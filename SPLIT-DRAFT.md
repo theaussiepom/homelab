@@ -1,18 +1,16 @@
-# Repository split draft
+# Repository integration status
 
 Reusable infrastructure and shared execution tooling. The earlier Proxmox draft remains held for real PVE execution.
 
-Nothing in this checkout is committed, pushed or deployed. The GitHub repository is empty. Existing live paths, UID/GID values, runtime data and editor writers remain unchanged.
+Source is published on the `prepare/repository-split` branch for review in PR #1.
+The initial source PR is not deployment authorization. Existing production paths,
+UID/GID values, runtime data and editor writers remain unchanged.
 
-The earlier three-repository implementation draft and the separately reviewed 526-file configuration candidate are distinct provenance sources. Their previous tests do not establish acceptance of this new five-repository layout.
+The source was assembled into clean initial history with signed commits and a
+GitHub noreply author address. Fast staged-file checks and CI source/history scans
+are installed. CI and code-review findings must be resolved or explicitly triaged
+before merge. A passing source check does not establish live runtime acceptance.
 
-Before a first commit: reconcile path-dependent tests and inventory/catalog generation, review license/attribution and remaining privacy findings, scan the exact proposed trees and author metadata, and obtain explicit commit/publication authority. Use clean initial history; never push a predecessor branch here.
-
-
-Source integration update: current tests use the split paths and synthetic fixtures;
-fleet inventory is projected from the sole private catalog, and Compose templates
-require explicit source roots/private runtime paths. Root MIT licences and bundled
-third-party notices are present. Historical acceptance records remain private.
-Source validation does not qualify a live deployment. Before publication, review
-the exact commit and author metadata, add the separately planned secret/private-file
-commit/CI safeguards, and obtain explicit commit and publication authority.
+Private catalog, credentials, generated configuration and historical acceptance
+records remain outside this public repository. Reconcile each private deployment
+input and qualify the resulting configuration before any separately approved rollout.

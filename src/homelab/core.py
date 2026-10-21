@@ -95,6 +95,10 @@ def validate_catalog(catalog: dict, schema_path: Path | None = None) -> dict:
         locations = ["/" + "/".join(map(str, e.path)) for e in failures[:30]]
         raise Refusal("schema validation failed at " + ", ".join(locations))
     seen: dict[str, set[Any]] = {"key": set(), "vmid": set(), "ip": set(), "mac": set()}
+    seen["mac"].update(
+        value.lower() for field in ("management_mac", "spare_mac", "installer_mac")
+        if (value := catalog["hardware"][field]) is not None
+    )
     for guest in catalog["guests"]:
         for name in ("key", "vmid"):
             value = guest[name]
@@ -112,6 +116,9 @@ def validate_catalog(catalog: dict, schema_path: Path | None = None) -> dict:
         if len(set(paths)) != len(paths):
             raise Refusal("duplicate volume path")
         for mount in guest["mounts"]:
+            if guest["runtime"] == "vm" and mount["slot"] is not None:
+                if not re.fullmatch(r"(?:scsi|virtio|sata)[0-9]+", mount["slot"]) or mount["slot"] == "scsi0":
+                    raise Refusal("invalid VM data disk slot or root disk conflict")
             if mount["path"] and (not mount["path"].startswith("/") or ".." in Path(mount["path"]).parts):
                 raise Refusal("unsafe volume path")
             if not mount["backup"]:
@@ -230,6 +237,8 @@ def sign_approval(plan: dict, key: bytes, *, expires: str) -> dict:
 
 
 def check_approval(approval: dict, plan: dict, key: bytes) -> None:
+    if not isinstance(approval, dict) or not isinstance(approval.get("payload"), dict):
+        raise Refusal("invalid approval document")
     payload = approval.get("payload", {})
     if payload.get("target") != "synthetic" or payload.get("plan_sha256") != digest(plan):
         raise Refusal("approval target/plan mismatch")
@@ -309,6 +318,8 @@ def synthetic_verify(catalog: dict, workspace: Path) -> dict:
 
 
 def guard_tofu_plan(plan: dict, change_class: str = "routine") -> dict:
+    if not isinstance(plan, dict):
+        raise Refusal("plan must be a JSON object")
     if plan.get("format_version") != "1.2":
         raise Refusal("unqualified OpenTofu plan JSON format")
     checked = 0

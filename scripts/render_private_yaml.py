@@ -84,7 +84,9 @@ def render(text, values):
 
 def write_new(path, content):
     path = Path(path)
-    parent = path.absolute().parent
+    # Canonicalize existing parents (including macOS /tmp and /var aliases),
+    # then refuse any symlink introduced during the descriptor-based walk.
+    parent = path.absolute().parent.resolve(strict=True)
     fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
     try:
         for part in parent.parts[1:]:

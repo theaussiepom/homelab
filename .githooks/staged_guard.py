@@ -21,7 +21,7 @@ MAX_TOTAL_BYTES = 16 * 1024 * 1024
 REVIEW_FILE = '.githooks/reviewed-findings.json'
 PRIVATE_DIRS = {'.ssh', '.gnupg', '.storage', '.homelab-private', '.runtime-env',
                 'node_modules', '__pycache__', '.venv', 'backups', '.backups'}
-PRIVATE_NAMES = {'secrets.yaml', 'secrets.yml', 'secret.yaml', 'secret.yml', 'auth.json',
+PRIVATE_NAMES = {'.gitleaksignore', 'secrets.yaml', 'secrets.yml', 'secret.yaml', 'secret.yml', 'auth.json',
                  'flows_cred.json', 'acme.json', 'config.secret.inc.php', 'dump.rdb'}
 OPAQUE_SUFFIXES = {'.zip', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.tar', '.rar',
                    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.woff', '.woff2'}

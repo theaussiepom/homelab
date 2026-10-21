@@ -9,7 +9,7 @@
       - homelab_native_package_policy_qualified | bool
       - homelab_target_is_new_guest | bool
       - homelab_native_packages | length > 0
-      - homelab_native_packages | select('search', '=') | list | length == homelab_native_packages | length
+      - homelab_native_packages | select('match', '^[a-z0-9][a-z0-9+.-]+(?::[a-z0-9][a-z0-9-]*)?=[0-9][A-Za-z0-9.+:~-]*$') | list | length == homelab_native_packages | length
     fail_msg: "Exact package locks, account preservation and post-install behavior remain required."
 
 - name: Stage exact packages without ordinary Debian service autostart

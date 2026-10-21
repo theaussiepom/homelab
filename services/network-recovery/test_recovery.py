@@ -228,10 +228,13 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(self.engine.state['halted'])
 
     def test_unsafe_policy_rejected(self):
+        baseline = copy.deepcopy(CONFIG)
+        baseline['hostname'] = 'ben-beast'
+        recovery.validate_config(baseline)
         for key in CONFIG['policy']:
-            bad = copy.deepcopy(CONFIG)
+            bad = copy.deepcopy(baseline)
             bad['policy'][key] = 0
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, '^Unsafe policy: ' + key + '$'):
                 recovery.validate_config(bad)
 
     def test_invalid_state_is_not_silently_reset(self):

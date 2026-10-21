@@ -41,7 +41,8 @@ plan=json.loads(show_plan.stdout)
 run('apply-local-builtin-fixture',['apply','-input=false','-no-color','fixture.plan'])
 shown=run('state-roundtrip',['show','-json'])
 state=json.loads(shown.stdout)
-assert state['values']['outputs']['fixture_value']['value']=='synthetic-private-marker-314159'
+value = state.get('values', {}).get('outputs', {}).get('fixture_value', {}).get('value')
+checks.append({'check': 'state-output-roundtrip', 'passed': value == 'synthetic-private-marker-314159'})
 for name in ['terraform.tfstate','fixture.plan']:
     data=(args.work/name).read_bytes()
     checks.append({'check':name+'-no-plaintext-marker','passed':b'synthetic-private-marker-314159' not in data})
@@ -52,3 +53,5 @@ run('missing-key-refused',['show','-json'],use_env=missing,expect=1)
 result={'target':'local_builtin_fixture','checks':checks,'all_passed':all(c['passed'] for c in checks),'tofu_plan_format':plan.get('format_version'),'PVE_contacted':False,'R2_locking_or_recovery_tested':False,'production_authority':False}
 (args.work/'receipt.json').write_text(json.dumps(result,indent=2)+'\n')
 print(json.dumps(result))
+if not result['all_passed']:
+    raise SystemExit(1)

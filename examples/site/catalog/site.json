@@ -80,7 +80,7 @@
         {
           "vlan": 25,
           "ipv4": "198.18.25.20",
-          "mac": "02:aa:00:00:00:01",
+          "mac": "02:aa:00:00:01:01",
           "bridge": "vmbr0",
           "address_assignment": "dhcp_mac_reservation",
           "firewall": true,

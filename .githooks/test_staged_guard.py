@@ -69,6 +69,11 @@ class StagedGuardTests(unittest.TestCase):
         self.write('config.yaml', 'enabled: true\n')
         self.assertEqual(self.check_guard()['scanned_files'], 1)
 
+    def test_scanner_ignore_file_cannot_suppress_staged_secret(self):
+        self.write('config.yaml', 'token: ' + self.token() + '\n')
+        self.write('.gitleaksignore', 'config.yaml:github-pat:1\n')
+        self.assertEqual(self.check_guard(1)['reason'], 'private_file_path')
+
     def test_private_env_forced_into_index(self):
         self.write('.env', 'SETTING=anything\n')
         self.assertEqual(self.check_guard(1)['reason'], 'private_file_path')

@@ -58,15 +58,18 @@ def main() -> int:
             if mode & 0o077:
                 raise core.Refusal("root hash input must be private")
             answer = installer_answer(catalog, args.root_password_hash_file.read_text().strip())
+            output = args.out.resolve()
+            if output.is_relative_to(core.ROOT):
+                raise core.Refusal("installer answer cannot be inside the public implementation tree")
             # Exclusive creation preserves earlier media inputs.
-            with args.out.open("x") as stream:
-                args.out.chmod(0o600)
+            with output.open("x") as stream:
+                output.chmod(0o600)
                 stream.write(answer)
             result = {"answer_written": True, "target": "synthetic", "native_parser_tested": False,
                       "boot_or_erase_authorized": False}
         print(json.dumps(result, sort_keys=True))
         return 0
-    except (core.Refusal, ValueError, OSError, KeyError, TypeError) as exc:
+    except (core.Refusal, ValueError, OSError, KeyError, TypeError, AttributeError, IndexError) as exc:
         # Refusal strings never include input values or raw provider/secret data.
         message = str(exc) if isinstance(exc, core.Refusal) else "invalid/missing local input"
         print(json.dumps({"refused": True, "reason": message}), file=sys.stderr)

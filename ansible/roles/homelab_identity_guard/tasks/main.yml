@@ -6,6 +6,22 @@
       - (homelab_expected_paths | length + homelab_expected_accounts | length) > 0
     fail_msg: "I08 identity manifest and actual path/account checks remain required."
 
+- name: Require canonical numeric identities in the reviewed manifest
+  ansible.builtin.assert:
+    that:
+      - item.uid is integer and item.uid >= 0
+      - item.gid is integer and item.gid >= 0
+    fail_msg: "Manifest UID/GID must be non-negative YAML integers; no implicit coercion."
+  loop: "{{ homelab_expected_paths + homelab_expected_accounts }}"
+
+- name: Require quoted four-digit octal path modes
+  ansible.builtin.assert:
+    that:
+      - item.mode is string
+      - item.mode is match('^[0-7]{4}$')
+    fail_msg: "Manifest modes must be quoted four-digit octal strings, for example '0750'."
+  loop: "{{ homelab_expected_paths }}"
+
 - name: Read preserved numeric path metadata without following symlinks
   ansible.builtin.stat:
     path: "{{ item.path }}"

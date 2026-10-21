@@ -2,7 +2,7 @@
 
 Jobs 07 (NAS) and 08 (R2) now use `--clean --if-exists`. The formerly missing default-database CONNECT grant is preserved natively. Fresh NAS restoration matched all four database ACLs/properties and five credential checks before and after restart; independent R2 retrieval passed integrity and grant-SQL checks. Only the backup container was recreated; the other 34 containers remained unchanged.
 
-Use [the current recovery procedure](POSTGRESQL-CLEAN-RECOVERY.md) and [acceptance record](POSTGRESQL-CLEAN-ACCEPTANCE.md). The older results below describe their original archives and are retained as history. Private current receipts are under `/home/ben/.local/state/db-pg-clean-20261008`; deployment rollback snapshots are in its `deployment` directory. Existing configuration recovery jobs will collect these updated source notes on their normal schedule.
+Use [the current recovery procedure](POSTGRESQL-CLEAN-RECOVERY.md) and [acceptance record](POSTGRESQL-CLEAN-ACCEPTANCE.md). The older results below describe their original archives and are retained as history. Private current receipts are under `${RECOVERY_EVIDENCE_DIR}`; deployment rollback snapshots are in its `deployment` directory. Existing configuration recovery jobs will collect these updated source notes on their normal schedule.
 
 # BenBeast database backup extension
 
@@ -11,16 +11,16 @@ This extends `database-db_backup-1` only. Production database images and storage
 ## Deployment inputs
 
 The maintained deployment uses Compose project `database`, project directory
-`/mnt/nas/docker/homelab/stacks/benbeast/database`, and the single canonical file
-`/mnt/nas/docker/homelab/stacks/benbeast/database/compose.yaml`. Compose interpolation
-uses `/mnt/nas/docker/.homelab-private/benbeast/database.env`; the backup service's
-protected env file is `/mnt/nas/docker/.homelab-private/benbeast/database.db_backup.env`.
+`${DATABASE_STACK_DIR}`, and the single canonical file
+`${DATABASE_STACK_DIR}/compose.yaml`. Compose interpolation
+uses `${PRIVATE_INPUT_DIR}/database.env`; the backup service's
+protected env file is `${PRIVATE_INPUT_DIR}/database.db_backup.env`.
 The resolved service preserves the ten job definitions, retention, destinations,
 logging and pinned image. The maintained image build source is
-`/mnt/nas/docker/homelab/services/database-backup`.
+`${BACKUP_SOURCE_DIR}`.
 
 Recovery bundles include the canonical Compose and private inputs. Their manifest
-is `/mnt/nas/docker/homelab/services/database-backup/recovery/manifest.json`.
+is `${RECOVERY_MANIFEST}`.
 The four retired duplicate input labels have been consolidated into the remaining
 21 mappings; their original files and historical deployment receipts are retained.
 Do not recreate the service from an old extension/image override or replay an old
@@ -90,13 +90,13 @@ python3 /recovery-source/backup/image-build-source/verify-s3-download.py --not-b
 
 Use the receipt's protected PostgreSQL path as the isolated restore input. `/backup/...` maps to `/mnt/nas/docker/homelab-data/backups/databases/...` on BenBeast. The helper neither triggers backups nor writes to S3. Downloaded verification copies are retained for the operator; they have no automatic cleanup policy.
 
-Archive presence, upload success, remote metadata, checksum validation, and decompression checks do not prove restoration. Acceptance requires strict isolated restores with the intended production engine versions, preserved roles/grants/configuration, appropriate application authentication checks, and independent NAS/S3 evidence. Use a unique scratch administrator for portable MariaDB accounts. For PostgreSQL, initialize with the original `postgres` bootstrap identity (OID 10), then add a separate validation administrator. Native `pg_dumpall` replay reports one documented duplicate `CREATE ROLE postgres`; the reviewed runner accepts only that exact diagnostic and stops on any other error. Preserve the dump bytes unchanged. Raw `mysql` tables are a version-specific fallback. InfluxDB needs full metadata/all-bucket restoration; bucket-only archives do not prove full recovery. No production database mount, network, or published port should be reused by a restore test.
+Archive presence, upload success, remote metadata, checksum validation, and decompression checks do not prove restoration. Acceptance requires strict isolated restores with the intended production engine versions, preserved roles/grants/configuration, appropriate application authentication checks, and independent NAS/S3 evidence. Use a unique scratch administrator for portable MariaDB accounts. For PostgreSQL, initialize with the original `postgres` bootstrap identity (OID 10), then add a separate validation administrator. For the current clean dumps, the runner requires exactly one `2BP01` diagnostic for the protected `DROP ROLE postgres`, followed by exactly one `42710` duplicate `CREATE ROLE postgres`, in that order. Every other error fails restoration. See the [current clean-restore contract](POSTGRESQL-CLEAN-RECOVERY.md#capture-and-restore-contract). Preserve the dump bytes unchanged. Raw `mysql` tables are a version-specific fallback. InfluxDB needs full metadata/all-bucket restoration; bucket-only archives do not prove full recovery. No production database mount, network, or published port should be reused by a restore test.
 
 ## Verified results and remaining boundary (7 October 2026)
 
 - Local storage inspection found 850.816406 GiB unallocated in the existing VG. No filesystem was created and no production data was moved. SSD health showed no critical warning or media errors at the check.
 - PostgreSQL NAS and S3 backup jobs passed. The independently retrieved S3 archive passed native checksum, compression and TLS checks, then restored with PostgreSQL 16.10. Authentik had 165 tables and Zabbix 203; index checks and recorded backup/Zabbix credential probes passed before and after isolated restart. The scratch container and data were removed.
-- Native PostgreSQL no-clean dumps omit explicit ACL metadata for the default `postgres` database. The source's explicit backup-role CONNECT grant was absent after restore, while effective CONNECT and all recorded backup capabilities passed. No supplement was silently applied. Authentik's production pg_hba.conf uses trust for its server/worker network aliases. The live application route accepted both its configured and a deliberately wrong password; the configured password failed SCRAM from the backup route. Thus the app works but its configured password does not independently authenticate against the stored verifier. This pre-existing discrepancy was not changed; Authentik password authentication was excluded from acceptance and its active pg_hba.conf is part of recovery configuration coverage. No application service was started against scratch.
+- Native PostgreSQL no-clean dumps omit explicit ACL metadata for the default `postgres` database. The source's explicit backup-role CONNECT grant was absent after restore, while effective CONNECT and all recorded backup capabilities passed. No supplement was silently applied. Application authentication was excluded from that historical acceptance; detailed authentication observations remain in protected receipts. No application service was started against scratch.
 - Full InfluxDB NAS capture and isolated InfluxDB 2.7.12 restoration passed for all four buckets. Selected history timestamps, retention/metadata and the backup token passed checks across restart. Scratch was removed and production identity/start time stayed unchanged. Full S3 job 06 passed and an independent download of its 2,302,124,551-byte archive passed native MD5, compression and HTTPS certificate checks. The SHA-256 receipt identifies these bytes. This newer S3 snapshot was not separately restored; the successful full restore used the earlier NAS archive.
 - MariaDB recovery jobs remain blocked until an administrator grants SHOW VIEW on mysql.* to backup@%. Do not omit the mysql.user view, edit privilege tables or reset credentials to bypass the failure. The corrected r2 job 09 returned exit 1 for MariaDB error 1142 (SHOW VIEW denied on mysql.user), withheld the failed system archive and skipped its recovery hook. No complete portable MariaDB/configuration recovery claim is made until NAS/S3 jobs and the isolated restore pass.
 

@@ -13,6 +13,7 @@ def render(catalog: dict, destination: Path) -> dict:
     destination = destination.absolute()
     if destination.exists() or destination.is_symlink():
         raise Refusal("render destination must be new; preserve prior drafts/edits")
+    destination = destination.resolve()
     if catalog["site"]["environment"] == "production" and destination.is_relative_to(ROOT):
         raise Refusal("production render cannot be inside the public implementation tree")
     destination.mkdir(parents=True, mode=0o700)

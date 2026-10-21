@@ -1,10 +1,13 @@
 # BenBeast local network recovery
 
-Host-local recovery for two observed failure signatures after a physical network
-adapter disappeared and returned. The user authorized implementation on
-8 October 2026 (Australia/Brisbane). Source is maintained in the private homelab
-repository; runtime and state are installed on the host SSD. Zabbix enrollment is
-separate and has not been performed by this package.
+Host-local recovery for missing overlay forwarding entries and missing macvlan
+addresses after an adapter interruption. Reusable source is maintained here;
+private configuration, runtime state and installation receipts remain on the host.
+Zabbix enrollment is a separate deployment step.
+
+The root service performs narrowly guarded network repairs. Publishing this source
+does not authorize installation or changes to its privileges. Review the unit,
+private configuration, target identities and dry-run evidence before deployment.
 
 ## Operation
 

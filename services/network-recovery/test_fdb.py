@@ -9,21 +9,21 @@ from unittest.mock import patch
 import fdb
 
 
-CONFIG = {'overlay': {'network': 'underground', 'local_ip': '10.254.253.5',
-                     'peer_subnet': '10.254.253.0/24', 'route_interface': 'ens1.100',
+CONFIG = {'overlay': {'network': 'underground', 'local_ip': '192.0.2.5',
+                     'peer_subnet': '192.0.2.0/24', 'route_interface': 'ens1.100',
                      'peer_probe_port': 22}}
 IP = '198.18.200.243'
-MAC = '02:42:ac:14:00:f3'
-PEER = '10.254.253.6'
-NAMESPACE = {'path': '/var/run/docker/netns/1-nfg7i5cyjo', 'device': 4, 'inode': 123}
+MAC = '02:00:00:00:01:f3'
+PEER = '192.0.2.6'
+NAMESPACE = {'path': '/var/run/docker/netns/1-fixture012', 'device': 4, 'inode': 123}
 
 
 def fixture():
-    network = {'Name': 'underground', 'Id': 'nfg7i5cyjo1mbobzoexvxpq5a', 'Created': '2026-09-15',
+    network = {'Name': 'underground', 'Id': 'fixture0123456789abcdefghi', 'Created': '2000-01-01',
                'Scope': 'swarm', 'Driver': 'overlay', 'Ingress': False,
                'IPAM': {'Config': [{'Subnet': '198.18.200.0/24'}]},
                'Options': {'com.docker.network.driver.overlay.vxlanid_list': '4098'},
-               'Peers': [{'IP': x} for x in ('10.254.253.5', PEER)],
+               'Peers': [{'IP': x} for x in ('192.0.2.5', PEER)],
                'Services': {'': {'Tasks': [{'Name': 'remote', 'EndpointIP': IP,
                                             'EndpointID': 'a'*64, 'Info': {'Host IP': PEER}}]}}}
     links = [{'ifname': 'br0', 'ifindex': 2, 'flags': ['UP'], 'linkinfo': {'info_kind': 'bridge'}},
@@ -31,7 +31,7 @@ def fixture():
               'linkinfo': {'info_kind': 'vxlan', 'info_data': {'id': 4098, 'port': 4789}}}]
     neighbours = [{'dst': IP, 'dev': 'vxlan0', 'lladdr': MAC, 'state': ['PERMANENT']}]
     entries = [{'mac': MAC, 'ifname': 'vxlan0', 'master': 'br0', 'flags': [], 'state': ''}]
-    routes = {PEER: [{'dev': 'ens1.100', 'prefsrc': '10.254.253.5'}]}
+    routes = {PEER: [{'dev': 'ens1.100', 'prefsrc': '192.0.2.5'}]}
     return network, links, neighbours, entries, routes
 
 
@@ -98,7 +98,7 @@ class ReconciliationTests(unittest.TestCase):
         self.assert_blocked(values, 'bridge_fdb_missing_or_conflicting')
 
     def test_conflicting_tunnel_never_replaced(self):
-        for rows in ([self_entry(dst='10.254.253.7')], [self_entry(), self_entry()],
+        for rows in ([self_entry(dst='192.0.2.7')], [self_entry(), self_entry()],
                      [self_entry(ifname='vxlan1')]):
             values = fixture(); values[3].extend(rows)
             self.assert_blocked(values, 'tunnel_fdb_conflict')
@@ -109,7 +109,7 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(len(plan(values)['candidates']), 1)
 
     def test_local_endpoint_never_repaired(self):
-        values = fixture(); values[0]['Services']['']['Tasks'][0]['Info']['Host IP'] = '10.254.253.5'
+        values = fixture(); values[0]['Services']['']['Tasks'][0]['Info']['Host IP'] = '192.0.2.5'
         self.assertTrue(plan(values)['healthy'])
         self.assertFalse(plan(values)['entries'])
 
@@ -122,13 +122,13 @@ class ReconciliationTests(unittest.TestCase):
         self.assert_blocked(values, 'endpoint_id_conflict')
 
     def test_unknown_remote_peer_is_blocked(self):
-        values = fixture(); values[0]['Services']['']['Tasks'][0]['Info']['Host IP'] = '10.254.253.9'
+        values = fixture(); values[0]['Services']['']['Tasks'][0]['Info']['Host IP'] = '192.0.2.9'
         self.assert_blocked(values, 'endpoint_peer_unknown')
 
     def test_route_must_match_current_local_data_path(self):
-        for route in ([{'dev': 'ens1.100', 'prefsrc': '10.254.253.5', 'gateway': '10.254.253.1'}],
-                      [{'dev': 'old0', 'prefsrc': '10.254.253.5'}], [],
-                      [{'dev': 'ens1.100', 'prefsrc': '10.254.253.9'}]):
+        for route in ([{'dev': 'ens1.100', 'prefsrc': '192.0.2.5', 'gateway': '192.0.2.1'}],
+                      [{'dev': 'old0', 'prefsrc': '192.0.2.5'}], [],
+                      [{'dev': 'ens1.100', 'prefsrc': '192.0.2.9'}]):
             values = fixture(); values[4][PEER] = route
             self.assert_blocked(values, 'underlay_route_not_ready')
 
@@ -158,41 +158,40 @@ class ReconciliationTests(unittest.TestCase):
         values[0]['Services']['']['Tasks'].append({'Name': 'remote', 'EndpointIP': '198.18.200.244',
                                                   'EndpointID': 'b'*64, 'Info': {'Host IP': PEER}})
         values[2].append({'dst': '198.18.200.244', 'dev': 'vxlan0',
-                          'lladdr': '02:42:ac:14:00:f4', 'state': ['PERMANENT']})
-        values[3].append({'mac': '02:42:ac:14:00:f4', 'ifname': 'vxlan0', 'master': 'br0', 'flags': []})
+                          'lladdr': '02:00:00:00:01:f4', 'state': ['PERMANENT']})
+        values[3].append({'mac': '02:00:00:00:01:f4', 'ifname': 'vxlan0', 'master': 'br0', 'flags': []})
         self.assert_blocked(values, 'logical_key_conflict')
 
     def test_namespace_matches_exact_network_prefix_not_substring(self):
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root/'1-nfg7i5cyjox').touch()
+            (root/'1-fixture012x').touch()
             with patch.object(fdb, 'NETNS_ROOT', root):
                 with self.assertRaisesRegex(fdb.GuardError, 'network_namespace_not_unique'):
                     with fdb._namespace(fixture()[0]): pass
-                (root/'1-nfg7i5cyjo').touch()
+                (root/'1-fixture012').touch()
                 with fdb._namespace(fixture()[0]) as (fd, identity):
                     self.assertGreaterEqual(fd, 0)
-                    self.assertEqual(identity['path'], str(root/'1-nfg7i5cyjo'))
-                (root/'2-nfg7i5cyjo').touch()
+                    self.assertEqual(identity['path'], str(root/'1-fixture012'))
+                (root/'2-fixture012').touch()
                 with self.assertRaisesRegex(fdb.GuardError, 'network_namespace_not_unique'):
                     with fdb._namespace(fixture()[0]): pass
 
-    def test_recorded_incident_fixture_selects_only_zwave(self):
-        # Minimal transcription of root-report.json at 2026-10-07T22:04:09Z
-        # plus verbose-overlay.json: preserve actual missing/present/aged states.
-        # Embedded so the test is independent of private historical work paths.
+    def test_synthetic_mixed_states_select_only_missing_zwave(self):
+        # Synthetic missing, present and aged forwarding states. No host report
+        # or private runtime identifiers are needed to reproduce the behavior.
         network, links, _, _, _ = fixture()
-        records = [('zabbix-agent-zigbeepi', '183', 'b7', '6', '', True),
+        records = [('agent-fixture-a', '183', 'b7', '6', '', True),
                    ('pihole2', '3', '03', '4', 'permanent', False),
                    ('zigbee2', '152', '98', '6', 'permanent', False),
                    ('zwave-js-ui', '243', 'f3', '6', None, True),
-                   ('zabbix-agent-pironman', '182', 'b6', '4', '', True),
-                   ('zabbix-agent-loungeotbr', '184', 'b8', '7', '', True)]
-        network['Peers'] = [{'IP': '10.254.253.' + s} for s in ('4', '5', '6', '7')]
+                   ('agent-fixture-b', '182', 'b6', '4', '', True),
+                   ('agent-fixture-c', '184', 'b8', '7', '', True)]
+        network['Peers'] = [{'IP': '192.0.2.' + s} for s in ('4', '5', '6', '7')]
         tasks, neighbours, entries, routes = [], [], [], {}
         for index, (name, suffix, mac_suffix, peer_suffix, state, master_present) in enumerate(records):
-            ip, mac, peer = '198.18.200.' + suffix, '02:42:ac:14:00:' + mac_suffix, '10.254.253.' + peer_suffix
+            ip, mac, peer = '198.18.200.' + suffix, '02:00:00:00:01:' + mac_suffix, '192.0.2.' + peer_suffix
             tasks.append({'Name': name, 'EndpointIP': ip, 'EndpointID': format(index, '064x'),
                           'Info': {'Host IP': peer}})
             neighbours.append({'dst': ip, 'dev': 'vxlan0', 'lladdr': mac, 'state': ['PERMANENT']})
@@ -200,7 +199,7 @@ class ReconciliationTests(unittest.TestCase):
                 entries.append({'mac': mac, 'ifname': 'vxlan0', 'master': 'br0', 'flags': []})
             if state is not None:
                 entries.append(self_entry(state, mac=mac, dst=peer))
-            routes[peer] = [{'dev': 'ens1.100', 'prefsrc': '10.254.253.5'}]
+            routes[peer] = [{'dev': 'ens1.100', 'prefsrc': '192.0.2.5'}]
         network['Services']['']['Tasks'] = tasks
         result = fdb._plan(CONFIG['overlay'], network, 4098, ipaddress.IPv4Network('198.18.200.0/24'),
                            NAMESPACE, links, neighbours, entries, routes)
@@ -270,7 +269,7 @@ class RepairTests(unittest.TestCase):
     def test_probe_is_bound_to_local_ip_and_sends_no_payload(self):
         with patch.object(fdb.socket, 'create_connection') as connect:
             fdb._probe_peer(PEER, CONFIG['overlay'])
-            connect.assert_called_once_with((PEER, 22), timeout=3, source_address=('10.254.253.5', 0))
+            connect.assert_called_once_with((PEER, 22), timeout=3, source_address=('192.0.2.5', 0))
             self.assertFalse(connect.return_value.__enter__.return_value.send.called)
         with patch.object(fdb.socket, 'create_connection', side_effect=TimeoutError):
             with self.assertRaisesRegex(fdb.PeerUnavailable, 'underlay_peer_probe_failed'):
@@ -321,7 +320,7 @@ class RepairTests(unittest.TestCase):
         self.assertFalse(self.calls)
 
     def test_changed_interface_or_peer_before_add_stops(self):
-        for field, value in [('ifindex', 99), ('peer', '10.254.253.7'), ('network_created', 'new')]:
+        for field, value in [('ifindex', 99), ('peer', '192.0.2.7'), ('network_created', 'new')]:
             changed = copy.deepcopy(self.snapshot); changed['entries'][0]['identity'][field] = value
             with self.assertRaisesRegex(fdb.GuardError, 'candidate_identity_changed'):
                 self.execute(snapshots=[self.snapshot, changed])

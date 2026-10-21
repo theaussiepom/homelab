@@ -8,7 +8,8 @@ variable "guest" {
       try(length(trimspace(var.guest.storage_id)) > 0, false),
       try(length(trimspace(var.guest.template_file_id)) > 0, false),
       alltrue([for nic in var.guest.interfaces : try(length(trimspace(nic.mac)) > 0 && length(trimspace(nic.ipv4)) > 0 && length(trimspace(nic.bridge)) > 0, false)]),
-      alltrue([for mount in var.guest.mounts : try(mount.size_gib > 0 && length(trimspace(mount.path)) > 0, false)])
+      alltrue([for mount in var.guest.mounts : try(mount.size_gib > 0 && can(regex("^(scsi|virtio|sata)[0-9]+$", mount.slot)) && mount.slot != "scsi0", false)]),
+      try(length(distinct([for mount in var.guest.mounts : mount.slot])) == length(var.guest.mounts), false)
     ])
     error_message = "Unresolved target identity, template, mount or allocation refuses before provider defaults."
   }

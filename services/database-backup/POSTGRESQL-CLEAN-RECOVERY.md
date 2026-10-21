@@ -6,6 +6,9 @@ and the named receipts for the exact archive and runtime evidence. The helper
 variants have 46 passing local tests, with 12 deployment and 14 clean-restore
 tests. This is not a production recovery or application-start claim.
 
+Path placeholders such as `${PRIVATE_INPUT_DIR}` refer to operator-supplied private
+locations. Resolve them from the reviewed deployment inputs; they are not defaults.
+
 ## Persistent configuration
 
 The canonical `db_backup` service retains these PostgreSQL clean-backup options:
@@ -16,11 +19,11 @@ DB08_EXTRA_BACKUP_OPTS=--clean --if-exists
 ```
 
 Use Compose project `database`, project directory
-`/mnt/nas/docker/homelab/stacks/benbeast/database`, the canonical file
-`/mnt/nas/docker/homelab/stacks/benbeast/database/compose.yaml`, and protected
-interpolation file `/mnt/nas/docker/.homelab-private/benbeast/database.env`.
+`${DATABASE_STACK_DIR}`, the canonical file
+`${DATABASE_STACK_DIR}/compose.yaml`, and protected
+interpolation file `${PRIVATE_INPUT_DIR}/database.env`.
 The service's private env file is
-`/mnt/nas/docker/.homelab-private/benbeast/database.db_backup.env`.
+`${PRIVATE_INPUT_DIR}/database.db_backup.env`.
 Do not add historical image/extension override files to these current inputs.
 
 Only the selected backup service is recreated for backup configuration changes.
@@ -78,13 +81,13 @@ but the diagnostic message, SQLSTATE, function and count must match.
 ## Private paths and evidence
 
 The historical 8 October evidence is retained under
-`/home/ben/.local/state/db-pg-clean-20261008`, including
+`${RECOVERY_EVIDENCE_DIR}`, including
 `source-metadata-before.json`, `postgresql-nas-checkpoint/receipt.json` and
 `postgresql-inputs/receipt.json`. It records that deployment, not the current
 container identity.
 
 For current recovery, read `deployment_metadata.postgresql_backup_recovery` in
-`/mnt/nas/docker/homelab/services/database-backup/recovery/manifest.json`. Resolve
+`${RECOVERY_MANIFEST}`. Resolve
 the canonical backup Compose using its protected env inputs. This mapping names
 the captured canonical Compose source and protected `DB07_PASS`/`DB08_PASS` keys;
 it contains no password value. Host, port and username come from `DB07_HOST`,
@@ -106,8 +109,8 @@ private and never print secrets. `execute-postgresql-restore.py` requires the
 reviewed full backup ID and SHA256 of `restore-sql-clean.py`.
 
 The shared restore lock remains
-`/home/ben/.local/state/db-next-20261008/isolated-restore.lock`. Target scratch is
-under `/var/lib/databases/restore-tests`; previous receipts and source archives
+`${RESTORE_LOCK}`. Target scratch is
+under `${RESTORE_SCRATCH}`; previous receipts and source archives
 are retained, subject to the already configured native retention policy.
 
 These helpers perform no production database writes or database storage moves.
