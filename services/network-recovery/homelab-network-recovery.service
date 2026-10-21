@@ -1,0 +1,19 @@
+[Unit]
+Description=BenBeast bounded local network recovery
+After=network.target docker.service
+
+[Service]
+Type=oneshot
+SuccessExitStatus=2
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /usr/local/lib/homelab-network-recovery/recovery.py --config /etc/homelab/network-recovery.json --state-dir /var/lib/homelab-network-recovery --apply
+TimeoutStartSec=900
+TimeoutStopSec=10
+KillMode=control-group
+WorkingDirectory=/
+UMask=0022
+StandardOutput=journal
+StandardError=journal
+# Namespace entry requires the host mount namespace and root setns capabilities.
+# Do not add PrivateMounts, NoNewPrivileges or a restrictive CapabilityBoundingSet.

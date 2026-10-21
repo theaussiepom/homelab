@@ -1,0 +1,1135 @@
+{
+  "schema_version": 1,
+  "site": {
+    "id": "example-lab",
+    "environment": "synthetic",
+    "node": "pve-lab",
+    "api_endpoint": "https://pve-lab.example.invalid:8006/",
+    "ssh_public_keys": [],
+    "bootstrap_user": "example-admin"
+  },
+  "policy": {
+    "preserve_existing_uid_gid": true,
+    "create_stopped": true,
+    "public_runner_production_access": false,
+    "native_lifecycle_owns_power": true
+  },
+  "hardware": {
+    "disk_by_id": "/dev/disk/by-id/example-disk",
+    "disk_serial": "EXAMPLE-SERIAL",
+    "disk_size_bytes": 1073741824000,
+    "management_mac": "02:aa:00:00:00:01",
+    "spare_mac": "02:aa:00:00:00:02",
+    "firmware": "uefi",
+    "smart_observation": "synthetic://fixture",
+    "fqdn": "pve-lab.example.invalid",
+    "installer_cidr": "198.18.25.2/24",
+    "installer_gateway": "198.18.25.1",
+    "installer_dns": [
+      "198.18.25.53"
+    ],
+    "installer_mac": "02:aa:00:00:00:02",
+    "final_tagged_network_qualified": false
+  },
+  "foundation": {
+    "bridge_name": "vmbr0",
+    "bridge_ports": [
+      "example0"
+    ],
+    "mtu": 1500,
+    "storage_id": "example-zfs",
+    "zfs_pool": "example-pool/data",
+    "existing_objects_adopted": false
+  },
+  "backend": {
+    "kind": "synthetic_local",
+    "qualified": false,
+    "global_lock_qualified": false,
+    "encrypted_history_qualified": false,
+    "external_recovery_qualified": false
+  },
+  "states": [
+    "foundation",
+    "critical",
+    "application_guests",
+    "security_VM"
+  ],
+  "guests": [
+    {
+      "key": "security",
+      "vmid": 900,
+      "runtime": "vm",
+      "state_root": "security_VM",
+      "cpu": 4,
+      "memory_mib": 4096,
+      "swap_mib": 0,
+      "root_gib": 32,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:iso/example-cloud-image.qcow2",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 30,
+      "normally_stopped": false,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.20",
+          "mac": "02:aa:00:00:01:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        },
+        {
+          "vlan": 30,
+          "ipv4": "198.18.30.20",
+          "mac": "02:aa:00:01:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        },
+        {
+          "vlan": 40,
+          "ipv4": "198.18.40.20",
+          "mac": "02:aa:00:02:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        }
+      ],
+      "mounts": [
+        {
+          "slot": "scsi1",
+          "size_gib": 8,
+          "path": "/srv/security/data",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        }
+      ],
+      "admitted": false
+    },
+    {
+      "key": "automation",
+      "vmid": 901,
+      "runtime": "unprivileged_lxc",
+      "state_root": "application_guests",
+      "cpu": 4,
+      "memory_mib": 6144,
+      "swap_mib": 0,
+      "root_gib": 20,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 40,
+      "normally_stopped": false,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.21",
+          "mac": "02:aa:01:00:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        },
+        {
+          "vlan": 30,
+          "ipv4": "198.18.30.21",
+          "mac": "02:aa:01:01:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        },
+        {
+          "vlan": 40,
+          "ipv4": "198.18.40.21",
+          "mac": "02:aa:01:02:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        },
+        {
+          "vlan": 100,
+          "ipv4": "198.18.100.21",
+          "mac": "02:aa:01:03:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        }
+      ],
+      "mounts": [
+        {
+          "slot": "mp0",
+          "size_gib": 4,
+          "path": "/srv/homelab",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        },
+        {
+          "slot": "mp1",
+          "size_gib": 4,
+          "path": "/srv/automation-private",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        }
+      ],
+      "admitted": false
+    },
+    {
+      "key": "radio",
+      "vmid": 902,
+      "runtime": "unprivileged_lxc",
+      "state_root": "application_guests",
+      "cpu": 2,
+      "memory_mib": 768,
+      "swap_mib": 0,
+      "root_gib": 8,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 50,
+      "normally_stopped": false,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.22",
+          "mac": "02:aa:02:00:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        },
+        {
+          "vlan": 30,
+          "ipv4": "198.18.30.22",
+          "mac": "02:aa:02:01:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        },
+        {
+          "vlan": 107,
+          "ipv4": "198.18.107.22",
+          "mac": "02:aa:02:02:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        }
+      ],
+      "mounts": [
+        {
+          "slot": "mp0",
+          "size_gib": 4,
+          "path": "/srv/radio/data",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        }
+      ],
+      "admitted": false
+    },
+    {
+      "key": "postgresql",
+      "vmid": 903,
+      "runtime": "unprivileged_lxc",
+      "state_root": "application_guests",
+      "cpu": 2,
+      "memory_mib": 1536,
+      "swap_mib": 0,
+      "root_gib": 8,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 20,
+      "normally_stopped": false,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.23",
+          "mac": "02:aa:03:00:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        },
+        {
+          "vlan": 30,
+          "ipv4": "198.18.30.23",
+          "mac": "02:aa:03:01:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        }
+      ],
+      "mounts": [
+        {
+          "slot": "mp0",
+          "size_gib": 24,
+          "path": "/srv/postgresql/data",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        },
+        {
+          "slot": "mp1",
+          "size_gib": 16,
+          "path": "/srv/postgresql/staging",
+          "backup": true,
+          "replicate": true,
+          "kind": "staging"
+        }
+      ],
+      "admitted": false
+    },
+    {
+      "key": "mariadb",
+      "vmid": 904,
+      "runtime": "unprivileged_lxc",
+      "state_root": "application_guests",
+      "cpu": 2,
+      "memory_mib": 1536,
+      "swap_mib": 0,
+      "root_gib": 8,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 20,
+      "normally_stopped": false,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.24",
+          "mac": "02:aa:04:00:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        },
+        {
+          "vlan": 30,
+          "ipv4": "198.18.30.24",
+          "mac": "02:aa:04:01:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        }
+      ],
+      "mounts": [
+        {
+          "slot": "mp0",
+          "size_gib": 40,
+          "path": "/srv/mariadb/data",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        },
+        {
+          "slot": "mp1",
+          "size_gib": 32,
+          "path": "/srv/mariadb/staging",
+          "backup": true,
+          "replicate": true,
+          "kind": "staging"
+        }
+      ],
+      "admitted": false
+    },
+    {
+      "key": "influxdb",
+      "vmid": 905,
+      "runtime": "unprivileged_lxc",
+      "state_root": "application_guests",
+      "cpu": 2,
+      "memory_mib": 1536,
+      "swap_mib": 0,
+      "root_gib": 8,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 20,
+      "normally_stopped": false,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.25",
+          "mac": "02:aa:05:00:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        },
+        {
+          "vlan": 30,
+          "ipv4": "198.18.30.25",
+          "mac": "02:aa:05:01:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        }
+      ],
+      "mounts": [
+        {
+          "slot": "mp0",
+          "size_gib": 32,
+          "path": "/srv/influxdb/data",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        },
+        {
+          "slot": "mp1",
+          "size_gib": 24,
+          "path": "/srv/influxdb/staging",
+          "backup": true,
+          "replicate": true,
+          "kind": "staging"
+        }
+      ],
+      "admitted": false
+    },
+    {
+      "key": "zabbix",
+      "vmid": 906,
+      "runtime": "unprivileged_lxc",
+      "state_root": "application_guests",
+      "cpu": 1,
+      "memory_mib": 512,
+      "swap_mib": 0,
+      "root_gib": 8,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 50,
+      "normally_stopped": false,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.26",
+          "mac": "02:aa:06:00:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        },
+        {
+          "vlan": 30,
+          "ipv4": "198.18.30.26",
+          "mac": "02:aa:06:01:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        }
+      ],
+      "mounts": [
+        {
+          "slot": "mp0",
+          "size_gib": 4,
+          "path": "/srv/zabbix/data",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        }
+      ],
+      "admitted": false
+    },
+    {
+      "key": "lens",
+      "vmid": 907,
+      "runtime": "unprivileged_lxc",
+      "state_root": "application_guests",
+      "cpu": 2,
+      "memory_mib": 2048,
+      "swap_mib": 0,
+      "root_gib": 12,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 50,
+      "normally_stopped": false,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.27",
+          "mac": "02:aa:07:00:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        },
+        {
+          "vlan": 30,
+          "ipv4": "198.18.30.27",
+          "mac": "02:aa:07:01:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        }
+      ],
+      "mounts": [
+        {
+          "slot": "mp0",
+          "size_gib": 96,
+          "path": "/srv/lens/data",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        },
+        {
+          "slot": "mp1",
+          "size_gib": 64,
+          "path": "/srv/lens/staging",
+          "backup": true,
+          "replicate": true,
+          "kind": "staging"
+        }
+      ],
+      "admitted": false
+    },
+    {
+      "key": "scrypted",
+      "vmid": 908,
+      "runtime": "unprivileged_lxc",
+      "state_root": "application_guests",
+      "cpu": 6,
+      "memory_mib": 5120,
+      "swap_mib": 0,
+      "root_gib": 16,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 60,
+      "normally_stopped": false,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.28",
+          "mac": "02:aa:08:00:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        },
+        {
+          "vlan": 30,
+          "ipv4": "198.18.30.28",
+          "mac": "02:aa:08:01:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        },
+        {
+          "vlan": 100,
+          "ipv4": "198.18.100.28",
+          "mac": "02:aa:08:02:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        }
+      ],
+      "mounts": [
+        {
+          "slot": "mp0",
+          "size_gib": 16,
+          "path": "/srv/scrypted/data",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        }
+      ],
+      "admitted": false
+    },
+    {
+      "key": "music",
+      "vmid": 909,
+      "runtime": "unprivileged_lxc",
+      "state_root": "application_guests",
+      "cpu": 1,
+      "memory_mib": 512,
+      "swap_mib": 0,
+      "root_gib": 8,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 60,
+      "normally_stopped": false,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.29",
+          "mac": "02:aa:09:00:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        },
+        {
+          "vlan": 30,
+          "ipv4": "198.18.30.29",
+          "mac": "02:aa:09:01:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        },
+        {
+          "vlan": 100,
+          "ipv4": "198.18.100.29",
+          "mac": "02:aa:09:02:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        }
+      ],
+      "mounts": [
+        {
+          "slot": "mp0",
+          "size_gib": 4,
+          "path": "/srv/music/data",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        }
+      ],
+      "admitted": false
+    },
+    {
+      "key": "db-tools",
+      "vmid": 910,
+      "runtime": "unprivileged_lxc",
+      "state_root": "application_guests",
+      "cpu": 1,
+      "memory_mib": 512,
+      "swap_mib": 0,
+      "root_gib": 8,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 90,
+      "normally_stopped": true,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.30",
+          "mac": "02:aa:0a:00:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        },
+        {
+          "vlan": 30,
+          "ipv4": "198.18.30.30",
+          "mac": "02:aa:0a:01:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        }
+      ],
+      "mounts": [
+        {
+          "slot": "mp0",
+          "size_gib": 4,
+          "path": "/srv/db-tools/data",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        }
+      ],
+      "admitted": false
+    },
+    {
+      "key": "dns",
+      "vmid": 911,
+      "runtime": "unprivileged_lxc",
+      "state_root": "critical",
+      "cpu": 1,
+      "memory_mib": 768,
+      "swap_mib": 0,
+      "root_gib": 4,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 10,
+      "normally_stopped": false,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.31",
+          "mac": "02:aa:0b:00:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        },
+        {
+          "vlan": 30,
+          "ipv4": "198.18.30.31",
+          "mac": "02:aa:0b:01:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        },
+        {
+          "vlan": 40,
+          "ipv4": "198.18.40.31",
+          "mac": "02:aa:0b:02:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        }
+      ],
+      "mounts": [
+        {
+          "slot": "mp0",
+          "size_gib": 8,
+          "path": "/srv/dns/data",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        }
+      ],
+      "admitted": false
+    },
+    {
+      "key": "traefik",
+      "vmid": 912,
+      "runtime": "unprivileged_lxc",
+      "state_root": "application_guests",
+      "cpu": 1,
+      "memory_mib": 256,
+      "swap_mib": 0,
+      "root_gib": 4,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 30,
+      "normally_stopped": false,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.32",
+          "mac": "02:aa:0c:00:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        },
+        {
+          "vlan": 30,
+          "ipv4": "198.18.30.32",
+          "mac": "02:aa:0c:01:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        },
+        {
+          "vlan": 40,
+          "ipv4": "198.18.40.32",
+          "mac": "02:aa:0c:02:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        }
+      ],
+      "mounts": [
+        {
+          "slot": "mp0",
+          "size_gib": 2,
+          "path": "/srv/traefik/data",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        }
+      ],
+      "admitted": false
+    },
+    {
+      "key": "bastion",
+      "vmid": 913,
+      "runtime": "unprivileged_lxc",
+      "state_root": "critical",
+      "cpu": 1,
+      "memory_mib": 256,
+      "swap_mib": 0,
+      "root_gib": 4,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 10,
+      "normally_stopped": false,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 15,
+          "ipv4": "198.18.15.33",
+          "mac": "02:aa:0d:00:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        },
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.33",
+          "mac": "02:aa:0d:01:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": false
+        }
+      ],
+      "mounts": [],
+      "admitted": false
+    },
+    {
+      "key": "deploy",
+      "vmid": 914,
+      "runtime": "unprivileged_lxc",
+      "state_root": "critical",
+      "cpu": 2,
+      "memory_mib": 2048,
+      "swap_mib": 0,
+      "root_gib": 8,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "os_type": "debian",
+      "image_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "boot_order": 20,
+      "normally_stopped": false,
+      "started": false,
+      "on_boot": false,
+      "protection": true,
+      "nesting": true,
+      "keyctl": false,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.34",
+          "mac": "02:aa:0e:00:00:01",
+          "bridge": "vmbr0",
+          "address_assignment": "dhcp_mac_reservation",
+          "firewall": true,
+          "main_default": true
+        }
+      ],
+      "mounts": [
+        {
+          "slot": "mp0",
+          "size_gib": 2,
+          "path": "/srv/deploy/data",
+          "backup": true,
+          "replicate": true,
+          "kind": "managed"
+        }
+      ],
+      "admitted": false
+    }
+  ],
+  "fleet": [
+    {
+      "key": "pi1",
+      "host": "198.18.25.80",
+      "ssh_alias": "example-pi1",
+      "ansible_user": "example-admin",
+      "observed_bootstrap_user": "example-admin",
+      "retained_services": [
+        "threadlens",
+        "matter-server",
+        "otbr",
+        "dns",
+        "ntp"
+      ],
+      "local_state_qualified": false,
+      "network_admitted": false,
+      "identity_changes_allowed": false
+    },
+    {
+      "key": "pi2",
+      "host": "198.18.25.81",
+      "ssh_alias": "example-pi2",
+      "ansible_user": "example-admin",
+      "observed_bootstrap_user": "example-admin",
+      "retained_services": [
+        "zigbee2mqtt",
+        "zwave-js-ui"
+      ],
+      "local_state_qualified": false,
+      "network_admitted": false,
+      "identity_changes_allowed": false
+    },
+    {
+      "key": "pi3",
+      "host": "198.18.25.82",
+      "ssh_alias": "example-pi3",
+      "ansible_user": "example-admin",
+      "observed_bootstrap_user": "example-admin",
+      "retained_services": [
+        "otbr",
+        "threadlens-agent"
+      ],
+      "local_state_qualified": false,
+      "network_admitted": false,
+      "identity_changes_allowed": false
+    }
+  ],
+  "gates": [
+    {
+      "id": "I01",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I01",
+      "requirement": "Bind scoped production evidence for I01 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I02",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I02",
+      "requirement": "Bind scoped production evidence for I02 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I03",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I03",
+      "requirement": "Bind scoped production evidence for I03 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I04",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I04",
+      "requirement": "Bind scoped production evidence for I04 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I05",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I05",
+      "requirement": "Bind scoped production evidence for I05 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I06",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I06",
+      "requirement": "Bind scoped production evidence for I06 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I07",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I07",
+      "requirement": "Bind scoped production evidence for I07 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I08",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I08",
+      "requirement": "Bind scoped production evidence for I08 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I09",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I09",
+      "requirement": "Bind scoped production evidence for I09 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I10",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I10",
+      "requirement": "Bind scoped production evidence for I10 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I11",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I11",
+      "requirement": "Bind scoped production evidence for I11 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I12",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I12",
+      "requirement": "Bind scoped production evidence for I12 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I13",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I13",
+      "requirement": "Bind scoped production evidence for I13 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I14",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I14",
+      "requirement": "Bind scoped production evidence for I14 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I15",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I15",
+      "requirement": "Bind scoped production evidence for I15 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I16",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I16",
+      "requirement": "Bind scoped production evidence for I16 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I17",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I17",
+      "requirement": "Bind scoped production evidence for I17 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I18",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I18",
+      "requirement": "Bind scoped production evidence for I18 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I19",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I19",
+      "requirement": "Bind scoped production evidence for I19 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I20",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I20",
+      "requirement": "Bind scoped production evidence for I20 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I21",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I21",
+      "requirement": "Bind scoped production evidence for I21 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I22",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I22",
+      "requirement": "Bind scoped production evidence for I22 before its affected operation; this record is synthetic."
+    },
+    {
+      "id": "I23",
+      "status": "synthetic_only",
+      "evidence_ref": "synthetic://I23",
+      "requirement": "Bind scoped production evidence for I23 before its affected operation; this record is synthetic."
+    }
+  ]
+}

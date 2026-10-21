@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-AU
+early_access: false
+enable_free_tier: true
+inheritance: false
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  review_info: true
+  poem: false
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+    drafts: false
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+  path_instructions:
+    - path: '**/*'
+      instructions: >-
+        This is public homelab source. Check for credentials, private deployment
+        values, runtime state and unsafe input handling. Preserve stable service
+        and entity identifiers. CI must use synthetic fixtures without contacting
+        production or reading private inputs. Distinguish parsing and unit tests
+        from deployment acceptance. Flag security-control changes for explicit
+        human review. Do not suggest blanket secret-scan exclusions.
+issue_enrichment:
+  auto_enrich:
+    enabled: false

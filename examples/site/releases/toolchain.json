@@ -1,0 +1,37 @@
+{
+  "status": "draft_candidates_not_production_admitted",
+  "opentofu": {
+    "version": "1.13.1",
+    "artifacts": {
+      "tofu_1.13.1_darwin_arm64.tar.gz": {
+        "url": "https://github.com/opentofu/opentofu/releases/download/v1.13.1/tofu_1.13.1_darwin_arm64.tar.gz",
+        "sha256": "be78f659f04ef06a9dbd9b3934d46af95d787a3aa38396d459dea395261816a9"
+      },
+      "tofu_1.13.1_linux_amd64.tar.gz": {
+        "url": "https://github.com/opentofu/opentofu/releases/download/v1.13.1/tofu_1.13.1_linux_amd64.tar.gz",
+        "sha256": "378ada19d4bc70c43732004e8159be771b23b9a5afdf059e5f8a2b3fa2c70a69"
+      }
+    }
+  },
+  "provider": {
+    "source": "bpg/proxmox",
+    "version": "0.117.0",
+    "source_url": "https://github.com/bpg/terraform-provider-proxmox/tree/v0.117.0"
+  },
+  "ansible_core": "2.20.10",
+  "python_controller": "3.12_or_3.14_qualified_per_environment",
+  "actions": {
+    "checkout": "11d5960a326750d5838078e36cf38b85af677262",
+    "setup_python": "a26af69be951a213d495a4c3e4e4022e16d87065"
+  },
+  "pve_iso": {
+    "version": "9.2-1",
+    "url": "https://enterprise.proxmox.com/iso/proxmox-ve_9.2-1.iso",
+    "sha256": "4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c",
+    "downloaded": true,
+    "signature_verified": false,
+    "selection_status": "candidate_from_official_listing; installer_native_and_physical_rehearsal_required",
+    "sha256_verified": true,
+    "size_bytes": 1706178560
+  }
+}

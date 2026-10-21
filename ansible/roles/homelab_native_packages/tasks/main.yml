@@ -1,0 +1,23 @@
+---
+- name: Enforce the admission boundary even when this role is included directly
+  ansible.builtin.import_role:
+    name: homelab_admission
+
+- name: Require a qualified new-target package/account policy
+  ansible.builtin.assert:
+    that:
+      - homelab_native_package_policy_qualified | bool
+      - homelab_target_is_new_guest | bool
+      - homelab_native_packages | length > 0
+      - homelab_native_packages | select('match', '^[a-z0-9][a-z0-9+.-]+(?::[a-z0-9][a-z0-9-]*)?=[0-9][A-Za-z0-9.+:~-]*$') | list | length == homelab_native_packages | length
+    fail_msg: "Exact package locks, account preservation and post-install behavior remain required."
+
+- name: Stage exact packages without ordinary Debian service autostart
+  ansible.builtin.apt:
+    name: "{{ homelab_native_packages }}"
+    state: present
+    update_cache: false
+    allow_downgrade: false
+    policy_rc_d: 101
+  # policy-rc.d alone does not qualify every vendor/cluster-creation script.
+  # Its exact package behavior is part of the preceding admission requirement.

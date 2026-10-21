@@ -1,0 +1,6 @@
+---
+homelab_allow_mutation: false
+homelab_scope_admitted: false
+homelab_preserve_uid_gid: true
+homelab_target_is_new_guest: false
+homelab_native_package_policy_qualified: false

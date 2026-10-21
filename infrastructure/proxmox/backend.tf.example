@@ -1,0 +1,4 @@
+# Copy/bind only after actual R2/I14 qualification, never as a plaintext fallback.
+terraform { backend "s3" {} }
+# Per-root backend arguments are private; use-lockfile/conditional semantics,
+# separate history/global lock/key custody must be proven before production.

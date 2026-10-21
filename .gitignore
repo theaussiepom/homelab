@@ -1,0 +1,265 @@
+# Proposed services/<name>/ layout. Slashless patterns apply at every depth.
+# Keep source/config tracked; scope application-specific runtime exclusions.
+
+# Local environment and credentials
+*.env
+*.env.*
+!*.env*.example
+!*.env*.sample
+!*.env*.template
+secrets.yaml
+secrets.yml
+secret.yaml
+secret.yml
+auth.json
+config.secret.inc.php
+id_rsa*
+id_ed25519*
+*.pem
+*.key
+*.p12
+*.pfx
+.ssh/
+.gnupg/
+password-store/
+
+# Logs and database files, including SQLite sidecars
+*.log
+*.log[.-]*
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+dump.rdb
+/services/**/logs/
+
+# Backup copies and migration/rollback artifacts
+*.bak
+*.bak[.-]*
+*.backup
+*.backup[.-]*
+.codex-backups/
+.rollback/
+/backups/
+/services/**/backups/
+/services/**/hass-upgrade-backups/
+
+# Service-root data/ is runtime; Node-RED and Zigbee2MQTT also store config there.
+/services/*/data/
+!/services/node-red/data/
+!/services/zigbee2mqtt/data/
+
+# Home Assistant: retain maintained configuration; installed integrations are excluded below.
+/services/home-assistant/config/.storage/
+/services/home-assistant/config/.cloud/
+/services/home-assistant/config/.cache/
+/services/home-assistant/config/deps/
+/services/home-assistant/config/tts/
+/services/home-assistant/config/home-assistant.log*
+/services/home-assistant/config/.ha_run.lock
+/services/home-assistant/config/.HA_VERSION
+/services/home-assistant/config/.write-test
+/services/home-assistant/config/ip_bans.yaml
+/services/home-assistant/config/google*.json
+/services/home-assistant/config/*credentials*.json
+/services/home-assistant/config/.google.token
+/services/home-assistant/config/html5_push_registrations.conf
+/services/home-assistant/config/www/community/
+/services/home-assistant/config/www/pictures/guest-wifi*-qr.png
+/services/home-assistant/config/solcast_solar/
+
+# Node-RED: retain flows.json, settings.js and package manifests in data/.
+/services/node-red/data/*flows_cred.json*
+/services/node-red/data/.sessions.json*
+/services/node-red/data/.config.users.json*
+/services/node-red/data/.config.runtime.json*
+/services/node-red/data/context/
+/services/node-red/data/stvd-timers/
+
+# MQTT and Zigbee2MQTT: retain configuration alongside their data directories.
+/services/mqtt/config/passwd_file*
+/services/mqtt/config/mosquitto_passwd*
+/services/zigbee2mqtt/data/state.json
+/services/zigbee2mqtt/data/coordinator_backup.json
+/services/zigbee2mqtt/data/configuration_backup_v*.yaml
+/services/zigbee2mqtt/data/log/
+
+# Other service-specific runtime directories
+/services/mariadb/db/
+/services/netalertx/db/
+/services/scrypted/nvr/
+/services/authentik/redis/
+/services/voice-assistant/whisper/
+/services/voice-assistant/piper/
+
+# Retired code-server configuration is private; exclusions below cover the full directory.
+/services/code-server/config/data/
+/services/code-server/config/.oh-my-zsh/
+/services/code-server/config/extensions/
+/services/code-server/config/.cache/
+/services/code-server/config/.local/
+
+# Codex source remains beside Compose; its runtime state lives outside the repo.
+/services/codex/ssh/
+/services/codex/reports/
+
+# Dependencies and development caches
+node_modules/
+.npm/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# OS, editor and NAS artifacts
+.DS_Store
+._*
+Thumbs.db
+@eaDir/
+\#recycle/
+.nfs*
+*.sw[op]
+*~
+.idea/
+
+# Reconciled operational artifacts identified in the source packet
+*.pid
+*.pre-update-*
+/services/netalertx/config/devices_*.csv
+/services/otbr/thread/0_*.data
+/services/code-server/config/.config/code-server/config.yaml
+/services/mqtt-explorer/settings.json
+/services/influxdb/config/influx-configs
+/services/home-assistant/config/.gitignore
+/services/node-red/data/node-red-contrib-home-assistant-websocket.json
+/services/code-server/config/.config/code-server/config.yaml
+/services/home-assistant/config/solcast_solar/solcast-sites.json
+/services/mqtt-explorer/settings.json
+/services/netalertx/config/app.conf
+
+/.runtime-env/
+
+# Fleet secret-reference templates are source, never populated env files.
+!/ansible/**/templates/*.env.j2
+
+/services/node-red/data/settings.private.json
+
+# Zigbee coordinator identity, state and private MQTT configuration.
+/services/zigbee2mqtt/data/
+
+
+# Public-source preparation: standard Git exclusions, not a publication list.
+# These rules do not erase private history or remove previously tracked files.
+# Only the separate preparation branch index is cleaned; live originals remain.
+*.private.json
+*.private.yaml
+*.private.yml
+!*.private.json.example
+!*.private.yaml.example
+!*.private.yml.example
+.homelab-private/
+acme.json
+acme.json.*
+.compose.yaml.*
+/services/**/DEPLOYMENT-*.json
+
+# Installed HA dependencies and retained media are restored privately.
+/services/home-assistant/config/custom_components/
+/services/home-assistant/config/www/community/
+/services/home-assistant/config/deps/
+/services/home-assistant/media/
+/services/home-assistant/haos/
+
+# Retired editor profiles, migration evidence and household presentation assets.
+/services/code-server/config/
+/docs/migration/
+/docs/archive/
+/ansible/reports/*
+!/ansible/reports/.gitkeep
+
+
+# Operational evidence and deployment-specific recovery inputs are private.
+/docs/operations/ha-source-history-evidence/
+/docs/operations/legacy-removal-plan-*.json
+/services/**/SOURCE-PREPARATION-*.json
+/services/**/LOCAL-WORKSPACE-ACCEPTANCE.json
+/services/**/packaging-report.json
+/services/**/*-packaging-report.json
+/services/database-backup/recovery/*.json
+/services/network-recovery/network-recovery.json
+/stacks/benbeast/deployment-inputs.json
+/stacks/**/compose.yaml.radio-metadata-*
+/stacks/**/.dns-storage-*
+
+# Media, downloaded theme bundles and device firmware need private restoration.
+# Keep authored JavaScript/CSS/YAML, including HA dashboards and templates.
+/services/authentik/media/
+# Retired Dashy configuration stays outside the source tree.
+/services/dashy/
+/services/home-assistant/config/www/pictures/
+/services/home-assistant/config/www/sounds/
+/services/home-assistant/config/themes/**/*.zip
+*.gbl
+
+# Retired Gatus must not be reintroduced by a source reconciliation.
+/services/gatus/
+
+# Locally rendered application configuration; public templates end in .in.
+/services/traefik/config/traefik.yaml
+
+# Private site-local configuration and retired deployment input.
+*.private.conf
+/services/openbao/openbao.hcl
+
+.venv/
+.work/
+.terraform/
+*.tfstate*
+*.tfplan
+crash.log
+__pycache__/
+.pytest_cache/
+*.pem
+*.key
+*.p12
+*.pfx
+.env
+inventory.private.*
+approval.json
+synthetic-approval-key.json
+
+
+# Runtime/private material is supplied outside the source repositories.
+**/.env
+**/.env.*
+!**/.env.example
+**/*.private.*
+!**/*.private.*.example
+**/secrets.yaml
+**/.storage/
+**/node_modules/
+**/__pycache__/
+**/.venv/
+**/.ansible/
+**/.mypy_cache/
+**/.pytest_cache/
+**/*.db
+**/*.db-*
+**/*.sqlite*
+**/*.log
+**/*.pem
+**/*.key
+**/flows_cred.json
+**/acme.json
+**/custom_components/
+**/backups/
+**/.backups/
+**/.work/
