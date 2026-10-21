@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install --require-hashes -r requirements.lock.txt
-      - run: python -m pytest -q tests --basetemp .work/pytest
+      - run: python -m pytest -q tests --basetemp "$RUNNER_TEMP/pytest-homelab"
       - run: python -m pytest -q -p no:cacheprovider services/network-recovery
       - run: python bin/homelab validate --catalog examples/site/catalog/site.json
       - run: python bin/homelab plan --catalog examples/site/catalog/site.json --workspace .work/rehearsal --target synthetic
