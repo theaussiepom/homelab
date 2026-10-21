@@ -1,0 +1,908 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/homelab/site.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "site": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "environment": {
+          "enum": [
+            "synthetic",
+            "production"
+          ]
+        },
+        "node": {
+          "type": "string",
+          "minLength": 1
+        },
+        "api_endpoint": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ssh_public_keys": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "bootstrap_user": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "environment",
+        "node",
+        "api_endpoint",
+        "ssh_public_keys",
+        "bootstrap_user"
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preserve_existing_uid_gid": {
+          "const": true
+        },
+        "create_stopped": {
+          "const": true
+        },
+        "public_runner_production_access": {
+          "const": false
+        },
+        "native_lifecycle_owns_power": {
+          "const": true
+        }
+      },
+      "required": [
+        "preserve_existing_uid_gid",
+        "create_stopped",
+        "public_runner_production_access",
+        "native_lifecycle_owns_power"
+      ]
+    },
+    "hardware": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "disk_by_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "disk_serial": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "disk_size_bytes": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "management_mac": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "spare_mac": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "firmware": {
+          "anyOf": [
+            {
+              "enum": [
+                "uefi"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "smart_observation": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fqdn": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "installer_cidr": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "installer_gateway": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "installer_dns": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "installer_mac": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "final_tagged_network_qualified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "disk_by_id",
+        "disk_serial",
+        "disk_size_bytes",
+        "management_mac",
+        "spare_mac",
+        "firmware",
+        "smart_observation",
+        "fqdn",
+        "installer_cidr",
+        "installer_gateway",
+        "installer_dns",
+        "installer_mac",
+        "final_tagged_network_qualified"
+      ]
+    },
+    "foundation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bridge_name": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bridge_ports": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mtu": {
+          "type": "integer",
+          "minimum": 576,
+          "maximum": 9216
+        },
+        "storage_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "zfs_pool": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "existing_objects_adopted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "bridge_name",
+        "bridge_ports",
+        "mtu",
+        "storage_id",
+        "zfs_pool",
+        "existing_objects_adopted"
+      ]
+    },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "r2_s3_candidate",
+            "synthetic_local"
+          ]
+        },
+        "qualified": {
+          "type": "boolean"
+        },
+        "global_lock_qualified": {
+          "type": "boolean"
+        },
+        "encrypted_history_qualified": {
+          "type": "boolean"
+        },
+        "external_recovery_qualified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "qualified",
+        "global_lock_qualified",
+        "encrypted_history_qualified",
+        "external_recovery_qualified"
+      ]
+    },
+    "states": {
+      "const": [
+        "foundation",
+        "critical",
+        "application_guests",
+        "security_VM"
+      ]
+    },
+    "guests": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "vmid": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 999999999
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runtime": {
+            "enum": [
+              "unprivileged_lxc",
+              "vm"
+            ]
+          },
+          "state_root": {
+            "enum": [
+              "critical",
+              "application_guests",
+              "security_VM"
+            ]
+          },
+          "cpu": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "memory_mib": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "swap_mib": {
+            "const": 0
+          },
+          "root_gib": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "storage_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "template_file_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "os_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "debian",
+                  "ubuntu",
+                  "unmanaged"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "image_sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "boot_order": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "normally_stopped": {
+            "type": "boolean"
+          },
+          "started": {
+            "const": false
+          },
+          "on_boot": {
+            "const": false
+          },
+          "protection": {
+            "const": true
+          },
+          "nesting": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "keyctl": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idmaps": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "type": {
+                      "enum": [
+                        "uid",
+                        "gid"
+                      ]
+                    },
+                    "container_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "host_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "container_id",
+                    "host_id",
+                    "size"
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "interfaces": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "vlan": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4094
+                },
+                "ipv4": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "ipv4"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "mac": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "bridge": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "address_assignment": {
+                  "const": "dhcp_mac_reservation"
+                },
+                "firewall": {
+                  "const": true
+                },
+                "main_default": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "vlan",
+                "ipv4",
+                "mac",
+                "bridge",
+                "address_assignment",
+                "firewall",
+                "main_default"
+              ]
+            }
+          },
+          "mounts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "slot": {
+                  "type": "string",
+                  "pattern": "^(mp|scsi)[0-9]+$"
+                },
+                "size_gib": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "path": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "backup": {
+                  "const": true
+                },
+                "replicate": {
+                  "type": "boolean"
+                },
+                "kind": {
+                  "enum": [
+                    "managed",
+                    "staging"
+                  ]
+                }
+              },
+              "required": [
+                "slot",
+                "size_gib",
+                "path",
+                "backup",
+                "replicate",
+                "kind"
+              ]
+            }
+          },
+          "admitted": {
+            "const": false
+          }
+        },
+        "required": [
+          "key",
+          "vmid",
+          "runtime",
+          "state_root",
+          "cpu",
+          "memory_mib",
+          "swap_mib",
+          "root_gib",
+          "storage_id",
+          "template_file_id",
+          "os_type",
+          "image_sha256",
+          "boot_order",
+          "normally_stopped",
+          "started",
+          "on_boot",
+          "protection",
+          "nesting",
+          "keyctl",
+          "idmaps",
+          "interfaces",
+          "mounts",
+          "admitted"
+        ]
+      }
+    },
+    "fleet": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "host": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ssh_alias": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ansible_user": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed_bootstrap_user": {
+            "type": "string",
+            "minLength": 1
+          },
+          "retained_services": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "local_state_qualified": {
+            "type": "boolean"
+          },
+          "network_admitted": {
+            "type": "boolean"
+          },
+          "identity_changes_allowed": {
+            "const": false
+          }
+        },
+        "required": [
+          "key",
+          "host",
+          "ssh_alias",
+          "ansible_user",
+          "observed_bootstrap_user",
+          "retained_services",
+          "local_state_qualified",
+          "network_admitted",
+          "identity_changes_allowed"
+        ]
+      }
+    },
+    "gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^I[0-9]{2}$"
+          },
+          "status": {
+            "enum": [
+              "unresolved",
+              "synthetic_only",
+              "qualified",
+              "deferred"
+            ]
+          },
+          "evidence_ref": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requirement": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "evidence_ref",
+          "requirement"
+        ]
+      }
+    },
+    "fleet_management": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deployment_admitted",
+        "inventory",
+        "policy"
+      ],
+      "properties": {
+        "deployment_admitted": {
+          "const": false
+        },
+        "inventory": {
+          "type": "object",
+          "minProperties": 2,
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "managed_hosts",
+            "otbr_hosts",
+            "observer_gateway",
+            "primary_nfs"
+          ],
+          "properties": {
+            "managed_hosts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]+$"
+              }
+            },
+            "otbr_hosts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]+$"
+              }
+            },
+            "observer_gateway": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]+$"
+              }
+            },
+            "primary_nfs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "site",
+    "policy",
+    "hardware",
+    "foundation",
+    "backend",
+    "states",
+    "guests",
+    "fleet",
+    "gates"
+  ]
+}

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check BenBeast local network every 30 seconds
+
+[Timer]
+OnActiveSec=30s
+OnUnitInactiveSec=30s
+AccuracySec=1s
+Unit=homelab-network-recovery.service
+
+[Install]
+WantedBy=timers.target

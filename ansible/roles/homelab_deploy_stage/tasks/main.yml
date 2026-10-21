@@ -1,0 +1,24 @@
+---
+- name: Enforce the admission boundary even when this role is included directly
+  ansible.builtin.import_role:
+    name: homelab_admission
+
+- name: Require the separately qualified deployment-controller contract
+  ansible.builtin.assert:
+    that:
+      - homelab_runner_qualified | default(false) | bool
+      - homelab_runner_repository_visibility | default('') == 'private'
+      - homelab_runner_registered_repository | default('') == homelab_site_repository
+      - homelab_runner_account_preexists_with_expected_ids | default(false) | bool
+      - homelab_runner_local_release_verified | default(false) | bool
+      - homelab_backend_and_external_takeover_qualified | default(false) | bool
+    fail_msg: "I23/I14 controller, release, private registration and recovery bindings remain required."
+
+- name: Stage a native runner unit without registration or activation
+  ansible.builtin.template:
+    src: homelab-deploy.service.j2
+    dest: /etc/systemd/system/homelab-deploy.service
+    mode: "0644"
+    backup: true
+  # Installing/registering the runner and enabling its unit are separate I23
+  # operations. This role cannot manufacture those prerequisites by assertion.

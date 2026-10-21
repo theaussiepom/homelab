@@ -1,0 +1,44 @@
+---
+- name: Enforce the admission boundary even when this role is included directly
+  ansible.builtin.import_role:
+    name: homelab_admission
+
+- name: Restrict deployment writes to their dedicated declaration directory
+  ansible.builtin.assert:
+    that:
+      - item.name is match('^[a-z][a-z0-9-]*$')
+      - item.source_sha256 is match('^[0-9a-f]{64}$')
+    fail_msg: "Only frozen deployment declarations belong to this role."
+  loop: "{{ homelab_compose_files }}"
+
+- name: Capture exact selected declaration bytes on the controller
+  ansible.builtin.slurp:
+    src: "{{ item.source }}"
+  delegate_to: localhost
+  become: false
+  loop: "{{ homelab_compose_files }}"
+  register: homelab_frozen_compose
+  no_log: true
+
+- name: Verify selected bytes before transfer
+  ansible.builtin.assert:
+    that:
+      - item.content | b64decode | hash('sha256') == item.item.source_sha256
+  loop: "{{ homelab_frozen_compose.results }}"
+  no_log: true
+
+- name: Create only the declaration directory on the admitted new target
+  ansible.builtin.file:
+    path: /etc/homelab-deployment/compose
+    state: directory
+    mode: "0700"
+
+- name: Stage exact declarations without starting containers
+  ansible.builtin.copy:
+    content: "{{ item.content | b64decode }}"
+    dest: "/etc/homelab-deployment/compose/{{ item.item.name }}.yaml"
+    mode: "0600"
+    backup: true
+  loop: "{{ homelab_frozen_compose.results }}"
+  no_log: true
+  diff: false

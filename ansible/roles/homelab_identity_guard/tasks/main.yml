@@ -1,0 +1,42 @@
+---
+- name: Require a bound identity manifest rather than passing an empty verification
+  ansible.builtin.assert:
+    that:
+      - homelab_identity_manifest_qualified | default(false) | bool
+      - (homelab_expected_paths | length + homelab_expected_accounts | length) > 0
+    fail_msg: "I08 identity manifest and actual path/account checks remain required."
+
+- name: Read preserved numeric path metadata without following symlinks
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+    get_checksum: false
+  loop: "{{ homelab_expected_paths }}"
+  register: homelab_path_observations
+
+- name: Refuse wrong or missing state instead of changing ownership
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - not item.stat.islnk
+      - item.stat.uid == item.item.uid
+      - item.stat.gid == item.item.gid
+      - item.stat.mode == item.item.mode
+    fail_msg: "Preserved state metadata differs; no chown/init fallback."
+  loop: "{{ homelab_path_observations.results }}"
+  loop_control:
+    label: "{{ item.item.logical_id }}"
+
+- name: Read existing accounts
+  ansible.builtin.getent:
+    database: passwd
+  when: homelab_expected_accounts | length > 0
+
+- name: Refuse a package/service account identity mismatch
+  ansible.builtin.assert:
+    that:
+      - item.name in ansible_facts.getent_passwd
+      - ansible_facts.getent_passwd[item.name][1] | int == item.uid
+      - ansible_facts.getent_passwd[item.name][2] | int == item.gid
+    fail_msg: "Native account does not preserve the required UID/GID; qualify before packages/restore."
+  loop: "{{ homelab_expected_accounts }}"

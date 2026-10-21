@@ -1,0 +1,125 @@
+{
+  "schema": 1,
+  "hostname": "fixture-host",
+  "policy": {
+    "stable_seconds": 60,
+    "fault_seconds": 60,
+    "cooldown_seconds": 900,
+    "max_repairs_per_hour": 6
+  },
+  "links": [
+    {
+      "name": "ens1",
+      "mac": "02:00:00:00:00:01"
+    },
+    {
+      "name": "ens1.100",
+      "mac": "02:00:00:00:00:01",
+      "vlan": 100
+    }
+  ],
+  "overlay": {
+    "network": "underground",
+    "local_ip": "10.254.253.10",
+    "peer_subnet": "10.254.253.0/24",
+    "route_interface": "ens1.100",
+    "peer_probe_port": 22
+  },
+  "macvlan": {
+    "network": "macvlan_100",
+    "parent": "ens1.100",
+    "nas_mount": "/fixtures/nas",
+    "nas_source": "10.254.253.50:/exports/fixture",
+    "nas_probe_file": "/fixtures/nas/probe",
+    "containers": [
+      {
+        "name": "hass",
+        "project": "automation",
+        "service": "homeassistant",
+        "static_ipv4": "10.254.253.12",
+        "static_networks": {
+          "underground": "10.254.253.13"
+        },
+        "ready_port": 8123,
+        "dependency": "nodered",
+        "multicast_groups": [
+          "224.0.0.251",
+          "239.255.255.250"
+        ],
+        "route_targets": [
+          "224.0.0.251"
+        ],
+        "ready_network": "underground"
+      },
+      {
+        "name": "mass",
+        "project": "music-assistant",
+        "service": "music-assistant-server",
+        "static_ipv4": "10.254.253.14",
+        "static_networks": {
+          "underground": "10.254.253.15"
+        },
+        "ready_port": 8095,
+        "multicast_groups": [
+          "224.0.0.251"
+        ],
+        "ready_network": "underground"
+      },
+      {
+        "name": "nodered",
+        "project": "automation",
+        "service": "node-red",
+        "static_ipv4": "10.254.253.16",
+        "static_networks": {
+          "underground": "10.254.253.17"
+        },
+        "ready_port": 1880,
+        "ready_network": "underground"
+      },
+      {
+        "name": "pgadmin",
+        "project": "database",
+        "service": "pgadmin",
+        "static_ipv4": "10.254.253.18",
+        "ready_port": 80
+      },
+      {
+        "name": "traefik",
+        "project": "network",
+        "service": "traefik",
+        "static_ipv4": "10.254.253.19",
+        "ready_port": 443
+      }
+    ]
+  },
+  "probes": [
+    {
+      "name": "homeassistant-to-zwave",
+      "source": "hass",
+      "network": "underground",
+      "target": "zwave-js-ui",
+      "port": 3000,
+      "protocol": "websocket"
+    },
+    {
+      "name": "homeassistant-to-zigbee2",
+      "source": "hass",
+      "network": "underground",
+      "target": "zigbee2",
+      "port": 8099,
+      "protocol": "tcp"
+    },
+    {
+      "name": "nodered-to-homeassistant",
+      "source": "nodered",
+      "network": "underground",
+      "target": "hass",
+      "port": 8123,
+      "protocol": "http",
+      "path": "/",
+      "statuses": [
+        200
+      ]
+    }
+  ]
+}
