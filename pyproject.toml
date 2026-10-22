@@ -3,7 +3,7 @@ name = "homelab-draft-tooling"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-  "ansible-core==2.20.10",
+  "ansible-core==2.21.5",
   "jsonschema==4.26.0",
   "PyYAML==6.0.3",
   "pytest==9.0.2",
