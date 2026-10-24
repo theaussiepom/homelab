@@ -99,6 +99,12 @@ class FetchVerificationTests(unittest.TestCase):
 
 
 class LegacyCompilerTests(unittest.TestCase):
+    def test_malformed_catalogue_hardware_refuses_before_layout_lookup(self):
+        for hardware in (None, [], 'invalid', 1, True):
+            inputs = {'catalog': core.canonical({'hardware': hardware})}
+            with self.subTest(hardware=hardware), self.assertRaisesRegex(core.Refusal, 'hardware must be an object'):
+                core.context(inputs, datetime.now(timezone.utc))
+
     def test_unavailable_legacy_mirror_contract_refuses_explicitly(self):
         with self.assertRaisesRegex(core.Refusal, 'unsupported.*mirror'):
             core.context({'catalog': b'{"hardware":{"disk_layout":"zfs-mirror"}}'}, datetime.now(timezone.utc))

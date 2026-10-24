@@ -248,7 +248,9 @@ def release_identity(release: dict, inputs: dict[str, bytes]) -> dict:
 
 def context(inputs: dict[str, bytes], now: datetime) -> dict:
     cat = decode_json(inputs["catalog"])
-    require(cat.get("hardware", {}).get("disk_layout") != "zfs-mirror",
+    hardware = cat.get("hardware", {})
+    require(type(hardware) is dict, "hardware must be an object")
+    require(hardware.get("disk_layout") != "zfs-mirror",
             "unsupported legacy zfs-mirror compiler contract; use the static ISO builder")
     return _single_context(inputs, now)
 

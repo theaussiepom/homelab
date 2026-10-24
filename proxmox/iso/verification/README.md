@@ -1,5 +1,11 @@
 # Verification status
 
+A follow-up fix on **25 October 2026** validates catalogue hardware before reading its layout. Nulls, arrays, strings, numbers and booleans now raise the intended refusal. The new regression failed before the fix; all **30 source tests** then passed locally and in the documented Docker builder. Build and VM checks for subsequent commits run in [GitHub Actions](https://github.com/theaussiepom/homelab/actions/workflows/proxmox-iso.yml).
+
+The packaged qualification record below and `validation.json` describe the earlier source digest and exact images recorded there. They are retained as historical evidence; the current files and source digest are listed in `source-manifest.json`.
+
+## Packaged qualification record
+
 Reverified on **25 October 2026**, using Docker Desktop on an Apple Silicon Mac. These are bounded preparation results, not acceptance of a physical Proxmox deployment.
 
 | Check | Result |

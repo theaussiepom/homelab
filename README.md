@@ -6,7 +6,7 @@ The public implementation and private site use the same `bin/homelab` commands. 
 
 ## Build a custom Proxmox installation USB
 
-Start with the [step-by-step ISO guide](proxmox/iso/README.md). It includes redacted settings, copy-and-paste commands, Docker build tools, a safe practice run and an attended installation flow. Its [verification record](proxmox/iso/verification/README.md) covers 29 source tests and six virtual boot checks. Physical installation and first-start networking still require acceptance on the actual machine.
+Start with the [step-by-step ISO guide](proxmox/iso/README.md). It includes redacted settings, copy-and-paste commands, Docker build tools, a safe practice run and an attended installation flow. Its [verification record](proxmox/iso/verification/README.md) covers source tests and six virtual boot checks. Physical installation and first-start networking still require acceptance on the actual machine.
 
 This is a separate installer workflow; it does not enable the held PVE guest execution adapter described above.
 
