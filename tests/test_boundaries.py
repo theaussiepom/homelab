@@ -26,7 +26,7 @@ def test_public_ci_cannot_choose_private_runner_or_privileged_pr_context():
     assert ' bin/homelab ' in (core.ROOT/'.github/workflows/ci.yml').read_text()
 
 
-def test_iso_ci_reuses_docker_commands_and_uploads_only_bounded_test_evidence(tmp_path):
+def test_iso_ci_reuses_docker_commands_and_reports_only_bounded_test_evidence(tmp_path):
     ci=yaml.load((core.ROOT/'.github/workflows/ci.yml').read_text(),Loader=yaml.BaseLoader)
     unit=ci['jobs']['iso-unit']
     assert unit['runs-on']=='ubuntu-24.04'
@@ -61,6 +61,18 @@ def test_iso_ci_reuses_docker_commands_and_uploads_only_bounded_test_evidence(tm
     replay=subprocess.run([sys.executable,'-c',source],cwd=tmp_path,capture_output=True)
     assert replay.returncode!=0
     assert before=={p.name:p.read_bytes() for p in local.iterdir()}
+    evidence=next(step for step in job['steps'] if step.get('name')=='Show build and boot evidence')
+    assert evidence['if']=='always()'
+    evidence_source=evidence['run'].split('\n',1)[1].rsplit('\nPY\n',1)[0]
+    case=tmp_path/'build/vm-tests/unit';case.mkdir(parents=True)
+    (case/'receipt.json').write_text('RECEIPT_FIXTURE')
+    (case/'console.log').write_text('CONSOLE_FIXTURE')
+    (case/'disk.raw').write_text('DO_NOT_LOG_DISK')
+    (case/'image.iso').write_text('DO_NOT_LOG_ISO')
+    reported=subprocess.run([sys.executable,'-c',evidence_source],cwd=tmp_path,check=True,capture_output=True,text=True)
+    assert 'RECEIPT_FIXTURE' in reported.stdout and 'CONSOLE_FIXTURE' in reported.stdout
+    assert 'DO_NOT_LOG_' not in reported.stdout
+    assert 'root-recovery-password.hash' not in reported.stdout
     for workflow in (ci,qualification):
         assert 'pull_request_target' not in workflow['on']
         assert '${{ secrets.' not in json.dumps(workflow)
@@ -68,13 +80,7 @@ def test_iso_ci_reuses_docker_commands_and_uploads_only_bounded_test_evidence(tm
             assert candidate['runs-on']=='ubuntu-24.04'
             for step in candidate['steps']:
                 if 'uses' in step:assert re.fullmatch('[0-9a-f]{40}',step['uses'].split('@')[1])
-                if step.get('uses','').startswith('actions/upload-artifact@'):
-                    assert step['if']=='always()'
-                    assert step['with']['retention-days']=='7'
-                    for path in step['with']['path'].splitlines():
-                        assert path.endswith(('.json','.txt','console.log'))
-                        assert '.local' not in path
-                        assert not path.endswith(('.iso','.raw','.squashfs'))
+                assert not step.get('uses','').startswith('actions/upload-artifact@')
 
 
 def test_fleet_only_site_runs_through_the_same_executor(tmp_path):

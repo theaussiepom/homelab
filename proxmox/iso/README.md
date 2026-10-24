@@ -70,7 +70,7 @@ If a command fails, use [When something goes wrong](#when-something-goes-wrong) 
 
 Every pull request runs the source tests in Docker. Changes to this ISO package also run **Proxmox ISO build and boot checks**: one job builds the practice image and runs its five VM cases; another builds with invented integration settings, checks vendor metadata and verifies wrong-machine refusal. The jobs use GitHub-hosted Linux runners and the same Docker/`make` commands as this guide. They need no homelab access or private site inputs.
 
-Build/test receipts and VM console logs are saved as workflow artifacts for seven days, including when a check fails. Images, virtual disks and local credential inputs are not uploaded. These CI checks cover the synthetic workflow; your real image still needs its own local tests and `make qualify` before USB preparation. Physical installation and first-start networking remain separate.
+Build/test receipts and VM console output appear in the final evidence step in each job's logs, including when a check fails. Images, virtual disks and local credential files are not uploaded. These CI checks cover the synthetic workflow; your real image still needs its own local tests and `make qualify` before USB preparation. Physical installation and first-start networking remain separate.
 
 ## 2. Collect your computer's details
 

@@ -74,19 +74,24 @@ jobs:
       - name: Build invented-input integration image and check wrong-machine refusal
         if: matrix.profile == 'integration'
         run: make fetch build test-profile
-      - name: Preserve build and boot evidence
+      - name: Show build and boot evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: iso-${{ matrix.profile }}-evidence-${{ github.run_attempt }}
-          path: |
-            proxmox/iso/evidence/source-tests*.json
-            proxmox/iso/evidence/final-metadata-verification.json
-            proxmox/iso/evidence/latest-build-command-failure.json
-            proxmox/iso/build/single-usb-*/build-receipt.json
-            proxmox/iso/build/single-usb-*/native-validation.txt
-            proxmox/iso/build/single-usb-*/boot-record.txt
-            proxmox/iso/build/vm-tests/*/receipt.json
-            proxmox/iso/build/vm-tests/*/argv.json
-            proxmox/iso/build/vm-tests/*/console.log
-          retention-days: 7
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          patterns = (
+              'evidence/source-tests*.json',
+              'evidence/final-metadata-verification.json',
+              'evidence/latest-build-command-failure.json',
+              'build/single-usb-*/build-receipt.json',
+              'build/single-usb-*/native-validation.txt',
+              'build/single-usb-*/boot-record.txt',
+              'build/vm-tests/*/receipt.json',
+              'build/vm-tests/*/argv.json',
+              'build/vm-tests/*/console.log',
+          )
+          for pattern in patterns:
+              for path in sorted(Path('.').glob(pattern)):
+                  print('Evidence:', path, flush=True)
+                  print(path.read_text(errors='replace'), flush=True)
+          PY
