@@ -58,8 +58,9 @@ def qualify():
         if record.get('result')!=record['expected'] or not record.get('no_target_disk_writes') or not record.get('reason_matches') or record.get('local_vm_exit')!=0 or record.get('image_sha256')!=images[env]['sha256']:
             raise ValueError('Boot test did not pass for the current image: '+case)
         accepted.append({'case':case,'receipt':str(path.relative_to(ROOT)),'receipt_sha256':sha(path)})
-    meta=ROOT/'evidence/final-metadata-verification.json'
-    if not json.loads(meta.read_text())['all_other_vendor_metadata_preserved']:raise ValueError('Metadata preservation failed')
+    meta=json.loads((ROOT/'evidence/final-metadata-verification.json').read_text())
+    if meta.get('all_other_vendor_metadata_preserved') is not True or meta.get('modified_squashfs_sha256')!=images['production']['modified_squashfs_sha256']:
+        raise ValueError('Metadata verification missing, failed or stale for the current image')
     record={'schema':'homelab-packaged-media-acceptance-v1','production_iso_sha256':images['production']['sha256'],'usb_write_admitted':True,'source_sha256':units['source_sha256'],'unit_test_count':units['tests_run'],'cases':accepted,'scope':'Local media preparation only; physical installation and first boot remain unverified.'}
     (ROOT/'evidence/media-acceptance.json').write_text(json.dumps(record,indent=2)+'\n')
     print('Current images passed the required local checks. USB preparation can proceed; physical installation is a separate step.')

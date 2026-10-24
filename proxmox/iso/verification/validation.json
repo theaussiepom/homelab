@@ -1,14 +1,14 @@
 {
-  "recorded_at": "2026-10-24T11:46:07.000182+00:00",
+  "recorded_at": "2026-10-24T21:07:23.573840+00:00",
   "status": "passed bounded package qualification",
-  "source_sha256": "c2275f2a440d88c92cd9caf2c1c7ac7f18fa2a2e1f39ea863776d5963e1dcc0a",
-  "unit_tests_passed": 22,
+  "source_sha256": "9cc19c2d4f88507e2d549aadeeb4981449f31543ebb38c3aebad4e1134fcd4f6",
+  "unit_tests_passed": 29,
   "boot_cases": [
     {
       "case": "matching-check",
       "result": "checked-and-stopped",
       "refusal_reason": null,
-      "image_sha256": "ef2a352c1516d82bb78878ba039d85224af4ac8bf3a471803ee54d9028aa582b",
+      "image_sha256": "d300ebf9c1a4dbe74a11756f49746184f00ed205046a4bb3781c38f7e169cee9",
       "disk_write_bytes": {
         "disk0": 0,
         "disk1": 0,
@@ -21,7 +21,7 @@
       "case": "wrong-machine",
       "result": "refused",
       "refusal_reason": "wrong machine UUID",
-      "image_sha256": "ef2a352c1516d82bb78878ba039d85224af4ac8bf3a471803ee54d9028aa582b",
+      "image_sha256": "d300ebf9c1a4dbe74a11756f49746184f00ed205046a4bb3781c38f7e169cee9",
       "disk_write_bytes": {
         "disk0": 0,
         "disk1": 0,
@@ -34,7 +34,7 @@
       "case": "missing-member",
       "result": "refused",
       "refusal_reason": "missing, ambiguous or conflicting disk identity: LAB-NEW-B",
-      "image_sha256": "ef2a352c1516d82bb78878ba039d85224af4ac8bf3a471803ee54d9028aa582b",
+      "image_sha256": "d300ebf9c1a4dbe74a11756f49746184f00ed205046a4bb3781c38f7e169cee9",
       "disk_write_bytes": {
         "disk0": 0,
         "disk1": 0,
@@ -47,7 +47,7 @@
       "case": "ambiguous-member",
       "result": "refused",
       "refusal_reason": "missing, ambiguous or conflicting disk identity: LAB-NEW-A",
-      "image_sha256": "ef2a352c1516d82bb78878ba039d85224af4ac8bf3a471803ee54d9028aa582b",
+      "image_sha256": "d300ebf9c1a4dbe74a11756f49746184f00ed205046a4bb3781c38f7e169cee9",
       "disk_write_bytes": {
         "disk0": 0,
         "disk1": 0,
@@ -61,7 +61,7 @@
       "case": "cancel-install",
       "result": "refused",
       "refusal_reason": "installation was not explicitly confirmed",
-      "image_sha256": "ef2a352c1516d82bb78878ba039d85224af4ac8bf3a471803ee54d9028aa582b",
+      "image_sha256": "d300ebf9c1a4dbe74a11756f49746184f00ed205046a4bb3781c38f7e169cee9",
       "disk_write_bytes": {
         "disk0": 0,
         "disk1": 0,
@@ -74,7 +74,7 @@
       "case": "profile-wrong-machine",
       "result": "refused",
       "refusal_reason": "wrong machine UUID",
-      "image_sha256": "6d88716028e4ef89741e5f6259b336fcbc9f2c9d4c67748ee9563b2ab4d58c70",
+      "image_sha256": "8e34f91a9f47f138d66f92e1aa379d7f710119c60ed660711dd2f215faae1c00",
       "disk_write_bytes": {
         "disk0": 0,
         "disk1": 0,
@@ -85,11 +85,6 @@
     }
   ],
   "vendor_metadata_other_records_preserved": 25210,
-  "unchanged_runtime_source_sha256": {
-    "launch.py": "4de0bd0cfc633c43fb00643dac932fe61b40902a73c0b469cf66cc253696e237",
-    "homelab_installer/core.py": "401cc05dbad9a6cb91ec3a8204c6edcacbae5b231cbbc8bea454bd3e21fdbf4c",
-    "homelab_installer/observe.py": "66d798711316a98f01bee3dc2278526ccaa7169d0b8a1a6d6b3e2afa4daa154b"
-  },
   "builder_image": {
     "id": "sha256:f664212784f260423918efaf1d5c6766ff43764d47b08b503ef29e76c21b0ca4",
     "platform": "linux/amd64"
@@ -110,5 +105,21 @@
     "The interactive password-entry helper was not used to create a real credential during this packaging task.",
     "Docker workflow was exercised on Apple Silicon macOS; Linux/other host platform acceptance was not performed.",
     "Repository publication does not establish physical installation or live service acceptance."
+  ],
+  "metadata_verified_squashfs_sha256": "7d6fce91852b48daf0838414cb00aeaa67baca6d7a088a8bb05d21646fb73dc8",
+  "runtime_source_sha256": {
+    "launch.py": "4f47b95595995c7ba5e5e405f775de3333eb0d5f0047e9bf1f8195212a343a0a",
+    "homelab_installer/core.py": "39da68896f34f156b513330c80ac6d1d6caf6cf7bb53c705681bbfc7ef6031c1",
+    "homelab_installer/observe.py": "66d798711316a98f01bee3dc2278526ccaa7169d0b8a1a6d6b3e2afa4daa154b"
+  },
+  "review_regression_tests": 7,
+  "review_fixes": [
+    "Vendor trust checks remain enabled with Python optimisation.",
+    "Metadata acceptance is bound to the current integration image SquashFS digest.",
+    "Ordinary runtime exceptions reach the attended guard refusal and hold.",
+    "Unavailable legacy mirror compiler paths explicitly refuse.",
+    "Legacy verification returns the captured signature with the verified request.",
+    "Bundle rendering and manifest validation precede directory creation and share one rendered answer.",
+    "Network interfaces mode 0644 retained and documented as a specific non-secret payload decision."
   ]
 }

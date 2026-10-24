@@ -248,9 +248,8 @@ def release_identity(release: dict, inputs: dict[str, bytes]) -> dict:
 
 def context(inputs: dict[str, bytes], now: datetime) -> dict:
     cat = decode_json(inputs["catalog"])
-    if cat.get("hardware", {}).get("disk_layout") == "zfs-mirror":
-        from .mirror import mirror_context
-        return mirror_context(inputs, now)
+    require(cat.get("hardware", {}).get("disk_layout") != "zfs-mirror",
+            "unsupported legacy zfs-mirror compiler contract; use the static ISO builder")
     return _single_context(inputs, now)
 
 
@@ -389,7 +388,8 @@ def request_for(ctx: dict, now: datetime, ttl: int = 300) -> dict:
             "nonce": secrets.token_hex(16), "attended_prewrite_required": True, "erase_authorized": False}
 
 
-def verify_request(data: bytes, ctx: dict, now: datetime, signature: Path, allowed_signers: Path, identity: str) -> dict:
+def verify_request(data: bytes, ctx: dict, now: datetime, signature: Path, allowed_signers: Path, identity: str) -> tuple[dict, bytes]:
+    """Return the approved request and exact verified signature for compilation."""
     request = decode_json(data)
     exact(request, {"schema", "purpose", "site_id", "environment", "bindings", "boot_id", "issued_at", "expires_at", "nonce", "attended_prewrite_required", "erase_authorized"}, "approval request")
     require(data == canonical(request), "approval request is not canonical JSON")
@@ -417,13 +417,12 @@ def verify_request(data: bytes, ctx: dict, now: datetime, signature: Path, allow
         except subprocess.SubprocessError:
             raise Refusal("signature verification process failed") from None
     require(result.returncode == 0, "build signature verification failed")
-    return request
+    return request, sig
 
 
 def answer(ctx: dict) -> bytes:
-    if ctx.get("disk_layout") == "zfs-mirror":
-        from .mirror import mirror_answer
-        return mirror_answer(ctx)
+    require(ctx.get("disk_layout") != "zfs-mirror",
+            "unsupported legacy zfs-mirror compiler contract; use the static ISO builder")
     return _single_answer(ctx)
 
 
@@ -456,20 +455,15 @@ def new_file(path: Path, data: bytes) -> None:
         f.write(data)
 
 
-def manifest_for(ctx: dict, request: dict, request_bytes: bytes, inputs: dict[str, bytes]) -> dict:
-    result = _single_manifest_for(ctx, request, request_bytes, inputs)
-    if ctx.get("disk_layout") == "zfs-mirror":
-        result.pop("target")
-        result["layout"] = "zfs-raid1"
-        result["targets"] = [{k: t[k] for k in ("devname", "size_bytes", "by_ids")} for t in ctx["targets"]]
-        result["protected_disks"] = ctx["protected_disks"]
-        result["vendor_checks"] = {"explicit_current_device_paths": True, "capacity": False,
-                                  "machine_uuid": False, "unique_match": False, "absent_property_rejection": False}
-    return result
+def manifest_for(ctx: dict, request: dict, request_bytes: bytes, inputs: dict[str, bytes], *, rendered: bytes | None = None) -> dict:
+    require(ctx.get("disk_layout") != "zfs-mirror",
+            "unsupported legacy zfs-mirror compiler contract; use the static ISO builder")
+    if rendered is None:
+        rendered = answer(ctx)
+    return _single_manifest_for(ctx, request, request_bytes, inputs, rendered)
 
 
-def _single_manifest_for(ctx: dict, request: dict, request_bytes: bytes, inputs: dict[str, bytes]) -> dict:
-    rendered = answer(ctx)
+def _single_manifest_for(ctx: dict, request: dict, request_bytes: bytes, inputs: dict[str, bytes], rendered: bytes) -> dict:
     return {"schema": "homelab-installer-bundle-v1", "request_sha256": sha(request_bytes),
                 "release_identity": ctx["release_identity"],
                 "bindings": ctx["bindings"], "answer_sha256": sha(rendered),
@@ -483,11 +477,12 @@ def _single_manifest_for(ctx: dict, request: dict, request_bytes: bytes, inputs:
 
 
 def compile_bundle(ctx: dict, request: dict, request_bytes: bytes, signature_bytes: bytes, inputs: dict[str, bytes], out: Path) -> dict:
+    """Use the request and captured signature returned together by verify_request."""
     require(not out.resolve().is_relative_to(PUBLIC_ROOT), "private compilation output must be outside public implementation")
     require(out.parent.resolve() == out.parent.absolute(), "output parent has a symlink component")
-    out.mkdir(mode=0o700, parents=False, exist_ok=False)
     rendered = answer(ctx)
-    manifest = manifest_for(ctx, request, request_bytes, inputs)
+    manifest = manifest_for(ctx, request, request_bytes, inputs, rendered=rendered)
+    out.mkdir(mode=0o700, parents=False, exist_ok=False)
     for name, data in {"answer.toml": rendered, "first-boot.sh": inputs["first_boot"],
                        "request.json": request_bytes, "request.json.sig": signature_bytes,
                        "manifest.json": canonical(manifest)}.items():

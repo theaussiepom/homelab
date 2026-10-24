@@ -61,6 +61,8 @@ def install(root=Path('/')):
     fd,temp=tempfile.mkstemp(prefix='.homelab-',dir=target.parent)
     try:
         with os.fdopen(fd,'w') as stream:stream.write(rendered);stream.flush();os.fsync(stream.fileno())
+        # Match Proxmox's conventional permissions for /etc/network/interfaces.
+        # This generated file contains no credentials; only root may modify it.
         os.chmod(temp,0o644);os.replace(temp,target)
     finally:
         if os.path.exists(temp):os.unlink(temp)

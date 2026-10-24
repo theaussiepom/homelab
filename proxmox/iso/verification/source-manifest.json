@@ -1,5 +1,5 @@
 {
-  "source_sha256": "c2275f2a440d88c92cd9caf2c1c7ac7f18fa2a2e1f39ea863776d5963e1dcc0a",
+  "source_sha256": "9cc19c2d4f88507e2d549aadeeb4981449f31543ebb38c3aebad4e1134fcd4f6",
   "files": [
     {
       "path": ".dockerignore",
@@ -68,8 +68,8 @@
     },
     {
       "path": "docs/technical-reference.md",
-      "bytes": 6457,
-      "sha256": "b92de9542bb2f8b6144214cb95e214bac4c0495594bb4f9efd697bdfd4605115"
+      "bytes": 7884,
+      "sha256": "097621b87db891b7efe922a9aba4cb06bf8deefdc0eba6f90d1a3bea7a5841b6"
     },
     {
       "path": "scripts/boot_test.py",
@@ -78,8 +78,8 @@
     },
     {
       "path": "scripts/fetch-assistant.py",
-      "bytes": 3838,
-      "sha256": "32f087add9e4deb98e2dbcb4e0bf61f6dd6faf0b22696171971927d1537e3343"
+      "bytes": 3980,
+      "sha256": "bfd09669d663051c5badae493855d3e8a3af83bb3103c7bbf0168fd8da44f92a"
     },
     {
       "path": "scripts/password-hash.py",
@@ -103,13 +103,13 @@
     },
     {
       "path": "scripts/verify_metadata.py",
-      "bytes": 1697,
-      "sha256": "b2af195e803cccb95e1acec4c0501ae74594b80fcf8fb35fdadeeffed16ac437"
+      "bytes": 1961,
+      "sha256": "fb601485433ff5f2a529f6a4a1967cb3db228b3bb294f519a425bbd247c8b7bc"
     },
     {
       "path": "scripts/workflow.py",
-      "bytes": 4517,
-      "sha256": "4a6d4fd3db77053828b2a7b0dfe084f4a73800101f682bb0ba1cbe7b9b03f489"
+      "bytes": 4670,
+      "sha256": "8e424bc9257e9f6a3cad0b9d5f17d836b327ef31383f95305f2102b5ec91e076"
     },
     {
       "path": "scripts/write-usb.py",
@@ -123,8 +123,8 @@
     },
     {
       "path": "src/first_boot.py",
-      "bytes": 2146,
-      "sha256": "b79bbb1494ae9c66005da9fe851da31d61863a48a95e0a3e5da202c13dda85c7"
+      "bytes": 2306,
+      "sha256": "e612d8fc99a195223660250f70dc8b2535b0e232b2aa2b549e92dd30f4b9dbbc"
     },
     {
       "path": "src/homelab_installer/__init__.py",
@@ -133,8 +133,8 @@
     },
     {
       "path": "src/homelab_installer/core.py",
-      "bytes": 31060,
-      "sha256": "401cc05dbad9a6cb91ec3a8204c6edcacbae5b231cbbc8bea454bd3e21fdbf4c"
+      "bytes": 31019,
+      "sha256": "39da68896f34f156b513330c80ac6d1d6caf6cf7bb53c705681bbfc7ef6031c1"
     },
     {
       "path": "src/homelab_installer/observe.py",
@@ -143,8 +143,8 @@
     },
     {
       "path": "src/launch.py",
-      "bytes": 13276,
-      "sha256": "4de0bd0cfc633c43fb00643dac932fe61b40902a73c0b469cf66cc253696e237"
+      "bytes": 13350,
+      "sha256": "4f47b95595995c7ba5e5e405f775de3333eb0d5f0047e9bf1f8195212a343a0a"
     },
     {
       "path": "src/site_profile.py",
@@ -167,14 +167,19 @@
       "sha256": "f60848308e2c5cdec411ae2ff4fc7e66be3b5e28d127e77553a4e8585c9270a0"
     },
     {
+      "path": "tests/test_review_fixes.py",
+      "bytes": 9931,
+      "sha256": "9506bb6adbc1f4d6adc7c7629f681ca20286918b41d74f10109e406673b0c797"
+    },
+    {
       "path": "verification/README.md",
-      "bytes": 3391,
-      "sha256": "8024091e6b68090070a3e345a1fc6cf6243bbd91fad9d9c024da04b95b0d12a7"
+      "bytes": 4060,
+      "sha256": "79b140b807185095c76bb895f1fe43b903eb69b1fdf01a05ba98b5530abdf84d"
     },
     {
       "path": "verification/validation.json",
-      "bytes": 4376,
-      "sha256": "79ed6590ea1527e35e3849ed72dc32c243edbe3f00e8ade78d162b7c32d94e04"
+      "bytes": 5122,
+      "sha256": "4c16d9ebd0af500f0805316a0037f43a83ffe092967bc96efa8c2ae67e817192"
     }
   ]
 }

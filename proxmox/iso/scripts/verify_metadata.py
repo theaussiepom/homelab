@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -6,6 +7,13 @@ import subprocess
 import tempfile
 
 ROOT=Path('/work')
+
+
+def sha(path):
+    digest=hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda:stream.read(8*1024**2),b''):digest.update(block)
+    return digest.hexdigest()
 
 
 def records(path):
@@ -29,7 +37,7 @@ with tempfile.TemporaryDirectory(prefix='homelab-metadata-') as temp:
     removed=sorted(x.decode(errors='replace') for x in original-modified)
     added=sorted(x.decode(errors='replace') for x in modified-original)
     success=len(removed)==len(added)==1 and all(x.startswith('usr/sbin/unconfigured.sh ') for x in removed+added)
-    receipt={'all_other_vendor_metadata_preserved':success,'unchanged_records':len(original&modified),'removed':removed,'added':added,'scope':'all exported ownership/mode/timestamp/hardlink/symlink/xattr metadata; regular-file data offsets ignored'}
+    receipt={'all_other_vendor_metadata_preserved':success,'modified_squashfs_sha256':sha(image),'unchanged_records':len(original&modified),'removed':removed,'added':added,'scope':'all exported ownership/mode/timestamp/hardlink/symlink/xattr metadata; regular-file data offsets ignored'}
     (ROOT/'evidence/final-metadata-verification.json').write_text(json.dumps(receipt,indent=2)+'\n')
     print(json.dumps(receipt))
-    assert success,'unexpected vendor metadata change'
+    if not success:raise ValueError('unexpected vendor metadata change')

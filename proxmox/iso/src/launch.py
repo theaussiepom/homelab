@@ -218,8 +218,13 @@ def main():
     os.execv(RUNTIME, [RUNTIME])
 
 
-if __name__ == '__main__':
+def guarded_main():
     try:
         main()
-    except (core.Refusal, OSError, ValueError, KeyError, TypeError) as error:
+    except Exception as error:
+        # Inventory commands and malformed runtime data must also stay stopped.
         hold('HOMELAB_REFUSED: ' + (str(error) if isinstance(error, core.Refusal) else type(error).__name__))
+
+
+if __name__ == '__main__':
+    guarded_main()
