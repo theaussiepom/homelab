@@ -1,0 +1,26 @@
+{
+  "machine_uuid": "REPLACE_WITH_MACHINE_UUID",
+  "disk_members": [
+    {
+      "disk_serial": "REPLACE_NEW_DISK_A_SERIAL",
+      "disk_by_id": "/dev/disk/by-id/REPLACE_NEW_DISK_A_ALIAS",
+      "disk_size_bytes": 0
+    },
+    {
+      "disk_serial": "REPLACE_NEW_DISK_B_SERIAL",
+      "disk_by_id": "/dev/disk/by-id/REPLACE_NEW_DISK_B_ALIAS",
+      "disk_size_bytes": 0
+    }
+  ],
+  "protected_disks": [
+    {
+      "disk_serial": "REPLACE_OLD_DISK_SERIAL",
+      "disk_by_id": "/dev/disk/by-id/REPLACE_OLD_DISK_ALIAS",
+      "disk_size_bytes": 0
+    }
+  ],
+  "interface_names": {
+    "REPLACE_ADMIN_NIC_MAC": "mgmt0",
+    "REPLACE_FAST_NIC_MAC": "fast0"
+  }
+}

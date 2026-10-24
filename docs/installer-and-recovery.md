@@ -1,6 +1,8 @@
 # Installer and workstation recovery drafts
 
-The installation remains a separately destructive attended release step. This package has not built a bootable ISO, executed a native answer parser, installed a disposable VM or changed firmware/networking. The answer generator is intentionally synthetic-only and cannot render the actual production catalog.
+For the reusable attended USB builder, start with the [plain-language ISO guide](../proxmox/iso/README.md) and its [verification record](../proxmox/iso/verification/README.md). That separate package has built images, exercised the native answer parser and passed bounded virtual boot checks. Full native installation and physical first-start networking remain unverified.
+
+The legacy command drafts described below remain separate. They have not built a bootable ISO, executed a native answer parser, installed a disposable VM or changed firmware/networking. Their answer generator is intentionally synthetic-only and cannot render the actual production catalog. Physical installation remains a separately destructive attended release step.
 
 ## Exact disk observation and refusal
 

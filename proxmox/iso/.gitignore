@@ -1,0 +1,11 @@
+.local/
+build/
+evidence/
+__pycache__/
+*.py[cod]
+*.iso
+*.raw
+*.qcow2
+*.deb
+*.gpg
+*.log

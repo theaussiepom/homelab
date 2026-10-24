@@ -1,0 +1,5 @@
+{
+  "approved_by": "REPLACE_WITH_YOUR_NAME",
+  "scope": "build-and-prepare-removable-media-only",
+  "production_boot_or_erase_authorized": false
+}
