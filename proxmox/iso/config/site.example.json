@@ -1,0 +1,29 @@
+{
+  "schema": "homelab-iso-site-v1",
+  "fqdn": "pve.example.invalid",
+  "mailto": "operator@example.invalid",
+  "keyboard": "en-us",
+  "country": "au",
+  "timezone": "Australia/Brisbane",
+  "management": {
+    "address": "198.18.25.2/24",
+    "gateway": "198.18.25.1",
+    "dns": "198.18.25.53",
+    "vlan": 25
+  },
+  "storage": {
+    "address": "198.18.20.2/24",
+    "vlan": 20
+  },
+  "admin_vlans": [
+    15,
+    25
+  ],
+  "fast_vlans": [
+    20,
+    30,
+    40,
+    100,
+    107
+  ]
+}

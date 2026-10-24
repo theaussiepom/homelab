@@ -1,0 +1,114 @@
+{
+  "recorded_at": "2026-10-24T11:46:07.000182+00:00",
+  "status": "passed bounded package qualification",
+  "source_sha256": "c2275f2a440d88c92cd9caf2c1c7ac7f18fa2a2e1f39ea863776d5963e1dcc0a",
+  "unit_tests_passed": 22,
+  "boot_cases": [
+    {
+      "case": "matching-check",
+      "result": "checked-and-stopped",
+      "refusal_reason": null,
+      "image_sha256": "ef2a352c1516d82bb78878ba039d85224af4ac8bf3a471803ee54d9028aa582b",
+      "disk_write_bytes": {
+        "disk0": 0,
+        "disk1": 0,
+        "disk2": 0
+      },
+      "no_target_disk_writes": true,
+      "local_vm_exit": 0
+    },
+    {
+      "case": "wrong-machine",
+      "result": "refused",
+      "refusal_reason": "wrong machine UUID",
+      "image_sha256": "ef2a352c1516d82bb78878ba039d85224af4ac8bf3a471803ee54d9028aa582b",
+      "disk_write_bytes": {
+        "disk0": 0,
+        "disk1": 0,
+        "disk2": 0
+      },
+      "no_target_disk_writes": true,
+      "local_vm_exit": 0
+    },
+    {
+      "case": "missing-member",
+      "result": "refused",
+      "refusal_reason": "missing, ambiguous or conflicting disk identity: LAB-NEW-B",
+      "image_sha256": "ef2a352c1516d82bb78878ba039d85224af4ac8bf3a471803ee54d9028aa582b",
+      "disk_write_bytes": {
+        "disk0": 0,
+        "disk1": 0,
+        "disk2": 0
+      },
+      "no_target_disk_writes": true,
+      "local_vm_exit": 0
+    },
+    {
+      "case": "ambiguous-member",
+      "result": "refused",
+      "refusal_reason": "missing, ambiguous or conflicting disk identity: LAB-NEW-A",
+      "image_sha256": "ef2a352c1516d82bb78878ba039d85224af4ac8bf3a471803ee54d9028aa582b",
+      "disk_write_bytes": {
+        "disk0": 0,
+        "disk1": 0,
+        "disk2": 0,
+        "disk3": 0
+      },
+      "no_target_disk_writes": true,
+      "local_vm_exit": 0
+    },
+    {
+      "case": "cancel-install",
+      "result": "refused",
+      "refusal_reason": "installation was not explicitly confirmed",
+      "image_sha256": "ef2a352c1516d82bb78878ba039d85224af4ac8bf3a471803ee54d9028aa582b",
+      "disk_write_bytes": {
+        "disk0": 0,
+        "disk1": 0,
+        "disk2": 0
+      },
+      "no_target_disk_writes": true,
+      "local_vm_exit": 0
+    },
+    {
+      "case": "profile-wrong-machine",
+      "result": "refused",
+      "refusal_reason": "wrong machine UUID",
+      "image_sha256": "6d88716028e4ef89741e5f6259b336fcbc9f2c9d4c67748ee9563b2ab4d58c70",
+      "disk_write_bytes": {
+        "disk0": 0,
+        "disk1": 0,
+        "disk2": 0
+      },
+      "no_target_disk_writes": true,
+      "local_vm_exit": 0
+    }
+  ],
+  "vendor_metadata_other_records_preserved": 25210,
+  "unchanged_runtime_source_sha256": {
+    "launch.py": "4de0bd0cfc633c43fb00643dac932fe61b40902a73c0b469cf66cc253696e237",
+    "homelab_installer/core.py": "401cc05dbad9a6cb91ec3a8204c6edcacbae5b231cbbc8bea454bd3e21fdbf4c",
+    "homelab_installer/observe.py": "66d798711316a98f01bee3dc2278526ccaa7169d0b8a1a6d6b3e2afa4daa154b"
+  },
+  "builder_image": {
+    "id": "sha256:f664212784f260423918efaf1d5c6766ff43764d47b08b503ef29e76c21b0ca4",
+    "platform": "linux/amd64"
+  },
+  "vm_image": {
+    "id": "sha256:0e9dbb3682ea63e3bf2abd3f022428c7c6a81dd68ad66d77427b59c787f03117",
+    "platform": "linux/arm64"
+  },
+  "vendor_downloads": "Existing public downloads reused; signatures, index/package/executable digests and derived cache digests rechecked. A fresh full network download was not repeated.",
+  "profile_used": "Invented local integration hardware/site and unusable synthetic credentials only. No original private inputs copied.",
+  "physical_installation_performed": false,
+  "packaged_usb_helper_physical_write_tested": false,
+  "prior_completed_usb_changed": false,
+  "limits": [
+    "Virtual tests stop or refuse before native installation; no successful complete native installation is claimed.",
+    "Physical target disk selection, ZFS/boot, first-start network and SSH acceptance remain required.",
+    "The reusable USB helper has source tests; no second physical USB write was performed for this package.",
+    "The interactive password-entry helper was not used to create a real credential during this packaging task.",
+    "Docker workflow was exercised on Apple Silicon macOS; Linux/other host platform acceptance was not performed.",
+    "Repository publication does not establish physical installation or live service acceptance."
+  ]
+}

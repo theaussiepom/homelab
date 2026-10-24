@@ -1,0 +1,180 @@
+{
+  "source_sha256": "c2275f2a440d88c92cd9caf2c1c7ac7f18fa2a2e1f39ea863776d5963e1dcc0a",
+  "files": [
+    {
+      "path": ".dockerignore",
+      "bytes": 60,
+      "sha256": "649b280f68fd8b37fe6a535dc9cab007c24e177067da84e289ad60877482607d"
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 86,
+      "sha256": "3ed1bd3bae168aaf98085fd86b23e58c6f14d61f514d2541ac1aebd705266bce"
+    },
+    {
+      "path": "Makefile",
+      "bytes": 1228,
+      "sha256": "32dc236389a626ec68e73a0086984311392cbe19770f6773f019ef48455e37d3"
+    },
+    {
+      "path": "README.md",
+      "bytes": 15193,
+      "sha256": "22280c738fb633519cdae0146f5a369bd865abe7611c1d9be8064e9697d5cf96"
+    },
+    {
+      "path": "config/fixture-hardware.json",
+      "bytes": 820,
+      "sha256": "e2dd1076fadd4b0c045191c00b7487ce56049f2f7b1e7bf1c7b7fccaf097a904"
+    },
+    {
+      "path": "config/fixture-site.json",
+      "bytes": 488,
+      "sha256": "8ed1a55240e5048919f97667925949533b43ca030d6e48f7f11fdeec84c79570"
+    },
+    {
+      "path": "config/fixture-ssh.pub",
+      "bytes": 81,
+      "sha256": "8b5a6781cafa6fd206a9681ddc4f09148311c8a14a571c784d30e5c53777e429"
+    },
+    {
+      "path": "config/hardware.example.json",
+      "bytes": 661,
+      "sha256": "120d34340362772b39129d9498a7ab7a88d8d4c2895735e0442533c77ac0d7ca"
+    },
+    {
+      "path": "config/media-approval.example.json",
+      "bytes": 147,
+      "sha256": "8c2d961b6bc327c1f98b8f510255ae7d47cc8495bedc3903cbcc4b78357c6c34"
+    },
+    {
+      "path": "config/site.example.json",
+      "bytes": 488,
+      "sha256": "8ed1a55240e5048919f97667925949533b43ca030d6e48f7f11fdeec84c79570"
+    },
+    {
+      "path": "docker/Dockerfile.build",
+      "bytes": 324,
+      "sha256": "65849d0d81182492ddc387fa1200d557357e111b9028173f810565be7380ea57"
+    },
+    {
+      "path": "docker/Dockerfile.test",
+      "bytes": 241,
+      "sha256": "cf792c3177e39d5ef34a9ff5dc64c203875ee29e3b57c1a28e551b2249e4798d"
+    },
+    {
+      "path": "docs/configuration.md",
+      "bytes": 3839,
+      "sha256": "c5b0233a62ecbd153b04039a80b1653585b12287c5f5e1e471fff30fd7fb58cb"
+    },
+    {
+      "path": "docs/technical-reference.md",
+      "bytes": 6457,
+      "sha256": "b92de9542bb2f8b6144214cb95e214bac4c0495594bb4f9efd697bdfd4605115"
+    },
+    {
+      "path": "scripts/boot_test.py",
+      "bytes": 8309,
+      "sha256": "fa74e60c24a2185d119b6a0fa58ec154201bb05a2d0ebaadfd86541ef8405efa"
+    },
+    {
+      "path": "scripts/fetch-assistant.py",
+      "bytes": 3838,
+      "sha256": "32f087add9e4deb98e2dbcb4e0bf61f6dd6faf0b22696171971927d1537e3343"
+    },
+    {
+      "path": "scripts/password-hash.py",
+      "bytes": 934,
+      "sha256": "5a3f5b6537671d085578eb4a934acd556efb14c904efd52a9a88e7cee38e7b2b"
+    },
+    {
+      "path": "scripts/prepare-vendor.py",
+      "bytes": 4201,
+      "sha256": "aa78abab8b887fd11a89f039a80a220ff3c676e6f5fcd9c8fb2e381332187273"
+    },
+    {
+      "path": "scripts/run.sh",
+      "bytes": 2494,
+      "sha256": "f15c890c9b8a640e38e5951c45058f0bac14c2fa44e7a15ef3707bf7aefb0591"
+    },
+    {
+      "path": "scripts/show-hardware.sh",
+      "bytes": 503,
+      "sha256": "795d12cd80b200d3cb82dec370e559eb1ed002cb2ccadff1be3dd02e1ec36d71"
+    },
+    {
+      "path": "scripts/verify_metadata.py",
+      "bytes": 1697,
+      "sha256": "b2af195e803cccb95e1acec4c0501ae74594b80fcf8fb35fdadeeffed16ac437"
+    },
+    {
+      "path": "scripts/workflow.py",
+      "bytes": 4517,
+      "sha256": "4a6d4fd3db77053828b2a7b0dfe084f4a73800101f682bb0ba1cbe7b9b03f489"
+    },
+    {
+      "path": "scripts/write-usb.py",
+      "bytes": 8182,
+      "sha256": "16beccadbe86f5d56ef6a5669212734bb8d51637ae53504c22079372538c4740"
+    },
+    {
+      "path": "src/build_single_usb.py",
+      "bytes": 15031,
+      "sha256": "a3530d957760426348d2b67219d51c8627d71449cfd1d80a038ec7e43084a20d"
+    },
+    {
+      "path": "src/first_boot.py",
+      "bytes": 2146,
+      "sha256": "b79bbb1494ae9c66005da9fe851da31d61863a48a95e0a3e5da202c13dda85c7"
+    },
+    {
+      "path": "src/homelab_installer/__init__.py",
+      "bytes": 109,
+      "sha256": "d34084d828afdc68af0d8ee7c2cfa2bcc39b97827bde0a29d019c8fbf1a1fa37"
+    },
+    {
+      "path": "src/homelab_installer/core.py",
+      "bytes": 31060,
+      "sha256": "401cc05dbad9a6cb91ec3a8204c6edcacbae5b231cbbc8bea454bd3e21fdbf4c"
+    },
+    {
+      "path": "src/homelab_installer/observe.py",
+      "bytes": 6430,
+      "sha256": "66d798711316a98f01bee3dc2278526ccaa7169d0b8a1a6d6b3e2afa4daa154b"
+    },
+    {
+      "path": "src/launch.py",
+      "bytes": 13276,
+      "sha256": "4de0bd0cfc633c43fb00643dac932fe61b40902a73c0b469cf66cc253696e237"
+    },
+    {
+      "path": "src/site_profile.py",
+      "bytes": 3827,
+      "sha256": "b839d1ad7070593907185fca8395d3269e15acb70f90ceaefbcfbaf97a10f83c"
+    },
+    {
+      "path": "tests/test_first_boot.py",
+      "bytes": 3121,
+      "sha256": "ae4bd412fa9ce9674505bbfe4281216e0dbf171b75ea03f69dea18af674af1b2"
+    },
+    {
+      "path": "tests/test_launch.py",
+      "bytes": 7130,
+      "sha256": "6b781e3f6022b69d3bd23dd85b0d117700f9e89d5fbd981db0ee235d8e1abfaa"
+    },
+    {
+      "path": "tests/test_profiles.py",
+      "bytes": 6766,
+      "sha256": "f60848308e2c5cdec411ae2ff4fc7e66be3b5e28d127e77553a4e8585c9270a0"
+    },
+    {
+      "path": "verification/README.md",
+      "bytes": 3391,
+      "sha256": "8024091e6b68090070a3e345a1fc6cf6243bbd91fad9d9c024da04b95b0d12a7"
+    },
+    {
+      "path": "verification/validation.json",
+      "bytes": 4376,
+      "sha256": "79ed6590ea1527e35e3849ed72dc32c243edbe3f00e8ade78d162b7c32d94e04"
+    }
+  ]
+}

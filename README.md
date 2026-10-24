@@ -4,6 +4,12 @@ Reusable OpenTofu/Ansible structure, strict catalog validation, local rehearsal 
 
 The public implementation and private site use the same `bin/homelab` commands. A synthetic apply changes only a local JSON model; it never contacts Proxmox, a Pi, a database or a radio. Native OpenTofu tests use only its built-in local `terraform_data` fixture.
 
+## Build a custom Proxmox installation USB
+
+Start with the [step-by-step ISO guide](proxmox/iso/README.md). It includes redacted settings, copy-and-paste commands, Docker build tools, a safe practice run and an attended installation flow. Its [verification record](proxmox/iso/verification/README.md) covers 22 source tests and six virtual boot checks. Physical installation and first-start networking still require acceptance on the actual machine.
+
+This is a separate installer workflow; it does not enable the held PVE guest execution adapter described above.
+
 ## Run the complete local example
 
 Use Python3.12+ and a new checkout/work directory. The dependency lock is hashed; no sudo/system installation is required.
