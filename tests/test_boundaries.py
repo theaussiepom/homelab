@@ -2,6 +2,7 @@ from pathlib import Path
 import copy
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -23,6 +24,57 @@ def test_public_ci_cannot_choose_private_runner_or_privileged_pr_context():
             assert len(step['uses'].split('@')[1])==40
         assert '${{ secrets.' not in json.dumps(step)
     assert ' bin/homelab ' in (core.ROOT/'.github/workflows/ci.yml').read_text()
+
+
+def test_iso_ci_reuses_docker_commands_and_uploads_only_bounded_test_evidence(tmp_path):
+    ci=yaml.load((core.ROOT/'.github/workflows/ci.yml').read_text(),Loader=yaml.BaseLoader)
+    unit=ci['jobs']['iso-unit']
+    assert unit['runs-on']=='ubuntu-24.04'
+    assert unit['defaults']['run']['working-directory']=='proxmox/iso'
+    assert any(step.get('run')=='make tools init unit' for step in unit['steps'])
+    qualification=yaml.load((core.ROOT/'.github/workflows/proxmox-iso.yml').read_text(),Loader=yaml.BaseLoader)
+    assert qualification['permissions']=={'contents':'read'}
+    assert set(qualification['on'])=={'pull_request','push','workflow_dispatch'}
+    for event in ('pull_request','push'):
+        assert 'proxmox/iso/**' in qualification['on'][event]['paths']
+        assert '.github/workflows/proxmox-iso.yml' in qualification['on'][event]['paths']
+    job=qualification['jobs']['build-and-boot']
+    assert job['runs-on']=='ubuntu-24.04'
+    assert job['strategy']['matrix']['profile']==['fixture','integration']
+    runs=[step.get('run','') for step in job['steps']]
+    assert 'make fetch fixture test-boot' in runs
+    assert 'make fetch build test-profile' in runs
+    # Exercise the actual CI input generator in a fresh temporary checkout.
+    generator=next(step['run'] for step in job['steps'] if step.get('name')=='Create invented integration inputs')
+    assert generator.startswith("python3 - <<'PY'\n") and generator.endswith('\nPY\n')
+    source=generator.split('\n',1)[1].rsplit('\nPY\n',1)[0]
+    fixtures=tmp_path/'config';fixtures.mkdir()
+    for name in ('fixture-hardware.json','fixture-site.json','fixture-ssh.pub'):
+        (fixtures/name).write_bytes((core.ROOT/'proxmox/iso/config'/name).read_bytes())
+    subprocess.run([sys.executable,'-c',source],cwd=tmp_path,check=True)
+    local=tmp_path/'.local'
+    hardware=json.loads((local/'hardware.json').read_text())
+    assert all(d['disk_serial'].startswith('CI-') for d in hardware['disk_members']+hardware['protected_disks'])
+    assert json.loads((local/'media-approval.json').read_text())['production_boot_or_erase_authorized'] is False
+    # An existing profile must never be overwritten by a CI setup convenience.
+    before={p.name:p.read_bytes() for p in local.iterdir()}
+    replay=subprocess.run([sys.executable,'-c',source],cwd=tmp_path,capture_output=True)
+    assert replay.returncode!=0
+    assert before=={p.name:p.read_bytes() for p in local.iterdir()}
+    for workflow in (ci,qualification):
+        assert 'pull_request_target' not in workflow['on']
+        assert '${{ secrets.' not in json.dumps(workflow)
+        for candidate in workflow['jobs'].values():
+            assert candidate['runs-on']=='ubuntu-24.04'
+            for step in candidate['steps']:
+                if 'uses' in step:assert re.fullmatch('[0-9a-f]{40}',step['uses'].split('@')[1])
+                if step.get('uses','').startswith('actions/upload-artifact@'):
+                    assert step['if']=='always()'
+                    assert step['with']['retention-days']=='7'
+                    for path in step['with']['path'].splitlines():
+                        assert path.endswith(('.json','.txt','console.log'))
+                        assert '.local' not in path
+                        assert not path.endswith(('.iso','.raw','.squashfs'))
 
 
 def test_fleet_only_site_runs_through_the_same_executor(tmp_path):
