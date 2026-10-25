@@ -199,6 +199,11 @@ hours**. Choose the intended lifetime before running it. For ongoing CD, read
 [credential lifetime and rotation](OPERATIONS.md#credential-lifetime-and-rotation);
 expiry prevents future Proxmox API jobs, even if the runner stays online.
 
+**Choose before copying the command:** `21600` is the six-hour practice setting.
+For an ongoing runner, use your agreed lifetime instead. `0` means no automatic
+expiry and requires your deliberate acceptance of that choice and its revocation
+procedure. Do not run `access` twice to change a token already created.
+
 ```sh
 ./proxmox/bootstrap/bootstrap access "$bootstrap_bundle" --expires-in 21600
 ./proxmox/bootstrap/bootstrap plan "$bootstrap_bundle"
@@ -207,6 +212,11 @@ expiry prevents future Proxmox API jobs, even if the runner stays online.
 **Expected result:** access reports `"status": "ready"`; plan reports
 `"status": "passed"` with the location of its saved plan. Credentials and the
 trusted Proxmox CA are saved privately, so no token copy/paste is needed.
+
+The API token is the deployment guest's Proxmox credential, separate from the
+root recovery password. Save the token from the private bundle's `access.json`
+in your password manager alongside your SSH key and recovery password. Keep
+that file private; it contains a usable credential, not a shareable log.
 
 Read the plan on your workstation:
 
@@ -299,6 +309,11 @@ private runner is online, and the GitHub job succeeds using the transferred
 state. A no-change plan means GitHub can see the same guest without trying to
 recreate it. It does not deploy your household applications.
 
+Continue with the [application deployment plan](../applications/README.md).
+Keep this runner dedicated to deployment: PegaProx is planned in its own LXC.
+The bootstrap's token only covers this first guest, so later guest creation
+needs its own reviewed access and jobs.
+
 ## When something goes wrong
 
 | What you see | What to do |
@@ -308,6 +323,7 @@ recreate it. It does not deploy your household applications.
 | SSH fingerprint or authentication fails | Follow [host access](../host-access.md); never disable strict host checking. |
 | Output, token or access-attempt file already exists | Preserve it and inspect the previous result. A new folder does not clear a partial host operation. |
 | Token has expired | The guest may still run, but API jobs fail. Follow the [credential reference](OPERATIONS.md#credential-lifetime-and-rotation); do not silently replace access. |
+| Creation reports `403` or missing `SDN.Use` for a VLAN | Stop and preserve the failed attempt. A tagged guest needs permission at its exact bridge/VLAN path. See the [physical-run correction](verification.md#physical-host-bootstrap-passed-after-a-correction-on-25-october-2026); do not substitute broad permissions or retry blindly. |
 | Apply times out or leaves `HOLD.json` | Keep state and logs. Inspect the actual guest and partial operation before another attempt; do not delete the hold. |
 | Equivalent host API rule belongs to someone else | Inspect the conflict. The script will not adopt or overwrite it. |
 | Runner setup fails after `HANDOVER.json` appears | Preserve the marker and reconcile the guest's actual state. Do not restart from the workstation copy. |
@@ -316,14 +332,16 @@ recreate it. It does not deploy your household applications.
 
 ## What has actually been verified?
 
-On **25 October 2026**, a fresh isolated Proxmox 9.2 machine completed guest
-creation, automatic template/token/firewall setup, state handover and a successful
-real private GitHub job without manual repairs between stages. Subsequent review
-corrections passed **67 unit tests** and offline OpenTofu/Ansible checks; that
-live rehearsal was not repeated for those corrections.
+On **25 October 2026**, both a fresh isolated Proxmox 9.2 machine and the
+maintainer's physical host reached a successful real GitHub no-change check.
+The physical run exposed a missing permission for a tagged VLAN. After one
+reviewed correction and retry, its guest, backup, transferred state and GitHub
+job matched. **70 unit tests passed** for the corrected bootstrap source.
 
-See [verification evidence and limits](verification.md). Physical installation,
-physical networking, later application rollout and independent NAS state-backup
-commissioning remain separate outcomes. Maintainers can use the
+The clean lab run and corrected physical run are separate results. The latter
+used an explicitly approved private Mac snapshot for initial handover; it did
+not establish a NAS backup. Application rollout and ongoing NAS state backup
+remain outstanding. See [verification evidence and limits](verification.md).
+Maintainers can use the
 [operating reference](OPERATIONS.md) for credential, firewall, locking and
 failure-path details.

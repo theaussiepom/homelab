@@ -56,8 +56,9 @@ allowance resolved the guest-to-host connection block; direct TLS verification
 and the subsequent authenticated provider checks passed.
 
 This was a staged rehearsal with incremental corrections. The separate fresh
-qualification below subsequently tested the final source. Production
-installation, physical restart and application rollout remain unverified. The
+qualification below subsequently tested that source. This staged rehearsal did
+not establish physical installation, physical restart or application rollout.
+The later physical bootstrap is recorded separately below. The
 independent NAS state-backup destination also remains unverified; the Mac
 snapshot is not that backup. The rehearsal firewall allowance persists until
 separately removed.
@@ -141,3 +142,46 @@ comment and verifies the created rule's owner on readback. Docker preparation
 has explicit build/run timeouts and reports that a timed-out CLI does not prove
 container completion. The ownership and timeout regressions failed before
 those fixes and passed in the final offline check. No live firewall was changed.
+
+## Physical host bootstrap: passed after a correction on 25 October 2026
+
+After the custom ISO's physical installation, the host's identity, healthy ZFS
+mirror, separate original disk and management access were checked. The bootstrap
+then created the deployment guest and handed over to a real private GitHub job.
+
+This run exposed an important difference from the lab: the guest used a tagged
+management VLAN. The first apply was refused with `403` because the token had
+permission for the bridge but not its exact VLAN. Readback found no guest or
+guest disk from that failed attempt; the logs and original hold were preserved.
+
+The correction passes the selected VLAN to credential setup, adds only its exact
+non-propagating bridge/VLAN grant and checks the effective permission. Its new
+regressions failed against the old implementation. **70 unit tests then passed**
+in the network-disabled Docker executor.
+
+One explicitly approved corrected attempt created the protected deployment LXC.
+A fresh provider plan reported no changes. The normal runner step configured
+the host API allowance, installed the runner and transferred the state.
+One manually dispatched job then ran on the uniquely selected physical-host
+runner. Its no-change result and state checksum, lineage and serial matched
+the handover and the private workstation backup. The workstation copy stayed
+frozen after handover.
+
+### What this establishes, and what remains
+
+- The installed physical host can run the first guest and its GitHub deployment
+  runner. The lab result and this corrected physical result are separate records;
+  the latter is not a clean, unchanged first-attempt run.
+- The guest used a selected static address and an explicitly approved revocable
+  token without automatic expiry. Its token was subsequently saved and synced
+  in the operator's password manager.
+- The initial state/configuration backup was an explicitly approved private Mac
+  snapshot. **Ongoing NAS state backup remains outstanding before further guest
+  or application rollout.** No NAS backup is claimed from that snapshot.
+- These results do not qualify PegaProx, household applications, new guest
+  permissions or repeated physical restart behaviour.
+
+The maintainer retains the private host readback, source/test bindings, failed
+attempt, corrected-attempt approval, backup/handover receipts and GitHub job
+metadata/logs. Real credentials, addresses, keys, plans and state remain outside
+this public record.
