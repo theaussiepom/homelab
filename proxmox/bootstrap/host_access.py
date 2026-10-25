@@ -33,6 +33,9 @@ def grant(request, execute=command, emit=lambda value: None, ca_pem=None):
     for name in ('storage_id', 'template_storage', 'bridge'):
         if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_.-]*', request[name]):
             raise RuntimeError('Use an individual existing storage or bridge name')
+    vlan = request.get('vlan')
+    if vlan is not None and (type(vlan) is not int or not 1 <= vlan <= 4094):
+        raise RuntimeError('Use no VLAN or one integer VLAN from 1 to 4094')
     seconds = request['expires_in']
     if type(seconds) is not int or (seconds != 0 and not 3600 <= seconds <= 31536000):
         raise RuntimeError('Token lifetime must be zero or between one hour and one year')
@@ -64,6 +67,8 @@ def grant(request, execute=command, emit=lambda value: None, ca_pem=None):
     add('/storage/' + request['storage_id'], 'PVEDatastoreUser')
     add('/storage/' + request['template_storage'], 'PVEAuditor')
     add('/sdn/zones/localnetwork/' + request['bridge'], 'PVESDNUser')
+    if vlan is not None:
+        add('/sdn/zones/localnetwork/' + request['bridge'] + '/' + str(vlan), 'PVESDNUser')
     add('/nodes/' + node, 'PVEAuditor')
     roles = {row['roleid'] for row in execute(['pveum', 'role', 'list', '--output-format', 'json'])}
     if not set().union(*grants.values()) <= roles:
@@ -107,6 +112,8 @@ def grant(request, execute=command, emit=lambda value: None, ca_pem=None):
     need('/storage/' + request['storage_id'], ['Datastore.AllocateSpace', 'Datastore.Audit'])
     need('/storage/' + request['template_storage'], ['Datastore.Audit'])
     need('/sdn/zones/localnetwork/' + request['bridge'], ['SDN.Use'])
+    if vlan is not None:
+        need('/sdn/zones/localnetwork/' + request['bridge'] + '/' + str(vlan), ['SDN.Use'])
     need('/nodes/' + node, ['Sys.Audit'])
     if any(not privileges <= set(effective[path]) for path, privileges in required.items()):
         raise RuntimeError('Required effective token privileges are missing')
