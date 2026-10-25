@@ -69,7 +69,9 @@ def main():
     finally:
         # Only our exact newly created synthetic targets, never a prune operation.
         for name in names:
-            subprocess.run(['docker', 'rm', '-f', name], check=True, stdout=subprocess.DEVNULL)
+            # A crashed --rm container may already be gone; try every exact name
+            # and keep Docker's diagnostics without replacing the original error.
+            subprocess.run(['docker', 'rm', '-f', name], check=False, stdout=subprocess.DEVNULL)
 
 
 if __name__ == '__main__':
