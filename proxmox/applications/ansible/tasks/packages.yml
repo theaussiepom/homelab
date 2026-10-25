@@ -1,0 +1,41 @@
+---
+- name: Verify each privately supplied package repository key
+  ansible.builtin.stat:
+    path: "{{ item.key_path }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  loop: "{{ app.repositories | default([]) }}"
+  register: repository_keys
+
+- name: Check repository signing keys before installing them
+  ansible.builtin.assert:
+    that:
+      - item.stat.checksum == item.item.key_sha256
+      - item.item.name is match('^[a-z][a-z0-9-]+$')
+      - "('/usr/share/keyrings/' ~ item.item.name ~ '.asc') in item.item.source"
+  loop: "{{ repository_keys.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Install the reviewed repository signing keys
+  ansible.builtin.copy:
+    src: "{{ item.key_path }}"
+    dest: "/usr/share/keyrings/{{ item.name }}.asc"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: "{{ app.repositories | default([]) }}"
+
+- name: Install reviewed deb822 repository sources with explicit Signed-By
+  ansible.builtin.copy:
+    content: "{{ item.source }}"
+    dest: "/etc/apt/sources.list.d/{{ item.name }}.sources"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: "{{ app.repositories | default([]) }}"
+
+- name: Prepare preserved database account IDs before vendor packages
+  ansible.builtin.include_tasks: database-account.yml
+  when: app.kind in ['mariadb', 'postgresql', 'influxdb']

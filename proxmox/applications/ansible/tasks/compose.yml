@@ -1,0 +1,78 @@
+---
+- name: Enable the isolated guest Docker service
+  ansible.builtin.systemd_service:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Read this guest stack from private controller inputs
+  ansible.builtin.set_fact:
+    stack: "{{ lookup('ansible.builtin.file', app.stack_config) | from_json }}"
+  no_log: true
+
+- name: Verify stack kind and memory match the selected guest
+  ansible.builtin.assert:
+    that:
+      - stack.kind == app.kind
+      - stack.guest_memory_mib | int == app.memory_mib | int
+      - stack.guest_memory_mib | int <= ansible_facts.memtotal_mb | int + 64
+
+- name: Render private stack files on the controller
+  ansible.builtin.command:
+    argv: [python3, "{{ playbook_dir }}/../render.py", --config, "{{ app.stack_config }}", --output, "{{ app.render_dir }}"]
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Copy rendered stack without logging credentials
+  ansible.builtin.copy:
+    src: "{{ app.render_dir }}/compose.yml"
+    dest: /opt/homelab-app/compose.yml
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Install only the new ingress routes into the restored Traefik file directory
+  ansible.builtin.copy:
+    src: "{{ app.render_dir }}/routes.yml"
+    dest: /srv/homelab/traefik/dynamic/homelab-applications.yml
+    owner: root
+    group: root
+    mode: '0600'
+    backup: true
+  when: app.kind == 'ingress' and not ansible_check_mode
+  no_log: true
+
+- name: Load preserved custom images by verified archive
+  ansible.builtin.include_tasks: image.yml
+  loop: "{{ stack.services | dict2items | selectattr('value.archive', 'defined') | list }}"
+  loop_control:
+    loop_var: image_input
+    label: "{{ image_input.key }}"
+
+- name: Validate Compose without emitting private configuration
+  ansible.builtin.command:
+    argv: [docker, compose, -f, /opt/homelab-app/compose.yml, config, --quiet]
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Require the explicit start step and retired old writers
+  ansible.builtin.assert:
+    that:
+      - app.start_services | default(false) | bool
+      - app.exclusive_writer_confirmed | default(false) | bool
+    fail_msg: 'Data is staged. Start requires the selected cutover and exclusive-writer confirmation.'
+  when: app.start_services | default(false) | bool and not ansible_check_mode
+
+- name: Start exactly this guest stack
+  ansible.builtin.command:
+    argv: [docker, compose, -f, /opt/homelab-app/compose.yml, up, -d, --wait, --wait-timeout, '180', --remove-orphans=false]
+  register: compose_start
+  changed_when: "'Started' in compose_start.stderr or 'Created' in compose_start.stderr or 'Recreated' in compose_start.stderr"
+  no_log: true
+  when: app.start_services | default(false) | bool and not ansible_check_mode

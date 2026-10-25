@@ -1,0 +1,31 @@
+---
+- name: Reject a host or an unexpected guest
+  ansible.builtin.stat:
+    path: /etc/pve
+  register: pve_directory
+
+- name: Require explicit target identity and compatible private inputs
+  ansible.builtin.assert:
+    that:
+      - groups['application'] | length == 1
+      - app.new_target | default(false) | bool
+      - app.vmid | int >= 100
+      - app.vmid | int not in [900, 4914, 4915, 4920]
+      - app.hostname == ansible_facts.hostname
+      - app.address in ansible_facts.all_ipv4_addresses
+      - app.mac | lower in (ansible_facts.interfaces | map('extract', ansible_facts) | selectattr('macaddress', 'defined') | map(attribute='macaddress') | map('lower') | list)
+      - ansible_facts.virtualization_type == 'lxc'
+      - ansible_facts.distribution == 'Debian'
+      - not pve_directory.stat.exists
+      - app.kind in ['dns', 'mariadb', 'postgresql', 'influxdb', 'identity', 'ingress', 'automation']
+      - app.packages | length > 0
+      - app.packages | select('match', '^[a-z0-9][a-z0-9+.-]*=[0-9][A-Za-z0-9.+:~\-]*$') | list | length == app.packages | length
+    fail_msg: 'Stop: supply the selected new Debian LXC identity and exact package versions.'
+
+- name: Record the target identity separately from application data
+  ansible.builtin.copy:
+    content: "{{ {'vmid': app.vmid, 'hostname': app.hostname, 'address': app.address, 'kind': app.kind} | to_nice_json }}\n"
+    dest: /etc/homelab-application.json
+    owner: root
+    group: root
+    mode: '0600'

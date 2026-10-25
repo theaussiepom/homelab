@@ -9,6 +9,28 @@ concurrency:
   group: validation-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
+  applications:
+    name: Application source and restore fixtures (Docker)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Build pinned source tools
+        run: docker build --platform linux/amd64 -t homelab-app-test -f proxmox/bootstrap/docker/Dockerfile proxmox/bootstrap/docker
+      - name: Test without network, host devices or deployment credentials
+        run: |
+          docker run --rm --platform linux/amd64 --network none --cpus 2 --memory 2g \
+            --tmpfs /tmp:rw,exec,nosuid,nodev,size=768m,mode=1777 \
+            -v "$PWD:/src:ro" -e HOME=/tmp homelab-app-test \
+            sh /src/proxmox/applications/tests/check.sh
+      - name: Validate all four rendered stacks with Docker Compose
+        run: |
+          python3 proxmox/applications/tests/compose_fixture.py "$RUNNER_TEMP/app-compose"
+          for kind in dns identity ingress automation; do
+            docker compose -f "$RUNNER_TEMP/app-compose/$kind.json" config --quiet
+          done
   iso-unit:
     name: ISO source tests (Docker)
     runs-on: ubuntu-24.04

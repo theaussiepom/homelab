@@ -1,0 +1,32 @@
+{
+  "kind": "automation",
+  "data_root": "/srv/homelab",
+  "guest_memory_mib": 4096,
+  "timezone": "Etc/UTC",
+  "services": {
+    "homeassistant": {
+      "image": "example.invalid/service@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "memory_mib": 256,
+      "cpus": 1,
+      "pids_limit": 128,
+      "environment": {},
+      "extra_mounts": []
+    },
+    "node_red": {
+      "image": "example.invalid/service@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "memory_mib": 256,
+      "cpus": 1,
+      "pids_limit": 128,
+      "environment": {},
+      "extra_mounts": []
+    },
+    "mqtt": {
+      "image": "example.invalid/service@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "memory_mib": 256,
+      "cpus": 1,
+      "pids_limit": 128,
+      "environment": {},
+      "extra_mounts": []
+    }
+  }
+}

@@ -1,0 +1,34 @@
+---
+- name: Copy the selected image archive
+  ansible.builtin.copy:
+    src: "{{ image_input.value.archive }}"
+    dest: "/opt/homelab-app/{{ image_input.key }}-image.tar"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+
+- name: Verify the uploaded image bytes
+  ansible.builtin.stat:
+    path: "/opt/homelab-app/{{ image_input.key }}-image.tar"
+    checksum_algorithm: sha256
+  register: image_archive
+
+- name: Refuse a different archive
+  ansible.builtin.assert:
+    that: image_archive.stat.checksum == image_input.value.archive_sha256
+
+- name: Load the existing custom image without rebuilding or substituting it
+  ansible.builtin.command:
+    argv: [docker, image, load, --input, "/opt/homelab-app/{{ image_input.key }}-image.tar"]
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Confirm the expected image content ID was loaded
+  ansible.builtin.command:
+    argv: [docker, image, inspect, "{{ image_input.value.image }}", --format, "{{ '{{' }}.Id{{ '}}' }}"]
+  register: loaded_image
+  changed_when: false
+  failed_when: loaded_image.stdout | trim != image_input.value.image
+  when: not ansible_check_mode

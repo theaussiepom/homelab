@@ -1,0 +1,30 @@
+---
+- name: Read the existing database account if present
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ app.database.user }}"
+    fail_key: false
+
+- name: Refuse to renumber an existing service account
+  ansible.builtin.assert:
+    that:
+      - app.database.uid | int > 0
+      - app.database.gid | int > 0
+      - ansible_facts.getent_passwd[app.database.user] == none or ansible_facts.getent_passwd[app.database.user][1] | int == app.database.uid | int
+      - ansible_facts.getent_passwd[app.database.user] == none or ansible_facts.getent_passwd[app.database.user][2] | int == app.database.gid | int
+
+- name: Preserve the selected service group ID
+  ansible.builtin.group:
+    name: "{{ app.database.group }}"
+    gid: "{{ app.database.gid }}"
+    system: true
+
+- name: Preserve the selected service user ID
+  ansible.builtin.user:
+    name: "{{ app.database.user }}"
+    uid: "{{ app.database.uid }}"
+    group: "{{ app.database.group }}"
+    home: "{{ app.database.home }}"
+    create_home: false
+    system: true
+    shell: /usr/sbin/nologin

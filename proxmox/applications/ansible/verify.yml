@@ -1,0 +1,28 @@
+---
+- name: Read back the selected application guest
+  hosts: application
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Confirm the guest identity without writing it
+      ansible.builtin.assert:
+        that:
+          - app.hostname == ansible_facts.hostname
+          - app.address in ansible_facts.all_ipv4_addresses
+          - ansible_facts.virtualization_type == 'lxc'
+
+    - name: Require the service-specific acceptance probes
+      ansible.builtin.assert:
+        that: app.health_checks | default([]) | length > 0
+        fail_msg: 'Define real DNS, database, MQTT or HTTP probes before calling this guest verified.'
+
+    - name: Run private service-specific read-only probes
+      ansible.builtin.command:
+        argv: "{{ item.argv }}"
+      register: health_probe
+      changed_when: false
+      failed_when: health_probe.rc != 0 or (item.expect | default('')) not in health_probe.stdout
+      loop: "{{ app.health_checks }}"
+      loop_control:
+        label: "{{ item.name }}"
+      no_log: true

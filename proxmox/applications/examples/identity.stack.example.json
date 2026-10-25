@@ -1,0 +1,37 @@
+{
+  "kind": "identity",
+  "data_root": "/srv/homelab",
+  "guest_memory_mib": 4096,
+  "timezone": "Etc/UTC",
+  "services": {
+    "server": {
+      "image": "example.invalid/service@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "memory_mib": 256,
+      "cpus": 1,
+      "pids_limit": 128,
+      "environment": {},
+      "extra_mounts": []
+    },
+    "worker": {
+      "image": "example.invalid/service@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "memory_mib": 256,
+      "cpus": 1,
+      "pids_limit": 128,
+      "environment": {},
+      "extra_mounts": []
+    },
+    "redis": {
+      "image": "example.invalid/service@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "memory_mib": 256,
+      "cpus": 1,
+      "pids_limit": 128,
+      "environment": {},
+      "extra_mounts": []
+    }
+  },
+  "postgresql_host": "pg.example.invalid",
+  "authentik_secret_key": "synthetic-only-key",
+  "postgresql_user": "authentik",
+  "postgresql_password": "synthetic-only-password",
+  "postgresql_database": "authentik"
+}
