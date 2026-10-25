@@ -75,7 +75,9 @@
     "mac": "02:00:00:00:61:01",
     "packages": [
       "docker.io=0.0.0-REPLACE",
-      "docker-compose-v2=0.0.0-REPLACE"
+      "docker-cli=0.0.0-REPLACE",
+      "docker-compose=0.0.0-REPLACE",
+      "curl=0.0.0-REPLACE"
     ],
     "capture": {
       "path": "/mnt/nas/captures/automation.tar",
