@@ -1,65 +1,98 @@
-# After bootstrap: deploy your applications
+# After bootstrap: bring home automation across one guest at a time
 
-[Back to the Proxmox guide](../README.md) ·
-[First deployment guest](../bootstrap/README.md)
+[Proxmox guide](../README.md) · [Bootstrap](../bootstrap/README.md) ·
+[PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
 
-**This is the agreed plan, not a ready-to-run application installer.** The first
-guest and GitHub handover have been proved. The jobs that create more guests and
-install their applications are still to be written and checked.
+The deployment guest receives GitHub jobs. These scripts are the next step:
+**OpenTofu creates one application guest; Ansible installs its applications and
+restores its saved configuration.**
 
-## PegaProx gets its own LXC
+**Current status:** application source and synthetic tests are available. This
+application path has not yet created or restored a guest on the rehearsal
+Proxmox system. Passing Docker tests does not mean the house has migrated.
+The earlier physical ISO/bootstrap result remains separate.
 
-[PegaProx](https://github.com/PegaProx/project-pegaprox) provides a web interface
-for managing Proxmox. An **LXC** is a lightweight Linux container hosted by
-Proxmox. We have chosen a separate Debian LXC for PegaProx.
+## What are we bringing across?
 
-Decision documented on **26 October 2026**. No PegaProx guest has been created.
+```mermaid
+flowchart TD
+  A[Deployment guest + NAS state recovery copies] --> B[DNS and required network paths]
+  B --> C[Native MariaDB, PostgreSQL and InfluxDB]
+  C --> D[Authentik + its Redis dependency]
+  D --> E[Traefik HTTPS routes]
+  E --> F[One automation LXC: Home Assistant + Node-RED + MQTT]
+  F --> G[Check existing Zigbee and real household automations]
+```
 
-| Guest | Its job |
+| Order | What it does | What must be proved before moving on |
+| --- | --- | --- |
+| 0 | Keep the runner's state recoverable on the NAS | Recovery copy written/read back; one active state owner |
+| 1 | DNS, using Pi-hole and Unbound | Lookups work from the next guest; router still provides DHCP |
+| 2 | Required native databases | Matching versions, restored users/grants/data and a real client query |
+| 3 | Authentik, including Redis for the installed version | Login and the restored Node-RED provider/outpost work |
+| 4 | Traefik HTTPS access | Valid certificate, HA's own login, Node-RED's Authentik login |
+| 5 | The shared automation guest | HA, Node-RED and MQTT work together with restored settings |
+| 6 | The working house | Existing radios, devices, automations and household access work |
+
+This is a dependency list, not one job that creates everything. PegaProx, PBS
+and optional recovery projects are not HA prerequisites. Existing radio
+services and physical hosts stay in place.
+
+## What you need before deployment
+
+- A working [bootstrap](../bootstrap/README.md) and private GitHub deployment repository.
+- An unused guest ID/address and resource budget, with its VLAN carried by the
+  host and switches. These scripts do not configure your router or switches.
+- API access for that guest/storage/network. **The bootstrap token covers only
+  the deployment guest; it cannot create application guests.**
+- The runner's NAS recovery directory, deployment SSH key, trusted Proxmox CA
+  and verified guest SSH host key. Secrets stay in private runner files.
+- A coherent NAS capture of this guest's configuration/data, required database
+  backups, preserved custom images and independently available keys.
+- NAS protection for new application/database writes, commissioned before the
+  live start. State recovery copies alone do not back up application data.
+
+Use database-native backups, not copies of files from running databases.
+Preserve numeric file owners, permissions, ACLs and extended attributes.
+
+## How a deployment works
+
+First, copy the [private-repository workflow templates](templates/README.md)
+into your own private deployment repository and supply its private inputs.
+
+Use **Application guest deployment** in the private repository's Actions tab.
+Select one guest and one step:
+
+1. **Plan:** preview one guest and its firewall. Review the result and retain its
+   plan SHA256, the fingerprint of the exact saved plan.
+2. **Apply:** supply that fingerprint to create/update only the reviewed guest.
+   Replacement and deletion are refused.
+3. **Stage:** install packages, restore files into the new guest and validate
+   configuration. Restored application/database services remain stopped.
+4. **Start:** at the chosen migration window, after confirming the old writers
+   are retired for this service. HA can control real devices: choose this step
+   deliberately.
+5. **Verify:** run the service checks, then check real devices and automations
+   with the people using the house.
+
+Active state stays outside the checkout, with NAS copies before and after each
+step. A failed change leaves a **HOLD** and private logs for review; rerunning a
+job does not automatically retry or clean up that target.
+
+## Where do settings live?
+
+| Public `homelab` | Private deployment repository |
 | --- | --- |
-| Deployment guest | Runs reviewed GitHub deployment jobs and holds their active OpenTofu state. It stays dedicated to that work. |
-| PegaProx guest | Runs the management web interface, with its own configuration, credentials and memory limit. |
-| General applications guest | Runs the applications selected for that guest. PegaProx is kept separate. |
+| Guest/app scripts, synthetic examples, tests and guides | Exact public-source revision, site-specific guest settings and deployment workflow |
+| No household addresses, passwords or personal backups | Addresses/VLAN selections can be private Git; tokens, private keys, dumps and restored app settings stay outside Git |
 
-PegaProx holds credentials that can manage Proxmox. Keeping it separate limits
-which guest contains those credentials and lets us update or restart the web
-interface independently of deployment jobs. Each guest also gets its own memory
-limit, so they do not compete inside the deployment guest's current 1 GiB limit.
+The [example inputs](examples/site.example.json) have invented addresses and
+deliberately unusable package/image selections. Replace them privately using
+the [technical reference](OPERATIONS.md); do not point unchanged examples at a server.
 
-A separate LXC still uses some RAM. We have not measured PegaProx on this site or
-chosen its final CPU/RAM/disk settings; sharing another guest would not remove
-the application's memory use.
+## What is still outstanding?
 
-**Network plan:** place it on your management VLAN with its own stable address
-and reviewed firewall access. Keep the actual VLAN number in private site
-settings; a particular VLAN number is not a PegaProx requirement.
-Other homes can use their management network or a different network with the
-[required access](https://docs.pegaprox.com/configuration/ports/).
-
-## How it will be installed
-
-1. **OpenTofu creates the guest** from a reviewed GitHub deployment job.
-2. **Ansible installs a selected PegaProx release** and starts its service.
-3. **Connect and check it:** sign in, add the intended Proxmox host with separately
-   reviewed credentials, and check that the selected management functions work.
-
-Reusable scripts and instructions belong in this public `homelab` repository.
-Site addresses, guest selections and deployment jobs belong in the private
-deployment repository. Passwords and tokens stay outside public Git.
-
-The bootstrap token is restricted to the first deployment guest. Access to
-create the PegaProx guest and PegaProx's own access to Proxmox must be reviewed
-for their separate purposes. Some PegaProx features also need SSH access;
-see its [permission guide](https://docs.pegaprox.com/configuration/proxmox-permissions/).
-
-## What is still to do?
-
-- Finish the runner's ongoing NAS state backup before further guest rollout.
-- Choose an unused guest ID/address and suitable resource limits.
-- Prepare the guest definition, installation steps, credentials and firewall
-  rules, then test the GitHub jobs on the existing rehearsal system.
-- Check the real installation and back up its configuration and required keys.
-
-This adds a management application. Home Assistant, Zigbee, MQTT and Node-RED
-still need their own deployment and working-home checks. A successful PegaProx
-login does not establish that the house automation has migrated.
+Native package installation, database restores, Docker inside the selected LXC,
+real VLAN discovery, application logins and household acceptance require the
+selected rehearsal and then the actual target. Keep the old working system
+available until those checks succeed.

@@ -24,7 +24,7 @@ to the two practical walkthroughs:
 | --- | --- | --- |
 | Prepare and install the host | [Make the installation USB](proxmox/iso/README.md) | Proxmox installed on the selected pair of SSDs, with network and SSH access. |
 | Connect the host to GitHub deployment | [Create the first deployment guest](proxmox/bootstrap/README.md) | One small Debian container, an online GitHub runner and a successful verification job. |
-| See what comes after bootstrap | [Application deployment plan](proxmox/applications/README.md) | The agreed PegaProx layout and the work still needed. This is a plan, not an installation guide yet. |
+| Prepare application deployment | [One-guest application guide](proxmox/applications/README.md) | DNS/database/login foundations, then HA, Node-RED and MQTT. Source tests are distinct from native acceptance. |
 
 The custom installer supports **two new mirrored SSDs, one original disk to
 preserve, two wired network ports and tagged VLANs**. Check the guide before

@@ -1,0 +1,98 @@
+---
+- name: Require pinned native database binaries and a logical backup
+  ansible.builtin.assert:
+    that:
+      - app.database.version_pattern | length > 0
+      - app.database.version_command | length > 0
+      - app.database.config_files | length > 0
+      - app.database.capture.coherent | default(false) | bool
+      - app.database.capture.sha256 is match('^[0-9a-f]{64}$')
+      - app.database.capture.path is match('^/')
+      - app.database.capture.format == ('influx-v2' if app.kind == 'influxdb' else ('pg-dumpall-clean' if app.kind == 'postgresql' else 'sql'))
+    fail_msg: 'Use a coherent SQL/native backup and matching native package versions, never live Docker database files.'
+
+- name: Check the installed database version without changing it
+  ansible.builtin.command:
+    argv: "{{ app.database.version_command }}"
+  register: database_version
+  changed_when: false
+  failed_when: app.database.version_pattern not in database_version.stdout
+  when: not ansible_check_mode
+
+- name: Limit database configuration to its guest configuration directory
+  ansible.builtin.assert:
+    that:
+      - item.destination is match('^/etc/(mysql|postgresql|influxdb)/[A-Za-z0-9_./-]+$')
+      - "'..' not in item.destination.split('/')"
+  loop: "{{ app.database.config_files }}"
+
+- name: Install the selected database configuration
+  ansible.builtin.copy:
+    src: "{{ item.source }}"
+    dest: "{{ item.destination }}"
+    owner: "{{ app.database.user }}"
+    group: "{{ app.database.group }}"
+    mode: '0600'
+    backup: true
+  loop: "{{ app.database.config_files }}"
+  no_log: true
+
+- name: Upload only the coherent native restore input
+  ansible.builtin.copy:
+    src: "{{ app.database.capture.path }}"
+    dest: /opt/homelab-app/database.capture
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+
+- name: Check native restore input bytes
+  ansible.builtin.stat:
+    path: /opt/homelab-app/database.capture
+    checksum_algorithm: sha256
+  register: database_capture
+
+- name: Refuse a different database capture
+  ansible.builtin.assert:
+    that: database_capture.stat.checksum == app.database.capture.sha256
+
+- name: Install the one-time native restore helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../database.py"
+    dest: /opt/homelab-app/database.py
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install the native backup extraction helper beside the database helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../restore.py"
+    dest: /opt/homelab-app/restore.py
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install the selected clean PostgreSQL restore adapter
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../pg_clean.py"
+    dest: /opt/homelab-app/pg_clean.py
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Stage private native restore settings
+  ansible.builtin.copy:
+    content: "{{ app.database | combine({'kind': app.kind, 'exclusive_writer_confirmed': app.exclusive_writer_confirmed | default(false)}) | to_nice_json }}\n"
+    dest: /opt/homelab-app/database.json
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+
+- name: Start only the selected new database and restore its coherent capture
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/database.py, --config, /opt/homelab-app/database.json]
+  register: native_restore
+  changed_when: (native_restore.stdout | from_json).restored
+  when: app.start_services | default(false) | bool and not ansible_check_mode
+  no_log: true

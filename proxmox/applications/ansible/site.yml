@@ -1,0 +1,50 @@
+---
+- name: Configure exactly one new application guest
+  hosts: application
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Check the selected new guest before changing it
+      ansible.builtin.import_tasks: tasks/guard.yml
+
+    - name: Install exact packages without starting vendor services
+      ansible.builtin.import_tasks: tasks/packages.yml
+
+    - name: Install exact packages without starting vendor services
+      ansible.builtin.apt:
+        name: "{{ app.packages }}"
+        state: present
+        update_cache: true
+        allow_downgrade: false
+        policy_rc_d: 101
+        fail_on_autoremove: true
+      when: not ansible_check_mode
+
+    - name: Prepare the private installation directory
+      ansible.builtin.file:
+        path: /opt/homelab-app
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Install the capture restore helper
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../restore.py"
+        dest: /opt/homelab-app/restore.py
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Restore frozen application data before starting services
+      ansible.builtin.import_tasks: tasks/restore.yml
+      when: app.kind in ['dns', 'identity', 'ingress', 'automation']
+
+    - name: Configure the native database guest
+      ansible.builtin.import_tasks: tasks/database.yml
+      when: app.kind in ['mariadb', 'postgresql', 'influxdb']
+
+    - name: Configure the application stack
+      ansible.builtin.import_tasks: tasks/compose.yml
+      when: app.kind in ['dns', 'identity', 'ingress', 'automation']
