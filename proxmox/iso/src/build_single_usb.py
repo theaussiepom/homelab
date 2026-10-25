@@ -79,6 +79,31 @@ def grub(vendor):
     return result.encode()
 
 
+def patched_startup(original, manifest_sha, code_pins):
+    core.require(core.sha(original) == STARTUP_SHA, 'vendor startup differs from inspected pin')
+    inventory = b'/usr/bin/proxmox-low-level-installer dump-env\n'
+    core.require(original.count(inventory) == 1, 'native inventory boundary changed')
+    expected = {'homelab/thunderbolt.py', 'homelab/launch.py', 'homelab/src/homelab_installer/core.py', 'homelab/src/homelab_installer/observe.py', 'homelab/src/homelab_installer/__init__.py'}
+    core.require(set(code_pins) == expected, 'missing pre-inventory code pins')
+    for digest in code_pins.values():
+        core.digest(digest, 'pre-inventory code SHA256')
+    lines = ' '.join("'" + code_pins[path] + '  /cdrom/' + path + "'" for path in sorted(expected))
+    preparation = ("if ! printf '%s\\n' " + lines + " | sha256sum --check --status; then\n"
+                   "    echo 'HOMELAB_REFUSED: media code changed before Thunderbolt preparation'\n"
+                   "    echo 'STOPPED. No installation was launched.'\n"
+                   "    while true; do sleep 3600; done\n"
+                   "fi\n"
+                   '/usr/bin/python3 /cdrom/homelab/thunderbolt.py --manifest-sha256 ' + manifest_sha + '\n').encode()
+    changed = original.replace(inventory, preparation + inventory)
+    needle = b'if /usr/bin/proxmox-auto-installer </run/automatic-installer-answers; then'
+    core.require(changed.count(needle) == 1, 'native launch boundary changed')
+    changed = changed.replace(needle, ('if /usr/bin/python3 /cdrom/homelab/launch.py --manifest-sha256 ' + manifest_sha + ' </run/automatic-installer-answers; then').encode())
+    core.require(changed.count(b'\ndhclient -v\n') == 1, 'vendor DHCP boundary changed')
+    changed = changed.replace(b'\ndhclient -v\n', b'\ntimeout 15 dhclient -1 -v || true\n')
+    core.require(b'if /usr/bin/proxmox-auto-installer ' not in changed, 'unguarded native automatic launch remains')
+    return changed
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--fixture', action='store_true', help='Separate synthetic-only ISO, never a runtime override')
@@ -103,7 +128,10 @@ def main():
         core.require(set(approval)=={'approved_by','scope','production_boot_or_erase_authorized'}, 'unexpected approval fields')
         core.require(type(approval['approved_by']) is str and approval['approved_by'].strip() and 'REPLACE' not in approval['approved_by'] and approval['scope']=='build-and-prepare-removable-media-only' and approval['production_boot_or_erase_authorized'] is False, 'explicit local operator media preparation approval required')
         known = core.decode_json(core.read_file(ROOT / '.local/hardware.json', protected=True))
-        core.exact(known, {'machine_uuid','disk_members','protected_disks','interface_names'}, 'local hardware profile')
+        fields = {'machine_uuid','disk_members','protected_disks','interface_names'}
+        if 'thunderbolt_devices' in known:
+            fields.add('thunderbolt_devices')
+        core.exact(known, fields, 'local hardware profile')
         config = dict(known, schema='homelab-static-launch-v1', environment='production', runtime_sha256=core.RUNTIME_SHA256)
         site = core.decode_json(core.read_file(ROOT / '.local/site.json', protected=True))
         public = core.read_file(ROOT / '.local/root-ssh.pub', protected=True).decode().strip()
@@ -122,6 +150,7 @@ def main():
     core.new_file(stage / 'proxmox-first-boot', payload)
     core.new_file(stage / 'homelab/config.json', core.canonical(config))
     shutil.copyfile(ROOT / 'src/launch.py', stage / 'homelab/launch.py')
+    shutil.copyfile(ROOT / 'src/thunderbolt.py', stage / 'homelab/thunderbolt.py')
     for filename in ('core.py','observe.py','__init__.py'):
         shutil.copyfile(ROOT / 'src/homelab_installer' / filename, stage / 'homelab/src/homelab_installer' / filename)
     validation = run([HELPER, 'validate-answer', stage / 'answer.toml'])
@@ -134,14 +163,8 @@ def main():
     core.new_file(stage / 'homelab/manifest.json', core.canonical(manifest))
     manifest_sha = sha(stage / 'homelab/manifest.json')
     original = (ROOT / 'build/unconfigured.sh').read_bytes()
-    core.require(core.sha(original) == STARTUP_SHA, 'vendor startup differs from inspected pin')
-    needle = b'if /usr/bin/proxmox-auto-installer </run/automatic-installer-answers; then'
-    core.require(original.count(needle) == 1, 'native launch boundary changed')
-    changed = original.replace(needle, ('if /usr/bin/python3 /cdrom/homelab/launch.py --manifest-sha256 ' + manifest_sha + ' </run/automatic-installer-answers; then').encode())
-    # Offline ISO answer mode must not hang indefinitely waiting for untagged DHCP.
-    core.require(changed.count(b'\ndhclient -v\n') == 1, 'vendor DHCP boundary changed')
-    changed = changed.replace(b'\ndhclient -v\n', b'\ntimeout 15 dhclient -1 -v || true\n')
-    core.require(b'if /usr/bin/proxmox-auto-installer ' not in changed, 'unguarded native automatic launch remains')
+    code_pins = {path: digest for path, digest in members.items() if path.endswith('.py')}
+    changed = patched_startup(original, manifest_sha, code_pins)
     with tempfile.TemporaryDirectory(prefix='homelab-iso-', dir='/tmp') as temp:
         # Pseudo export preserves vendor xattrs as metadata, without trying to
         # apply trusted.overlay attributes to the unprivileged build container.

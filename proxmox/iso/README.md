@@ -19,6 +19,8 @@ Your switch must already support the numbered networks, called **VLANs**, in you
 
 The USB starts in **CHECK ONLY**. That checks the computer and disks, then stops. To install, you must choose **INSTALL**, check the displayed drive serial numbers, and type the exact requested confirmation. Installation erases the two selected new SSDs. There is no automatic progression from CHECK ONLY into installation.
 
+If you explicitly list a trusted Thunderbolt network adapter in your hardware settings, both boot modes authorise that adapter before checking the hardware. CHECK ONLY still makes no installation writes to the SSDs.
+
 ```mermaid
 flowchart LR
     A[Your settings] --> B[Build and test]
@@ -111,10 +113,34 @@ Keep the output private. Use it to complete `.local/hardware.json`:
 | `disk_members` | The two new SSDs: each serial number, its full `/dev/disk/by-id/…` alias, and its exact capacity in bytes. |
 | `protected_disks` | The original system disk, with the same three details. There must be exactly one. |
 | `interface_names` | The two physical port MAC addresses. Assign the administration port to `mgmt0` and the faster/storage port to `fast0`. These are the names used after installation. |
+| `thunderbolt_devices` | Leave `[]` for ordinary built-in/USB ports. For a Thunderbolt Ethernet adapter you explicitly trust, enter its stable `unique_id` and the same MAC used in `interface_names`. |
 
 Use the serial number to match each alias to its disk. Do not use an alias ending in `-part1` or another partition number. Do not enter “1 TB” as the capacity: copy the exact byte count. Current names such as `nvme0n1` can change at the next boot; the installer checks persistent identities instead.
 
 If you cannot positively identify a disk or port, stop and resolve that before building your real image.
+
+### If your network adapter uses Thunderbolt
+
+A fresh installer may see a Thunderbolt adapter but withhold access until it is authorised. Its existing Ubuntu authorisation does not configure the new installation. On the intended Linux computer, read the attached device names and identities:
+
+```sh
+grep -H . /sys/bus/thunderbolt/devices/*/{device_name,unique_id}
+```
+
+Match the external adapter's name to its ID, then add an entry to `.local/hardware.json`. This invented example must be replaced with your adapter's values:
+
+```json
+"thunderbolt_devices": [
+  {
+    "unique_id": "22222222-2222-4222-8222-222222222222",
+    "mac": "02:00:00:00:10:02"
+  }
+]
+```
+
+Listing an adapter grants that particular device PCIe/DMA access on the selected computer. The installer checks the embedded code and settings, machine identity and UEFI mode before authorising it, then waits for its expected Ethernet MAC. It leaves other Thunderbolt devices and firmware security settings alone. An unauthorised device in `secure` mode requires its existing secure trust rather than an automatic downgrade.
+
+The installed system uses the same check before networking on every boot. If the selected adapter is missing or its MAC does not appear, startup reports a failure instead of treating another adapter as a replacement.
 
 ## 3. Fill in your local settings
 
@@ -147,6 +173,12 @@ Keep the private key outside this folder; the ISO build uses only the public
 key. The shared host/guest public key is intentional for this initial bootstrap.
 During that later step, the launcher mounts the private key read-only into
 Docker for non-interactive SSH; it is not installed in the guest or runner.
+
+**Check access before switching off your old system.** If that system hosts your
+password manager, make sure the saved recovery password and private SSH key are
+available from an unlocked offline vault or another protected copy. Test that
+access now; needing the old server to retrieve its replacement's key will stop
+you halfway through installation.
 
 1. Copy your existing **public** SSH key into `.local/root-ssh.pub`. This version requires the single line beginning `ssh-ed25519`. Copy the key type and long key value; omit any trailing comment. Do not copy a file beginning `BEGIN … PRIVATE KEY`.
 2. Create a strong recovery password in your password manager, then run:
@@ -227,6 +259,19 @@ The helper refuses internal disks, changed identities, insufficient capacity and
 
 Building or testing the ISO does not shut down the target computer. Plan that interruption separately.
 
+Before booting the USB, check your cables and switch settings:
+
+- Plug each cable into the exact switch port you configured, and label the
+  administration cable so the two ports are easy to distinguish.
+- Carry the management VLAN **tagged** on that port and every connecting
+  switch/router uplink. A cable link can be up while the VLAN path is wrong.
+- Make sure your workstation's network can reach Proxmox on TCP **8006** for the
+  web interface and TCP **22** for SSH. It can stay on your normal home network
+  if your routing/firewall permits that access.
+
+The ISO creates the host-side network configuration. It does not configure any
+switch or router for you. See the [network settings reference](docs/configuration.md).
+
 1. Boot the USB in **UEFI** mode.
 2. Use its default **CHECK ONLY** entry first. Read the listed new-disk serial numbers and the protected original. A successful check ends at a stop screen; it does not install anything.
 3. When you are ready to erase the two new SSDs, reboot the USB and select **INSTALL**. Confirm that the displayed serials are the intended new drives. Type the exact phrase requested on screen, including those serial numbers. A wrong answer or five-minute timeout stops the operation.
@@ -236,7 +281,16 @@ Building or testing the ISO does not shut down the target computer. Plan that in
    management/storage addresses, the new mirror and the preserved original disk
    before moving on to guests or applications.
 
+The typed confirmation in step 3 is expected. This is an attended installation:
+having your settings on the USB does not remove that final drive check.
+
+If you plan to return to the preserved original system between stages, use your
+firmware's boot menu to select it. While Proxmox is running, applications that
+only exist on the original system are off; installing Proxmox does not move them.
+
 The first-start network script checks both expected port identities before writing its configuration. It preserves the vendor-created interfaces file and refuses a repeated run. It does not configure switch ports or firewalls.
+
+For a configured Thunderbolt adapter, first start also installs `homelab-thunderbolt.service`, required before `networking.service` on every boot. This keeps adapter authorisation automatic after future restarts.
 
 ## When something goes wrong
 
@@ -253,13 +307,19 @@ The first-start network script checks both expected port identities before writi
 | USB identity changed | Stop. Check whether it was disconnected, moved to another port or renumbered. Do not substitute another disk automatically. |
 | USB write failed or readback differs | Keep the USB-operation receipt and error. Do not boot it or replay the write until the failure is understood. |
 | Installer says `HOMELAB_REFUSED` | It has stopped before launching the native installer. Check the reason and the actual hardware; do not relax the guard to make the message disappear. |
+| Thunderbolt adapter is connected but its network interface is missing | Check its device name, `unique_id`, `authorized` value and domain security in the local console. Add only the adapter you explicitly trust to your hardware settings and rebuild/test the ISO. |
 | First-start network does not work | Use the local console and review the saved network file, port identities and switch VLANs. Do not rerun the first-start script blindly. |
 
 Raw logs can include private settings. Redact them before sharing; the `verification/` folder contains the shareable summaries.
 
 ## What has actually been verified?
 
-See [verification status](verification/README.md) for the packaged workflow's current results. Local checks and disposable VM boots are distinct from a successful physical installation and first-start network acceptance. The latter still require the actual target computer.
+See [verification status](verification/README.md) for the separate virtual-test
+and physical-installation results. A physical installation and first-start access
+were checked on the maintainer's host on **25 October 2026**. Switch-port and
+uplink VLAN corrections were needed; those are documented as setup issues, not
+proof that the installer configures your network. Your own computer still needs
+its disk, network and access checks.
 
 The download and build steps check exact supported inputs, but different build times and Debian package updates can produce a different final ISO checksum. This is a repeatable workflow, not a promise of byte-identical builds. Each resulting image gets its own checksum, readback and tests.
 

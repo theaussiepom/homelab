@@ -27,7 +27,10 @@ RUNTIME = '/usr/bin/proxmox-auto-installer'
 
 
 def validate_config(cfg):
-    core.exact(cfg, {'schema', 'environment', 'machine_uuid', 'disk_members', 'protected_disks', 'interface_names', 'runtime_sha256'}, 'static launch configuration')
+    fields = {'schema', 'environment', 'machine_uuid', 'disk_members', 'protected_disks', 'interface_names', 'runtime_sha256'}
+    if 'thunderbolt_devices' in cfg:
+        fields.add('thunderbolt_devices')
+    core.exact(cfg, fields, 'static launch configuration')
     core.require(cfg['schema'] == 'homelab-static-launch-v1', 'unsupported static launch contract')
     core.require(cfg['environment'] in ('production', 'synthetic'), 'unknown media environment')
     core.identifier(cfg['machine_uuid'], 'machine UUID')
@@ -43,6 +46,10 @@ def validate_config(cfg):
     core.require(type(cfg['interface_names']) is dict and set(cfg['interface_names'].values()) == {'mgmt0', 'fast0'} and len(cfg['interface_names']) == 2, 'two pinned NIC roles required')
     for mac in cfg['interface_names']:
         core.require(core.MAC.fullmatch(mac), 'invalid literal MAC')
+    from thunderbolt import validate_devices
+    devices = cfg.get('thunderbolt_devices', [])
+    validate_devices(devices)
+    core.require(all(d['mac'] in cfg['interface_names'] for d in devices), 'Thunderbolt MAC must be a pinned physical NIC')
 
 
 def check_hardware(cfg, observation, native):
@@ -120,7 +127,7 @@ def verify_media(root, expected_manifest):
     manifest = core.decode_json(body)
     core.exact(manifest, {'schema', 'build_approval', 'files'}, 'media manifest')
     core.require(manifest['schema'] == 'homelab-static-media-build-v1', 'unknown media build contract')
-    expected = {'answer.toml', 'auto-installer-mode.toml', 'proxmox-first-boot', 'homelab/config.json', 'homelab/launch.py', 'homelab/src/homelab_installer/core.py', 'homelab/src/homelab_installer/observe.py', 'homelab/src/homelab_installer/__init__.py'}
+    expected = {'answer.toml', 'auto-installer-mode.toml', 'proxmox-first-boot', 'homelab/config.json', 'homelab/launch.py', 'homelab/thunderbolt.py', 'homelab/src/homelab_installer/core.py', 'homelab/src/homelab_installer/observe.py', 'homelab/src/homelab_installer/__init__.py'}
     core.require(set(manifest['files']) == expected, 'unexpected or missing media members')
     for path, digest in manifest['files'].items():
         core.require(core.sha(core.read_file(root / path, limit=4*1024**2)) == digest, 'media member changed: ' + path)
