@@ -17,6 +17,10 @@ from restore import sync_directory
 SOURCE = Path(__file__).resolve().parent
 
 
+class InputNeeded(ValueError):
+    """A deliberately non-secret operator instruction, safe for the job summary."""
+
+
 def sha(path):
     result = hashlib.sha256()
     with Path(path).open('rb') as stream:
@@ -86,7 +90,15 @@ def input_hashes(cfg):
 def guest_trust(cfg, work):
     """Pin this guest after creation; unrelated known_hosts additions are harmless."""
     address = cfg['app']['address']
-    output = subprocess.check_output(['ssh-keygen', '-F', address, '-f', cfg['paths']['known_hosts']], text=True)
+    instruction = 'Verify the new guest SSH host key using the trusted Proxmox route, then supply its private known_hosts entry before Ansible'
+    if not Path(cfg['paths']['known_hosts']).is_file():
+        raise InputNeeded(instruction)
+    result = subprocess.run(['ssh-keygen', '-F', address, '-f', cfg['paths']['known_hosts']], capture_output=True, text=True, check=False)
+    if result.returncode == 1 and not result.stdout:
+        raise InputNeeded(instruction)
+    if result.returncode != 0:
+        raise InputNeeded('Guest host-key lookup failed; inspect the private known_hosts file before continuing')
+    output = result.stdout
     keys = []
     for line in output.splitlines():
         if not line or line.startswith('#'):
@@ -96,7 +108,7 @@ def guest_trust(cfg, work):
             raise ValueError('Use exact pinned guest host keys; do not introduce a wildcard or SSH CA')
         keys.append(parts[1:3])
     if not keys:
-        raise ValueError('Verify and supply this new guest host key after creation, before Ansible')
+        raise InputNeeded(instruction)
     binding = {'address': address, 'keys': sorted(keys)}
     path = work / 'ssh-trust.json'
     if path.exists():
@@ -227,6 +239,8 @@ def main():
     args = parser.parse_args()
     try:
         print(json.dumps(execute(args.action, args.site, args.plan_sha256)))
+    except InputNeeded as error:
+        raise SystemExit(str(error)) from None
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         # Logs and inputs can contain secrets; do not emit command output or file contents.
         raise SystemExit(f'Deployment held ({type(error).__name__}); inspect private runner inputs/receipts') from None

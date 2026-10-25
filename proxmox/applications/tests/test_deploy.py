@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -95,13 +96,24 @@ class DeployTests(unittest.TestCase):
     def test_guest_trust_is_bound_after_creation_and_cannot_silently_change(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); cfg = fixture(root)
+            (root / 'hosts').touch()
             line = '198.18.100.20 ssh-ed25519 AAAAsynthetic\n'
-            with patch.object(deploy.subprocess, 'check_output', return_value='# Host found: line 1\n' + line):
+            with patch.object(deploy.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '# Host found: line 1\n' + line, '')):
                 deploy.guest_trust(cfg, root)
-            with patch.object(deploy.subprocess, 'check_output', return_value='# Host found: line 7\n' + line):
+            with patch.object(deploy.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '# Host found: line 7\n' + line, '')):
                 deploy.guest_trust(cfg, root)
-            with patch.object(deploy.subprocess, 'check_output', return_value=line.replace('AAAAsynthetic', 'AAAAdifferent')):
+            with patch.object(deploy.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, line.replace('AAAAsynthetic', 'AAAAdifferent'), '')):
                 with self.assertRaises(ValueError): deploy.guest_trust(cfg, root)
+
+    def test_missing_known_hosts_or_guest_entry_has_a_safe_actionable_instruction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); cfg = fixture(root)
+            with self.assertRaisesRegex(deploy.InputNeeded, 'Verify the new guest SSH host key'):
+                deploy.guest_trust(cfg, root)
+            (root / 'hosts').touch()
+            # Use real ssh-keygen to cover its no-match exit status 1.
+            with self.assertRaisesRegex(deploy.InputNeeded, 'Verify the new guest SSH host key'):
+                deploy.guest_trust(cfg, root)
 
 
 if __name__ == '__main__':

@@ -3,6 +3,7 @@
 set -eu
 HA_IP="${HOMELAB_HA_IPV4:-${MACVLAN_PREFIX:?Set HOMELAB_HA_IPV4 or the legacy MACVLAN_PREFIX}.242}"
 IFACE="$(ip -o -4 addr show | awk -v ip="$HA_IP" 'split($4, cidr, "/") && cidr[1] == ip {print $2; exit}')"
+IFACE="${IFACE%%@*}"
 if [ -z "$IFACE" ]; then
     echo 'HA discovery address is not assigned to this guest; refusing startup' >&2
     exit 1
