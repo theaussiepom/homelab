@@ -1,14 +1,14 @@
 # homelab migration tooling — draft
 
-Reusable OpenTofu/Ansible structure, strict catalog validation, local rehearsal and private deployment examples. This starter release has working local validation/rendering/synthetic execution and provider-schema-valid infrastructure drafts. **The PVE execution adapter remains held.** It cannot currently provision or restore a real site. Production gates and incomplete native/route/lifecycle work are documented explicitly.
+Reusable OpenTofu/Ansible structure, strict catalog validation, local rehearsal and private deployment examples. This starter release has working local validation/rendering/synthetic execution and provider-schema-valid infrastructure drafts. **The full-site PVE execution adapter remains held.** Full-site provisioning and restore are not ready; the separate one-guest bootstrap and its current verification limits are described below.
 
 The public implementation and private site use the same `bin/homelab` commands. A synthetic apply changes only a local JSON model; it never contacts Proxmox, a Pi, a database or a radio. Native OpenTofu tests use only its built-in local `terraform_data` fixture.
 
-## Build a custom Proxmox installation USB
+## Start with Proxmox
 
-Start with the [step-by-step ISO guide](proxmox/iso/README.md). It includes redacted settings, copy-and-paste commands, Docker build tools, a safe practice run and an attended installation flow. Its [verification record](proxmox/iso/verification/README.md) covers source tests and six virtual boot checks. Physical installation and first-start networking still require acceptance on the actual machine.
+Read the [combined Proxmox guide](proxmox/README.md) for the complete sequence: build the installation USB, install Proxmox, then run the small bootstrap that creates a deployment guest and hands over to private GitHub CD (continuous deployment).
 
-This is a separate installer workflow; it does not enable the held PVE guest execution adapter described above.
+That guide links to the detailed instructions for each step. The one-guest bootstrap has passed a fresh isolated Proxmox-to-GitHub test; physical installation and later guest/application rollout remain separate work. The bootstrap requires no database.
 
 ## Run the complete local example
 

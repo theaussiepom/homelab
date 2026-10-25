@@ -1,0 +1,102 @@
+---
+# Shared by the admitted native candidate and the Docker fixture. The fixture
+# supplies its own tiny archive; it never downloads or invokes a real runner.
+- name: Check runner installation inputs
+  ansible.builtin.assert:
+    that:
+      - runner_directory is match('^/')
+      - runner_name is match('^[a-z][a-z0-9-]{1,62}$')
+      - runner_repository is match('^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$')
+      - runner_archive_sha256 is match('^[a-f0-9]{64}$')
+
+- name: Require a short-lived registration token without logging its value
+  ansible.builtin.assert:
+    that: lookup('ansible.builtin.env', 'HOMELAB_RUNNER_REGISTRATION_TOKEN') | length > 0
+  no_log: true
+
+- name: Inspect previous registration attempt
+  ansible.builtin.stat:
+    path: "{{ runner_directory }}/.bootstrap-attempt"
+  register: previous_attempt
+
+- name: Preserve existing or partial registration
+  ansible.builtin.assert:
+    that: not previous_attempt.stat.exists
+    fail_msg: "Runner setup was already attempted. Preserve evidence and reconcile it before another operation."
+
+- name: Check downloaded runner archive
+  ansible.builtin.stat:
+    path: "{{ runner_archive }}"
+    checksum_algorithm: sha256
+  register: archive_stat
+
+- name: Refuse a changed archive before extraction or registration
+  ansible.builtin.assert:
+    that:
+      - archive_stat.stat.isreg | default(false)
+      - archive_stat.stat.checksum == runner_archive_sha256
+
+- name: Create dedicated runner directory
+  ansible.builtin.file:
+    path: "{{ runner_directory }}"
+    state: directory
+    mode: "0700"
+    owner: "{{ runner_owner | default(omit) }}"
+    group: "{{ runner_owner | default(omit) }}"
+
+- name: Record attempt before any extraction or registration
+  ansible.builtin.copy:
+    dest: "{{ runner_directory }}/.bootstrap-attempt"
+    content: "Runner setup attempted for {{ runner_repository }}. No automatic retry.\n"
+    force: false
+    mode: "0600"
+    owner: "{{ runner_owner | default(omit) }}"
+    group: "{{ runner_owner | default(omit) }}"
+
+- name: Extract checksum-verified runner
+  ansible.builtin.unarchive:
+    src: "{{ runner_archive }}"
+    dest: "{{ runner_directory }}"
+    remote_src: true
+    owner: "{{ runner_owner | default(omit) }}"
+    group: "{{ runner_owner | default(omit) }}"
+
+- name: Register with a short-lived token supplied through the environment
+  ansible.builtin.command:
+    argv:
+      - "{{ runner_directory }}/config.sh"
+      - --unattended
+      - --url
+      - "https://github.com/{{ runner_repository }}"
+      - --name
+      - "{{ runner_name }}"
+      - --labels
+      - "homelab-private-deploy,{{ runner_name }}"
+      - --work
+      - _work
+    chdir: "{{ runner_directory }}"
+  environment:
+    ACTIONS_RUNNER_INPUT_TOKEN: "{{ lookup('ansible.builtin.env', 'HOMELAB_RUNNER_REGISTRATION_TOKEN') }}"
+  become: "{{ runner_become | default(false) }}"
+  become_user: "{{ runner_owner | default(omit) }}"
+  no_log: true
+  changed_when: true
+
+- name: Verify registration file binds the intended repository
+  ansible.builtin.slurp:
+    src: "{{ runner_directory }}/.runner"
+  register: registration
+  no_log: true
+
+- name: Refuse unexpected runner registration
+  ansible.builtin.assert:
+    that:
+      - (registration.content | b64decode(encoding='utf-8-sig') | from_json).gitHubUrl == 'https://github.com/' + runner_repository
+      - (registration.content | b64decode(encoding='utf-8-sig') | from_json).agentName == runner_name
+  no_log: true
+
+- name: Stage dedicated runner service
+  ansible.builtin.template:
+    src: runner.service.j2
+    dest: "{{ runner_service_file }}"
+    mode: "0644"

@@ -1,0 +1,17 @@
+{
+  "opentofu": {
+    "version": "1.13.1",
+    "url": "https://github.com/opentofu/opentofu/releases/download/v1.13.1/tofu_1.13.1_linux_amd64.tar.gz",
+    "sha256": "378ada19d4bc70c43732004e8159be771b23b9a5afdf059e5f8a2b3fa2c70a69"
+  },
+  "provider": {
+    "source": "bpg/proxmox",
+    "version": "0.117.0",
+    "source_url": "https://github.com/bpg/terraform-provider-proxmox/tree/v0.117.0"
+  },
+  "runner": {
+    "version": "2.338.1",
+    "url": "https://github.com/actions/runner/releases/download/v2.338.1/actions-runner-linux-x64-2.338.1.tar.gz",
+    "sha256": "08e9ccb3604d2462c24b5e33604dc30810296ca15cc65f23cffd4317eb144c37"
+  }
+}

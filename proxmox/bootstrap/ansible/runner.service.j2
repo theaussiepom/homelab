@@ -1,0 +1,21 @@
+[Unit]
+Description=Private homelab GitHub deployment runner
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists={{ runner_directory }}/.runner
+
+[Service]
+User={{ runner_owner | default('fixture-user') }}
+WorkingDirectory={{ runner_directory }}
+Environment="PATH=/opt/homelab-tools/bin:/usr/local/bin:/usr/bin:/bin"
+{% if runner_env_file is defined %}
+EnvironmentFile={{ runner_env_file }}
+{% endif %}
+ExecStart={{ runner_directory }}/run.sh
+Restart=on-failure
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

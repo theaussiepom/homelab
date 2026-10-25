@@ -1,5 +1,7 @@
 # Make a Proxmox installation USB
 
+[Back to the combined Proxmox guide](../README.md)
+
 This guide helps you build a custom Proxmox installer, practise its checks in a virtual machine, and put it on a USB drive. An **ISO** is the bootable image that goes on the USB.
 
 Start with the practice run below. It uses invented hardware details and does not give the test container access to physical disk devices. You can then supply your own settings and build the real image.
@@ -26,7 +28,10 @@ flowchart LR
     E --> F[Choose INSTALL at your maintenance window]
 ```
 
-Guest creation and application setup happen later through OpenTofu and Ansible.
+After installation and the host checks below, follow the
+[first deployment guest guide](../bootstrap/README.md). OpenTofu creates that
+guest and Ansible installs its GitHub runner. Other guests and application setup
+follow through later deployment jobs.
 
 ## What you need
 
@@ -230,3 +235,13 @@ See [verification status](verification/README.md) for the packaged workflow's cu
 The download and build steps check exact supported inputs, but different build times and Debian package updates can produce a different final ISO checksum. This is a repeatable workflow, not a promise of byte-identical builds. Each resulting image gets its own checksum, readback and tests.
 
 For maintainers: [technical design and supported version pins](docs/technical-reference.md).
+
+## Next: create the deployment guest
+
+Once installation is complete and the host checks in step 6 pass, continue to
+the [bootstrap guide](../bootstrap/README.md). It takes you from the installed
+Proxmox host to one deployment guest and a private GitHub runner, including the
+job that confirms the handover.
+
+For the full sequence and current readiness status, return to the
+[combined Proxmox guide](../README.md).
