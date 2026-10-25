@@ -59,6 +59,13 @@ not replace the earlier image-specific receipts or qualify someone else's build.
 Private hardware identities, network settings, credentials and raw evidence
 remain outside this public summary.
 
+The subsequent PR review corrected uppercase machine-UUID handling and added
+revocation of a newly granted adapter authorisation after failed MAC validation.
+**45 source tests passed** after those regressions first failed. These later
+failure-path changes were not exercised on the physical host, and do not update
+an already installed helper or an existing USB. A new image still needs its own
+build, qualification and write/readback results.
+
 ## What did the six boot cases do?
 
 | Case | Expected and observed result |
