@@ -58,6 +58,7 @@
   "paths": {
     "state_root": "/var/lib/homelab-applications",
     "backup_mount": "/mnt/nas",
+    "backup_source": "nas.example.invalid:/backups",
     "backup_directory": "/mnt/nas/homelab-state",
     "api_token": "/var/lib/homelab-inputs/application-api-token",
     "ca_file": "/var/lib/homelab-inputs/proxmox-ca.crt",

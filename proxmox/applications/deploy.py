@@ -64,6 +64,17 @@ def validate(cfg):
     return vmid
 
 
+def input_hashes(cfg):
+    """Bind external configuration and trust files as well as the top-level site JSON."""
+    paths = [cfg['paths'][key] for key in ('ca_file', 'known_hosts')]
+    app = cfg['app']
+    if 'stack_config' in app:
+        paths.append(app['stack_config'])
+    paths.extend(item['key_path'] for item in app.get('repositories', []))
+    paths.extend(item['source'] for item in app.get('database', {}).get('config_files', []))
+    return {path: sha(path) for path in sorted(set(paths))}
+
+
 def quiet(command, environment, log, cwd=None):
     with log.open('ab') as output:
         os.chmod(log, 0o600)
@@ -74,9 +85,9 @@ def backup(cfg, state, label):
     mount = Path(cfg['paths']['backup_mount']).resolve()
     if not os.path.ismount(mount):
         raise ValueError('The declared NAS recovery mount is unavailable; no local fallback')
-    actual = subprocess.check_output(['findmnt', '-rn', '-o', 'FSTYPE', '--target', str(mount)], text=True).strip()
-    if actual not in {'nfs', 'nfs4', 'cifs'}:
-        raise ValueError('The recovery mount must be the selected NAS filesystem')
+    actual = subprocess.check_output(['findmnt', '-rn', '-o', 'FSTYPE,SOURCE', '--target', str(mount)], text=True).strip().split()
+    if len(actual) != 2 or actual[0] not in {'nfs', 'nfs4', 'cifs'} or actual[1] != cfg['paths']['backup_source']:
+        raise ValueError('The recovery mount must match the selected NAS filesystem and source')
     destination = Path(cfg['paths']['backup_directory']) / str(cfg['guest']['vmid'])
     destination.mkdir(parents=True, mode=0o700, exist_ok=True)
     # A write/read receipt also proves the mount is writable before initial creation.
@@ -121,12 +132,15 @@ def execute(action, cfg_path, approved_plan=None):
             quiet(tofu + ['plan', '-input=false', '-lock-timeout=30s', '-out=' + str(work / 'guest.tfplan')], environment, logfile)
             output = subprocess.check_output(tofu + ['show', '-json', str(work / 'guest.tfplan')], env=environment)
             check_plan(json.loads(output), cfg['site']['node'], vmid)
-            receipt = {'plan_sha256': sha(work / 'guest.tfplan'), 'site_sha256': sha(cfg_path), 'source_sha256': source_hash(), 'vmid': vmid}
+            receipt = {'plan_sha256': sha(work / 'guest.tfplan'), 'site_sha256': sha(cfg_path),
+                       'source_sha256': source_hash(), 'input_hashes': input_hashes(cfg), 'vmid': vmid}
             write(work / 'plan.json', receipt)
             return receipt
         receipt = json.loads((work / 'plan.json').read_text())
         if receipt['site_sha256'] != sha(cfg_path) or receipt['source_sha256'] != source_hash():
             raise ValueError('Source or site inputs changed; review a new plan')
+        if receipt.get('input_hashes') != input_hashes(cfg):
+            raise ValueError('Private configuration or trust files changed; review a new plan')
         if action == 'apply':
             if not approved_plan or approved_plan != receipt['plan_sha256'] or approved_plan != sha(work / 'guest.tfplan'):
                 raise ValueError('Apply requires the exact reviewed plan SHA256')

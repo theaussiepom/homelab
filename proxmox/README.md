@@ -100,15 +100,16 @@ recovery copies safe and do not run a second active copy from your workstation.
 
 ## 4. Continue with application deployment
 
-The initial setup ends at the successful GitHub check. Further OpenTofu jobs
-create other guests; Ansible jobs install/configure their applications. Those
-jobs and application acceptance are later work. The bootstrap does not migrate
-Home Assistant, databases or NAS data into new applications.
+The initial setup ends at the successful GitHub check. The
+[application guide](applications/README.md) covers the next source path: one
+OpenTofu guest, Ansible staging, then an explicit application start and check.
+DNS, native databases and login/proxy foundations come before the shared
+Home Assistant, Node-RED and MQTT guest. Native application acceptance remains
+outstanding; the bootstrap does not migrate those services itself.
 
-The agreed [application deployment plan](applications/README.md) places
-**PegaProx in its own LXC**, separate from both the deployment runner and the
-general applications guest. It explains why and identifies what is still to do.
-PegaProx provisioning and installation have not been implemented here yet.
+[PegaProx has its own planned LXC](applications/pegaprox.md). It remains separate
+from the runner and is not an HA prerequisite. Its installation is not yet
+implemented.
 
 Before creating more guests, finish the runner's ongoing NAS state backup and
 review access for the next guest. The bootstrap token covers its first guest;

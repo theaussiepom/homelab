@@ -26,7 +26,7 @@ files mode 0600 and directories 0700.
 | `site` | Verified Proxmox node and trusted HTTPS API endpoint |
 | `guest` | One ID, hostname, resources, template/storage, NICs and firewall allowances |
 | `ssh_public_keys` | Deployment public key; private key stays on the runner |
-| `paths` | Existing token, CA, deployment key, verified known_hosts, state and NAS recovery paths |
+| `paths` | Existing token, CA, deployment key, verified known_hosts, state, NAS recovery paths and exact `backup_source` mount identity |
 | `app` | Same guest identity, selected kind, exact packages, coherent capture and health probes |
 
 Kinds: `dns`, `mariadb`, `postgresql`, `influxdb`, `identity`, `ingress`,
@@ -123,7 +123,8 @@ python3 proxmox/applications/deploy.py start --site /var/lib/homelab-inputs/auto
 python3 proxmox/applications/deploy.py verify --site /var/lib/homelab-inputs/automation.json
 ```
 
-Source/site hashes bind the saved plan; changes require a fresh plan. Starting
+Source/site hashes and private configuration/trust-file hashes bind the saved
+plan; changes require a fresh plan. Starting
 requires `exclusive_writer_confirmed: true` after the selected cutover decision
 and retirement of old writers. Stage does not need it. HA can operate real
 devices even if its data is a copy: do not start it casually for rehearsal.
