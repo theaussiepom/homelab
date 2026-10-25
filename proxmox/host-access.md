@@ -11,11 +11,21 @@ and in your password manager. Never publish the private part.
 
 **Current bootstrap limitation:** its Docker SSH calls are non-interactive and
 do not forward your workstation's SSH agent. The supplied private key must be
-usable without a passphrase. For a new dedicated bootstrap key, leave the
-passphrase prompts empty only if you accept that anyone who obtains this file
-can use it. Keep it private with mode `0600` and store a recovery copy in your
-password manager. Do not remove a passphrase from an existing personal key to
-work around this limitation.
+usable without a passphrase. **Before creating or using one, review and accept
+that a stolen copy can authenticate as root on the host and guest.** File mode
+`0600` and a password-manager backup do not protect a copy already stolen.
+
+Confirm your access restrictions and a usable revocation route first: an
+administrator must be able to remove this exact public key from the host and
+guest while retaining independent recovery access. This version accepts only a
+bare public key; it does not install per-key source-address or forced-command
+restrictions. Do not assume those controls exist. If that scope is unacceptable,
+stop before making the key; agent/passphrase support is not implemented here.
+
+For a new dedicated key, leave the passphrase prompts empty only after accepting
+that scope. Keep its file private with mode `0600` and store a recovery copy in
+your password manager. Do not remove a passphrase from an existing personal key
+to work around the limitation.
 
 If you already have a suitable dedicated Ed25519 key, use it. Otherwise run this
 on your **workstation**, using a new filename:
@@ -96,18 +106,28 @@ Compare its `SHA256:…` value with the value you recorded at the host's own scr
 **They must match exactly.** If they differ or there is no key, stop. Do not
 disable host checking or accept a new key merely because a connection answers.
 
-Only after a match, save it and select your private key:
+Only after a match and an explained host-key change, save the candidate. On a
+first installation there is no previous file. If one exists, the command below
+preserves it under a new timestamped name before replacing the active file:
 
 ```sh
-cp -n "$bootstrap_private/known_hosts.candidate" "$bootstrap_private/known_hosts"
-export HOMELAB_SSH_KEY="$HOME/.ssh/homelab-proxmox"
-export HOMELAB_KNOWN_HOSTS="$bootstrap_private/known_hosts"
+if [ -e "$bootstrap_private/known_hosts" ]; then
+  trust_backup="$bootstrap_private/known_hosts.before-$(date -u +%Y%m%dT%H%M%SZ)"
+  ( set -C; cat "$bootstrap_private/known_hosts" > "$trust_backup" ) &&
+    cp "$bootstrap_private/known_hosts.candidate" "$bootstrap_private/known_hosts"
+else
+  cp "$bootstrap_private/known_hosts.candidate" "$bootstrap_private/known_hosts"
+fi &&
+export HOMELAB_SSH_KEY="$HOME/.ssh/homelab-proxmox" &&
+export HOMELAB_KNOWN_HOSTS="$bootstrap_private/known_hosts" &&
 chmod 600 "$HOMELAB_SSH_KEY" "$HOMELAB_KNOWN_HOSTS"
 ```
 
-Use the actual key filename if you chose a different one. If `known_hosts`
-already exists, inspect it rather than replacing or appending to it blindly.
-A reinstall can legitimately change a host key, but needs a fresh console comparison.
+Use the actual key filename if you chose a different one. If preserving the old
+file fails, stop; do not proceed with SSH or delete the backup to force a retry.
+A reinstall can legitimately change a host key, but needs this fresh console
+comparison and deliberate replacement. Never remove old trust merely to silence
+an SSH warning.
 
 ## 4. Confirm workstation access
 

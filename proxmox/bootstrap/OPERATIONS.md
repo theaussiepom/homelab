@@ -98,6 +98,22 @@ workflow-change access, and do not send untrusted pull-request jobs to this
 runner. Runner labels route jobs; they are not an access control. The operator's SSH
 private key and personal GitHub token are not installed as deployment credentials.
 
+Before registering the runner, the repository owner must check:
+
+- Repository access and branch/ruleset protection prevent untrusted people from
+  changing a workflow that can use the runner. Check who can bypass those rules.
+- Pull requests, including private forks, cannot run untrusted code on this
+  runner. Inspect triggers and checkout behaviour, including any
+  `pull_request_target` workflow; the private-repository flag alone is not enough.
+- This script registers a repository-level runner, not an organisation runner
+  group. Confirm its repository scope. If additional organisation runners/groups
+  are available, review their repository/workflow access separately rather than
+  treating a group or label name as protection for this runner.
+
+**Do not register or accept jobs if untrusted code can reach the runner.** This
+is an operator acceptance check; the script verifies repository privacy/admin
+access, but does not audit branch protection, workflow code or fork policy.
+
 **Handover is one-way.** A local `HANDOVER.json` disables further workstation
 plans/applies once state transfer begins. A workspace lock prevents handover
 from racing a local operation. If setup fails halfway, preserve the marker and

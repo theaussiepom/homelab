@@ -17,7 +17,7 @@ The bootstrap does not require a database.
 | --- | --- | --- | --- |
 | Bitwarden MariaDB database | Hourly | Hourly, five minutes later | NAS 7 days; offsite 3 days |
 | Home Assistant MariaDB database | Every 6 hours | Daily | 7 days |
-| Full InfluxDB, all buckets | Every 6 hours | Every 6 hours, fifteen minutes later | 3 days |
+| Full InfluxDB, all buckets | Every 6 hours | Daily, at 00:45 Brisbane time | 3 days |
 | PostgreSQL databases, roles and permissions | Every 6 hours | Daily | 7 days |
 | MariaDB system/accounts and configuration recovery bundle | Daily | Daily | 7 days |
 
@@ -73,7 +73,9 @@ copies. It neither starts backups nor writes to offsite storage.
 
 See [retrieval instructions](OPERATIONS.md#retrieval-and-restore-evidence) for
 `--scope`, `--not-before` and paths. Supply the start time of the backup you are
-checking; the old sample timestamp is historical, not a value to reuse today.
+checking. The cutoff is a lower bound, not an exact-run selector: compare the
+retrieved archive identity with that run's receipt, especially if a newer backup
+has since completed.
 
 **Expected result:** a receipt identifying the exact independently retrieved
 bytes and successful checks. This still does not prove restoration.

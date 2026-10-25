@@ -248,6 +248,10 @@ NAS or prove a path is NAS-backed; check the actual mount yourself.
 
 Now install the runner and transfer the active state:
 
+First complete the [workflow-trust checks](OPERATIONS.md#runner-trust-and-one-way-handover)
+for repository access, protected workflow changes and fork jobs. Do not register
+the runner if untrusted code can reach it.
+
 ```sh
 ./proxmox/bootstrap/bootstrap runner "$bootstrap_bundle"
 ```

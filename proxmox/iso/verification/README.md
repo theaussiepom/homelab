@@ -66,7 +66,7 @@ After USB writing, wait for `usb_ready: true`, `readback_verified: true` and
 ## 2. Check the actual installation
 
 At your chosen installation window, use the
-[attended install steps](../README.md#6-boot-and-install--at-your-chosen-maintenance-window),
+[attended installation steps](../README.md#6-boot-and-install--at-your-chosen-maintenance-window),
 then [host access and checks](../../host-access.md).
 
 **Expected result:** the intended host, healthy new mirror, preserved original

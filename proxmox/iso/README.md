@@ -142,7 +142,11 @@ first. It explains the public/private files and the current bootstrap's
 non-interactive key requirement. Use that same public key for the ISO and the
 later deployment guest.
 
-Save the recovery password and your SSH private key in your password manager. The private key never needs to enter this folder or Docker.
+Save the recovery password and your SSH private key in your password manager.
+Keep the private key outside this folder; the ISO build uses only the public
+key. The shared host/guest public key is intentional for this initial bootstrap.
+During that later step, the launcher mounts the private key read-only into
+Docker for non-interactive SSH; it is not installed in the guest or runner.
 
 1. Copy your existing **public** SSH key into `.local/root-ssh.pub`. This version requires the single line beginning `ssh-ed25519`. Copy the key type and long key value; omit any trailing comment. Do not copy a file beginning `BEGIN … PRIVATE KEY`.
 2. Create a strong recovery password in your password manager, then run:

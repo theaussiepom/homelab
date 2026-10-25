@@ -76,6 +76,12 @@ API token, create one container, add its host API firewall allowance, install
 the runner and transfer its state. You do not need a separate base-guest script
 or manual token/firewall setup in the Proxmox web interface.
 
+Before running the host-changing steps, review the selected guest/storage
+privileges, guest-to-host TCP 8006 endpoints, runner workflow trust and state
+handover described in the [bootstrap operating reference](bootstrap/OPERATIONS.md).
+Confirm these are the access you intend to grant. A scoped token still grants
+real administrative permissions; its scope alone is not a least-privilege guarantee.
+
 **Expected result:** one guest running, a runner online in your private GitHub
 repository, and a successful GitHub job reporting a no-change OpenTofu plan.
 This confirms that GitHub can manage the guest using the transferred state.
