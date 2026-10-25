@@ -26,6 +26,7 @@ class ProxmoxFixture:
         self.calls = []
         self.lose_other_rule = False
         self.fail_create = False
+        self.rename_created_rule = False
 
     def execute(self, args):
         """Simulate only the expected Proxmox commands and record their effects."""
@@ -43,6 +44,8 @@ class ProxmoxFixture:
                 raise RuntimeError('synthetic create failure')
             rule = dict(zip((key[2:] for key in args[3::2]), args[4::2]))
             self.rules.insert(0, rule)
+            if self.rename_created_rule:
+                self.rules[0]['comment'] = 'Another owner'
             if self.lose_other_rule:
                 self.rules.pop()
             return 'null'
@@ -99,6 +102,24 @@ class HostApiTests(unittest.TestCase):
             host_api.ensure_rule(self.request, self.host.execute)
         self.assertEqual(sum(args[:2] == ['pvesh', 'create'] for args in self.host.calls), 1)
         self.assertFalse(any(args[:2] == ['pvesh', 'delete'] for args in self.host.calls))
+
+    def test_equivalent_unmanaged_rule_is_a_conflict_without_a_write(self):
+        """Do not silently adopt another owner's equivalent firewall allowance."""
+        host_api.ensure_rule(self.request, self.host.execute)
+        self.host.rules[0]['comment'] = 'Another owner'
+        self.host.calls.clear()
+        before = copy.deepcopy(self.host.rules)
+        with self.assertRaisesRegex(RuntimeError, 'conflict'):
+            host_api.ensure_rule(self.request, self.host.execute)
+        self.assertEqual(self.host.rules, before)
+        self.assertFalse(any(args[:2] == ['pvesh', 'create'] for args in self.host.calls))
+
+    def test_created_rule_comment_is_verified_without_replay(self):
+        """Keep failed ownership readback as evidence without another edit."""
+        self.host.rename_created_rule = True
+        with self.assertRaisesRegex(RuntimeError, 'readback'):
+            host_api.ensure_rule(self.request, self.host.execute)
+        self.assertEqual(sum(args[:2] == ['pvesh', 'create'] for args in self.host.calls), 1)
 
     def test_create_failure_is_not_retried(self):
         """Verify create failure is not retried."""

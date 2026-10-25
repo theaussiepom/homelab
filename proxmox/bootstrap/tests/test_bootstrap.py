@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -38,7 +39,22 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(build[:2], ['docker', 'build'])
             self.assertIn(f'HOST_UID={os.getuid()}', build)
             self.assertIn(f'HOST_GID={os.getgid()}', build)
+            self.assertEqual(run.call_args_list[0].kwargs.get('timeout'), 1800)
+            self.assertEqual(run.call_args_list[1].kwargs.get('timeout'), 300)
             self.assertEqual(report['prepared_bundle'], str(root / 'first-run/bundle'))
+
+    def test_prepare_timeout_preserves_the_unknown_docker_outcome(self):
+        """Explain that stopping a timed-out CLI does not close its Docker work."""
+        error = io.StringIO()
+        with patch.object(sys, 'argv', ['bootstrap', 'container-prepare',
+                '--catalog', '/synthetic/site.json', '--settings', '/synthetic/settings.json',
+                '--out', '/synthetic/new-output']), \
+                patch.object(bootstrap, 'container_prepare',
+                             side_effect=subprocess.TimeoutExpired(['docker', 'run'], 300)), \
+                patch.object(sys, 'stderr', error):
+            self.assertEqual(bootstrap.main(), 3)
+        self.assertIn('may still be running', error.getvalue())
+        self.assertIn('before another attempt', error.getvalue())
 
     def setUp(self):
         """Create isolated synthetic inputs for this test case."""

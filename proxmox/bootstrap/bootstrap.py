@@ -184,7 +184,7 @@ def container_prepare(catalog, settings, destination):
     destination.mkdir(parents=True, mode=0o700)
     subprocess.run(['docker', 'build', '--platform', 'linux/amd64',
         '--build-arg', f'HOST_UID={os.getuid()}', '--build-arg', f'HOST_GID={os.getgid()}',
-        '-t', 'homelab-bootstrap-test:1', str(HERE / 'docker')], check=True)
+        '-t', 'homelab-bootstrap-test:1', str(HERE / 'docker')], check=True, timeout=1800)
     command = ['docker', 'run', '--rm', '--platform', 'linux/amd64', '--network', 'none',
         '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
         '--user', f'{os.getuid()}:{os.getgid()}', '--tmpfs', '/tmp:rw,nosuid,nodev,mode=1777',
@@ -199,7 +199,8 @@ def container_prepare(catalog, settings, destination):
         command += ['-v', f'{archive}:/inputs/template.archive:ro', '-e', 'HOMELAB_TEMPLATE_FILE=/inputs/template.archive']
     subprocess.run(command + ['homelab-bootstrap-test:1',
         'python3', '/src/proxmox/bootstrap/bootstrap.py', 'prepare',
-        '--catalog', '/inputs/site.json', '--settings', '/inputs/settings.json', '--out', '/output/bundle'], check=True)
+        '--catalog', '/inputs/site.json', '--settings', '/inputs/settings.json', '--out', '/output/bundle'],
+        check=True, timeout=300)
     return {'prepared_bundle': str(destination / 'bundle'), 'live_execution_admitted': False}
 
 
@@ -323,6 +324,9 @@ def main():
         else:
             rehearse(args.evidence)
         return 0
+    except subprocess.TimeoutExpired:
+        print(json.dumps({'refused': True, 'reason': 'Local Docker work may still be running after the CLI timeout; inspect Docker and preserve partial output before another attempt'}), file=sys.stderr)
+        return 3
     except (Refused, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         message = str(exc) if isinstance(exc, Refused) else 'Invalid input or failed local rehearsal step'
         print(json.dumps({'refused': True, 'reason': message}), file=sys.stderr)

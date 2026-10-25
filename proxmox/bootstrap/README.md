@@ -16,7 +16,7 @@ runner. Other guests and applications are later work. No database is required.
 fresh-host test in an isolated Proxmox 9.2 lab: guest creation, automatic API
 firewall setup, state handover, new runner registration and a successful real
 GitHub verification job. No manual repairs were made between script stages.
-Subsequent publication-review fixes passed 64 unit tests and offline
+Subsequent publication-review fixes passed 67 unit tests and offline
 OpenTofu/Ansible integration checks; the live rehearsal was not repeated for
 those corrections. Physical-target and later application rollout remain separate. See the
 [verification record](verification.md) for the exact scope and limits.
@@ -159,6 +159,9 @@ bootstrap_bundle="$bootstrap_private/first-run/bundle"
 Preparation builds its AMD64 tools image on your selected local Docker engine,
 then creates the private bundle with networking disabled. A prebuilt tools image
 is not required. Apple Silicon workstations use Docker's AMD64 emulation.
+The build has a 30-minute limit and offline preparation a five-minute limit.
+A timeout stops the local CLI; Docker may still be running the build or
+container. Inspect Docker and preserve partial output before another attempt.
 Preparation prints the actual bundle directory. Note the final `/bundle` in
 subsequent commands. An existing output directory is preserved; preparation
 refuses to overwrite it.
@@ -234,7 +237,8 @@ not mount the NAS or prove that a supplied path is actually NAS-backed.
 The runner step automatically permits **the selected guest address → this
 Proxmox host on TCP port 8006**, using the already verified host SSH connection.
 It prepends one enabled host rule, or reuses the exact first rule, and checks
-that all existing rules and host firewall settings were preserved. It does not
+that all existing rules and host firewall settings were preserved. An equivalent
+rule with a different owner comment is a conflict and is not silently adopted. It does not
 enable/disable the host firewall or change your router, NAS firewall or VLANs.
 The API hostname must resolve to one IPv4 address assigned to this host.
 

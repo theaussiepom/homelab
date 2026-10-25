@@ -130,8 +130,14 @@ these corrections are recorded separately from the earlier real-host rehearsal;
 that rehearsal was not repeated or relabelled as a test of the later source.
 
 The regressions first failed against the previous source. After the fixes,
-**64 unit tests passed** in the network-disabled Docker executor, together with
+**67 unit tests passed** in the network-disabled Docker executor, together with
 real OpenTofu 1.13.1 validation and mocked provider plans for the root and guest
 module, Ansible syntax checks and the synthetic runner scenarios. Both source
-and fixture changes were included in that check. All 131 Python functions have
+and fixture changes were included in that check. All 134 Python functions have
 docstrings; adding those docstrings left the executable AST unchanged.
+
+The follow-up also refuses equivalent firewall rules owned by a different
+comment and verifies the created rule's owner on readback. Docker preparation
+has explicit build/run timeouts and reports that a timed-out CLI does not prove
+container completion. The ownership and timeout regressions failed before
+those fixes and passed in the final offline check. No live firewall was changed.

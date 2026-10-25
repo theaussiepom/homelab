@@ -80,7 +80,7 @@ else:
         docker = calls[-1]
         self.assertTrue(docker['fresh_registration_token'])
         self.assertIn('HOMELAB_RUNNER_REGISTRATION_TOKEN', docker['arguments'])
-        self.assertFalse(any('synthetic-token' in arg or 'synthetic-registration-token' in arg
+        self.assertFalse(any('synthetic-private-api-value' in arg or 'synthetic-registration-token' in arg
                              for call in calls for arg in call['arguments']))
         self.assertNotIn('GH_TOKEN', docker['arguments'])
         self.assertNotIn('GITHUB_TOKEN', docker['arguments'])

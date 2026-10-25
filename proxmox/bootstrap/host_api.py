@@ -66,6 +66,8 @@ def ensure_rule(request, execute=command, emit=lambda value: None):
     before_options, before = options(), rules()
     emit({'phase': 'before', 'rule': desired, 'options': before_options, 'rules': before})
     owned = [row for row in before if row.get('comment') == desired['comment']]
+    if any(same_allowance(row, desired) and row.get('comment') != desired['comment'] for row in before):
+        raise RuntimeError('Equivalent unmanaged API rule conflict; no adoption or automatic rewrite')
     if owned and (len(owned) != 1 or not same_allowance(owned[0], desired) or owned[0] != before[0]):
         raise RuntimeError('Existing bootstrap API rule conflict; no rewrite or automatic retry')
     changed = not (before and same_allowance(before[0], desired))
@@ -77,7 +79,7 @@ def ensure_rule(request, execute=command, emit=lambda value: None):
         execute(args)
     after = rules()
     remainder = after[1:] if changed else after
-    if (not after or not same_allowance(after[0], desired)
+    if (not after or not same_allowance(after[0], desired) or after[0].get('comment') != desired['comment']
             or normalized(remainder) != normalized(before) or options() != before_options):
         raise RuntimeError('Host rule readback did not preserve the existing rules/options; no retry or cleanup')
     return {'phase': 'result', 'status': 'stored', 'changed': changed,
