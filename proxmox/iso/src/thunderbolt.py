@@ -81,6 +81,7 @@ def authorize(profile, root=Path('/'), timeout=20):
         if domain is None:
             raise ValueError('Unexpected Thunderbolt device location')
         state = (adapter / 'authorized').read_text().strip()
+        newly_authorized = False
         if state == '0':
             security = (bus / ('domain' + domain[1]) / 'security').read_text().strip()
             if security != 'user':
@@ -89,11 +90,26 @@ def authorize(profile, root=Path('/'), timeout=20):
             if (adapter / 'unique_id').read_text().strip().lower() != item['unique_id']:
                 raise ValueError('Thunderbolt identity changed before authorisation')
             (adapter / 'authorized').write_text('1\n')
+            newly_authorized = True
         elif state != '1':
             raise ValueError('Unexpected Thunderbolt authorisation state')
-        if (adapter / 'authorized').read_text().strip() != '1':
-            raise ValueError('Thunderbolt authorisation did not take effect')
-        wait_for_mac(root / 'sys/class/net', item['mac'], deadline)
+        try:
+            if (adapter / 'authorized').read_text().strip() != '1':
+                raise ValueError('Thunderbolt authorisation did not take effect')
+            wait_for_mac(root / 'sys/class/net', item['mac'], deadline)
+        except Exception as validation_error:
+            if newly_authorized:
+                try:
+                    # Do not revoke a pre-existing grant or a replacement device.
+                    if (adapter / 'unique_id').read_text().strip().lower() != item['unique_id']:
+                        raise ValueError('Thunderbolt identity changed before revocation')
+                    (adapter / 'authorized').write_text('0\n')
+                    if (adapter / 'authorized').read_text().strip() != '0':
+                        raise ValueError('Thunderbolt revocation did not take effect')
+                except Exception as revoke_error:
+                    raise RuntimeError('New Thunderbolt authorisation could not be revoked; '
+                                       'access may remain: ' + str(revoke_error)) from validation_error
+            raise
 
 
 def settle_devices():

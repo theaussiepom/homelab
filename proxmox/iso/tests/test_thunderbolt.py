@@ -119,6 +119,49 @@ class ThunderboltTests(unittest.TestCase):
             tb.authorize(profile(), root=root, timeout=0)
             self.assertEqual((adapter / 'authorized').read_text().strip(), '1')
 
+    def test_failed_mac_validation_revokes_only_a_new_authorisation(self):
+        for initial in ('0', '1'):
+            with self.subTest(initial=initial), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder); adapter = machine(root, state=initial, mac='02:00:00:00:99:99')
+                with self.assertRaisesRegex(ValueError, 'MAC did not appear'):
+                    tb.authorize(profile(), root=root, timeout=0)
+                self.assertEqual((adapter / 'authorized').read_text().strip(), initial)
+
+    def test_failed_validation_does_not_revoke_a_replacement_device(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); adapter = machine(root)
+            def replaced(*args):
+                (adapter / 'unique_id').write_text(OTHER)
+                raise ValueError('MAC did not appear')
+            with patch.object(tb, 'wait_for_mac', side_effect=replaced):
+                with self.assertRaisesRegex(RuntimeError, 'could not be revoked'):
+                    tb.authorize(profile(), root=root, timeout=0)
+            self.assertEqual((adapter / 'authorized').read_text().strip(), '1')
+
+    def test_failed_revocation_reports_that_access_may_remain(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); adapter = machine(root, mac='02:00:00:00:99:99')
+            original = Path.write_text
+            def write(path, value, *args, **kwargs):
+                if path == adapter / 'authorized' and value == '0\n':
+                    raise PermissionError('revocation denied')
+                return original(path, value, *args, **kwargs)
+            with patch.object(Path, 'write_text', write):
+                with self.assertRaisesRegex(RuntimeError, 'could not be revoked'):
+                    tb.authorize(profile(), root=root, timeout=0)
+            self.assertEqual((adapter / 'authorized').read_text().strip(), '1')
+
+    def test_uppercase_machine_uuid_can_reach_adapter_authorisation(self):
+        cfg = json.loads((ROOT / 'config/fixture-hardware.json').read_text())
+        cfg['machine_uuid'] = 'AABBCCDD-1111-4111-8111-111111111111'
+        cfg['thunderbolt_devices'] = profile()['devices']
+        launch.validate_config(cfg)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); adapter = machine(root)
+            (root / 'sys/class/dmi/id/product_uuid').write_text(cfg['machine_uuid'].lower())
+            tb.authorize({'machine_uuid': cfg['machine_uuid'], 'devices': cfg['thunderbolt_devices']}, root=root, timeout=0)
+            self.assertEqual((adapter / 'authorized').read_text().strip(), '1')
+
     def test_hardware_profile_rejects_wildcards_and_unpinned_mac(self):
         cfg = json.loads((ROOT / 'config/fixture-hardware.json').read_text())
         cfg['thunderbolt_devices'] = profile()['devices']

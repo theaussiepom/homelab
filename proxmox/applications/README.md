@@ -30,8 +30,9 @@ A separate LXC still uses some RAM. We have not measured PegaProx on this site o
 chosen its final CPU/RAM/disk settings; sharing another guest would not remove
 the application's memory use.
 
-**Network plan:** place it on Management VLAN 25 with its own stable address and
-reviewed firewall access. VLAN 25 is our site choice, not a PegaProx requirement.
+**Network plan:** place it on your management VLAN with its own stable address
+and reviewed firewall access. Keep the actual VLAN number in private site
+settings; a particular VLAN number is not a PegaProx requirement.
 Other homes can use their management network or a different network with the
 [required access](https://docs.pegaprox.com/configuration/ports/).
 

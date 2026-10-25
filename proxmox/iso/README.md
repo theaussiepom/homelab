@@ -140,7 +140,13 @@ Match the external adapter's name to its ID, then add an entry to `.local/hardwa
 
 Listing an adapter grants that particular device PCIe/DMA access on the selected computer. The installer checks the embedded code and settings, machine identity and UEFI mode before authorising it, then waits for its expected Ethernet MAC. It leaves other Thunderbolt devices and firmware security settings alone. An unauthorised device in `secure` mode requires its existing secure trust rather than an automatic downgrade.
 
-The installed system uses the same check before networking on every boot. If the selected adapter is missing or its MAC does not appear, startup reports a failure instead of treating another adapter as a replacement.
+The installed system uses the same check before networking on every boot. If the selected adapter is missing or its MAC does not appear, startup reports a failure instead of treating another adapter as a replacement. The check is required by the networking service, so a failure can leave **both ports without network access**, including the administration port. You will need the host's local keyboard/screen to investigate.
+
+If a newly authorised adapter fails its MAC check, the helper attempts to revoke
+only that new authorisation after checking its identity again. Existing grants
+are preserved. A failed revocation is reported explicitly because access may
+remain. Revocation disconnects the device, so select a dedicated Ethernet
+adapter rather than a dock carrying storage; see the [kernel's explanation](https://docs.kernel.org/admin-guide/thunderbolt.html#de-authorizing-devices).
 
 ## 3. Fill in your local settings
 

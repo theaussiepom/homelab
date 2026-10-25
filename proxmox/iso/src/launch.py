@@ -33,7 +33,7 @@ def validate_config(cfg):
     core.exact(cfg, fields, 'static launch configuration')
     core.require(cfg['schema'] == 'homelab-static-launch-v1', 'unsupported static launch contract')
     core.require(cfg['environment'] in ('production', 'synthetic'), 'unknown media environment')
-    core.identifier(cfg['machine_uuid'], 'machine UUID')
+    cfg['machine_uuid'] = core.identifier(cfg['machine_uuid'], 'machine UUID')
     core.digest(cfg['runtime_sha256'], 'runtime SHA256')
     core.require(len(cfg['disk_members']) == 2 and len(cfg['protected_disks']) == 1, 'two new disks and one protected original required')
     declared = cfg['disk_members'] + cfg['protected_disks']
