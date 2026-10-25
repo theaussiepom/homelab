@@ -1,0 +1,57 @@
+name: Application guest deployment
+on:
+  workflow_dispatch:
+    inputs:
+      guest:
+        description: One selected guest
+        type: choice
+        options: [dns, mariadb, postgresql, influxdb, identity, ingress, automation]
+        required: true
+      step:
+        description: Plan first; stage does not start restored applications
+        type: choice
+        options: [plan, apply, stage, start, verify]
+        default: plan
+        required: true
+      plan_sha256:
+        description: Exact reviewed saved-plan SHA256, required for apply
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: homelab-private-deployment
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.event.repository.private == true && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, homelab-private-deploy, homelab-deploy-SITE]
+    timeout-minutes: 40
+    steps:
+      - name: Check out reviewed private workflow and source lock
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Resolve fixed public source and selected private inputs
+        id: source
+        env:
+          SELECTED_GUEST: ${{ inputs.guest }}
+          SELECTED_STEP: ${{ inputs.step }}
+          PLAN_SHA256: ${{ inputs.plan_sha256 }}
+        run: python3 .github/scripts/application_source.py --guest "$SELECTED_GUEST" --step "$SELECTED_STEP" --plan-sha256 "$PLAN_SHA256" >> "$GITHUB_OUTPUT"
+      - name: Fetch the fixed reusable HomeLab revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: theaussiepom/homelab
+          ref: ${{ steps.source.outputs.revision }}
+          path: public-source
+          persist-credentials: false
+      - name: Run the selected single-guest step
+        env:
+          SELECTED_STEP: ${{ inputs.step }}
+          PRIVATE_INPUT: ${{ steps.source.outputs.input_path }}
+          PLAN_SHA256: ${{ inputs.plan_sha256 }}
+        run: |
+          umask 077
+          python3 public-source/proxmox/applications/deploy.py "$SELECTED_STEP" \
+            --site "$PRIVATE_INPUT" --plan-sha256 "$PLAN_SHA256"

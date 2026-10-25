@@ -57,6 +57,9 @@ Preserve numeric file owners, permissions, ACLs and extended attributes.
 
 ## How a deployment works
 
+First, copy the [private-repository workflow templates](templates/README.md)
+into your own private deployment repository and supply its private inputs.
+
 Use **Application guest deployment** in the private repository's Actions tab.
 Select one guest and one step:
 
