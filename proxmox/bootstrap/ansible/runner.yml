@@ -1,0 +1,21 @@
+---
+- name: Rehearse runner configuration inside the isolated Docker fixture
+  hosts: deploy
+  gather_facts: false
+  tasks:
+    - name: Require the isolated fixture before any changes
+      ansible.builtin.assert:
+        that:
+          - bootstrap_docker_fixture | default(false) | bool
+          - ansible_connection == 'local'
+          - runner_directory is match('^/tmp/bootstrap-rehearsal/runner/')
+          - runner_repository == 'example-owner/private-site'
+
+    - name: Exercise the same runner setup tasks with the fixture archive
+      ansible.builtin.import_tasks: runner-common.yml
+
+    - name: Start the local fixture process once
+      ansible.builtin.command:
+        argv: ["{{ runner_directory }}/run.sh", "--once"]
+        chdir: "{{ runner_directory }}"
+      changed_when: true

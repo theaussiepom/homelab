@@ -1,0 +1,116 @@
+#!/bin/sh
+set -eu
+base=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo=$(CDPATH= cd -- "$base/../.." && pwd)
+case "${1:-help}" in
+  test)
+    shift
+    mkdir -p "$repo/.work"
+    run=$(mktemp -d "$repo/.work/bootstrap-XXXXXX")
+    python3 "$base/bootstrap.py" snapshot --out "$run/source"
+    test "$#" -eq 0 || { echo "Use: ./bootstrap test"; exit 2; }
+    mkdir "$run/evidence"
+    docker build --platform linux/amd64 --build-arg HOST_UID="$(id -u)" --build-arg HOST_GID="$(id -g)" \
+      -t homelab-bootstrap-test:1 "$base/docker"
+    docker run --rm --platform linux/amd64 --network none --read-only \
+      --cap-drop ALL --security-opt no-new-privileges --cpus 2 --memory 2g \
+      --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,exec,nosuid,nodev,size=768m,mode=1777 \
+      -e HOME=/tmp -e ANSIBLE_LOCAL_TEMP=/tmp/ansible-local -e ANSIBLE_REMOTE_TEMP=/tmp/ansible-remote \
+      -v "$run/source:/src:ro" -v "$run/evidence:/evidence" \
+      homelab-bootstrap-test:1 python3 /src/proxmox/bootstrap/bootstrap.py rehearse --evidence /evidence "$@"
+    echo "Evidence: $run/evidence/result.json"
+    ;;
+  prepare)
+    shift
+    exec python3 "$base/bootstrap.py" container-prepare "$@"
+    ;;
+  test-backend)
+    exec python3 "$base/tests/backend_fixture.py"
+    ;;
+  backup)
+    test "$#" -eq 3 || { echo "Use: ./bootstrap backup /absolute/private/bundle /new/private/backup-directory"; exit 2; }
+    exec python3 "$base/bootstrap.py" container-backup --work "$2" --out "$3"
+    ;;
+  access|plan|apply|verify|runner)
+    action=$1
+    if [ "$action" = access ]; then
+      test "$#" -eq 2 || test "$#" -eq 4 || { echo "Use: ./bootstrap access /absolute/private/bundle [--expires-in SECONDS]"; exit 2; }
+      if [ "$#" -eq 4 ]; then
+        test "$3" = --expires-in || { echo "Use --expires-in SECONDS"; exit 2; }
+      fi
+      access_lifetime=${4:-21600}
+    else
+      test "$#" -eq 2 || { echo "Use: ./bootstrap $action /absolute/private/bundle"; exit 2; }
+    fi
+    work=$(CDPATH= cd -- "$2" && pwd)
+    if [ "$action" != access ] && [ -f "$work/access.json" ] && \
+        [ -z "${PROXMOX_VE_API_TOKEN:-}${PROXMOX_VE_USERNAME:-}${PROXMOX_VE_PASSWORD:-}" ]; then
+      PROXMOX_VE_API_TOKEN=$(python3 -c '
+import json,sys,time
+value=json.load(open(sys.argv[1]))
+if value.get("status")!="ready" or (value["expires_at"] and value["expires_at"] <= time.time()):
+    raise SystemExit("Saved Proxmox access is incomplete or expired; preserve it before another credential action.")
+print(value["PROXMOX_VE_API_TOKEN"])
+' "$work/access.json")
+      export PROXMOX_VE_API_TOKEN
+    fi
+    HOMELAB_PVE_CA=${HOMELAB_PVE_CA:-"$work/pve-ca.pem"}
+    if [ "$action" = runner ]; then
+      if [ -n "${PROXMOX_VE_USERNAME:-}${PROXMOX_VE_PASSWORD:-}" ] || [ -z "${PROXMOX_VE_API_TOKEN:-}" ]; then
+        echo "Runner setup requires the scoped API token and refuses Proxmox username/password credentials." >&2
+        exit 2
+      fi
+      repository=$(python3 -c '
+import json,re,sys
+repository=json.load(open(sys.argv[1]))["repository"]
+if not isinstance(repository,str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9_.-]*",repository):
+    raise SystemExit("Runner setup requires an owner/repository name.")
+print(repository)
+' "$work/settings.json")
+      test "$(GH_DEBUG= gh api --hostname github.com "repos/$repository" --jq '.private and .permissions.admin')" = true || {
+        echo "Runner setup requires a private repository and an authenticated GitHub CLI with repository admin access." >&2; exit 2;
+      }
+      if ! HOMELAB_RUNNER_REGISTRATION_TOKEN=$(GH_DEBUG= gh api --hostname github.com --method POST \
+          "repos/$repository/actions/runners/registration-token" --jq '.token // empty' 2>/dev/null); then
+        echo "Could not obtain a runner registration token. Check the existing GitHub login and repository administration permissions." >&2
+        exit 2
+      fi
+      case "$HOMELAB_RUNNER_REGISTRATION_TOKEN" in
+        ''|null|*[![:graph:]]*) echo "GitHub did not return a valid runner registration token." >&2; exit 2 ;;
+      esac
+      export HOMELAB_RUNNER_REGISTRATION_TOKEN
+    fi
+    set -- docker run --rm --platform linux/amd64 --cap-drop ALL --security-opt no-new-privileges \
+      --cpus 2 --memory 2g --user "$(id -u):$(id -g)" --read-only --tmpfs /tmp:rw,exec,nosuid,nodev,size=768m,mode=1777 \
+      -e HOME=/tmp -e ANSIBLE_LOCAL_TEMP=/tmp/ansible-local -e ANSIBLE_REMOTE_TEMP=/tmp/ansible-remote \
+      -e PROXMOX_VE_API_TOKEN -e PROXMOX_VE_USERNAME -e PROXMOX_VE_PASSWORD \
+      -e HOMELAB_RUNNER_REGISTRATION_TOKEN \
+      -v "$base:/src/proxmox/bootstrap:ro" -v "$work:/work"
+    if [ -n "${HOMELAB_SSH_KEY:-}" ]; then
+      set -- "$@" -v "$HOMELAB_SSH_KEY:/keys/bootstrap-key:ro"
+    fi
+    if [ -n "${HOMELAB_KNOWN_HOSTS:-}" ]; then
+      set -- "$@" -v "$HOMELAB_KNOWN_HOSTS:/keys/known_hosts:ro"
+    fi
+    if [ -f "$HOMELAB_PVE_CA" ]; then
+      set -- "$@" -v "$HOMELAB_PVE_CA:/keys/pve-ca.pem:ro" -e SSL_CERT_FILE=/keys/pve-ca.pem
+    fi
+    if [ "$action" = access ]; then
+      exec python3 "$base/workstation.py" "$work" "$@" homelab-bootstrap-test:1 python3 /src/proxmox/bootstrap/access.py --work /work --expires-in "$access_lifetime"
+    fi
+    if [ "$action" = runner ]; then
+      exec python3 "$base/workstation.py" "$work" "$@" homelab-bootstrap-test:1 python3 /src/proxmox/bootstrap/runner.py --work /work
+    fi
+    exec python3 "$base/workstation.py" "$work" "$@" homelab-bootstrap-test:1 python3 /src/proxmox/bootstrap/bootstrap.py native "$action" --work /work
+    ;;
+  *)
+    echo "Practice: ./bootstrap test"
+    echo "Prepare only: ./bootstrap prepare --catalog SITE.json --settings SETTINGS.json --out NEW_DIRECTORY"
+    echo "After reviewing private settings: ./bootstrap plan /private/bundle"
+    echo "Create scoped API access over pinned SSH: ./bootstrap access /private/bundle [--expires-in SECONDS]"
+    echo "Apply the saved plan: ./bootstrap apply /private/bundle"
+    echo "Install private runner: ./bootstrap runner /private/bundle"
+    echo "Verify fresh provider no-op: ./bootstrap verify /private/bundle"
+    echo "Save private state/configuration: ./bootstrap backup /private/bundle /new/private/backup-directory"
+    ;;
+esac

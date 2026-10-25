@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "site": {
+    "id": "example-home",
+    "environment": "production",
+    "node": "pve",
+    "api_endpoint": "https://pve.example.invalid:8006/",
+    "ssh_public_keys": ["REPLACE_WITH_YOUR_SSH_PUBLIC_KEY"]
+  },
+  "guests": [
+    {
+      "key": "deploy",
+      "runtime": "unprivileged_lxc",
+      "vmid": 900,
+      "cpu": 1,
+      "memory_mib": 1024,
+      "root_gib": 8,
+      "storage_id": "local-lvm",
+      "template_file_id": "local:vztmpl/REPLACE_WITH_DEBIAN_13_TEMPLATE.tar.zst",
+      "protection": true,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "name": "eth0",
+          "bridge": "vmbr0",
+          "vlan": null,
+          "mac": "02:00:00:00:09:00",
+          "ipv4": "dhcp"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "repository": "example-owner/private-site",
+  "runner_name": "homelab-deploy",
+  "admin_cidr": "198.18.25.0/24",
+  "prefix_length": 24,
+  "gateway": "198.18.25.1",
+  "dns_servers": ["198.18.25.53"]
+}

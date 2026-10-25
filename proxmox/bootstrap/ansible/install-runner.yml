@@ -1,0 +1,169 @@
+---
+- name: Configure the new deployment guest
+  hosts: deploy
+  become: true
+  gather_facts: true
+  vars:
+    # Each module creates a private directory under this shared parent.
+    ansible_remote_tmp: /tmp
+  pre_tasks:
+    - name: Check the intended Debian deployment guest and installation paths
+      ansible.builtin.assert:
+        that:
+          - ansible_hostname == 'deploy'
+          - ansible_distribution == 'Debian'
+          - ansible_distribution_major_version == '13'
+          - ansible_architecture == 'x86_64'
+          - runner_directory == '/opt/homelab-runner'
+          - runner_service_file == '/etc/systemd/system/homelab-deploy.service'
+          - runner_owner == 'homelab-runner'
+
+  tasks:
+    - name: Create the unprivileged runner account
+      ansible.builtin.user:
+        name: homelab-runner
+        create_home: true
+        shell: /bin/bash
+
+    - name: Install runtime dependencies in the admitted new guest
+      ansible.builtin.apt:
+        name: [ca-certificates, git, python3, python3-venv, python3-packaging, sudo, libicu76, libssl3t64, zlib1g]
+        state: present
+        update_cache: true
+
+    - name: Read public pinned tool releases
+      ansible.builtin.set_fact:
+        bootstrap_tools: "{{ lookup('ansible.builtin.file', playbook_dir + '/../docker/tools.json') | from_json }}"
+
+    - name: Download the pinned runner archive
+      ansible.builtin.get_url:
+        url: "{{ bootstrap_tools.runner.url }}"
+        checksum: "sha256:{{ bootstrap_tools.runner.sha256 }}"
+        dest: /var/tmp/homelab-runner.tar.gz
+        mode: "0600"
+
+    - name: Download the pinned OpenTofu archive
+      ansible.builtin.get_url:
+        url: "{{ bootstrap_tools.opentofu.url }}"
+        checksum: "sha256:{{ bootstrap_tools.opentofu.sha256 }}"
+        dest: /var/tmp/homelab-tofu.tar.gz
+        mode: "0600"
+
+    - name: Install OpenTofu inside the guest
+      ansible.builtin.unarchive:
+        src: /var/tmp/homelab-tofu.tar.gz
+        dest: /usr/local/bin
+        remote_src: true
+        include: [tofu]
+
+    - name: Copy locked deployment Python requirements
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../docker/requirements.lock.txt"
+        dest: /var/tmp/homelab-requirements.lock.txt
+        mode: "0600"
+
+    - name: Install locked Ansible environment inside the guest
+      ansible.builtin.pip:
+        requirements: /var/tmp/homelab-requirements.lock.txt
+        virtualenv: /opt/homelab-tools
+        virtualenv_command: python3 -m venv
+        extra_args: --require-hashes
+
+    - name: Trust the same Proxmox CA inside this new guest
+      ansible.builtin.copy:
+        src: /keys/pve-ca.pem
+        dest: /usr/local/share/ca-certificates/homelab-pve.crt
+        mode: "0644"
+
+    - name: Update guest certificate trust
+      ansible.builtin.command: update-ca-certificates
+      changed_when: true
+
+    - name: Require trusted Proxmox API access from the deployment guest
+      ansible.builtin.uri:
+        url: "{{ bootstrap_api_endpoint | regex_replace('/+$', '') }}/api2/json/version"
+        method: GET
+        validate_certs: true
+        ca_path: /usr/local/share/ca-certificates/homelab-pve.crt
+        status_code: [200, 401]
+        timeout: 10
+        follow_redirects: none
+      changed_when: false
+
+    - name: Create root-owned bootstrap source directory
+      ansible.builtin.file:
+        path: /opt/homelab-bootstrap
+        state: directory
+        mode: "0755"
+
+    - name: Install the small bootstrap caller
+      ansible.builtin.copy:
+        src: "{{ bootstrap_source }}/{{ item }}"
+        dest: "/opt/homelab-bootstrap/{{ item }}"
+        mode: "0644"
+      loop: [bootstrap.py, native.py]
+
+    - name: Create private deployment workspace
+      ansible.builtin.file:
+        path: /var/lib/homelab-bootstrap
+        state: directory
+        owner: homelab-runner
+        group: homelab-runner
+        mode: "0700"
+
+    - name: Copy the configuration and exact state without plans or operator keys
+      ansible.builtin.copy:
+        src: "{{ bootstrap_bundle_source }}/"
+        dest: /var/lib/homelab-bootstrap/
+        owner: homelab-runner
+        group: homelab-runner
+        mode: preserve
+
+    - name: Read the transferred state checksum
+      ansible.builtin.stat:
+        path: /var/lib/homelab-bootstrap/tofu/terraform.tfstate
+        checksum_algorithm: sha256
+      register: transferred_state
+
+    - name: Require the exact workstation state before registering the runner
+      ansible.builtin.assert:
+        that:
+          - transferred_state.stat.isreg | default(false)
+          - transferred_state.stat.checksum == bootstrap_state_sha256
+
+    - name: Install private deployment connection environment
+      ansible.builtin.copy:
+        src: "{{ bootstrap_environment_source }}"
+        dest: /etc/homelab-bootstrap.env
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Verify the same guest from the transferred state before registration
+      ansible.builtin.command:
+        argv:
+          - /opt/homelab-tools/bin/python3
+          - /opt/homelab-bootstrap/bootstrap.py
+          - native
+          - verify
+          - --work
+          - /var/lib/homelab-bootstrap
+      become_user: homelab-runner
+      environment: "{{ bootstrap_provider_environment | combine({'PATH': '/opt/homelab-tools/bin:/usr/local/bin:/usr/bin:/bin'}) }}"
+      changed_when: false
+      no_log: true
+
+    - name: Configure the qualified private runner
+      ansible.builtin.import_tasks: runner-common.yml
+      vars:
+        runner_archive: /var/tmp/homelab-runner.tar.gz
+        runner_archive_sha256: "{{ bootstrap_tools.runner.sha256 }}"
+        runner_become: true
+
+    - name: Start the separately admitted runner service
+      ansible.builtin.systemd_service:
+        name: homelab-deploy
+        daemon_reload: true
+        enabled: true
+        state: started

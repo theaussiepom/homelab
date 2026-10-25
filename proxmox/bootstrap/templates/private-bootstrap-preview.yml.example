@@ -1,0 +1,24 @@
+# Inactive example for the designated PRIVATE deployment repository.
+# Review the installed paths, private repository and backend connection
+# before enabling. No runner registration or repository modification occurs here.
+name: Bootstrap handover preview
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: homelab-private-deployment
+  cancel-in-progress: false
+jobs:
+  plan:
+    if: github.event.repository.private == true && github.ref == 'refs/heads/main'
+    # Replace homelab-deploy with the runner_name from your private settings.
+    runs-on: [self-hosted, linux, x64, homelab-private-deploy, homelab-deploy]
+    timeout-minutes: 15
+    steps:
+      - name: Verify the deployment guest using the transferred local state
+        run: python3 /opt/homelab-bootstrap/bootstrap.py native verify --work /var/lib/homelab-bootstrap
+# Preserve the private verifier receipt and check the expected deploy identity.
+# A provider no-op does not establish application or network acceptance.
+# GitHub concurrency supplements OpenTofu's local state lock. The workstation
+# remains frozen after handover; do not create a second active state copy.
