@@ -10,6 +10,7 @@ from native import workspace_lock
 def run(work, command):
     # Docker Desktop bind-mount locking is not sufficient between containers.
     # Hold the workstation's lock until the Docker command has terminated.
+    """Keep the workstation lock held across the complete Docker operation."""
     with workspace_lock(work.resolve(), name='.workstation.lock'):
         return subprocess.run(command, check=False).returncode
 

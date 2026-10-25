@@ -16,6 +16,7 @@ import access
 
 class AccessClientTests(unittest.TestCase):
     def run_case(self, mode, cached=False):
+        """Exercise one synthetic access attempt and return its retained evidence."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             work = root / 'work'
@@ -39,6 +40,7 @@ class AccessClientTests(unittest.TestCase):
                 (work / 'template.json').write_text(json.dumps(template))
 
             def invoke(args, **kwargs):
+                """Return a simulated command response for the current access scenario."""
                 self.assertEqual(args[0], 'ssh')
                 self.assertIn('StrictHostKeyChecking=yes', args)
                 self.assertIn('root@pve.example.invalid', args)
@@ -55,6 +57,7 @@ class AccessClientTests(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 0 if mode == 'success' else 1)
 
             def paths(value):
+                """Supply synthetic key locations without reading operator credentials."""
                 return keys if str(value) == '/keys' else Path(value)
 
             with patch.object(access, 'Path', side_effect=paths), patch.object(access.subprocess, 'run', side_effect=invoke) as ssh:
@@ -78,15 +81,19 @@ class AccessClientTests(unittest.TestCase):
                 self.assertEqual(stat.S_IMODE((work / name).stat().st_mode), 0o600)
 
     def test_success_saves_secret_privately_and_reuses_it_without_reminting(self):
+        """Verify success saves secret privately and reuses it without reminting."""
         self.run_case('success')
 
     def test_partial_failure_retains_credential_evidence_without_retry(self):
+        """Verify partial failure retains credential evidence without retry."""
         self.run_case('partial')
 
     def test_timeout_retains_partial_stdout_and_does_not_claim_remote_completion(self):
+        """Verify timeout retains partial stdout and does not claim remote completion."""
         self.run_case('timeout')
 
     def test_cached_template_is_sent_over_pinned_ssh_before_token_creation(self):
+        """Verify cached template is sent over pinned SSH before token creation."""
         self.run_case('success', cached=True)
 
 

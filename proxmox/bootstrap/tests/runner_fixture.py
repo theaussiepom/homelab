@@ -13,6 +13,7 @@ TOKEN = 'synthetic-registration-token-never-print'
 
 
 def archive(path, fail=False, bom=False):
+    """Build a tiny synthetic runner archive for local Ansible checks."""
     config = '''#!/usr/bin/env python3
 import json,os,sys
 from pathlib import Path
@@ -42,6 +43,7 @@ Path('fixture-job-complete').write_text('local fixture job passed; no GitHub job
 
 
 def run(work, evidence, name, fail=False, tampered=False, bom=False):
+    """Execute the isolated fixture and retain its validation evidence."""
     area = work / name
     area.mkdir(parents=True)
     tar = area / 'runner.tar.gz'

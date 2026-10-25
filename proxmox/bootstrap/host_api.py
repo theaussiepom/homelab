@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 
 def command(args):
+    """Execute one bounded host API command and decode its JSON response."""
     proc = subprocess.run(args, capture_output=True, text=True, timeout=10)
     if proc.returncode:
         raise RuntimeError('Host command failed: ' + proc.stderr.strip())
@@ -16,10 +17,12 @@ def command(args):
 
 
 def normalized(rows):
+    """Normalize firewall fields before exact rule comparison."""
     return [{k: v for k, v in row.items() if k not in ('pos', 'digest')} for row in rows]
 
 
 def same_allowance(row, desired):
+    """Recognize the selected guest address and API-only destination rule."""
     fields = set(desired) - {'comment'}
     return (all(str(row.get(k)) == str(desired[k]) for k in fields)
             and not (set(row) - fields - {'comment', 'pos', 'digest', 'ipversion', 'log'})
@@ -27,6 +30,7 @@ def same_allowance(row, desired):
 
 
 def ensure_rule(request, execute=command, emit=lambda value: None):
+    """Add or verify the narrow API allowance while preserving existing firewall settings."""
     node, vmid = request['node'], request['vmid']
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,62}', node) or socket.gethostname().split('.')[0] != node:
         raise RuntimeError('SSH host must be the selected Proxmox node')

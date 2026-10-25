@@ -18,6 +18,7 @@ from bootstrap import container_backup
 
 
 def run():
+    """Execute the isolated fixture and retain its validation evidence."""
     (ROOT / '.work').mkdir(exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix='bootstrap-local-state-', dir=ROOT / '.work'))
     work.chmod(0o700)
@@ -38,6 +39,7 @@ resource "terraform_data" "fixture" {
     writer = None
 
     def command(directory, *args, name=None):
+        """Simulate the expected tool command without contacting external services."""
         prefix = ['docker', 'run', '--rm', '--platform', 'linux/amd64', '--network', 'none',
                   '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
                   '--memory', '512m', '--cpus', '1', '--user', str(os.getuid()) + ':' + str(os.getgid()),
@@ -49,6 +51,7 @@ resource "terraform_data" "fixture" {
                 *prefix, 'homelab-bootstrap-test:1', 'tofu', *args]
 
     def client(directory, args, log, check=True):
+        """Run the local state client used to test competing writers."""
         result = subprocess.run(command(directory, *args), capture_output=True, text=True, timeout=60)
         (evidence / log).write_text(result.stdout + result.stderr)
         if check and result.returncode:

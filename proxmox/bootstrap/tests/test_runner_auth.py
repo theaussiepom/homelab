@@ -12,7 +12,8 @@ BASE = Path(__file__).resolve().parents[1]
 
 
 class RunnerAuthenticationTests(unittest.TestCase):
-    def launch(self, mode='success', action='runner', repository='example-owner/private-site', saved_access=False):
+    def launch(self, mode='success', action='runner', repository='example-owner/private-site', saved_access=False, credentials=None):
+        """Run the workstation launcher with fake Docker and GitHub commands."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             bundle = root / 'bundle'
@@ -62,6 +63,8 @@ else:
                        GH_DEBUG='api', HOMELAB_RUNNER_REGISTRATION_TOKEN='stale-synthetic-token')
             for name in ('PROXMOX_VE_API_TOKEN', 'PROXMOX_VE_USERNAME', 'PROXMOX_VE_PASSWORD', 'HOMELAB_PVE_CA'):
                 env.pop(name, None)
+            if action == 'runner':
+                env.update({'PROXMOX_VE_API_TOKEN': 'synthetic-private-api-value'} if credentials is None else credentials)
             result = subprocess.run([str(BASE / 'bootstrap'), action, str(bundle)],
                                     env=env, capture_output=True, text=True, timeout=10)
             calls = [json.loads(line) for line in calls_path.read_text().splitlines()] if calls_path.exists() else []
@@ -70,6 +73,7 @@ else:
             return result, calls
 
     def test_existing_auth_obtains_fresh_token_without_exposing_it_in_arguments(self):
+        """Verify existing auth obtains fresh token without exposing it in arguments."""
         result, calls = self.launch()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([call['command'] for call in calls], ['gh', 'gh', 'docker'])
@@ -81,17 +85,30 @@ else:
         self.assertNotIn('GH_TOKEN', docker['arguments'])
         self.assertNotIn('GITHUB_TOKEN', docker['arguments'])
 
+    def test_runner_rejects_account_credentials_before_github_or_docker(self):
+        """Reject passwords and missing API access before minting a runner token."""
+        for credentials in ({}, {'PROXMOX_VE_USERNAME': 'root@pam'},
+                            {'PROXMOX_VE_API_TOKEN': 'synthetic-token',
+                             'PROXMOX_VE_PASSWORD': 'synthetic-password'}):
+            with self.subTest(names=sorted(credentials)):
+                result, calls = self.launch(credentials=credentials)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(calls, [])
+
     def test_missing_auth_stops_before_token_or_docker(self):
+        """Verify missing auth stops before token or docker."""
         result, calls = self.launch('unauthenticated')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual([call['command'] for call in calls], ['gh'])
 
     def test_public_repository_or_missing_admin_stops_before_token_or_docker(self):
+        """Verify public repository or missing admin stops before token or docker."""
         result, calls = self.launch('public-or-no-admin')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual([call['command'] for call in calls], ['gh'])
 
     def test_token_failure_or_empty_response_stops_before_docker_without_retry(self):
+        """Verify token failure or empty response stops before docker without retry."""
         for mode in ('token-failure', 'empty-token'):
             with self.subTest(mode=mode):
                 result, calls = self.launch(mode)
@@ -99,16 +116,19 @@ else:
                 self.assertEqual([call['command'] for call in calls], ['gh', 'gh'])
 
     def test_runner_failure_does_not_request_another_token_or_retry(self):
+        """Verify runner failure does not request another token or retry."""
         result, calls = self.launch('docker-failure')
         self.assertEqual(result.returncode, 7)
         self.assertEqual([call['command'] for call in calls], ['gh', 'gh', 'docker'])
 
     def test_guest_plan_does_not_need_github_authentication(self):
+        """Verify guest plan does not need GitHub authentication."""
         result, calls = self.launch('unauthenticated', action='plan')
         self.assertEqual(result.returncode, 0)
         self.assertEqual([call['command'] for call in calls], ['docker'])
 
     def test_saved_access_is_loaded_without_secret_arguments_or_manual_exports(self):
+        """Verify saved access is loaded without secret arguments or manual exports."""
         result, calls = self.launch(action='plan', saved_access=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(calls[-1]['saved_api_token_loaded'])
@@ -116,12 +136,14 @@ else:
         self.assertTrue(any('/keys/pve-ca.pem:ro' in arg for arg in calls[-1]['arguments']))
 
     def test_access_uses_existing_ssh_without_github_authentication(self):
+        """Verify access uses existing SSH without GitHub authentication."""
         result, calls = self.launch('unauthenticated', action='access')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([call['command'] for call in calls], ['docker'])
         self.assertIn('/src/proxmox/bootstrap/access.py', calls[-1]['arguments'])
 
     def test_invalid_repository_stops_before_contacting_github(self):
+        """Verify invalid repository stops before contacting GitHub."""
         result, calls = self.launch(repository='example-owner/private-site/../other-repo')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(calls, [])

@@ -118,3 +118,20 @@ Private receipts retain the exact source, workflow, commit, runner and job-log
 bindings. Credentials, state, plans and raw private receipts remain outside Git.
 Preserve earlier failed attempts rather than treating the final success as
 proof that those attempts succeeded.
+
+## Publication review follow-up
+
+The subsequent public review identified failure-path and credential-boundary
+corrections: timed-out applies now receive a bounded graceful interruption;
+runner handover rejects account passwords and requires the scoped API token;
+and the unused Proxmox API template-download variant was removed. The selected
+cached-template SSH path remains the supported MVP. Regression results for
+these corrections are recorded separately from the earlier real-host rehearsal;
+that rehearsal was not repeated or relabelled as a test of the later source.
+
+The regressions first failed against the previous source. After the fixes,
+**64 unit tests passed** in the network-disabled Docker executor, together with
+real OpenTofu 1.13.1 validation and mocked provider plans for the root and guest
+module, Ansible syntax checks and the synthetic runner scenarios. Both source
+and fixture changes were included in that check. All 131 Python functions have
+docstrings; adding those docstrings left the executable AST unchanged.

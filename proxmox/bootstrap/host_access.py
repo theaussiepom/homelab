@@ -10,11 +10,13 @@ import time
 
 
 def node_ready(node):
+    """Confirm the local Proxmox cluster filesystem belongs to the selected node."""
     return (os.path.ismount('/etc/pve') and Path('/etc/pve/nodes/' + node).is_dir()
             and Path('/etc/pve/local').resolve() == Path('/etc/pve/nodes/' + node))
 
 
 def command(args):
+    """Run one bounded Proxmox command and decode its JSON response."""
     proc = subprocess.run(args, capture_output=True, text=True, timeout=20)
     if proc.returncode:
         raise RuntimeError('Proxmox access setup failed; ' + proc.stderr.strip())
@@ -22,6 +24,7 @@ def command(args):
 
 
 def grant(request, execute=command, emit=lambda value: None, ca_pem=None):
+    """Mint one separated token and verify its exact resource grants without retry."""
     node, vmid = request['node'], request['vmid']
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,62}', node) or socket.gethostname().split('.')[0] != node:
         raise RuntimeError('SSH host must be the selected Proxmox node')
@@ -35,6 +38,8 @@ def grant(request, execute=command, emit=lambda value: None, ca_pem=None):
         raise RuntimeError('Token lifetime must be zero or between one hour and one year')
     if type(request['download_template']) is not bool:
         raise RuntimeError('Template download selection must be explicit')
+    if request['download_template']:
+        raise RuntimeError('Use a cached template over pinned SSH; API template downloads are outside this MVP')
     if not node_ready(node):
         raise RuntimeError('Proxmox cluster filesystem/local node is not ready')
     guests = execute(['pvesh', 'get', '/cluster/resources', '--type', 'vm', '--output-format', 'json'])
@@ -43,6 +48,7 @@ def grant(request, execute=command, emit=lambda value: None, ca_pem=None):
     token_name = 'homelab-deploy-' + str(vmid)
     token_id = 'root@pam!' + token_name
     def token_acls():
+        """Read ACL rows assigned to this exact token identity."""
         return [row for row in execute(['pveum', 'acl', 'list', '--output-format', 'json'])
                 if row.get('ugid') == token_id]
     tokens = execute(['pveum', 'user', 'token', 'list', 'root@pam', '--output-format', 'json'])
@@ -52,10 +58,11 @@ def grant(request, execute=command, emit=lambda value: None, ca_pem=None):
         raise RuntimeError('Selected token has preexisting ACL rows; no adoption')
     grants = {}
     def add(path, role):
+        """Combine selected roles at one nonpropagating resource path."""
         grants.setdefault(path, set()).add(role)
     add('/vms/' + str(vmid), 'PVEVMAdmin')
     add('/storage/' + request['storage_id'], 'PVEDatastoreUser')
-    add('/storage/' + request['template_storage'], 'PVEDatastoreAdmin' if request['download_template'] else 'PVEAuditor')
+    add('/storage/' + request['template_storage'], 'PVEAuditor')
     add('/sdn/zones/localnetwork/' + request['bridge'], 'PVESDNUser')
     add('/nodes/' + node, 'PVEAuditor')
     roles = {row['roleid'] for row in execute(['pveum', 'role', 'list', '--output-format', 'json'])}
@@ -93,13 +100,12 @@ def grant(request, execute=command, emit=lambda value: None, ca_pem=None):
         raise RuntimeError('Effective permission paths/propagation differ from the selected grants')
     required = {}
     def need(path, privileges):
+        """Collect the effective privileges required at a selected resource path."""
         required.setdefault(path, set()).update(privileges)
     need('/vms/' + str(vmid), ['VM.Allocate', 'VM.Audit', 'VM.PowerMgmt', 'VM.Config.CPU',
                              'VM.Config.Memory', 'VM.Config.Disk', 'VM.Config.Network', 'VM.Config.Options'])
     need('/storage/' + request['storage_id'], ['Datastore.AllocateSpace', 'Datastore.Audit'])
     need('/storage/' + request['template_storage'], ['Datastore.Audit'])
-    if request['download_template']:
-        need('/storage/' + request['template_storage'], ['Datastore.AllocateTemplate'])
     need('/sdn/zones/localnetwork/' + request['bridge'], ['SDN.Use'])
     need('/nodes/' + node, ['Sys.Audit'])
     if any(not privileges <= set(effective[path]) for path, privileges in required.items()):

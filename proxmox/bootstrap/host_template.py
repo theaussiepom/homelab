@@ -10,10 +10,12 @@ import sys
 
 
 def node_ready(node):
+    """Confirm the host cluster filesystem matches the selected Proxmox node."""
     return (os.path.ismount('/etc/pve') and Path('/etc/pve/local').resolve() == Path('/etc/pve/nodes/' + node))
 
 
 def command(args):
+    """Run one bounded host command and decode the JSON response."""
     proc = subprocess.run(args, capture_output=True, text=True, timeout=10)
     if proc.returncode:
         raise RuntimeError('Selected template storage is unavailable: ' + proc.stderr.strip())
@@ -21,11 +23,13 @@ def command(args):
 
 
 def digest(path):
+    """Hash the complete archive for content verification."""
     with path.open('rb') as source:
         return hashlib.file_digest(source, 'sha256').hexdigest()
 
 
 def store(request, source, execute=command):
+    """Publish a verified template stream without overwriting conflicting or partial data."""
     node = request['node']
     if (not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,62}', node)
             or socket.gethostname().split('.')[0] != node or not node_ready(node)):

@@ -13,6 +13,7 @@ from native import workspace_lock
 
 
 def upload_template(work, parent_ssh):
+    """Transfer the verified cached archive over pinned SSH and retain its receipt."""
     request = read(work / 'template.json')
     source = work / 'template.archive'
     if source.is_symlink() or sha(source) != request['sha256'] or source.stat().st_size != request['size_bytes']:
@@ -37,6 +38,7 @@ def upload_template(work, parent_ssh):
 
 
 def setup(work, expires_in):
+    """Reuse valid saved access or request one scoped token without replaying failures."""
     with workspace_lock(work):
         if (work / 'access.json').exists():
             saved = read(work / 'access.json')
@@ -45,6 +47,8 @@ def setup(work, expires_in):
                 raise Refused('Saved access is incomplete or expired; preserve it before another credential action')
             return {'status': 'ready', 'token_id': saved['token_id'], 'expires_at': saved['expires_at'], 'changed': False}
         values = read(work / 'tofu/site.auto.tfvars.json')
+        if values.get('template') is not None:
+            raise Refused('Use a cached template over pinned SSH; API template downloads are outside this MVP')
         guest = values['deploy']
         endpoint = urlparse(values['site']['api_endpoint'])
         if endpoint.scheme != 'https' or endpoint.port != 8006 or not endpoint.hostname or endpoint.username or endpoint.password:
@@ -52,11 +56,10 @@ def setup(work, expires_in):
         for name in ('bootstrap-key', 'known_hosts'):
             if not (Path('/keys') / name).is_file():
                 raise Refused('Supply the ISO SSH key and verified known-hosts file')
-        template = values.get('template')
         request = {'node': values['site']['node'], 'vmid': guest['vmid'],
                    'storage_id': guest['storage_id'], 'bridge': guest['bridge'],
-                   'template_storage': template['datastore_id'] if template else guest['template_file_id'].split(':', 1)[0],
-                   'download_template': template is not None, 'expires_in': expires_in}
+                   'template_storage': guest['template_file_id'].split(':', 1)[0],
+                   'download_template': False, 'expires_in': expires_in}
         marker = work / 'access-attempt.json'
         try:
             with marker.open('x') as stream:

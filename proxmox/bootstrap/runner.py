@@ -43,6 +43,7 @@ def allow_host_api(work, parent_ssh, request):
 
 
 def stage_handover(work):
+    """Freeze workstation writes before copying and hashing the active state."""
     native.state_file(work)
     with (work / 'HANDOVER.json').open('x') as stream:
         stream.write(json.dumps({'runner_workspace': '/var/lib/homelab-bootstrap',
@@ -55,11 +56,26 @@ def stage_handover(work):
 
 
 def install(work):
+    """Hold the workspace lock throughout the one-way runner handover."""
     with native.workspace_lock(work):
         return install_locked(work)
 
 
+def connection_environment():
+    """Allow only the scoped Proxmox API token to cross into the runner."""
+    if os.environ.get('PROXMOX_VE_USERNAME') or os.environ.get('PROXMOX_VE_PASSWORD'):
+        raise Refused('The runner keeps only the scoped API token; unset Proxmox username/password')
+    token = os.environ.get('PROXMOX_VE_API_TOKEN')
+    if not token:
+        raise Refused('Create scoped API access first; the runner needs PROXMOX_VE_API_TOKEN')
+    if '\n' in token or '\r' in token or '\x00' in token:
+        raise Refused('Connection environment values must be single-line')
+    return {'PROXMOX_VE_API_TOKEN': token}
+
+
 def install_locked(work):
+    """Verify the guest and token before installing the runner and transferring state."""
+    environment = connection_environment()
     native.run_locked('verify', work)
     values = read(work / 'tofu/site.auto.tfvars.json')
     settings = read(work / 'settings.json')
@@ -98,12 +114,8 @@ def install_locked(work):
     allow_host_api(work, command[:-1], {'node': values['site']['node'], 'vmid': vmid,
                    'guest_address': address, 'api_endpoint': values['site']['api_endpoint']})
     bundle, state = stage_handover(work)
-    # Only normal deployment connection variables persist in the private guest.
+    # Only the scoped deployment API token persists in the private guest.
     # The short-lived GitHub registration token and operator SSH key do not.
-    names = ('PROXMOX_VE_API_TOKEN', 'PROXMOX_VE_USERNAME', 'PROXMOX_VE_PASSWORD')
-    environment = {name: os.environ[name] for name in names if os.environ.get(name)}
-    if any('\n' in value or '\x00' in value for value in environment.values()):
-        raise Refused('Connection environment values must be single-line')
     environment_file = work / 'runner-environment'
     environment_file.write_text(''.join(name + '=' + json.dumps(value, ensure_ascii=False) + '\n'
                                         for name, value in environment.items()))

@@ -10,6 +10,7 @@ import host_access
 
 class HostAccessTests(unittest.TestCase):
     def setUp(self):
+        """Create isolated synthetic inputs for this test case."""
         self.request = dict(node='pve', vmid=900, storage_id='local-lvm',
                             template_storage='local', download_template=False,
                             bridge='vmbr0', expires_in=21600)
@@ -23,6 +24,7 @@ class HostAccessTests(unittest.TestCase):
         self.bad_metadata = False
 
     def execute(self, args):
+        """Simulate only the expected Proxmox commands and record their effects."""
         self.calls.append(args)
         if args[:2] == ['pvesh', 'get']:
             return [{'vmid': 900}] if self.existing_vm else []
@@ -55,6 +57,7 @@ class HostAccessTests(unittest.TestCase):
         raise AssertionError(args)
 
     def grant(self):
+        """Exercise token setup against the synthetic host identity and API."""
         with patch.object(host_access.socket, 'gethostname', return_value='pve'), \
                 patch.object(host_access, 'node_ready', return_value=True), \
                 patch.object(host_access.time, 'time', return_value=1000):
@@ -62,6 +65,7 @@ class HostAccessTests(unittest.TestCase):
                                      ca_pem='synthetic-public-ca')
 
     def test_one_separated_token_and_only_exact_nonpropagating_acl_paths(self):
+        """Verify one separated token and only exact nonpropagating acl paths."""
         result = self.grant()
         self.assertEqual(result['status'], 'ready')
         minted = [c for c in self.calls if c[:4] == ['pveum', 'user', 'token', 'add']]
@@ -78,13 +82,16 @@ class HostAccessTests(unittest.TestCase):
         self.assertEqual(self.emitted[0]['status'], 'token_created_grants_pending')
         self.assertIn('synthetic-secret', self.emitted[0]['PROXMOX_VE_API_TOKEN'])
 
-    def test_template_download_gets_its_storage_role_without_losing_guest_storage_access(self):
+    def test_api_template_download_refuses_before_any_host_action(self):
+        """Verify API template download refuses before any host action."""
         self.request.update(download_template=True)
-        self.grant()
-        acl = next(c for c in self.calls if c[:4] == ['pveum', 'acl', 'modify', '/storage/local'])
-        self.assertIn('PVEDatastoreAdmin', acl[acl.index('--roles') + 1])
+        with self.assertRaisesRegex(RuntimeError, 'cached template'):
+            self.grant()
+        self.assertEqual(self.calls, [])
+        self.assertFalse(self.minted)
 
     def test_preexisting_acl_rows_are_refused_before_mint(self):
+        """Verify preexisting acl rows are refused before mint."""
         self.acls = [{'type': 'token', 'ugid': 'root@pam!homelab-deploy-900',
                       'path': '/', 'roleid': 'Administrator', 'propagate': 1}]
         with self.assertRaisesRegex(RuntimeError, 'ACL'):
@@ -92,11 +99,13 @@ class HostAccessTests(unittest.TestCase):
         self.assertFalse(self.minted)
 
     def test_expiry_readback_mismatch_is_not_claimed_ready(self):
+        """Verify expiry readback mismatch is not claimed ready."""
         self.bad_metadata = True
         with self.assertRaisesRegex(RuntimeError, 'expiry'):
             self.grant()
 
     def test_missing_pmxcfs_readiness_prevents_even_the_collision_lookup(self):
+        """Verify missing pmxcfs readiness prevents even the collision lookup."""
         with patch.object(host_access.socket, 'gethostname', return_value='pve'), \
                 patch.object(host_access, 'node_ready', return_value=False):
             with self.assertRaisesRegex(RuntimeError, 'ready'):
@@ -105,6 +114,7 @@ class HostAccessTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_existing_guest_or_token_is_not_replaced(self):
+        """Verify existing guest or token is not replaced."""
         for field in ('existing_vm', 'existing_token'):
             self.calls.clear()
             setattr(self, field, True)
@@ -114,6 +124,7 @@ class HostAccessTests(unittest.TestCase):
             setattr(self, field, False)
 
     def test_partial_acl_failure_keeps_minted_secret_receipt_without_retry_or_cleanup(self):
+        """Verify partial acl failure keeps minted secret receipt without retry or cleanup."""
         self.fail_acl = True
         with self.assertRaises(RuntimeError):
             self.grant()
@@ -122,6 +133,7 @@ class HostAccessTests(unittest.TestCase):
         self.assertFalse(any('delete' in c for c in self.calls))
 
     def test_no_broad_paths_or_protected_ids(self):
+        """Verify no broad paths or protected ids."""
         for key, value in [('vmid', 4914), ('bridge', '../other'), ('storage_id', '/'),
                            ('expires_in', -1), ('node', 'other-pve')]:
             request = dict(self.request)

@@ -24,11 +24,14 @@ class Refused(ValueError):
 
 
 def sha(path):
+    """Hash a file in bounded chunks for an exact content binding."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def read(path):
+    """Read JSON while refusing duplicate object keys."""
     def unique(pairs):
+        """Reject ambiguous duplicate JSON keys."""
         result = {}
         for key, value in pairs:
             if key in result:
@@ -39,11 +42,13 @@ def read(path):
 
 
 def write(path, value):
+    """Save a JSON receipt with private file permissions."""
     path.write_text(json.dumps(value, indent=2) + '\n')
     path.chmod(0o600)
 
 
 def settings_check(value):
+    """Validate repository, network and cached-template settings before preparation."""
     required = {'repository', 'runner_name', 'admin_cidr', 'prefix_length', 'gateway', 'dns_servers'}
     if set(value) not in (required, required | {'template'}):
         raise Refused('Use the documented repository/network settings; credentials use normal environment variables')
@@ -58,16 +63,15 @@ def settings_check(value):
     for address in value['dns_servers']: ipaddress.ip_address(address)
     if 'template' in value:
         template = value['template']
-        if (set(template) not in ({'url', 'sha256', 'file_name', 'datastore_id'},
-                                  {'file', 'sha256', 'file_name', 'datastore_id'}) or
-                ('url' in template and not template['url'].startswith('https://')) or
-                ('file' in template and (not isinstance(template['file'], str) or not template['file'])) or
+        if (set(template) != {'file', 'sha256', 'file_name', 'datastore_id'} or
+                not isinstance(template['file'], str) or not template['file'] or
                 not re.fullmatch('[a-f0-9]{64}', template['sha256']) or
                 Path(template['file_name']).name != template['file_name']):
-            raise Refused('Supply a vendor template HTTPS URL or cached file, exact SHA-256 and simple file name')
+            raise Refused('Supply a vendor template cached file, exact SHA-256 and simple file name')
 
 
 def select(catalog):
+    """Select the single protected deployment container from the catalogue."""
     guests = [g for g in catalog['guests'] if g['key'] == 'deploy']
     if len(guests) != 1:
         raise Refused('The catalog must contain exactly one deploy guest')
@@ -84,6 +88,7 @@ def select(catalog):
 
 
 def prepare(catalog_path, settings_path, destination):
+    """Create a private operator bundle without contacting the target host."""
     catalog, settings = read(catalog_path), read(settings_path)
     guest = select(catalog)
     settings_check(settings)
@@ -125,7 +130,7 @@ def prepare(catalog_path, settings_path, destination):
               'sha256': template['sha256'], 'size_bytes': archive.stat().st_size})
         template = None  # The SSH access step seeds it; OpenTofu then uses this existing template.
     write(tofu / 'site.auto.tfvars.json', {'site': catalog['site'], 'deploy': projection,
-          'admin_cidr': settings['admin_cidr'], 'template': template})
+          'admin_cidr': settings['admin_cidr']})
     write(destination / 'inventory.json', {'all': {'hosts': {'deploy': {
         'ansible_host': address, 'ansible_user': 'root',
         'ansible_ssh_common_args': '-o StrictHostKeyChecking=yes',
@@ -199,6 +204,7 @@ def container_prepare(catalog, settings, destination):
 
 
 def log_run(arguments, cwd, output, expected=0):
+    """Run a bounded offline check and retain its output and expected exit status."""
     with output.open('w') as stream:
         result = subprocess.run(arguments, cwd=cwd, stdout=stream,
                                 stderr=subprocess.STDOUT, timeout=180)
@@ -228,6 +234,7 @@ def container_backup(work, destination):
 
 
 def rehearse(evidence):
+    """Exercise the real local toolchain with synthetic provider and runner fixtures."""
     if not Path('/.dockerenv').exists():
         raise Refused('Use ./bootstrap test; rehearsal runs inside Docker')
     evidence.mkdir(parents=True, exist_ok=True)
@@ -278,6 +285,7 @@ def rehearse(evidence):
 
 
 def main():
+    """Dispatch the documented bootstrap CLI and report refusal without secret output."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     for action in ('prepare', 'container-prepare'):

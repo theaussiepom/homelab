@@ -13,6 +13,7 @@ import host_template
 
 class HostTemplateTests(unittest.TestCase):
     def setUp(self):
+        """Create isolated synthetic inputs for this test case."""
         self.area = tempfile.TemporaryDirectory()
         self.addCleanup(self.area.cleanup)
         self.target = Path(self.area.name) / 'cache/debian.tar.zst'
@@ -21,24 +22,28 @@ class HostTemplateTests(unittest.TestCase):
                         'sha256': hashlib.sha256(self.data).hexdigest(), 'size_bytes': len(self.data)}
 
     def upload(self, data=None):
+        """Exercise template storage using a synthetic stream and host fixture."""
         with patch.object(host_template.socket, 'gethostname', return_value='pve'), \
                 patch.object(host_template, 'node_ready', return_value=True):
             return host_template.store(self.request, io.BytesIO(self.data if data is None else data),
                                        execute=lambda args: str(self.target))
 
     def test_verified_stream_is_published_and_existing_copy_is_reused(self):
+        """Verify verified stream is published and existing copy is reused."""
         self.assertTrue(self.upload()['changed'])
         self.assertEqual(self.target.read_bytes(), self.data)
         self.assertFalse(self.upload()['changed'])
         self.assertEqual(self.target.read_bytes(), self.data)
 
     def test_wrong_digest_keeps_partial_evidence_and_publishes_nothing(self):
+        """Verify wrong digest keeps partial evidence and publishes nothing."""
         with self.assertRaisesRegex(RuntimeError, 'checksum'):
             self.upload(b'X' * len(self.data))
         self.assertFalse(self.target.exists())
         self.assertTrue(self.target.with_name(self.target.name + '.bootstrap-partial').exists())
 
     def test_existing_different_file_is_never_overwritten(self):
+        """Verify existing different file is never overwritten."""
         self.target.parent.mkdir()
         self.target.write_bytes(b'original different archive')
         with self.assertRaises(RuntimeError):
@@ -46,6 +51,7 @@ class HostTemplateTests(unittest.TestCase):
         self.assertEqual(self.target.read_bytes(), b'original different archive')
 
     def test_existing_partial_is_not_replayed_or_cleaned_up(self):
+        """Verify existing partial is not replayed or cleaned up."""
         self.target.parent.mkdir()
         partial = self.target.with_name(self.target.name + '.bootstrap-partial')
         partial.write_bytes(b'failed evidence')
@@ -54,6 +60,7 @@ class HostTemplateTests(unittest.TestCase):
         self.assertEqual(partial.read_bytes(), b'failed evidence')
 
     def test_size_limit_and_non_template_paths_fail_before_a_write(self):
+        """Verify size limit and non template paths fail before a write."""
         for key, value in [('file_id', 'local:snippets/secret'), ('size_bytes', 0),
                            ('size_bytes', 2 * 1024 ** 3), ('file_id', 'local:vztmpl/../other')]:
             before = dict(self.request)

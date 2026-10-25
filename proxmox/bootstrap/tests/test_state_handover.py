@@ -18,6 +18,7 @@ from bootstrap import Refused
 
 class StateHandoverTests(unittest.TestCase):
     def workspace(self, root):
+        """Create a private local state fixture with a known lineage and serial."""
         work = root / 'work'
         tofu = work / 'tofu'
         tofu.mkdir(parents=True)
@@ -27,6 +28,7 @@ class StateHandoverTests(unittest.TestCase):
         return work
 
     def test_handover_copies_exact_state_and_freezes_workstation(self):
+        """Verify handover copies exact state and freezes workstation."""
         with tempfile.TemporaryDirectory() as tmp:
             work = self.workspace(Path(tmp))
             (work / 'tofu/review.tfplan').write_text('private saved plan, excluded')
@@ -48,6 +50,7 @@ class StateHandoverTests(unittest.TestCase):
                 pass
 
     def test_failed_copy_keeps_workstation_frozen_and_never_retries(self):
+        """Verify failed copy keeps workstation frozen and never retries."""
         with tempfile.TemporaryDirectory() as tmp:
             work = self.workspace(Path(tmp))
             with native.workspace_lock(work), patch.object(native, 'copy_workspace', side_effect=OSError('fixture failure')):
@@ -58,6 +61,7 @@ class StateHandoverTests(unittest.TestCase):
                 native.run('apply', work)
 
     def test_missing_state_is_not_replaced_by_an_empty_state(self):
+        """Verify missing state is not replaced by an empty state."""
         with tempfile.TemporaryDirectory() as tmp:
             work = self.workspace(Path(tmp))
             (work / 'tofu/terraform.tfstate').unlink()
@@ -66,6 +70,7 @@ class StateHandoverTests(unittest.TestCase):
             self.assertFalse((work / 'HANDOVER.json').exists())
 
     def test_workspace_lock_refuses_another_process(self):
+        """Verify workspace lock refuses another process."""
         with tempfile.TemporaryDirectory() as tmp:
             work = self.workspace(Path(tmp))
             code = '''import sys
@@ -85,6 +90,7 @@ except native.Refused:
             self.assertEqual(process.returncode, 0, process.stderr)
 
     def test_backup_after_handover_is_private_and_does_not_unfreeze_source(self):
+        """Verify backup after handover is private and does not unfreeze source."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             work = self.workspace(root)
@@ -99,6 +105,7 @@ except native.Refused:
                 native.backup(work, destination)
 
     def test_workstation_does_not_launch_docker_during_another_operation(self):
+        """Verify workstation does not launch docker during another operation."""
         with tempfile.TemporaryDirectory() as tmp:
             work = self.workspace(Path(tmp))
             with native.workspace_lock(work, name='.workstation.lock'):

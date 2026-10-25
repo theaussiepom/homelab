@@ -56,6 +56,10 @@ print(value["PROXMOX_VE_API_TOKEN"])
     fi
     HOMELAB_PVE_CA=${HOMELAB_PVE_CA:-"$work/pve-ca.pem"}
     if [ "$action" = runner ]; then
+      if [ -n "${PROXMOX_VE_USERNAME:-}${PROXMOX_VE_PASSWORD:-}" ] || [ -z "${PROXMOX_VE_API_TOKEN:-}" ]; then
+        echo "Runner setup requires the scoped API token and refuses Proxmox username/password credentials." >&2
+        exit 2
+      fi
       repository=$(python3 -c '
 import json,re,sys
 repository=json.load(open(sys.argv[1]))["repository"]

@@ -11,6 +11,7 @@ import fcntl
 from pathlib import Path
 import platform
 import shutil
+import signal
 import subprocess
 import tempfile
 
@@ -35,6 +36,7 @@ def workspace_lock(work, backup=False, name='.bootstrap.lock'):
 
 
 def state_file(work):
+    """Require the existing state and validate its lineage, serial and private mode."""
     path = work / 'tofu/terraform.tfstate'
     if path.is_symlink() or not path.is_file():
         raise Refused('The existing local state file is required; do not recreate it')
@@ -67,6 +69,7 @@ def copy_workspace(work, destination):
 
 
 def backup(work, destination):
+    """Copy exact state and configuration under the shared workspace lock."""
     work, destination = work.resolve(), destination.absolute()
     source_root = HERE.parents[1] if (HERE.parents[1] / 'proxmox/bootstrap').is_dir() else HERE
     if destination.resolve().is_relative_to(source_root):
@@ -78,17 +81,18 @@ def backup(work, destination):
 
 
 def check_plan(plan):
+    """Refuse changes outside creation of the selected deployment guest."""
     allowed = {'module.guests["deploy"].proxmox_virtual_environment_container.guest',
                'module.guests["deploy"].proxmox_virtual_environment_firewall_options.guest',
-               'module.guests["deploy"].proxmox_virtual_environment_firewall_rules.ssh',
-               'proxmox_virtual_environment_download_file.template[0]'}
+               'module.guests["deploy"].proxmox_virtual_environment_firewall_rules.ssh'}
     changes = plan.get('resource_changes', [])
     if not changes or any(c['address'] not in allowed or
                           c['change']['actions'] not in (['create'], ['no-op']) for c in changes):
-        raise Refused('Bootstrap accepts only creation of its own guest/template or no changes; review other changes separately')
+        raise Refused('Bootstrap accepts only creation of its own guest or no changes; review other changes separately')
 
 
 def binding(work):
+    """Hash the active OpenTofu configuration while excluding tool caches."""
     files = sorted(p for p in (work / 'tofu').rglob('*') if p.is_file()
                    and '.terraform' not in p.parts and p.suffix in ('.tf', '.json', '.hcl'))
     return hashlib.sha256(b''.join(str(p.relative_to(work)).encode() + b'\0' + p.read_bytes()
@@ -96,11 +100,32 @@ def binding(work):
 
 
 def run(action, directory):
+    """Serialize a native operation against workstation writes and handover."""
     with workspace_lock(directory.resolve()):
         return run_locked(action, directory)
 
 
+def apply_process(args, cwd, stdout, stderr):
+    """Give a timed-out apply time to save state, while retaining UNKNOWN."""
+    proc = subprocess.Popen(args, cwd=cwd, stdout=stdout, stderr=stderr)
+    try:
+        proc.wait(timeout=900)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.send_signal(signal.SIGINT)
+            try:
+                proc.wait(timeout=300)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # Local cleanup cannot establish the remote resource outcome.
+        raise
+    return proc
+
+
 def run_locked(action, directory):
+    """Run one Linux-operator action and preserve failed apply evidence without retry."""
     if platform.system() != 'Linux' or Path('/etc/pve').exists():
         raise Refused('Run the tools in the Linux Docker executor, not on Mac or the PVE host')
     work = directory.resolve()
@@ -114,10 +139,14 @@ def run_locked(action, directory):
     write(attempt / 'result.json', result)
 
     def command(args, name, accepted=(0,)):
+        """Capture one tool invocation privately and enforce its allowed exit codes."""
         out, err = attempt / (name + '.stdout'), attempt / (name + '.stderr')
         for path in (out, err): path.touch(mode=0o600)
         with out.open('w') as stdout, err.open('w') as stderr:
-            proc = subprocess.run(args, cwd=work / 'tofu', stdout=stdout, stderr=stderr, timeout=900)
+            if name == 'apply':
+                proc = apply_process(args, work / 'tofu', stdout, stderr)
+            else:
+                proc = subprocess.run(args, cwd=work / 'tofu', stdout=stdout, stderr=stderr, timeout=900)
         if proc.returncode not in accepted:
             raise Refused('Command failed; inspect private logs at ' + str(attempt))
         return proc.returncode, out

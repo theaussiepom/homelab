@@ -12,11 +12,13 @@ your homelab:
 OpenTofu creates and starts the guest. Ansible installs its deployment tools and
 runner. Other guests and applications are later work. No database is required.
 
-**Current status (25 October 2026):** the unchanged script passed a complete
+**Current status (25 October 2026):** the selected route passed a complete
 fresh-host test in an isolated Proxmox 9.2 lab: guest creation, automatic API
 firewall setup, state handover, new runner registration and a successful real
 GitHub verification job. No manual repairs were made between script stages.
-Physical-target and later application rollout remain separate. See the
+Subsequent publication-review fixes passed 64 unit tests and offline
+OpenTofu/Ansible integration checks; the live rehearsal was not repeated for
+those corrections. Physical-target and later application rollout remain separate. See the
 [verification record](verification.md) for the exact scope and limits.
 
 ## The steps at a glance
@@ -36,8 +38,8 @@ creation script or manual Proxmox token/firewall setup is needed.
 - A Mac or Linux workstation with Git, Python 3, Docker, and GitHub CLI (`gh`).
 - A newly installed, reachable x86-64 Proxmox host.
 - An existing storage location and management bridge on that host.
-- A checksum-pinned Debian 13 amd64 template archive or HTTPS download,
-  or an existing template on the host. Bootstrap can upload a cached archive.
+- A checksum-pinned Debian 13 amd64 template archive, or an existing template
+  on the host. Bootstrap can upload a cached archive over pinned SSH.
 - A private GitHub deployment repository that you administer. The source code
   can be public; the self-hosted runner is registered to your private repository.
 - The SSH key installed on the host by your ISO. Bootstrap creates its own
@@ -121,19 +123,11 @@ selected template storage, checks its size/hash again, and refuses to overwrite
 a different file. No manual Proxmox template upload is needed. Retain the
 vendor's signed-index/checksum provenance for the archive you choose.
 
-If the vendor provides a working HTTPS download, use `url` instead of `file`:
-
-```json
-{
-  "url": "https://VENDOR/EXACT-DEBIAN-13-TEMPLATE.tar.zst",
-  "sha256": "EXACT_VENDOR_SHA256",
-  "file_name": "EXACT-DEBIAN-13-TEMPLATE.tar.zst",
-  "datastore_id": "local"
-}
-```
-
-Use the vendor's actual release URL and checksum. Storage and bridges must
-already exist; this bootstrap does not reconfigure host networking or disks.
+Download the archive to your workstation from the vendor and retain its trusted
+checksum before preparing the bundle. This MVP accepts a cached file or an
+existing host template; it does not download templates through the Proxmox API
+or grant template-administration permissions. Storage and bridges must already
+exist; this bootstrap does not reconfigure host networking or disks.
 
 ## 3. Establish SSH trust for the fresh host
 
@@ -172,19 +166,28 @@ refuses to overwrite it.
 The `access` step checks the selected host and unused guest ID, retrieves the
 public Proxmox CA, and creates one separated `root@pam!homelab-deploy-VMID`
 token. It grants access only to the selected guest, storage, bridge and node;
-existing accounts, tokens and permissions remain intact. If a template download
-is selected, the token also receives `PVEDatastoreAdmin` on that template's
-storage. A cached archive uses the existing root SSH connection for the exact
-file transfer, so the API token needs only audit access to its template storage.
+existing accounts, tokens and permissions remain intact. A cached archive uses
+the existing root SSH connection for the exact file transfer, so the API token
+needs only audit access to its template storage.
 It adds no permissions to other guests. HTTPS certificate checks stay enabled.
 
 The token and CA are saved privately in the bundle. Later commands load them
 automatically; no token copy/paste or credential export is needed. The example
 lifetime is six hours, suitable for a rehearsal. For an ongoing CD installation,
-choose the intended lifetime explicitly; `--expires-in 0` creates a token
-without automatic expiry. Expired or partially created credentials are held
+choose the intended lifetime explicitly. Use `--expires-in 0` only after the
+operator explicitly approves a credential without automatic expiry; this is
+not the rehearsal default. Expired or partially created credentials are held
 for inspection rather than silently replaced. Keep durable credentials in your
 password manager and keep this bundle outside Git.
+
+For revocation, an administrator removes the exact `homelab-deploy-VMID` token
+from Proxmox's API Tokens panel; an exposed token should be revoked immediately.
+For planned rotation, approve and issue a replacement separated token with the
+same reviewed resource grants. Update the token in the private workstation
+`access.json` and the guest's root-owned `/etc/homelab-bootstrap.env`, then
+restart `homelab-deploy.service` and verify a no-change deployment job before
+revoking the old token. Keep both tokens private and preserve the active state.
+The bootstrap does not automate rotation or replace an existing token.
 
 Read the plan log and confirm the correct host, unused guest ID, template,
 storage and network. Then apply those same saved plan bytes:
@@ -200,7 +203,10 @@ administration subnet; outbound traffic is allowed. The bootstrap accepts only
 creation of its own guest/template or a no-op. It refuses replacement, deletion
 and unrelated resource changes.
 
-A failed apply leaves `HOLD.json` and private logs. Inspect the actual outcome
+A timed-out apply first interrupts OpenTofu and gives it up to five minutes to
+save partial state. Only then does it force-stop the local process if necessary.
+The result remains `UNKNOWN`: local process exit does not prove the remote
+resource outcome. A failed apply leaves `HOLD.json` and private logs. Inspect the actual outcome
 before another attempt. Do not delete state or clear a hold to make a retry run.
 
 ## 5. Back up the initial state, then hand over to GitHub
@@ -235,8 +241,10 @@ The API hostname must resolve to one IPv4 address assigned to this host.
 After installing the trusted CA in the guest, Ansible checks HTTPS access to
 the API before copying state and registering the runner. A failed allowance or
 connection check stops setup and preserves its private evidence; there is no
-automatic retry. Keep the guest address stable through your chosen static
-settings or existing DHCP reservation.
+automatic retry. Before leaving this allowance in place for ongoing CD, the
+operator must confirm a static address or DHCP reservation and prevent another
+device from taking that address. This firewall rule trusts the `/32` address,
+not the guest's identity; it does not reserve or follow a changing DHCP lease.
 
 Now install the runner:
 
@@ -258,8 +266,13 @@ The installer verifies the guest, reads its SSH public host key through the
 trusted Proxmox connection, and copies the exact state/configuration into
 `/var/lib/homelab-bootstrap` on the guest. It checks the state hash and runs a
 fresh no-change provider plan there before registering and starting the runner.
-The guest receives the Proxmox connection credentials it needs for deployment;
-they are stored in a root-readable service environment file. The operator's SSH
+The guest receives only the scoped Proxmox API token; username/password
+credentials and a missing API token are refused before handover. The token is
+stored in a root-readable service environment file. The service loads it into
+its process environment, so **every workflow job on this runner can read it**.
+Only protected, reviewed workflows may run here. Restrict repository and
+workflow-change access, and do not send untrusted pull-request jobs to this
+runner. Runner labels route jobs; they are not an access control. The operator's SSH
 private key and personal GitHub token are not installed as deployment credentials.
 
 **Handover is one-way.** A local `HANDOVER.json` disables further workstation
