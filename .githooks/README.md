@@ -1,66 +1,114 @@
-# Fast staged-source check
+# Check staged files before committing
 
-The pre-commit hook checks only added, modified, renamed or type-changed **index
-blobs**, not the working files, old commits or untracked files. Deleted files
-need no content scan. It performs no network requests, dependency installation,
-builds, service commands or application tests.
+[Back to the main README](../README.md) ·
+[Full contributor setup](../docs/contributing-safely.md)
 
-## Setup and use
+These Git hooks help prevent private files, credentials and unsafe source
+formats from entering a commit. They are for contributors changing this
+repository; you do not need to configure them merely to use the Proxmox guides.
 
-Requires Git, Python 3.11+ and an already installed Gitleaks **8.30.1**. Install
-the scanner separately from its official release and verify its checksum.
+**Staged files** are the versions selected by `git add` for the next commit.
+The pre-commit check reads those exact Git blobs, not potentially different
+working files.
+
+## What you need
+
+- Git and Python **3.11 or newer**.
+- A verified installation of Gitleaks **8.30.1**, the secret scanner.
+- A clone of this repository, with your normal commit-signing setup.
+
+Use [contributing safely](../docs/contributing-safely.md) for the verified scanner
+installer, signing requirements and complete CI expectations. No scanner download,
+dependency installation, build or application test runs inside the hook.
+
+## 1. Enable hooks in this clone
+
+From the **repository root**:
 
 ```sh
 git config --local core.hooksPath .githooks
-# Optional when the verified scanner is not on PATH:
+```
+
+If the verified scanner is not on your PATH, set its actual absolute path:
+
+```sh
 git config --local hooks.gitleaksPath /absolute/path/to/gitleaks
+```
+
+Each new clone needs its own setup. `GITLEAKS_BIN` can select an installed binary
+when testing; it does not trigger a download or update.
+
+## 2. Check the staged version
+
+After selecting your intended files with `git add`, run:
+
+```sh
 python3 .githooks/staged_guard.py
 ```
 
-The hook runs automatically on a normal `git commit`. `GITLEAKS_BIN` can select
-an installed binary when testing. There is no automatic download or update.
-Git hooks are a local safeguard and can be bypassed; server-side controls are
-separate work. A clone must enable its own hook using the setup command above.
+**Expected result:** a successful status report. It reports paths, rule IDs and
+line numbers when needed, never the matching secret values. It does not change
+your files, Git index or permissions. Normal `git commit` runs the same check
+automatically.
 
-## Checks and bounds
+The guard checks added, modified, renamed and type-changed files. Deleted files
+need no content scan. Old commits and untracked files are outside this fast
+staged check; CI separately scans committed trees and new history.
 
-- Conventional private/runtime paths and paths excluded by **staged** `.gitignore`
-  rules are refused, including files force-added to the index. Examples/templates
-  are still scanned for secrets; their suffix is not a content exemption.
-- Gitleaks runs its bundled default rules over complete changed text blobs.
-  This catches secrets elsewhere in a modified file, not just added diff lines.
-  Inline allow comments, repository scanner configs and ignore fingerprints
-  cannot silently disable this scan.
+## When something goes wrong
+
+| What you see | What to do |
+| --- | --- |
+| Missing or wrong scanner version | Install/choose verified Gitleaks 8.30.1 using the contributor guide. |
+| Private path or ignored file refused | Remove it from the proposed commit; keep the real file private. Do not force-add it to bypass the guard. |
+| A secret finding | Inspect privately and replace/remove the sensitive value. An exposed credential also needs its own incident response. |
+| Suspected false positive | Review that exact finding before updating the narrowly bound exception file. Do not disable a rule or directory. |
+| Timeout, oversized input or unsupported file | Split/review the change appropriately; the hook intentionally blocks rather than skipping the file. |
+| Git index changed during the check | Finish the other staging operation, then check the intended index again. |
+
+Do not routinely bypass hooks. A passing scan is not a complete privacy audit or
+proof of runtime security. It cannot determine every household identifier's
+sensitivity or compare your private credential stores.
+
+## What is checked?
+
+- Conventional private/runtime paths and paths excluded by **staged**
+  `.gitignore` rules are refused, including force-added files.
+- Examples/templates still receive the full secret scan. Their suffix does not
+  exempt their content.
+- Gitleaks scans whole changed text blobs, including unchanged lines. Inline
+  allow comments, repository scanner settings and ignore fingerprints cannot
+  silently disable it.
 - Symlinks, submodules, unresolved merges, archives, binary/non-UTF-8 files and
-  oversized inputs are refused for a separate review rather than silently skipped.
-- Limits: **five seconds**, **2,000 changed files**, **2 MiB per file**, **16 MiB total**.
-  Missing/wrong-version scanners, errors and timeouts block the commit.
-- Git index bytes are compared before/after checking; concurrent index changes
-  block the commit. The guard does not alter the index, source, or permissions.
+  oversized inputs require separate review and are refused.
+- The budget is **five seconds**, **2,000 changed files**, **2 MiB per file** and
+  **16 MiB total**. Scanner errors or timeouts block the commit.
+- Git index bytes are compared before/after checking; a concurrent change blocks
+  the result.
 
-The scanner receives a mode-0700 temporary snapshot; files/reports stay under
-that directory and are removed when the process exits normally or handles a
-failure. Output contains only status, paths, rule IDs, line numbers and timing,
-never matching values. Abrupt process termination can leave a private temporary
-directory to remove later.
+The scanner uses a private mode-`0700` temporary snapshot. Normal completion or
+handled failure removes it; abrupt termination can leave a private directory
+requiring later inspection.
 
-Previously reviewed false positives live in `reviewed-findings.json`. Every
-exception binds one **path, full-file SHA-256, rule and line**, with a reason.
-Changing the file invalidates that exception. Review a new finding before
-updating this file; never suppress a whole directory or scanner rule to make
-a check pass. Exceptions are read from the index, so unstaged edits do not
-affect the proposed commit.
+Reviewed exceptions in `reviewed-findings.json` bind one **path, full-file
+SHA-256, rule and line**, with a reason. Changing the file invalidates its
+exception. The guard reads exceptions from the index, so unstaged edits cannot
+alter the proposed commit's checks. No blanket directory/rule suppression is
+an acceptable way to get a pass.
 
-This is a fast prevention check, not a complete security/privacy audit. It does
-not compare private credential stores, determine whether household identifiers
-are sensitive, inspect old history, or prove runtime security.
+## What has actually been verified?
 
-## Regression tests
+Run the regression checks from the repository root:
 
 ```sh
 python3 -B .githooks/test_staged_guard.py
 ```
 
-Tests use disposable Git repositories and synthetic credential-shaped fixtures.
-They exercise actual hook acceptance/refusal, partial staging, staged ignore
-rules, byte-pinned exceptions, scanner failures and the five-second timeout.
+**Expected result:** the test summary ends with `OK`. Tests use disposable Git
+repositories and synthetic credential-shaped fixtures. They exercise acceptance,
+refusal, partial staging, staged ignore rules, byte-pinned exceptions, scanner
+failures and the five-second timeout.
+
+Hooks can be bypassed locally, so server-side CI and branch controls remain
+separate safeguards. Before merging, check CI and CodeRabbit against the latest
+PR commit using the [contributor requirements](../docs/contributing-safely.md).

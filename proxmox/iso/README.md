@@ -41,9 +41,25 @@ follow through later deployment jobs.
 - Internet access for the first download, including a roughly **1.7 GB** vendor ISO. Allow about **40 GB** of free build space for downloads, intermediate images and tests.
 - A USB drive of at least **8 GB** whose contents you are happy to erase, for the real installation stage.
 
+If Docker is not installed, start with the official
+[Docker Desktop setup](https://docs.docker.com/desktop/). Wait until it reports
+that its engine is running before starting the commands below.
+
 The documented automatic USB-writing helper currently supports **macOS**. The Docker build can also be used on Linux; this package does not supply a Linux or Windows USB-writing helper. Follow the [vendor's installation-media guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#installation_prepare_media) for those systems. Do not translate a Mac disk name into a Linux command by guesswork.
 
-Open a terminal in this repository's `proxmox/iso` folder. All commands below run from that folder.
+If you have not downloaded the repository, use the
+[main README's clone commands](../../README.md#1-get-a-copy-on-your-computer).
+Then, from the repository root, run:
+
+```sh
+cd proxmox/iso
+pwd
+```
+
+The printed path should end in `homelab/proxmox/iso`. **All commands below run
+from this folder**, on your workstation, unless a step says otherwise. You can
+open `.local/` in your file manager or text editor; a leading dot makes it hidden
+in many file managers. On a Mac, Command–Shift–Period shows hidden files in Finder.
 
 ## 1. Try it safely first
 
@@ -120,7 +136,17 @@ Addresses use the form `192.0.2.10/24`: the `/24` is the network size. Example a
 
 ### Sign-in details
 
-Save the recovery password and your SSH private key in your password manager. The private key never needs to enter this folder or Docker.
+If you do not already have a suitable SSH key, follow
+[prepare your SSH key](../host-access.md#1-have-a-key-ready-before-building-the-iso)
+first. It explains the public/private files and the current bootstrap's
+non-interactive key requirement. Use that same public key for the ISO and the
+later deployment guest.
+
+Save the recovery password and your SSH private key in your password manager.
+Keep the private key outside this folder; the ISO build uses only the public
+key. The shared host/guest public key is intentional for this initial bootstrap.
+During that later step, the launcher mounts the private key read-only into
+Docker for non-interactive SSH; it is not installed in the guest or runner.
 
 1. Copy your existing **public** SSH key into `.local/root-ssh.pub`. This version requires the single line beginning `ssh-ed25519`. Copy the key type and long key value; omit any trailing comment. Do not copy a file beginning `BEGIN … PRIVATE KEY`.
 2. Create a strong recovery password in your password manager, then run:
@@ -205,7 +231,10 @@ Building or testing the ISO does not shut down the target computer. Plan that in
 2. Use its default **CHECK ONLY** entry first. Read the listed new-disk serial numbers and the protected original. A successful check ends at a stop screen; it does not install anything.
 3. When you are ready to erase the two new SSDs, reboot the USB and select **INSTALL**. Confirm that the displayed serials are the intended new drives. Type the exact phrase requested on screen, including those serial numbers. A wrong answer or five-minute timeout stops the operation.
 4. Successful installation powers the machine off. Remove the USB, select the new Proxmox boot entry, and start the machine.
-5. Check both wired ports, management access, the storage address and SSH sign-in. Also confirm the new mirrored storage and the preserved original disk before moving on to guests or applications.
+5. Follow [host access and checks](../host-access.md) for the console commands,
+   fingerprint comparison and workstation SSH test. Check both wired ports,
+   management/storage addresses, the new mirror and the preserved original disk
+   before moving on to guests or applications.
 
 The first-start network script checks both expected port identities before writing its configuration. It preserves the vendor-created interfaces file and refuses a repeated run. It does not configure switch ports or firewalls.
 

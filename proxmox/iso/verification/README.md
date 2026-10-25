@@ -1,39 +1,107 @@
-# Verification status
+# What the installer tests establish
 
-A follow-up fix on **25 October 2026** validates catalogue hardware before reading its layout. Nulls, arrays, strings, numbers and booleans now raise the intended refusal. The new regression failed before the fix; all **30 source tests** then passed locally and in the documented Docker builder. Build and VM checks for subsequent commits run in [GitHub Actions](https://github.com/theaussiepom/homelab/actions/workflows/proxmox-iso.yml).
+[Back to the installation USB guide](../README.md) ·
+[Whole Proxmox sequence](../../README.md)
 
-The packaged qualification record below and `validation.json` describe the earlier source digest and exact images recorded there. They are retained as historical evidence; the current files and source digest are listed in `source-manifest.json`.
+The installer has passed source checks, image builds and guarded virtual boot
+tests. **These results do not mean it has installed your physical computer.**
+That happens when you choose the actual migration window.
 
-## Packaged qualification record
+A **receipt** is a saved result identifying the exact files/image checked.
+A **checksum** identifies file contents; changed contents produce a different
+checksum. A result for an earlier image does not qualify a new image.
 
-Reverified on **25 October 2026**, using Docker Desktop on an Apple Silicon Mac. These are bounded preparation results, not acceptance of a physical Proxmox deployment.
+## Read the results at a glance
 
-| Check | Result |
+The packaged checks were reverified on **25 October 2026**, using Docker Desktop
+on an Apple Silicon Mac. A later code correction was checked separately:
+
+| Check | Result | What that means for you |
+| --- | --- | --- |
+| Docker tool images and vendor inputs | Passed. Existing public downloads were rechecked, including signed verification; the full download was not repeated. | The documented build tools and selected inputs worked in that environment. |
+| Packaged source suite | 29 tests passed locally and in Docker. | Configuration, guards and reviewed failure paths passed at that recorded source. |
+| Later malformed-catalogue correction | 30 tests passed locally and in Docker; its regression failed before the fix. | Null, array, text, numeric and boolean hardware entries receive the intended refusal. |
+| Practice image build and embedded-file readback | Passed. | The image contained its intended files and a native-parser-valid answer. |
+| Build with private-style inputs | Passed with invented settings and unusable synthetic credentials. | The build path worked without publishing real private inputs. |
+| Vendor filesystem metadata | All 25,210 other records preserved. | The startup script was the sole intentional changed record. |
+| Six guarded virtual boot cases | Passed, with zero target-disk writes. | The cases below checked the image's stop/refusal behaviour. |
+| Physical installation and first-start networking | Not performed in this packaged qualification. | Check the actual machine at installation. |
+| Physical write by the reusable USB helper | Not performed for this package. | A fresh write needs its own complete readback receipt. An earlier target-specific helper completed a separate write/readback. |
+
+The detailed [validation summary](validation.json) binds the earlier qualification
+to its exact source and image hashes. [The source manifest](source-manifest.json)
+records a later source snapshot. They are historical records, not manifests to
+silently regenerate after a documentation edit or proof that every later checkout
+was boot-tested. Current PR build/boot results appear in
+[GitHub Actions](https://github.com/theaussiepom/homelab/actions/workflows/proxmox-iso.yml).
+
+## What did the six boot cases do?
+
+| Case | Expected and observed result |
 | --- | --- |
-| Documented Docker tool-image builds | Passed. |
-| Vendor ISO/helper/runtime verification and derived-input preparation | Passed using the existing public download cache, with its signed chain and digests rechecked. The full network download was not repeated. |
-| Source checks locally and in the documented Docker builder | **29 tests passed**, with matching source digests. |
-| Practice ISO build, native answer parser and embedded-file readback | Passed. |
-| Private-input build path | Passed using invented hardware/site settings and unusable synthetic credentials. No real private inputs were copied. |
-| Vendor filesystem metadata | All **25210 other records preserved**; the startup script is the sole intentional changed record. |
-| Matching virtual hardware | CHECK ONLY passed and stopped, with zero target-disk writes. |
-| Wrong machine, missing disk and duplicate disk identities | Refused for the expected reasons, with zero target-disk writes. |
-| Cancelled installation confirmation | Refused, with zero target-disk writes. |
-| Exact private-input image on the wrong virtual machine | Refused the machine UUID, with zero target-disk writes. |
-| Physical installation / first-start networking | **Not performed.** Still requires the actual target and its installation window. |
-| Reusable USB helper physical write | **Not performed for this package.** Selection and receipt behavior have source tests. The earlier target-specific writer completed its own full physical write/readback. |
+| Matching invented computer | CHECK ONLY succeeds and stops. |
+| Wrong machine | Refuses the machine UUID. |
+| Missing disk | Refuses the incomplete layout. |
+| Duplicate disk identity | Refuses the ambiguous layout. |
+| Cancelled installation confirmation | Refuses to launch installation. |
+| Real-image build path on the wrong virtual computer | Refuses the machine UUID. |
 
-The six new accepted boot receipts bind the rebuilt images' exact hashes. The guard now holds on ordinary runtime failures, and retained legacy compiler helpers have bounded review fixes. The observer remains unchanged. Seven new regression tests cover optimised-Python trust checks, stale metadata, guard failures, unsupported legacy mirror compilation, captured signature bytes, output creation and single-render manifest consistency. All 29 source tests passed locally and in Docker. Earlier image results were not credited to the revised images.
+Five cases use the practice image; the sixth uses the invented-input build path.
+All six accepted receipts identify their rebuilt images. They stop before a
+native installation and cannot prove that a mirror, physical port or switch
+works after installing your host.
 
-During the original packaging qualification, two local failures were retained and corrected: the first ordinary-user build changed root ownership metadata, and one test missed the serial-console menu entry. Root ownership/mode/time are now explicit, menu selection waits for the complete menu and paces keys, and the affected images/case were checked again. Failed/incomplete cases are not counted as passes. Raw logs and generated test images remain outside Git.
+## 1. Check a new image you build
 
-The generated network interfaces file intentionally retains mode `0644`, following Proxmox's network writer convention for this payload without credentials. Its CodeQL report is documented in the [technical reference](../docs/technical-reference.md); no blanket suppression was added. The metadata preservation receipt now includes the verified SquashFS hash, which media acceptance requires to match the current build.
+Return to the [ISO walkthrough](../README.md) and run its practice tests, then
+`make build`, `make test-profile` and `make qualify` for your own settings.
 
-The interactive password prompt was not exercised with a real credential during packaging. Linux and other build hosts were not separately qualified. Successful full native installation, physical cabling/switching, first-start hook execution, network/SSH access and guest/application rollout are separate outcomes.
+**Expected result:** `make qualify` creates
+`evidence/media-acceptance.json` for the current exact image hashes. A build receipt
+alone records construction; it does not replace the later acceptance record.
 
-The original completed USB was not changed. All new image builds used synthetic or invented integration inputs. These verification runs performed no physical installation or live service operation; repository publication is separate from deployment.
+After USB writing, wait for `usb_ready: true`, `readback_verified: true` and
+`ejected: true` in that operation's receipt.
 
-- [Machine-readable validation summary](validation.json)
-- [Source file checksums](source-manifest.json)
+## 2. Check the actual installation
 
-A build receipt records the build phase; the separate acceptance record records later test completion. For a new local build, `make qualify` produces `evidence/media-acceptance.json` for that build's exact image hashes.
+At your chosen installation window, use the
+[attended installation steps](../README.md#6-boot-and-install--at-your-chosen-maintenance-window),
+then [host access and checks](../../host-access.md).
+
+**Expected result:** the intended host, healthy new mirror, preserved original
+disk identity, correct port/address setup and working verified SSH access.
+Those observations belong to your installation, not to the earlier virtual tests.
+
+## When a check fails
+
+Keep the failed files and console output. Use the
+[ISO troubleshooting table](../README.md#when-something-goes-wrong).
+Do not count an incomplete/queued case as a pass, delete failure receipts, or
+credit earlier images' results to a revised image.
+
+During qualification, an initial build changed root ownership metadata and a
+test missed the serial-console menu entry. Both failures were preserved.
+Ownership/mode/time handling and paced menu selection were corrected, and the
+affected images/cases were checked again.
+
+## Technical detail and limits
+
+The packaged review fixes covered optimised-Python trust checks, stale metadata,
+ordinary guard failures, unsupported legacy mirror compilation, captured
+signature bytes, output creation and consistent single-render manifests.
+The observer was unchanged. The later malformed-catalogue regression brought
+the source suite from 29 to 30 tests.
+
+The generated network file intentionally uses Proxmox's conventional `0644`
+mode and contains no credentials. See the [technical reference](../docs/technical-reference.md)
+for its CodeQL explanation. No blanket suppression was added. The metadata
+receipt also binds the verified SquashFS hash required by media acceptance.
+
+Real-password interactive entry, other build hosts, physical installation,
+cabling/switching, first-start hook execution and guest/application rollout were
+not established by these packaged tests. The original completed USB was not
+changed. Builds used invented inputs, and raw logs/images stayed outside Git.
+
+Follow [the next guest guide](../../bootstrap/README.md) only after your host's
+installation checks pass.
