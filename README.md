@@ -1,40 +1,95 @@
-# homelab migration tooling — draft
+# Build your Proxmox homelab
 
-Reusable OpenTofu/Ansible structure, strict catalog validation, local rehearsal and private deployment examples. This starter release has working local validation/rendering/synthetic execution and provider-schema-valid infrastructure drafts. **The full-site PVE execution adapter remains held.** Full-site provisioning and restore are not ready; the separate one-guest bootstrap and its current verification limits are described below.
+Start with a custom installation USB, then run a small script from your computer
+to create one deployment container on Proxmox. That container connects to your
+private GitHub repository so it can run future deployment jobs.
 
-The public implementation and private site use the same `bin/homelab` commands. A synthetic apply changes only a local JSON model; it never contacts Proxmox, a Pi, a database or a radio. Native OpenTofu tests use only its built-in local `terraform_data` fixture.
+This is aimed at home automation enthusiasts who are comfortable copying terminal
+commands and editing a settings file. The guides explain terms as they appear.
 
-## Start with Proxmox
-
-Read the [combined Proxmox guide](proxmox/README.md) for the complete sequence: build the installation USB, install Proxmox, then run the small bootstrap that creates a deployment guest and hands over to private GitHub CD (continuous deployment).
-
-That guide links to the detailed instructions for each step. The one-guest bootstrap has passed a fresh isolated Proxmox-to-GitHub test; physical installation and later guest/application rollout remain separate work. The bootstrap requires no database.
-
-## Run the complete local example
-
-Use Python3.12+ and a new checkout/work directory. The dependency lock is hashed; no sudo/system installation is required.
-
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --require-hashes -r requirements.lock.txt
-python -m pytest -q tests --basetemp .work/pytest
-python bin/homelab validate --catalog examples/site/catalog/site.json
-python bin/homelab render --catalog examples/site/catalog/site.json --out .work/rendered
-python bin/homelab plan --catalog examples/site/catalog/site.json --workspace .work/example --target synthetic
-python bin/homelab approve --catalog examples/site/catalog/site.json --workspace .work/example --target synthetic
-python bin/homelab apply --catalog examples/site/catalog/site.json --workspace .work/example --target synthetic
-python bin/homelab verify --catalog examples/site/catalog/site.json --workspace .work/example --target synthetic
-python bin/homelab plan --catalog examples/site/catalog/site.json --workspace .work/example --target synthetic
+```mermaid
+flowchart LR
+    A[Make the USB] --> B[Install Proxmox]
+    B --> C[Create one deployment container]
+    C --> D[GitHub runs a successful check]
+    D --> E[Later: deploy your apps]
 ```
 
-Expected:15 PVE guest records plus3 Pi records in the local synthetic model; verification passes and the final plan reports zero changes. Approval is a local synthetic HMAC exercise, with no production authority. Select a new render destination each time; rendering preserves earlier directories/edits. Synthetic addresses are in198.18.0.0/15 and hostnames underexample.invalid.
+## Start here
 
-```bash
-python tools/bootstrap-tools.py --directory .work/tools
-python tools/native_tofu_fixture.py --tofu .work/tools/tofu --work .work/native-encryption
+**Read the [Proxmox guide](proxmox/README.md)** for the whole sequence. It links
+to the two practical walkthroughs:
+
+| What you want to do | Guide | What you have at the end |
+| --- | --- | --- |
+| Prepare and install the host | [Make the installation USB](proxmox/iso/README.md) | Proxmox installed on the selected pair of SSDs, with network and SSH access. |
+| Connect the host to GitHub deployment | [Create the first deployment guest](proxmox/bootstrap/README.md) | One small Debian container, an online GitHub runner and a successful verification job. |
+
+The custom installer supports **two new mirrored SSDs, one original disk to
+preserve, two wired network ports and tagged VLANs**. Check the guide before
+assuming it fits a different computer or home network.
+
+## 1. Get a copy on your computer
+
+You need Git. On a Mac, open **Terminal**, run `git --version`, and follow Apple's
+Command Line Tools prompt if one appears. Linux users can install Git through
+their distribution's package manager.
+
+Run these commands in Terminal, one at a time:
+
+```sh
+git clone https://github.com/theaussiepom/homelab.git
+cd homelab
 ```
 
-This downloads the pinned binary with checksum verification and runs an encrypted local state/plan roundtrip, wrong/missing-key refusal and plaintext-marker checks. It does not test R2 or PVE. Archive signature verification is a separate release-trust step.
+You should now see this README and the `proxmox` folder. If you already have a
+copy, keep any local work and use a reviewed version; do not clone over it or
+discard changes to get a clean folder.
 
-Read [private site setup](docs/configure-private-site.md), [shared command contract](docs/execution.md), [installer/recovery](docs/installer-and-recovery.md), [ownership/lifecycle](docs/ownership-and-lifecycle.md), and [rehearsal](docs/rehearsal.md). Public CI calls these same commands on hosted runners. Site catalog, keys, fabrics, private state/plans and operational reports stay in the private deployment site.
+The guides say which folder to use for each command. A **workstation** means the
+Mac or Linux computer where you run these commands. The **host** is the machine
+that will run Proxmox.
+
+## 2. Follow the Proxmox guide
+
+Continue to the [combined Proxmox guide](proxmox/README.md). Start with its
+prerequisites, then follow the installer and bootstrap in order. Each walkthrough
+includes expected results and advice for failures.
+
+Keep passwords, private keys, real settings, backups and installation images
+private. The examples in this public repository use invented values.
+
+## What is ready?
+
+Status recorded on **25 October 2026**:
+
+- **Installer and one-container bootstrap tooling:** implemented. Installer builds
+  and guarded virtual boots passed; a fresh isolated Proxmox machine successfully
+  handed over to a real private GitHub runner.
+- **Actual installation:** install your physical host and check its disks and
+  networking during your chosen migration window.
+- **Later application deployment:** subsequent OpenTofu and Ansible jobs are
+  separate work. An online runner does not mean Home Assistant or other apps
+  have been migrated.
+
+See the [ISO verification record](proxmox/iso/verification/README.md) and
+[bootstrap verification record](proxmox/bootstrap/verification.md) for exact test
+scope, later corrections and remaining limits.
+
+## Other folders
+
+These are separate from the two-step Proxmox setup:
+
+| Folder | Use it for |
+| --- | --- |
+| [Local site example](examples/site/README.md) | Practise the broader framework using invented data on your computer. It does not deploy real guests. |
+| [Database backup](services/database-backup/README.md) | Understand the existing BenBeast backup extension and its dated restore evidence. |
+| [Network recovery](services/network-recovery/README.md) | Understand the existing BenBeast-specific network repair service. It is not a generic Proxmox prerequisite. |
+| [Contributing safely](docs/contributing-safely.md) | Make code changes, run checks and prepare pull requests. |
+
+The broader framework's full-site Proxmox execution adapter remains held. Its
+technical contracts are in [execution](docs/execution.md),
+[private-site configuration](docs/configure-private-site.md),
+[ownership](docs/ownership-and-lifecycle.md) and [rehearsal](docs/rehearsal.md).
+Use the separate [one-container bootstrap](proxmox/bootstrap/README.md) for the
+working first-guest path.

@@ -2,90 +2,115 @@
 
 [Back to the main README](../README.md)
 
-The goal is a freshly installed Proxmox machine with one small deployment guest
-ready to run jobs from your private GitHub repository. A **guest** is a container
-or virtual machine hosted by Proxmox. This bootstrap creates a Debian container.
-A **runner** is the service inside it that receives and runs GitHub jobs.
+The goal is a freshly installed Proxmox machine with one small deployment
+container ready to run jobs from your private GitHub repository.
 
-Start here, then follow the detailed guide for the stage you need. You do not
-need a separate script to create base guests before OpenTofu.
+A **guest** is a container or virtual machine hosted by Proxmox. This bootstrap
+creates a Debian container. A **runner** is the service inside it that receives
+and runs GitHub jobs. **CD**, or continuous deployment, means using those jobs to
+make reviewed changes to your homelab.
 
 ```mermaid
 flowchart TD
-    A[Build the custom installation USB] --> B[Install Proxmox and check host access]
-    B --> C[Run bootstrap from your workstation]
-    C --> D[OpenTofu creates one deployment guest]
-    D --> E[Ansible installs tools and the GitHub runner]
-    E --> F[GitHub job verifies the transferred state]
-    F --> G[Later CD jobs manage other guests and applications]
+    A[Build and test the installation USB] --> B[Install Proxmox]
+    B --> C[Check host disks, networking and SSH]
+    C --> D[Run bootstrap from your workstation]
+    D --> E[One deployment container starts]
+    E --> F[GitHub runner runs a successful check]
+    F --> G[Later: jobs deploy other guests and apps]
 ```
 
-## 1. Install Proxmox
+## Does this fit your setup?
 
-Follow the [installation USB guide](iso/README.md). It covers the supported
-hardware layout, private settings, Docker build tools, practice tests, USB
-writing and attended installation.
+The installer supports **two new mirrored SSDs, one preserved original disk,
+two wired network ports and UEFI boot**. Both ports use tagged VLANs: numbered
+networks that your switch must already carry. A different layout needs a
+supported design; changing example values alone is not enough.
 
-The installer prepares the host's disks, networking and SSH access. It does
-not create the deployment guest. Before continuing, confirm the installed
-host's storage, network and SSH access using that guide.
+You also need:
 
-**Supported layout:** two new mirrored SSDs, one preserved original disk, two
-wired network ports and UEFI boot. A different layout needs a supported design;
-changing the example values alone is not sufficient.
+- A Mac or Linux workstation, with a [copy of this repository](../README.md#1-get-a-copy-on-your-computer).
+- Docker running; on a Mac, use Docker Desktop with Linux containers. Apple
+  Silicon Macs use x86-64 emulation for these tools.
+- A private GitHub repository that you administer, and GitHub CLI (`gh`) signed
+  in on your workstation, for the bootstrap stage.
+- Your chosen management/storage addresses, VLANs and matching switch setup.
+- A password manager for the recovery password and SSH key.
 
-## 2. Create the deployment guest and hand over to GitHub
+The [ISO guide](iso/README.md#what-you-need) lists download, disk-space and USB
+requirements. The [bootstrap guide](bootstrap/README.md#what-you-need) lists
+its additional tools. Windows is not covered by these walkthroughs.
 
-Follow the [bootstrap guide](bootstrap/README.md). Run it from your Mac or Linux
-workstation with Docker and an authenticated GitHub CLI. OpenTofu and Ansible
-run inside Docker, not on the Proxmox host.
+## 1. Make the installation USB
 
-The bootstrap:
+Follow the [installation USB guide](iso/README.md). Start with its safe practice
+run, supply your own hardware/settings, then build, test and write the real image.
 
-1. Uses the host's verified SSH connection to upload a checksum-pinned template
-   when needed and create a narrowly scoped Proxmox API token.
-2. Uses a saved OpenTofu plan to create and start one small Debian guest.
-3. Adds the guest's required API-only allowance in the Proxmox host firewall.
-4. Uses Ansible to install deployment tools and the private GitHub runner.
-5. Transfers the exact OpenTofu state to the guest and freezes the workstation
-   copy. A real GitHub job must then confirm a no-change plan on that runner.
+**Expected result:** a USB whose complete image has been read back and verified,
+with `usb_ready: true` and `ejected: true`. You can then unplug it.
 
-There is no PostgreSQL requirement. **State** is the private file OpenTofu uses
-to track the guest it created. Keep its backup safe; after handover, the runner
-owns the active copy.
+The USB starts in **CHECK ONLY**. Installing requires choosing **INSTALL** and
+confirming the selected drive serial numbers. Installation erases those two new
+SSDs. Choose the interruption to your existing system separately.
 
-The host storage, bridge and network must already exist. The bootstrap scripts
-the template, API-token and host-firewall steps; it does not require manual
-Proxmox web-interface configuration for those steps. You still supply your
-private settings and verify the fresh host's SSH fingerprint.
+## 2. Install and check the host
 
-## What is ready, and what still needs proving?
+Use [the ISO guide's installation steps](iso/README.md#6-boot-and-install--at-your-chosen-maintenance-window).
+After installation, check the host from its local keyboard/screen and your
+workstation using [host access and checks](host-access.md).
 
-Status recorded on **25 October 2026**. The linked verification records contain
-the evidence and limits; this overview does not replace them.
+**Expected result:** the intended Proxmox host is reachable, its mirror is
+healthy, the original disk remains separate, both network ports match their
+settings, and SSH works with the key you included in the ISO.
+
+Do not continue with guest creation if a host check fails. The installation
+has not yet created a guest or connected anything to GitHub.
+
+## 3. Create the first guest and connect GitHub
+
+Follow the [bootstrap guide](bootstrap/README.md). Run its commands on your
+workstation. OpenTofu and Ansible run inside Docker, not on the Proxmox host.
+
+The scripts upload the selected template when needed, create a scoped Proxmox
+API token, create one container, add its host API firewall allowance, install
+the runner and transfer its state. You do not need a separate base-guest script
+or manual token/firewall setup in the Proxmox web interface.
+
+**Expected result:** one guest running, a runner online in your private GitHub
+repository, and a successful GitHub job reporting a no-change OpenTofu plan.
+This confirms that GitHub can manage the guest using the transferred state.
+
+**State** is OpenTofu's private record of what it created. No PostgreSQL or other
+database is required. After handover, the runner owns the active state; keep
+recovery copies safe and do not run a second active copy from your workstation.
+
+## 4. Continue with application deployment
+
+The initial setup ends at the successful GitHub check. Further OpenTofu jobs
+create other guests; Ansible jobs install/configure their applications. Those
+jobs and application acceptance are later work. The bootstrap does not migrate
+Home Assistant, databases or NAS data into new applications.
+
+## When something goes wrong
+
+| What you see | What to do |
+| --- | --- |
+| Your disk, port or VLAN layout differs | Check the supported layout before building. Do not guess settings to make it pass. |
+| A build, test or USB check fails | Use the [ISO troubleshooting table](iso/README.md#when-something-goes-wrong). |
+| The installed host is unreachable | Work through [host access and checks](host-access.md) at its local console. |
+| Bootstrap stops, times out or leaves a hold | Use the [bootstrap troubleshooting table](bootstrap/README.md#when-something-goes-wrong); keep the files and inspect the outcome before retrying. |
+| Runner is online but the job is queued | Check the workflow's runner labels against [the final bootstrap step](bootstrap/README.md#7-confirm-github-has-taken-over). |
+
+## What has actually been verified?
+
+Status recorded on **25 October 2026**:
 
 | Stage | Established | Still outstanding |
 | --- | --- | --- |
-| Installation USB | Packaged build instructions, source tests and six accepted virtual boot checks. | Physical installation and first-start networking on the intended machine. See [ISO verification](iso/verification/README.md). |
-| Deployment bootstrap | Fresh isolated Proxmox 9.2 test passed: automatic template/token setup, guest creation, API firewall allowance, state handover and a successful real GitHub job on the new runner, using unchanged source and no manual repairs between stages. | Physical-target acceptance, ongoing address/credential policy and independent NAS state-backup commissioning. See [bootstrap verification](bootstrap/verification.md). |
-| Later guest and application CD | The deployment runner is the intended starting point for subsequent OpenTofu and Ansible jobs. | Full-estate deployment and application acceptance are not established by this bootstrap. |
+| Installer | Packaged build workflow, source tests and six accepted virtual boot checks. | Physical installation and first-start networking on the intended machine. See [ISO verification](iso/verification/README.md). |
+| Bootstrap | Fresh isolated Proxmox 9.2 → one container → private runner → successful real GitHub job with matching state, without manual repairs between stages. Later review corrections passed offline checks. | Physical-target acceptance, ongoing address/credential policy and independent NAS state-backup commissioning. See [bootstrap verification](bootstrap/verification.md). |
+| Later guests and applications | The runner provides the starting point for subsequent deployment jobs. | Full-estate deployment and application acceptance. |
 
-The completed isolated bootstrap milestone is deliberately small: **fresh
-Proxmox → run bootstrap → guest running → private runner online → successful
-GitHub job with the same state**. Additional service rollout is a later stage.
-
-Physical installation and first-start networking are steps in the actual
-migration. They are separate from completing the installer and bootstrap tooling.
-
-## Where to find things
-
-| Guide | Use it for |
-| --- | --- |
-| [Installation USB](iso/README.md) | Building, testing, writing and installing the custom ISO. |
-| [Bootstrap](bootstrap/README.md) | Private settings and commands to create the first guest and connect GitHub. |
-| [ISO verification](iso/verification/README.md) | What installer checks passed and what remains unverified. |
-| [Bootstrap verification](bootstrap/verification.md) | Local checks, the successful fresh-machine test and its limits. |
-
-Keep real credentials, private settings, state, plans and installation media
-outside Git. The public examples are starting points, not your site's ready-made
-configuration.
+Physical installation and first-start networking are part of the actual migration.
+They are separate from completing the installer and bootstrap tooling. Keep real
+credentials, settings, state, plans and installation media outside Git.

@@ -1,61 +1,62 @@
 # Start the first deployment guest
 
-[Back to the combined Proxmox guide](../README.md) ·
-[Installation USB guide](../iso/README.md) ·
-[Bootstrap verification](verification.md)
+[Back to the Proxmox guide](../README.md) · [Installation USB](../iso/README.md)
 
-This is the small step between installing Proxmox and letting GitHub manage
-your homelab:
+Run this after installing Proxmox. You will create one small Debian container,
+connect it to your private GitHub repository, and run a job that confirms GitHub
+has taken over.
 
-**Your workstation → one Debian deployment guest → its private GitHub runner.**
+**OpenTofu** creates the container. **Ansible** installs its tools and GitHub
+**runner**, the service that receives jobs. No database is required. Other guests
+and application deployment come later.
 
-OpenTofu creates and starts the guest. Ansible installs its deployment tools and
-runner. Other guests and applications are later work. No database is required.
-
-**Current status (25 October 2026):** the selected route passed a complete
-fresh-host test in an isolated Proxmox 9.2 lab: guest creation, automatic API
-firewall setup, state handover, new runner registration and a successful real
-GitHub verification job. No manual repairs were made between script stages.
-Subsequent publication-review fixes passed 67 unit tests and offline
-OpenTofu/Ansible integration checks; the live rehearsal was not repeated for
-those corrections. Physical-target and later application rollout remain separate. See the
-[verification record](verification.md) for the exact scope and limits.
-
-## The steps at a glance
-
-| Step | What you do | What the scripts do |
-| --- | --- | --- |
-| Prepare | Supply private site settings and verify the host's SSH fingerprint. | Build the local Docker tools image, validate settings and create a private working bundle. |
-| Create | Run `access`, review `plan`, then run `apply` and `verify`. | Upload a selected cached template, create scoped API access, and create and check one guest. |
-| Hand over | Save a private backup and run `runner`. | Add the required host API allowance, install tools, transfer state and register the GitHub runner. |
-| Confirm | Run the reviewed workflow in your private GitHub repository. | Prove that the new runner can use the transferred state for a no-change plan. |
-
-The following sections give the commands in that order. No separate base-guest
-creation script or manual Proxmox token/firewall setup is needed.
+```mermaid
+flowchart LR
+    A[Your settings] --> B[Create one guest]
+    B --> C[Save a backup]
+    C --> D[Install runner and hand over state]
+    D --> E[Successful GitHub check]
+```
 
 ## What you need
 
-- A Mac or Linux workstation with Git, Python 3, Docker, and GitHub CLI (`gh`).
-- A newly installed, reachable x86-64 Proxmox host.
-- An existing storage location and management bridge on that host.
-- A checksum-pinned Debian 13 amd64 template archive, or an existing template
-  on the host. Bootstrap can upload a cached archive over pinned SSH.
-- A private GitHub deployment repository that you administer. The source code
-  can be public; the self-hosted runner is registered to your private repository.
-- The SSH key installed on the host by your ISO. Bootstrap creates its own
-  separated Proxmox API token through that trusted SSH connection.
+- A Mac or Linux workstation with [this repository](../../README.md#1-get-a-copy-on-your-computer),
+  Git, Python **3.10 or newer**, Docker, OpenSSH (`ssh`, `ssh-keygen`,
+  `ssh-keyscan`) and [GitHub CLI](https://cli.github.com/).
+- A newly installed, reachable x86-64 Proxmox host, with
+  [its disks, networking and SSH access checked](../host-access.md).
+- A private GitHub deployment repository that you administer, with Actions enabled.
+  This is a separate repository from this public source checkout.
+- A Debian 13 **amd64 LXC template**: a compressed `.tar.zst` archive, not an ISO
+  or a VM disk image. See step 3.
+- An existing private NAS mount on the workstation for the initial state backup.
 
-Run the commands below from the root of your source checkout. Docker must be
-running. The deployment tools run inside Docker; do not install them on Proxmox.
+If a workstation tool is missing, use its official setup instructions:
+[Python](https://www.python.org/downloads/),
+[Docker Desktop](https://docs.docker.com/desktop/), or
+[GitHub CLI](https://cli.github.com/). Install OpenSSH through your Linux
+distribution if needed; macOS includes its command-line tools.
+
+On a Mac, use Docker Desktop with Linux containers. Apple Silicon uses AMD64
+emulation. Allow the first Docker image build time to finish; it downloads tools.
+Check that Docker's selected context points to the local engine you intend to use.
+
+Run the following from the **repository root**, not `proxmox/iso`:
 
 ```sh
 python3 --version
+docker context show
 docker version
 gh auth status
 ```
 
-If GitHub CLI is not signed in, run `gh auth login` on the workstation. The
-bootstrap reuses that login; no additional GitHub personal access token is needed.
+**Expected result:** Python is recent enough, Docker reports both Client and
+Server, and GitHub CLI reports the account that administers your private repository.
+If needed, run `gh auth login` and follow its browser sign-in. No extra personal
+GitHub token needs to be pasted into settings.
+
+If you finished the ISO guide in the same terminal, return to the root with
+`cd ../..`. The root contains this project's main README and the `proxmox` folder.
 
 ## 1. Practise without touching Proxmox
 
@@ -64,19 +65,18 @@ bootstrap reuses that login; no additional GitHub personal access token is neede
 ./proxmox/bootstrap/bootstrap test-backend
 ```
 
-The first command runs unit checks, real OpenTofu/provider-schema checks with
-mocked Proxmox calls, and Ansible with a synthetic runner. The second runs real
-OpenTofu against disposable local state, tests competing-writer refusal, and
-copies that state to a second workspace for a fresh no-change plan. Neither
-test contacts Proxmox, your NAS, or GitHub. There is no database container.
+**Expected result:** both finish successfully. The first prints an evidence-file
+path and a `PASS` summary; the second reports local-state qualification results.
+The Docker image build uses the internet, but the test containers then run with
+networking disabled. They do not contact Proxmox, your NAS or GitHub.
 
-These checks cannot prove that your physical host, guest, networking or real
-GitHub registration works. That final check is described below.
+If either fails, stop and use the troubleshooting table below. These local
+checks cannot prove your physical host or a real GitHub registration works.
 
-## 2. Make your private settings
+## 2. Fill in your private settings
 
-Keep your real host details, credentials, state and plans outside the public
-checkout. The examples contain invented addresses and placeholders.
+Use the same terminal throughout so the variables below remain available.
+These commands create private copies of the two example files:
 
 ```sh
 umask 077
@@ -86,232 +86,240 @@ cp -n proxmox/bootstrap/site.example.json "$bootstrap_private/site.json"
 cp -n proxmox/bootstrap/settings.example.json "$bootstrap_private/settings.json"
 ```
 
-Edit the two copied files:
+Open those copies in a text editor, such as TextEdit in plain-text mode on a Mac.
+JSON uses double quotes and commas between entries, with no comma after the last
+entry. Leave the checked-in example files unchanged.
 
-| File | Replace |
-| --- | --- |
-| `site.json` | Proxmox hostname/API address and node name; your SSH public key; an unused guest ID; existing storage and bridge; an unused MAC address; your IP settings. |
-| `settings.json` | Your private `owner/repository`, runner name, administration subnet, DNS and gateway settings. |
+### Carry your ISO settings into bootstrap
 
-The small `site.example.json` contains only the deployment guest. You do not
-need the full homelab catalogue. Its hostname inside the guest is `deploy`;
-its default size is 1 CPU, 1 GiB RAM and an 8 GiB disk. Check that those values
-fit your host. Guest IDs 4914, 4915 and 4920 remain excluded for this project's
-protected rehearsal machines.
+The table is **one invented worked example**, consistent with the ISO's
+`config/site.example.json`. Replace it with your own values. The
+`198.18…` addresses and `example.invalid` hostname are not ready-made home settings.
 
-For DHCP, leave the guest's `ipv4` as `"dhcp"`; the gateway is obtained by
-DHCP. Replace the example DNS servers with your own, or use an empty list to
-inherit the host's DNS configuration. For a static address, provide its actual
-address, subnet prefix, gateway and DNS.
+| Field in the private copy | Worked example | Where to find your value |
+| --- | --- | --- |
+| `site.json → site.node` | `pve` | Run `hostname -s` on the installed host. |
+| `site.api_endpoint` | `https://pve.example.invalid:8006/` | Your ISO hostname, resolving to the management address. Include HTTPS and port 8006. |
+| `site.ssh_public_keys` | Your public key's type and long value | The same Ed25519 public key used in the ISO; omit its comment. |
+| `guests[0].vmid` | `900` | Choose an unused guest ID; check the Proxmox resource list first. |
+| `guests[0].storage_id` | `local-zfs` | The active guest storage shown by `pvesm status`. The ISO uses a ZFS mirror; do not assume the example's generic `local-lvm` applies. |
+| `guests[0].interfaces[0].bridge` | `vmbr0` | The administration bridge made by this ISO. |
+| `guests[0].interfaces[0].vlan` | `25` | Your ISO's `management.vlan`. This ISO uses tagged management; replace the generic example's `null`. |
+| `guests[0].interfaces[0].mac` | `02:00:00:00:09:00` | Choose a locally administered MAC not already used on your network. |
+| `guests[0].interfaces[0].ipv4` | `198.18.25.10/24` | An unused, reserved management-subnet address for this guest; keep it different from the host. |
+| `settings.json → repository` | `your-account/private-site` | Your private GitHub repository's owner/name. |
+| `runner_name` | `homelab-deploy` | A unique descriptive name for this runner. |
+| `admin_cidr` | `198.18.25.0/24` | The subnet from which you will SSH to the guest; it can differ from the guest's subnet. |
+| `prefix_length`, `gateway`, `dns_servers` | `24`, `198.18.25.1`, `["198.18.25.53"]` | Your guest's subnet size, router and DNS server addresses. |
 
-Set `template_file_id` to an existing Debian 13 LXC template. Alternatively,
-add a `template` object to `settings.json`. For a cached vendor archive:
+For a static address, reserve it outside your DHCP allocation or reserve it in
+your network manager. DHCP is also supported: set `ipv4` to `"dhcp"`; its gateway
+comes from DHCP. Use your DNS servers or `[]` to inherit the host's DNS.
+**Ongoing deployment needs a stable guest address**, through a static address or
+DHCP reservation; the host firewall rule follows an address, not a changing lease.
+
+Leave the guest key `deploy`, unprivileged-container type and deletion protection
+as supplied. Its default size is **1 CPU, 1 GiB RAM and 8 GiB disk**. The script
+excludes IDs 4914, 4915 and 4920 for this project's protected rehearsal guests.
+
+## 3. Select the Debian template
+
+If a Debian 13 amd64 LXC template already exists on the host, use its full
+storage identifier in `template_file_id`. Find it under the host's template
+storage in the Proxmox web interface, or list existing templates at its console
+with `pveam list local`. This lists files; it does not download anything.
+
+For the automatic workstation-to-host upload:
+
+1. Open the [official Proxmox template directory](https://download.proxmox.com/images/system/)
+   and select a Debian 13 standard **amd64** `.tar.zst` archive. Save it outside
+   the public checkout. Keep its vendor checksum/signed-index evidence and verify
+   it against that trusted source before using it.
+2. Record the full local file path and exact filename. On a Mac, print its SHA-256
+   with the command below, replacing the path. On Linux, use `sha256sum`.
+3. Add the `template` object below **inside** your private `settings.json`, beside
+   `repository` and the other settings. Add a comma after the preceding entry.
+4. Set `site.json → guests[0].template_file_id` to
+   `local:vztmpl/YOUR_EXACT_TEMPLATE_FILENAME.tar.zst`.
+
+```sh
+shasum -a 256 /YOUR/PRIVATE/PATH/debian-template.tar.zst
+```
 
 ```json
-{
-  "file": "/YOUR/CACHED/debian-template.tar.zst",
-  "sha256": "EXACT_TRUSTED_VENDOR_SHA256",
+"template": {
+  "file": "/YOUR/PRIVATE/PATH/debian-template.tar.zst",
+  "sha256": "REPLACE_WITH_THE_64_CHARACTER_SHA256",
   "file_name": "debian-template.tar.zst",
   "datastore_id": "local"
 }
 ```
 
-Set the guest's `template_file_id` to the matching
-`local:vztmpl/debian-template.tar.zst`. Preparation verifies and privately copies
-the archive. The `access` step automatically uploads it over pinned SSH to the
-selected template storage, checks its size/hash again, and refuses to overwrite
-a different file. No manual Proxmox template upload is needed. Retain the
-vendor's signed-index/checksum provenance for the archive you choose.
+The filename and storage must match `template_file_id`. Use the real filename
+throughout; `debian-template.tar.zst` is only an illustration. A checksum you
+calculate identifies those downloaded bytes; it does not independently verify
+their publisher. Keep the trusted vendor evidence too. See the vendor's
+[template manager reference](https://pve.proxmox.com/pve-docs/pveam.1.html).
 
-Download the archive to your workstation from the vendor and retain its trusted
-checksum before preparing the bundle. This MVP accepts a cached file or an
-existing host template; it does not download templates through the Proxmox API
-or grant template-administration permissions. Storage and bridges must already
-exist; this bootstrap does not reconfigure host networking or disks.
+Preparation checks and privately copies the selected archive. The later
+`access` step uploads it over verified SSH, checks it again and refuses to
+overwrite different bytes. No manual template upload is needed. The bootstrap
+does not download archives through the Proxmox API or create storage/bridges.
 
-## 3. Establish SSH trust for the fresh host
+## 4. Verify host access and prepare the bundle
 
-Use the SSH key you included when preparing the ISO. You also need a known-hosts
-file whose SSH fingerprint you have compared with the host's console. Do not
-accept an unknown host key without comparing it. Substitute your private paths:
+Follow [host access and checks](../host-access.md). It shows the actual commands
+to compare the host's fingerprint at its console and on your workstation.
+Keep `HOMELAB_SSH_KEY` and `HOMELAB_KNOWN_HOSTS` exported in this terminal.
 
-```sh
-export HOMELAB_SSH_KEY="$bootstrap_private/bootstrap-key"
-export HOMELAB_KNOWN_HOSTS="$bootstrap_private/known_hosts"
-```
+The key must work non-interactively; the current launcher does not forward an SSH
+agent. The linked guide explains the dedicated-key requirement.
 
-No Proxmox web-interface setup is needed for the API token or the runner's
-host firewall allowance. The scripted steps below use the verified SSH key.
-
-## 4. Prepare, establish API access and create one guest
+Prepare a **new** working directory:
 
 ```sh
 ./proxmox/bootstrap/bootstrap prepare \
   --catalog "$bootstrap_private/site.json" \
   --settings "$bootstrap_private/settings.json" \
   --out "$bootstrap_private/first-run"
-
 bootstrap_bundle="$bootstrap_private/first-run/bundle"
+```
+
+**Expected result:** preparation prints a result and creates the final `/bundle`
+directory. It builds the local Docker tools image, then prepares files with
+networking disabled. It has not yet changed Proxmox. Existing output directories
+are preserved; use a new name for a genuinely new attempt after inspecting any
+earlier failure.
+
+## 5. Create API access, review the plan and create the guest
+
+The next command **changes the host**: it uploads your selected template when
+needed and creates a scoped API token. This example token expires after **six
+hours**. Choose the intended lifetime before running it. For ongoing CD, read
+[credential lifetime and rotation](OPERATIONS.md#credential-lifetime-and-rotation);
+expiry prevents future Proxmox API jobs, even if the runner stays online.
+
+```sh
 ./proxmox/bootstrap/bootstrap access "$bootstrap_bundle" --expires-in 21600
 ./proxmox/bootstrap/bootstrap plan "$bootstrap_bundle"
 ```
 
-Preparation builds its AMD64 tools image on your selected local Docker engine,
-then creates the private bundle with networking disabled. A prebuilt tools image
-is not required. Apple Silicon workstations use Docker's AMD64 emulation.
-The build has a 30-minute limit and offline preparation a five-minute limit.
-A timeout stops the local CLI; Docker may still be running the build or
-container. Inspect Docker and preserve partial output before another attempt.
-Preparation prints the actual bundle directory. Note the final `/bundle` in
-subsequent commands. An existing output directory is preserved; preparation
-refuses to overwrite it.
+**Expected result:** access reports `"status": "ready"`; plan reports
+`"status": "passed"` with the location of its saved plan. Credentials and the
+trusted Proxmox CA are saved privately, so no token copy/paste is needed.
 
-The `access` step checks the selected host and unused guest ID, retrieves the
-public Proxmox CA, and creates one separated `root@pam!homelab-deploy-VMID`
-token. It grants access only to the selected guest, storage, bridge and node;
-existing accounts, tokens and permissions remain intact. A cached archive uses
-the existing root SSH connection for the exact file transfer, so the API token
-needs only audit access to its template storage.
-It adds no permissions to other guests. HTTPS certificate checks stay enabled.
+Read the plan on your workstation:
 
-The token and CA are saved privately in the bundle. Later commands load them
-automatically; no token copy/paste or credential export is needed. The example
-lifetime is six hours, suitable for a rehearsal. For an ongoing CD installation,
-choose the intended lifetime explicitly. Use `--expires-in 0` only after the
-operator explicitly approves a credential without automatic expiry; this is
-not the rehearsal default. Expired or partially created credentials are held
-for inspection rather than silently replaced. Keep durable credentials in your
-password manager and keep this bundle outside Git.
+```sh
+cat "$bootstrap_bundle"/operations/plan-*/plan.stdout
+```
 
-For revocation, an administrator removes the exact `homelab-deploy-VMID` token
-from Proxmox's API Tokens panel; an exposed token should be revoked immediately.
-For planned rotation, approve and issue a replacement separated token with the
-same reviewed resource grants. Update the token in the private workstation
-`access.json` and the guest's root-owned `/etc/homelab-bootstrap.env`, then
-restart `homelab-deploy.service` and verify a no-change deployment job before
-revoking the old token. Keep both tokens private and preserve the active state.
-The bootstrap does not automate rotation or replace an existing token.
+Confirm the selected host, unused guest ID, template, storage, bridge and VLAN.
+The expected new infrastructure is **one deployment container with its guest
+firewall resources**. If the plan includes replacements, deletions or unrelated
+resources, stop. Plan logs are private.
 
-Read the plan log and confirm the correct host, unused guest ID, template,
-storage and network. Then apply those same saved plan bytes:
+When the plan matches your intended setup, apply those saved bytes:
 
 ```sh
 ./proxmox/bootstrap/bootstrap apply "$bootstrap_bundle"
 ./proxmox/bootstrap/bootstrap verify "$bootstrap_bundle"
 ```
 
-The guest starts automatically and is configured to start after a host reboot.
-It is unprivileged and protected against deletion. SSH is allowed from the
-administration subnet; outbound traffic is allowed. The bootstrap accepts only
-creation of its own guest/template or a no-op. It refuses replacement, deletion
-and unrelated resource changes.
+**Expected result:** both report `"status": "passed"`; verification includes
+`"provider_noop": true`, meaning a fresh plan needs no changes. In Proxmox,
+your selected guest is running and protected against deletion. It starts again
+after a host reboot.
 
-A timed-out apply first interrupts OpenTofu and gives it up to five minutes to
-save partial state. Only then does it force-stop the local process if necessary.
-The result remains `UNKNOWN`: local process exit does not prove the remote
-resource outcome. A failed apply leaves `HOLD.json` and private logs. Inspect the actual outcome
-before another attempt. Do not delete state or clear a hold to make a retry run.
+## 6. Back up, then hand over to the runner
 
-## 5. Back up the initial state, then hand over to GitHub
-
-State is the file `tofu/terraform.tfstate` inside the private bundle.
-There is no PostgreSQL dependency. Keep this file private and available for
-recovery. Use one bootstrap workstation and the documented launcher: it holds
-a workstation lock across each Docker operation. Docker Desktop bind-mount
-locking alone did not exclude competing containers in our test. Inside the
-Linux deployment guest, OpenTofu also uses its standard local state lock.
-Do not run raw OpenTofu or another active state copy alongside the launcher.
-
-Use an already-mounted private NAS directory as the backup destination. The
-parent directory must exist; the final backup directory must be new:
+**State** is the private file OpenTofu uses to remember the guest it created.
+The NAS backup directory's parent must already exist and be privately mounted
+on your workstation. Replace the path below; the final directory must be new:
 
 ```sh
 ./proxmox/bootstrap/bootstrap backup "$bootstrap_bundle" \
   /YOUR/MOUNTED/NAS/private/bootstrap-before-handover
 ```
 
-This copies the state and configuration without cached tools, plans, or SSH
-keys. It checks the copied state hash and records its lineage/serial. It does
-not mount the NAS or prove that a supplied path is actually NAS-backed.
+**Expected result:** a private backup with a matching state checksum. This copies
+state/configuration, not SSH keys, cached tools or plans. It does not mount the
+NAS or prove a path is NAS-backed; check the actual mount yourself.
 
-The runner step automatically permits **the selected guest address → this
-Proxmox host on TCP port 8006**, using the already verified host SSH connection.
-It prepends one enabled host rule, or reuses the exact first rule, and checks
-that all existing rules and host firewall settings were preserved. An equivalent
-rule with a different owner comment is a conflict and is not silently adopted. It does not
-enable/disable the host firewall or change your router, NAS firewall or VLANs.
-The API hostname must resolve to one IPv4 address assigned to this host.
-
-After installing the trusted CA in the guest, Ansible checks HTTPS access to
-the API before copying state and registering the runner. A failed allowance or
-connection check stops setup and preserves its private evidence; there is no
-automatic retry. Before leaving this allowance in place for ongoing CD, the
-operator must confirm a static address or DHCP reservation and prevent another
-device from taking that address. This firewall rule trusts the `/32` address,
-not the guest's identity; it does not reserve or follow a changing DHCP lease.
-
-Now install the runner:
+Now install the runner and transfer the active state:
 
 ```sh
 ./proxmox/bootstrap/bootstrap runner "$bootstrap_bundle"
 ```
 
-Runner registration includes both `homelab-private-deploy` and your configured
-runner name as labels. Target the unique name label when testing alongside
-another retained runner, so GitHub cannot choose the older machine.
+The script adds the selected guest-to-host TCP **8006** allowance on the
+**Proxmox host**, installs tools, checks API access and registers the runner.
+It preserves other host rules and does not change NAS/router firewalls or VLANs.
+The API hostname must resolve to one IPv4 address assigned to this host.
 
-The workstation checks that your GitHub repository is private and your account
-has administration access. It obtains a fresh one-hour registration token
-automatically. Only that temporary token is passed to Docker for registration;
-your personal GitHub credentials remain on the workstation. The token is not
-printed or saved in the bootstrap configuration.
+**Expected result:** runner setup succeeds, and GitHub shows your configured
+runner online. A local `HANDOVER.json` freezes workstation plans/applies.
+The guest now owns the active state. The workstation and NAS copies are recovery
+snapshots and do not automatically stay current.
 
-The installer verifies the guest, reads its SSH public host key through the
-trusted Proxmox connection, and copies the exact state/configuration into
-`/var/lib/homelab-bootstrap` on the guest. It checks the state hash and runs a
-fresh no-change provider plan there before registering and starting the runner.
-The guest receives only the scoped Proxmox API token; username/password
-credentials and a missing API token are refused before handover. The token is
-stored in a root-readable service environment file. The service loads it into
-its process environment, so **every workflow job on this runner can read it**.
-Only protected, reviewed workflows may run here. Restrict repository and
-workflow-change access, and do not send untrusted pull-request jobs to this
-runner. Runner labels route jobs; they are not an access control. The operator's SSH
-private key and personal GitHub token are not installed as deployment credentials.
+Only trusted, reviewed workflows may run here: every job on this runner can read
+its scoped Proxmox API token. Your personal GitHub token and workstation SSH
+private key are not installed as deployment credentials. Keep repository access
+restricted; labels select runners and do not provide access control.
 
-**Handover is one-way.** A local `HANDOVER.json` disables further workstation
-plans/applies once state transfer begins. A workspace lock prevents handover
-from racing a local operation. If setup fails halfway, preserve the marker and
-logs and reconcile the guest's actual state. There is no automatic retry or
-automatic return to the workstation copy.
+See [runner trust and handover](OPERATIONS.md#runner-trust-and-one-way-handover)
+for failure handling and backing up the runner's later state. Providing its NAS
+mount and scheduling ongoing backups are subsequent site configuration.
 
-After handover, the guest's copy is active. The workstation and NAS copies are
-recovery snapshots; they are not automatically kept current. Any future CD
-workflow that changes infrastructure must back up the current runner state to
-your private NAS before its state can be discarded or the runner rebuilt.
-The installed helper supports that without needing database or API access:
+## 7. Confirm GitHub has taken over
 
-```sh
-python3 /opt/homelab-bootstrap/bootstrap.py backup \
-  --work /var/lib/homelab-bootstrap \
-  --out /YOUR/MOUNTED/NAS/private/NEW-STATE-BACKUP
-```
+In your **private deployment repository** on GitHub:
 
-Run that command as the deployment account (or an administrator) on the guest.
-Providing the NAS mount and scheduling ongoing state backups are subsequent
-site configuration; this MVP does not silently install them.
+1. Open **Settings → Actions → Runners**. Find your configured runner name and
+   check that it is **Idle/online**.
+2. Open this checkout's
+   [workflow example](templates/private-bootstrap-preview.yml.example) in a text
+   editor. Change the final `homelab-deploy` label in `runs-on` to your
+   `runner_name` if different.
+3. In the private repository, choose **Add file → Create new file**. Name it
+   `.github/workflows/bootstrap-preview.yml` and paste the reviewed example.
+   Review and commit it through your repository's normal process to `main`.
+   Never put this self-hosted workflow in the public source repository.
+4. Open **Actions → Bootstrap handover preview → Run workflow**, select
+   `main`, then run it.
+5. Open the new run and its **plan** job. Confirm it ran on your new runner and
+   succeeded with a no-change verification result.
 
-## 6. Confirm GitHub has taken over
+**You are finished when:** the guest is running, verified SSH access works, the
+private runner is online, and the GitHub job succeeds using the transferred
+state. A no-change plan means GitHub can see the same guest without trying to
+recreate it. It does not deploy your household applications.
 
-Enable the reviewed manual workflow from
-`templates/private-bootstrap-preview.yml.example` in your private deployment
-repository's `.github/workflows/` folder with a `.yml` filename. Replace the
-example `homelab-deploy` label in `runs-on` with your configured `runner_name`.
-Check that GitHub shows that runner online, then run the workflow.
-It must finish with a no-change OpenTofu plan using the transferred state.
-An existing registered runner is preserved rather than replaced on a repeat run.
+## When something goes wrong
 
-The MVP is accepted only when **guest running, SSH working, private runner
-online, and GitHub job successful with the same state** have been observed.
-Docker tests alone do not establish that. Physical disk installation and later
-application rollout remain separate operations.
+| What you see | What to do |
+| --- | --- |
+| Docker cannot connect | Start your local Docker engine and check `docker context show`. Retry only a step confirmed not to have started. |
+| Template, settings or JSON validation fails | Check the private copies, exact filename/hash and the ISO-to-bootstrap table. Do not change runtime code to accept a bad value. |
+| SSH fingerprint or authentication fails | Follow [host access](../host-access.md); never disable strict host checking. |
+| Output, token or access-attempt file already exists | Preserve it and inspect the previous result. A new folder does not clear a partial host operation. |
+| Token has expired | The guest may still run, but API jobs fail. Follow the [credential reference](OPERATIONS.md#credential-lifetime-and-rotation); do not silently replace access. |
+| Apply times out or leaves `HOLD.json` | Keep state and logs. Inspect the actual guest and partial operation before another attempt; do not delete the hold. |
+| Equivalent host API rule belongs to someone else | Inspect the conflict. The script will not adopt or overwrite it. |
+| Runner setup fails after `HANDOVER.json` appears | Preserve the marker and reconcile the guest's actual state. Do not restart from the workstation copy. |
+| GitHub job stays queued | Check the exact `runs-on` labels, runner availability, private repository and `main` branch. |
+| GitHub reports changes | Inspect the private provider plan and state identity; do not apply automatically to make verification pass. |
+
+## What has actually been verified?
+
+On **25 October 2026**, a fresh isolated Proxmox 9.2 machine completed guest
+creation, automatic template/token/firewall setup, state handover and a successful
+real private GitHub job without manual repairs between stages. Subsequent review
+corrections passed **67 unit tests** and offline OpenTofu/Ansible checks; that
+live rehearsal was not repeated for those corrections.
+
+See [verification evidence and limits](verification.md). Physical installation,
+physical networking, later application rollout and independent NAS state-backup
+commissioning remain separate outcomes. Maintainers can use the
+[operating reference](OPERATIONS.md) for credential, firewall, locking and
+failure-path details.
