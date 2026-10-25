@@ -58,6 +58,7 @@ def setup(work, expires_in):
                 raise Refused('Supply the ISO SSH key and verified known-hosts file')
         request = {'node': values['site']['node'], 'vmid': guest['vmid'],
                    'storage_id': guest['storage_id'], 'bridge': guest['bridge'],
+                   'vlan': guest.get('vlan'),
                    'template_storage': guest['template_file_id'].split(':', 1)[0],
                    'download_template': False, 'expires_in': expires_in}
         marker = work / 'access-attempt.json'

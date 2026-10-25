@@ -14,6 +14,20 @@ existing accounts, tokens and permissions remain intact. A cached archive uses
 the existing root SSH connection for the exact file transfer, so the API token
 needs only audit access to its template storage.
 It adds no permissions to other guests. HTTPS certificate checks stay enabled.
+For a tagged guest, it also grants `SDN.Use` at the exact bridge/VLAN path
+(for example `vmbr0/25`). Neither the bridge nor VLAN grant propagates to other
+VLANs. An untagged rehearsal does not exercise this additional permission.
+
+### Physical-run access review: 25 October 2026
+
+Before the physical bootstrap, the operator explicitly approved the selected
+guest, storage and bridge access. After the missing tagged-VLAN permission was
+identified, a separate approval covered one corrected attempt adding only the
+selected bridge/VLAN grant, with the other grants and lifetime preserved. This
+was human approval of both network scopes, separate from test results and the
+successful retry. The exact private approval/readback receipts are retained.
+For another installation, review both paths for that site's intended network;
+this record grants no permission for a different target or VLAN.
 
 The token and CA are saved privately in the bundle. Later commands load them
 automatically; no token copy/paste or credential export is needed. The example

@@ -37,6 +37,9 @@ You also need:
 - Your chosen management/storage addresses, VLANs and matching switch setup.
 - A password manager for the recovery password and SSH key.
 
+Before switching off an existing server, make sure you can retrieve those
+credentials while it is off. This matters if it also hosts your password manager.
+
 The [ISO guide](iso/README.md#what-you-need) lists download, disk-space and USB
 requirements. The [bootstrap guide](bootstrap/README.md#what-you-need) lists
 its additional tools. Windows is not covered by these walkthroughs.
@@ -86,6 +89,11 @@ real administrative permissions; its scope alone is not a least-privilege guaran
 repository, and a successful GitHub job reporting a no-change OpenTofu plan.
 This confirms that GitHub can manage the guest using the transferred state.
 
+The runner is a service **inside the deployment guest**. GitHub lists it in the
+private repository named in your settings. This public `homelab` repository holds
+the reusable scripts and guides; the private deployment repository holds your
+reviewed jobs and site settings. Credentials stay private.
+
 **State** is OpenTofu's private record of what it created. No PostgreSQL or other
 database is required. After handover, the runner owns the active state; keep
 recovery copies safe and do not run a second active copy from your workstation.
@@ -96,6 +104,20 @@ The initial setup ends at the successful GitHub check. Further OpenTofu jobs
 create other guests; Ansible jobs install/configure their applications. Those
 jobs and application acceptance are later work. The bootstrap does not migrate
 Home Assistant, databases or NAS data into new applications.
+
+The agreed [application deployment plan](applications/README.md) places
+**PegaProx in its own LXC**, separate from both the deployment runner and the
+general applications guest. It explains why and identifies what is still to do.
+PegaProx provisioning and installation have not been implemented here yet.
+
+Before creating more guests, finish the runner's ongoing NAS state backup and
+review access for the next guest. The bootstrap token covers its first guest;
+it does not automatically grant permission to create the rest of the homelab.
+
+If you boot back into a preserved original operating system, Proxmox and its
+guests are off. The runner will show offline until you boot Proxmox again.
+Household services on the original system and their new replacements need their
+own checks before you rely on them.
 
 ## When something goes wrong
 
@@ -109,14 +131,15 @@ Home Assistant, databases or NAS data into new applications.
 
 ## What has actually been verified?
 
-Status recorded on **25 October 2026**:
+Status updated on **26 October 2026**, including the physical results from 25 October:
 
 | Stage | Established | Still outstanding |
 | --- | --- | --- |
-| Installer | Packaged build workflow, source tests and six accepted virtual boot checks. | Physical installation and first-start networking on the intended machine. See [ISO verification](iso/verification/README.md). |
-| Bootstrap | Fresh isolated Proxmox 9.2 → one container → private runner → successful real GitHub job with matching state, without manual repairs between stages. Later review corrections passed offline checks. | Physical-target acceptance, ongoing address/credential policy and independent NAS state-backup commissioning. See [bootstrap verification](bootstrap/verification.md). |
-| Later guests and applications | The runner provides the starting point for subsequent deployment jobs. | Full-estate deployment and application acceptance. |
+| Installer | Packaged virtual checks plus a physical installation with a healthy two-drive mirror, separate original disk and working first-start access. | Each new machine needs its own checks; repeated physical restart behaviour is not established by that first start. See [ISO verification](iso/verification/README.md). |
+| Bootstrap | Clean lab handover, then physical host → one deployment container → real private GitHub no-change check with matching state. The physical run needed one reviewed tagged-VLAN correction. | Ongoing NAS state backup before further rollout. See [bootstrap verification](bootstrap/verification.md). |
+| PegaProx | Decision recorded: a separate management LXC. | Guest sizing/address, reviewed access, CD jobs, installation and actual use checks. See the [application plan](applications/README.md). |
+| Household applications | The runner provides the starting point for subsequent deployment jobs. | Guest-by-guest deployment and application acceptance. |
 
 Physical installation and first-start networking are part of the actual migration.
-They are separate from completing the installer and bootstrap tooling. Keep real
+They are separate from software-only tests. Keep real
 credentials, settings, state, plans and installation media outside Git.

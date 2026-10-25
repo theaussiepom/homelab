@@ -47,7 +47,16 @@ def validate_production(hardware,site):
 
 def first_boot_payload(hardware,site):
     validate_site(site)
-    network={'expected':{name:mac for mac,name in hardware['interface_names'].items()},'management':site['management'],'storage':site['storage'],'admin_vlans':site['admin_vlans'],'fast_vlans':site['fast_vlans']}
+    network={'expected':{name:mac for mac,name in hardware['interface_names'].items()},'management':site['management'],'storage':site['storage'],'admin_vlans':site['admin_vlans'],'fast_vlans':site['fast_vlans'],'machine_uuid':hardware['machine_uuid'],'thunderbolt_devices':hardware.get('thunderbolt_devices',[])}
+    helper=Path(__file__).with_name('thunderbolt.py').read_text()
+    core.require(helper.count('THUNDERBOLT_PROFILE = None')==1,'Thunderbolt helper placeholder changed')
+    helper=helper.replace('THUNDERBOLT_PROFILE = None','THUNDERBOLT_PROFILE = '+repr({'machine_uuid':hardware['machine_uuid'],'devices':hardware.get('thunderbolt_devices',[])}))
+    entry="\nif __name__ == '__main__':\n    main()\n"
+    core.require(helper.count(entry)==1,'Thunderbolt helper entry point changed')
+    library=helper.replace(entry,'\n')
     source=Path(__file__).with_name('first_boot.py').read_text()
     core.require(source.count('PROFILE = None')==1,'network payload placeholder changed')
-    return ('#!/usr/bin/python3\n'+source.replace('PROFILE = None','PROFILE = '+repr(network))).encode()
+    imports='from thunderbolt import authorize, settle_devices\n'
+    core.require(source.count(imports)==1 and source.count('THUNDERBOLT_HELPER = None')==1,'first-boot helper boundary changed')
+    source=source.replace(imports,'').replace('THUNDERBOLT_HELPER = None','THUNDERBOLT_HELPER = '+repr(helper))
+    return ('#!/usr/bin/python3\n'+library+'\n'+source.replace('PROFILE = None','PROFILE = '+repr(network))).encode()

@@ -4,8 +4,8 @@
 [Whole Proxmox sequence](../../README.md)
 
 The installer has passed source checks, image builds and guarded virtual boot
-tests. **These results do not mean it has installed your physical computer.**
-That happens when you choose the actual migration window.
+tests. A later installation on the maintainer's physical host is recorded below.
+**Your computer still needs its own installation and checks.**
 
 A **receipt** is a saved result identifying the exact files/image checked.
 A **checksum** identifies file contents; changed contents produce a different
@@ -25,7 +25,7 @@ on an Apple Silicon Mac. A later code correction was checked separately:
 | Build with private-style inputs | Passed with invented settings and unusable synthetic credentials. | The build path worked without publishing real private inputs. |
 | Vendor filesystem metadata | All 25,210 other records preserved. | The startup script was the sole intentional changed record. |
 | Six guarded virtual boot cases | Passed, with zero target-disk writes. | The cases below checked the image's stop/refusal behaviour. |
-| Physical installation and first-start networking | Not performed in this packaged qualification. | Check the actual machine at installation. |
+| Physical installation and first-start networking | Not performed in that packaged qualification; a later physical result is recorded below. | Check your own machine at installation. |
 | Physical write by the reusable USB helper | Not performed for this package. | A fresh write needs its own complete readback receipt. An earlier target-specific helper completed a separate write/readback. |
 
 The detailed [validation summary](validation.json) binds the earlier qualification
@@ -34,6 +34,37 @@ records a later source snapshot. They are historical records, not manifests to
 silently regenerate after a documentation edit or proof that every later checkout
 was boot-tested. Current PR build/boot results appear in
 [GitHub Actions](https://github.com/theaussiepom/homelab/actions/workflows/proxmox-iso.yml).
+
+## Later physical installation: 25 October 2026
+
+The maintainer installed the custom ISO on the intended pair of new SSDs.
+Authenticated host checks found the new two-drive ZFS mirror `ONLINE` with no
+reported data errors, the original disk present outside that mirror, both named
+network interfaces up, the configured VLAN addresses and the management route.
+The web interface and SSH access worked after the host's SSH fingerprint was
+compared with its local console.
+
+The real installation required the selected Thunderbolt adapter's authorisation
+fix. Network access also required correcting the physical switch port and the
+management VLAN on a connecting uplink. These observations explain the
+walkthrough's cable/VLAN checks; the ISO does not configure switches or routers.
+
+The [physical bootstrap record](../../bootstrap/verification.md#physical-host-bootstrap-passed-after-a-correction-on-25-october-2026)
+continues from that installed host to one guest and a real GitHub check. The
+operator subsequently reported returning to the original Ubuntu system.
+
+This records first-start installation/access, not every future physical reboot,
+every file on the original disk or household application acceptance. It does
+not replace the earlier image-specific receipts or qualify someone else's build.
+Private hardware identities, network settings, credentials and raw evidence
+remain outside this public summary.
+
+The subsequent PR review corrected uppercase machine-UUID handling and added
+revocation of a newly granted adapter authorisation after failed MAC validation.
+**45 source tests passed** after those regressions first failed. These later
+failure-path changes were not exercised on the physical host, and do not update
+an already installed helper or an existing USB. A new image still needs its own
+build, qualification and write/readback results.
 
 ## What did the six boot cases do?
 

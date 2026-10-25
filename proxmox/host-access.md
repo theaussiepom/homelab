@@ -54,7 +54,13 @@ Return to [ISO sign-in details](iso/README.md#sign-in-details).
 ## 2. Check the fresh host at its own screen
 
 After installation, use the host's local keyboard/screen to sign in as `root`
-with the recovery password you saved. Run these **read-only** commands there:
+with the recovery password you saved.
+
+Password typing normally shows no characters, not even dots. Check the keyboard
+layout and Caps Lock if sign-in fails. This is the recovery password from your
+password manager; an SSH key or API token is a different credential.
+
+Run these **read-only** commands there:
 
 ```sh
 hostname -s
@@ -146,6 +152,12 @@ without a password prompt or a host-key question. Check the web interface at
 separate from SSH trust; the bootstrap retrieves the Proxmox CA over the verified
 SSH connection and keeps API certificate checking enabled.
 
+For web sign-in, use `root`, select **Linux PAM standard authentication**, and
+use the saved recovery password. A **"no valid subscription"** notice can be
+dismissed to continue: [Proxmox VE is free to use](https://www.proxmox.com/en/products/proxmox-virtual-environment/get-started).
+That notice is separate from a connection or password failure. Update-repository
+selection is not performed by these access checks.
+
 Your workstation must later be able to reach both the host and the new guest.
 Return to [bootstrap](bootstrap/README.md#2-fill-in-your-private-settings).
 
@@ -155,6 +167,8 @@ Return to [bootstrap](bootstrap/README.md#2-fill-in-your-private-settings).
 | --- | --- |
 | Hostname cannot be resolved | Check your chosen local DNS record or name resolution. Use the same verified name consistently. |
 | Connection timed out | Check cables, VLAN membership, management address and access from the workstation's network. |
+| A physical port shows `NO-CARRIER` or no switch link light | Check the cable and the exact physical switch port before changing IP settings. |
+| The link is up but the router is unreachable | Check the tagged management VLAN on the host's switch port and every connecting uplink. Link-up alone does not confirm the VLAN path. |
 | Permission denied | Check the public key in the ISO matches your selected private key and that root SSH works at the host. |
 | Key needs a passphrase | The current Docker launcher cannot forward your SSH agent. Review the dedicated-key limitation above. |
 | Host identification changed | Compare the actual host's console fingerprint again. Preserve the previous entry until the change is explained. |

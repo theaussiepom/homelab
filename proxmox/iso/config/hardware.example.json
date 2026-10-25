@@ -19,6 +19,7 @@
       "disk_size_bytes": 0
     }
   ],
+  "thunderbolt_devices": [],
   "interface_names": {
     "REPLACE_ADMIN_NIC_MAC": "mgmt0",
     "REPLACE_FAST_NIC_MAC": "fast0"

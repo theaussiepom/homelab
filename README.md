@@ -24,6 +24,7 @@ to the two practical walkthroughs:
 | --- | --- | --- |
 | Prepare and install the host | [Make the installation USB](proxmox/iso/README.md) | Proxmox installed on the selected pair of SSDs, with network and SSH access. |
 | Connect the host to GitHub deployment | [Create the first deployment guest](proxmox/bootstrap/README.md) | One small Debian container, an online GitHub runner and a successful verification job. |
+| See what comes after bootstrap | [Application deployment plan](proxmox/applications/README.md) | The agreed PegaProx layout and the work still needed. This is a plan, not an installation guide yet. |
 
 The custom installer supports **two new mirrored SSDs, one original disk to
 preserve, two wired network ports and tagged VLANs**. Check the guide before
@@ -61,16 +62,22 @@ private. The examples in this public repository use invented values.
 
 ## What is ready?
 
-Status recorded on **25 October 2026**:
+Status updated on **26 October 2026**, including the physical results from 25 October:
 
-- **Installer and one-container bootstrap tooling:** implemented. Installer builds
-  and guarded virtual boots passed; a fresh isolated Proxmox machine successfully
-  handed over to a real private GitHub runner.
-- **Actual installation:** install your physical host and check its disks and
-  networking during your chosen migration window.
+- **Installer and first deployment guest:** the custom ISO was installed on the
+  maintainer's physical host. Bootstrap handover reached successful GitHub checks
+  on both a fresh lab machine and that host. The physical run needed a tagged-VLAN
+  permission fix; the verification record explains the failed attempt and correction.
+- **Your installation:** still needs your own disk, network and access checks.
+  Another computer's successful installation does not verify yours.
 - **Later application deployment:** subsequent OpenTofu and Ansible jobs are
   separate work. An online runner does not mean Home Assistant or other apps
-  have been migrated.
+  have been migrated. PegaProx is planned in its own LXC; it is not installed yet.
+
+For the physical run, the initial OpenTofu backup was saved privately on the Mac.
+Ongoing NAS state backup is still required before further guest/application
+rollout. The [Proxmox guide](proxmox/README.md) separates completed and outstanding
+steps.
 
 See the [ISO verification record](proxmox/iso/verification/README.md) and
 [bootstrap verification record](proxmox/bootstrap/verification.md) for exact test

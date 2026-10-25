@@ -53,6 +53,8 @@ class HostAccessTests(unittest.TestCase):
                     '/nodes/pve': {'Sys.Audit': 0}, '/sdn/zones/localnetwork/vmbr0': {'SDN.Use': 0}}
             if self.request['download_template']:
                 permissions['/storage/' + self.request['template_storage']]['Datastore.AllocateTemplate'] = 0
+            if self.request.get('vlan') is not None:
+                permissions['/sdn/zones/localnetwork/vmbr0/25'] = {'SDN.Use': 0}
             return permissions
         raise AssertionError(args)
 
@@ -81,6 +83,28 @@ class HostAccessTests(unittest.TestCase):
             self.assertNotIn('--users', command)
         self.assertEqual(self.emitted[0]['status'], 'token_created_grants_pending')
         self.assertIn('synthetic-secret', self.emitted[0]['PROXMOX_VE_API_TOKEN'])
+
+    def test_tagged_guest_grants_only_its_exact_vlan_without_propagation(self):
+        """Cover the native 403 from a tagged bridge whose parent ACL does not inherit."""
+        self.request['vlan'] = 25
+        result = self.grant()
+        paths = {row['path'] for row in result['grants']}
+        self.assertEqual(paths, {'/vms/900', '/storage/local-lvm', '/storage/local',
+                         '/nodes/pve', '/sdn/zones/localnetwork/vmbr0',
+                         '/sdn/zones/localnetwork/vmbr0/25'})
+        self.assertTrue(all(not row['propagate'] for row in result['grants']))
+        self.assertNotIn('/sdn/zones/localnetwork/vmbr0/26', paths)
+
+    def test_invalid_vlan_refuses_before_reading_or_minting_on_host(self):
+        """Reject malformed VLAN scopes before any remote operation or credential write."""
+        for vlan in (True, False, 0, 4095, '25', '../25'):
+            with self.subTest(vlan=vlan):
+                self.calls.clear()
+                self.request['vlan'] = vlan
+                with self.assertRaisesRegex(RuntimeError, 'VLAN'):
+                    self.grant()
+                self.assertEqual(self.calls, [])
+                self.assertFalse(self.minted)
 
     def test_api_template_download_refuses_before_any_host_action(self):
         """Verify API template download refuses before any host action."""

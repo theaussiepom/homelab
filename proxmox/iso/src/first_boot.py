@@ -3,8 +3,50 @@ from pathlib import Path
 import os
 import shutil
 import tempfile
+from thunderbolt import authorize, settle_devices
 
 PROFILE = None
+THUNDERBOLT_HELPER = None
+
+THUNDERBOLT_UNIT = '''[Unit]
+Description=Authorise the selected homelab Thunderbolt network adapter
+DefaultDependencies=no
+Requires=systemd-udevd.service
+After=local-fs.target systemd-udevd.service
+Before=network-pre.target networking.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/libexec/homelab-thunderbolt.py
+TimeoutStartSec=90
+RemainAfterExit=yes
+'''
+
+
+def thunderbolt_assets(root):
+    if not PROFILE.get('thunderbolt_devices'):
+        return []
+    if not isinstance(THUNDERBOLT_HELPER, str):
+        raise ValueError('Embedded Thunderbolt startup helper missing')
+    helper = root / 'usr/local/libexec/homelab-thunderbolt.py'
+    unit = root / 'etc/systemd/system/homelab-thunderbolt.service'
+    required = root / 'etc/systemd/system/networking.service.requires/homelab-thunderbolt.service'
+    if any(p.exists() or p.is_symlink() for p in (helper, unit, required)):
+        raise ValueError('Existing Thunderbolt startup files require review')
+    return [(helper, THUNDERBOLT_HELPER, 0o755), (unit, THUNDERBOLT_UNIT, 0o644), (required, None, None)]
+
+
+def persist_thunderbolt(assets):
+    for path, body, mode in assets:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if body is None:
+            path.symlink_to('../homelab-thunderbolt.service')
+        else:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
+            with os.fdopen(fd, 'w') as stream:
+                stream.write(body); stream.flush(); os.fsync(stream.fileno())
+            os.chmod(path, mode)
 
 
 def configuration(nics,profile=None):
@@ -51,13 +93,19 @@ source /etc/network/interfaces.d/*
 
 
 def install(root=Path('/')):
+    target=root/'etc/network/interfaces';backup=target.with_name('interfaces.before-homelab')
+    if target.is_symlink() or not target.is_file() or backup.exists():raise ValueError('Unexpected network configuration or previous hook run')
+    assets = thunderbolt_assets(root)
+    if assets:
+        authorize({'machine_uuid': PROFILE['machine_uuid'], 'devices': PROFILE['thunderbolt_devices']}, root=root)
+        if root == Path('/'):
+            settle_devices()
     net=root/'sys/class/net'
     nics={p.name:(p/'address').read_text().strip().lower() for p in net.iterdir() if (p/'address').is_file()}
     rendered=configuration(nics)
-    target=root/'etc/network/interfaces';backup=target.with_name('interfaces.before-homelab')
-    if target.is_symlink() or not target.is_file() or backup.exists():raise ValueError('Unexpected network configuration or previous hook run')
     with backup.open('xb') as saved:saved.write(target.read_bytes())
     shutil.copystat(target,backup)
+    persist_thunderbolt(assets)
     fd,temp=tempfile.mkstemp(prefix='.homelab-',dir=target.parent)
     try:
         with os.fdopen(fd,'w') as stream:stream.write(rendered);stream.flush();os.fsync(stream.fileno())
