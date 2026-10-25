@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Restore one new native database; a failed attempt leaves a persistent hold."""
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
-import tempfile
+import time
+import urllib.error
+import urllib.request
 
 from restore import digest, restore
 
@@ -28,8 +29,42 @@ def commands(cfg):
         required = ['influx_operator_token', 'influx_username', 'influx_password', 'influx_org', 'influx_bucket']
         if not all(isinstance(cfg.get(k), str) and cfg[k] for k in required):
             raise ValueError('Influx requires the original operator token and private setup inputs')
-        return [['influx', 'setup', '--force'], ['influx', 'restore', '--full', str(ROOT / 'influx-backup')]], 'influxdb'
+        if not re.fullmatch(r'2\.[0-8]\.[0-9]+', cfg.get('source_version', '')):
+            raise ValueError('This restore path requires a matching pre-2.9 InfluxDB v2 capture')
+        return [['influx', 'restore', '--full', str(ROOT / 'influx-backup')]], 'influxdb'
     raise ValueError('Choose a native MariaDB, PostgreSQL or InfluxDB guest')
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Do not forward setup credentials away from the local selected service."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def influx_request(method, path, payload=None):
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    request = urllib.request.Request('http://127.0.0.1:8086' + path, method=method,
+                                     data=None if payload is None else json.dumps(payload).encode(),
+                                     headers={'Content-Type': 'application/json'})
+    with opener.open(request, timeout=5) as response:
+        return json.load(response)
+
+
+def setup_influx(cfg, request=influx_request):
+    """The HTTP setup API avoids unsupported CLI env vars and password argv."""
+    for attempt in range(30):
+        try:
+            status = request('GET', '/api/v2/setup')
+            break
+        except urllib.error.URLError:
+            if attempt == 29:
+                raise
+            time.sleep(1)
+    if status.get('allowed') is not True:
+        raise ValueError('Influx target is already initialised; do not overwrite it')
+    request('POST', '/api/v2/setup', {'username': cfg['influx_username'], 'password': cfg['influx_password'],
+                                    'org': cfg['influx_org'], 'bucket': cfg['influx_bucket'],
+                                    'token': cfg['influx_operator_token']})
 
 
 def run(cfg, root=ROOT):
@@ -56,10 +91,10 @@ def run(cfg, root=ROOT):
     environment = os.environ.copy()
     environment.update({'INFLUX_HOST': 'http://127.0.0.1:8086'})
     if cfg['kind'] == 'influxdb':
-        environment.update({'INFLUX_TOKEN': cfg['influx_operator_token'],
-                            'INFLUX_USERNAME': cfg['influx_username'], 'INFLUX_PASSWORD': cfg['influx_password'],
-                            'INFLUX_ORG': cfg['influx_org'], 'INFLUX_BUCKET_NAME': cfg['influx_bucket']})
+        environment.update({'INFLUX_TOKEN': cfg['influx_operator_token'], 'INFLUX_ORG': cfg['influx_org']})
     subprocess.run(['systemctl', 'start', service], check=True, stdout=subprocess.DEVNULL)
+    if cfg['kind'] == 'influxdb':
+        setup_influx(cfg)
     for command in restore_commands:
         with capture.open('rb') as stream:
             # SQL goes to stdin; Influx reads the checked native backup directory.
@@ -84,7 +119,7 @@ def main():
         parser.error('Run only inside the selected new guest as root')
     try:
         print(json.dumps({'restored': run(json.loads(args.config.read_text()))}))
-    except (ValueError, subprocess.CalledProcessError):
+    except (ValueError, OSError, subprocess.CalledProcessError):
         raise SystemExit('Native restore held; preserve private receipts and inspect the selected guest') from None
 
 

@@ -19,10 +19,22 @@ class DatabaseTests(unittest.TestCase):
 
     def test_influx_requires_original_operator_credentials(self):
         with self.assertRaises(ValueError): database.commands({'kind': 'influxdb'})
-        cfg = dict(kind='influxdb', **{key: 'synthetic' for key in ['influx_operator_token', 'influx_username', 'influx_password', 'influx_org', 'influx_bucket']})
+        cfg = dict(kind='influxdb', source_version='2.7.12', **{key: 'synthetic' for key in ['influx_operator_token', 'influx_username', 'influx_password', 'influx_org', 'influx_bucket']})
         commands, service = database.commands(cfg)
-        self.assertEqual(service, 'influxdb'); self.assertIn('--full', commands[1])
+        self.assertEqual(service, 'influxdb'); self.assertIn('--full', commands[0])
         self.assertNotIn('synthetic', str(commands))
+
+    def test_influx_setup_uses_private_http_body_and_original_operator_token(self):
+        cfg = {key: 'synthetic-' + key for key in ['influx_operator_token', 'influx_username', 'influx_password', 'influx_org', 'influx_bucket']}
+        from unittest.mock import Mock
+        request = Mock(side_effect=[{'allowed': True}, {}])
+        database.setup_influx(cfg, request=request)
+        self.assertEqual(request.call_args.args[:2], ('POST', '/api/v2/setup'))
+        self.assertEqual(request.call_args.args[2]['token'], cfg['influx_operator_token'])
+        self.assertEqual(request.call_args.args[2]['password'], cfg['influx_password'])
+        request = Mock(return_value={'allowed': False})
+        with self.assertRaises(ValueError): database.setup_influx(cfg, request=request)
+        self.assertEqual(request.call_count, 1)
 
     def test_failed_sql_restore_is_held_without_automatic_replay(self):
         with tempfile.TemporaryDirectory() as tmp:

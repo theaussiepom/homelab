@@ -85,7 +85,9 @@ Supply the source `influx_operator_token` and private setup
 `influx_username`, `influx_password`, `influx_org`, `influx_bucket`.
 The original token is used for setup and full restore, following
 [InfluxDB's procedure](https://docs.influxdata.com/influxdb/v2/admin/backup-restore/restore/).
-Credentials go through environment variables, not argv. A 2.9+ hashed-token
+Setup credentials go through the local HTTP setup API body; the restore token
+uses the CLI's supported environment variable, never argv. Supply the captured
+`source_version` as well; this helper admits only pre-2.9 v2 backups. A 2.9+ hashed-token
 backup needs its exact supported CLI/token procedure and is not automatically
 admitted by this initial helper.
 
