@@ -22,7 +22,9 @@ variable "guest" {
       !contains([900, 4914, 4915, 4920], var.guest.vmid) &&
       can(regex("^[a-z][a-z0-9-]{0,62}$", var.guest.hostname)) &&
       var.guest.cpu >= 1 && floor(var.guest.cpu) == var.guest.cpu &&
-      var.guest.memory_mib >= 256 && var.guest.root_gib >= 4 &&
+      var.guest.memory_mib >= 256 && floor(var.guest.memory_mib) == var.guest.memory_mib &&
+      var.guest.root_gib >= 4 && floor(var.guest.root_gib) == var.guest.root_gib &&
+      var.guest.boot_order >= 0 && floor(var.guest.boot_order) == var.guest.boot_order &&
       length(var.guest.storage_id) > 0 && length(var.guest.template_file_id) > 0
     )
     error_message = "Choose an application guest with explicit resources; the deployment controller and protected rehearsal IDs are excluded."
@@ -34,6 +36,7 @@ variable "guest" {
       length([for nic in var.guest.interfaces : nic.gateway if nic.gateway != null]) == 1 &&
       alltrue([for nic in var.guest.interfaces :
         can(cidrnetmask(nic.ipv4)) && can(regex("^([0-9a-f]{2}:){5}[0-9a-f]{2}$", nic.mac)) &&
+        (nic.ipv6 == null ? true : contains(["auto", "dhcp", "manual"], nic.ipv6) || can(cidrhost(nic.ipv6, 0))) &&
         (nic.vlan == null ? true : nic.vlan >= 1 && nic.vlan <= 4094 && floor(nic.vlan) == nic.vlan)
       ])
     )
@@ -41,7 +44,7 @@ variable "guest" {
   }
   validation {
     condition = alltrue([for volume in values(var.guest.volumes) :
-      volume.size_gib >= 1 && can(regex("^(/srv/homelab|/var/lib/(mysql|postgresql|influxdb))(/[a-z0-9_-]+)*$", volume.path))
+      volume.size_gib >= 1 && floor(volume.size_gib) == volume.size_gib && can(regex("^(/srv/homelab|/var/lib/(mysql|postgresql|influxdb))(/[a-z0-9_-]+)*$", volume.path))
     ])
     error_message = "Data volumes must be managed guest volumes at explicit service paths, never host bind mounts."
   }

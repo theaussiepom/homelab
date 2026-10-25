@@ -6,13 +6,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import shlex
 import shutil
 import subprocess
 import time
 
 from plan import check_plan
+from restore import sync_directory
 
 SOURCE = Path(__file__).resolve().parent
 
@@ -39,6 +39,9 @@ def write(path, value):
     with os.fdopen(fd, 'w') as stream:
         json.dump(value, stream, indent=2)
         stream.write('\n')
+        stream.flush()
+        os.fsync(stream.fileno())
+    sync_directory(path.parent)
 
 
 def validate(cfg):
@@ -52,6 +55,11 @@ def validate(cfg):
         raise ValueError('Ansible must use a selected guest interface')
     if app.get('new_target') is not True:
         raise ValueError('This installer is for a selected new guest')
+    if app.get('kind') == 'automation' and 'stack_config' in app:
+        stack = json.loads(Path(app['stack_config']).read_text())
+        address = stack.get('services', {}).get('homeassistant', {}).get('environment', {}).get('HOMELAB_HA_IPV4')
+        if address and address not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
+            raise ValueError('HA discovery must select an address assigned to this guest')
     for key in ('state_root', 'backup_mount', 'backup_directory', 'api_token', 'ca_file', 'private_key', 'known_hosts'):
         if not Path(cfg['paths'][key]).is_absolute():
             raise ValueError(f'{key} must be an absolute private runner path')
@@ -66,13 +74,36 @@ def validate(cfg):
 
 def input_hashes(cfg):
     """Bind external configuration and trust files as well as the top-level site JSON."""
-    paths = [cfg['paths'][key] for key in ('ca_file', 'known_hosts')]
+    paths = [cfg['paths']['ca_file']]
     app = cfg['app']
     if 'stack_config' in app:
         paths.append(app['stack_config'])
     paths.extend(item['key_path'] for item in app.get('repositories', []))
     paths.extend(item['source'] for item in app.get('database', {}).get('config_files', []))
     return {path: sha(path) for path in sorted(set(paths))}
+
+
+def guest_trust(cfg, work):
+    """Pin this guest after creation; unrelated known_hosts additions are harmless."""
+    address = cfg['app']['address']
+    output = subprocess.check_output(['ssh-keygen', '-F', address, '-f', cfg['paths']['known_hosts']], text=True)
+    keys = []
+    for line in output.splitlines():
+        if not line or line.startswith('#'):
+            continue
+        parts = line.split()
+        if len(parts) < 3 or parts[0].startswith('@') or not (parts[0] == address or parts[0].startswith('|1|')):
+            raise ValueError('Use exact pinned guest host keys; do not introduce a wildcard or SSH CA')
+        keys.append(parts[1:3])
+    if not keys:
+        raise ValueError('Verify and supply this new guest host key after creation, before Ansible')
+    binding = {'address': address, 'keys': sorted(keys)}
+    path = work / 'ssh-trust.json'
+    if path.exists():
+        if json.loads(path.read_text()) != binding:
+            raise ValueError('Guest host trust changed; preserve the old binding for review')
+    else:
+        write(path, binding)
 
 
 def quiet(command, environment, log, cwd=None):
@@ -146,28 +177,45 @@ def execute(action, cfg_path, approved_plan=None):
                 raise ValueError('Apply requires the exact reviewed plan SHA256')
         elif action not in {'stage', 'start', 'verify'}:
             raise ValueError('Unknown deployment step')
+        applied = work / 'applied.json'
+        if action == 'apply' and applied.exists() and json.loads(applied.read_text()) == receipt:
+            raise ValueError('This saved plan was already applied; prepare a new plan')
+        if action != 'apply' and (not applied.exists() or json.loads(applied.read_text()) != receipt):
+            raise ValueError('Apply the selected reviewed plan before configuring its guest')
+        if action == 'stage' and (work / 'started.json').exists():
+            raise ValueError('This guest has already started; stage is only for a new installation')
+        if action != 'apply':
+            guest_trust(cfg, work)
+        # Mark BEFORE a native command: SIGKILL/job cancellation cannot run an
+        # exception handler, and local process exit never proves remote closure.
+        if action != 'verify':
+            write(work / 'HOLD.json', {'action': action, 'vmid': vmid, 'log': str(logfile),
+                                      'started_at_ns': time.time_ns(), 'remote_closure': 'unconfirmed'})
         try:
             if action == 'apply':
                 quiet(tofu + ['apply', '-input=false', '-lock-timeout=30s', str(work / 'guest.tfplan')], environment, logfile)
                 write(work / 'applied.json', receipt)
             else:
-                if json.loads((work / 'applied.json').read_text()) != receipt:
-                    raise ValueError('Apply the selected reviewed plan before configuring its guest')
                 app = dict(cfg['app'], start_services=(action == 'start'), render_dir=str(work / 'rendered'))
                 write(work / 'variables.json', {'app': app})
                 write(work / 'inventory.json', {'application': {'hosts': {app['hostname']: {'ansible_host': app['address'], 'ansible_user': 'root'}}}})
                 environment.update({'ANSIBLE_CONFIG': str(SOURCE / 'ansible' / 'ansible.cfg'),
                                     'ANSIBLE_HOST_KEY_CHECKING': 'True',
-                                    'ANSIBLE_SSH_ARGS': '-o StrictHostKeyChecking=yes -o BatchMode=yes -o ControlMaster=no -o UserKnownHostsFile=' + shlex.quote(cfg['paths']['known_hosts'])})
+                                    'ANSIBLE_SSH_ARGS': '-F /dev/null -o StrictHostKeyChecking=yes -o BatchMode=yes -o ControlMaster=no -o GlobalKnownHostsFile=/dev/null -o VerifyHostKeyDNS=no -o UpdateHostKeys=no -o IdentitiesOnly=yes -o UserKnownHostsFile=' + shlex.quote(cfg['paths']['known_hosts'])})
                 playbook = 'verify.yml' if action == 'verify' else 'site.yml'
                 quiet(['ansible-playbook', '-i', str(work / 'inventory.json'),
                        '--private-key', cfg['paths']['private_key'], str(SOURCE / 'ansible' / playbook),
                        '--extra-vars', '@' + str(work / 'variables.json')], environment, logfile)
+                if action == 'start':
+                    write(work / 'started.json', receipt)
             backup(cfg, state, 'after-' + action)
         except (OSError, ValueError, subprocess.CalledProcessError):
             if action != 'verify':
                 write(work / 'HOLD.json', {'action': action, 'vmid': vmid, 'log': str(logfile), 'failed_at_ns': time.time_ns()})
             raise
+        if action != 'verify':
+            (work / 'HOLD.json').unlink()
+            sync_directory(work)
         return {'step': action, 'vmid': vmid, 'status': 'passed'}
 
 

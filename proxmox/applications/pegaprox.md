@@ -3,9 +3,10 @@
 [Back to application deployment](README.md) ·
 [First deployment guest](../bootstrap/README.md)
 
-**This is the agreed plan, not a ready-to-run application installer.** The first
-guest and GitHub handover have been proved. The jobs that create more guests and
-install their applications are still to be written and checked.
+**This is PegaProx's agreed plan, not a ready-to-run PegaProx installer.** The
+first guest and GitHub handover have been proved. The
+[HA application jobs](README.md) now have source and synthetic tests; PegaProx's
+own installation jobs remain unimplemented.
 
 ## PegaProx gets its own LXC
 

@@ -35,10 +35,7 @@ resource "proxmox_virtual_environment_container" "guest" {
           address = ip_config.value.ipv4
           gateway = ip_config.value.gateway
         }
-        dynamic "ipv6" {
-          for_each = ip_config.value.ipv6 == null ? [] : [ip_config.value.ipv6]
-          content { address = ipv6.value }
-        }
+        ipv6 { address = coalesce(ip_config.value.ipv6, "manual") }
       }
     }
   }

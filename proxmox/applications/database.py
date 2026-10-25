@@ -10,7 +10,8 @@ import time
 import urllib.error
 import urllib.request
 
-from restore import digest, restore
+from restore import digest, restore, sync_directory
+from pg_clean import restore_clean
 
 ROOT = Path('/opt/homelab-app')
 
@@ -71,6 +72,8 @@ def run(cfg, root=ROOT):
     if not cfg.get('exclusive_writer_confirmed'):
         raise ValueError('Starting the new database requires the selected exclusive-writer/cutover decision')
     restore_commands, service = commands(cfg)
+    if cfg['kind'] == 'postgresql' and cfg['capture']['format'] != 'pg-dumpall-clean':
+        raise ValueError('Use the existing selected clean pg_dumpall restore contract')
     capture = root / 'database.capture'
     checksum = digest(capture)
     if checksum != cfg['capture']['sha256']:
@@ -88,6 +91,7 @@ def run(cfg, root=ROOT):
         json.dump({'state': 'started', 'kind': cfg['kind'], 'sha256': checksum}, stream)
         stream.flush()
         os.fsync(stream.fileno())
+    sync_directory(root)
     environment = os.environ.copy()
     environment.update({'INFLUX_HOST': 'http://127.0.0.1:8086'})
     if cfg['kind'] == 'influxdb':
@@ -95,7 +99,9 @@ def run(cfg, root=ROOT):
     subprocess.run(['systemctl', 'start', service], check=True, stdout=subprocess.DEVNULL)
     if cfg['kind'] == 'influxdb':
         setup_influx(cfg)
-    for command in restore_commands:
+    if cfg['kind'] == 'postgresql':
+        restore_clean(capture, root)
+    for command in ([] if cfg['kind'] == 'postgresql' else restore_commands):
         with capture.open('rb') as stream:
             # SQL goes to stdin; Influx reads the checked native backup directory.
             subprocess.run(command, stdin=stream if cfg['kind'] != 'influxdb' else subprocess.DEVNULL,
@@ -108,6 +114,7 @@ def run(cfg, root=ROOT):
         stream.flush()
         os.fsync(stream.fileno())
     complete_path.replace(receipt)
+    sync_directory(root)
     return True
 
 

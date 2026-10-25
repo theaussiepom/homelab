@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Render one application guest from private inputs; never print its credentials."""
 import argparse
-import copy
 import json
+import ipaddress
 import math
 import os
 from pathlib import Path
@@ -34,6 +34,17 @@ def required(cfg, key):
     return value
 
 
+def preserved(value, field):
+    """Keep container-shell expansion literal through Compose interpolation."""
+    if value is None and field in ('command', 'entrypoint'):
+        return None
+    if isinstance(value, str):
+        return literal(value)
+    if field in ('command', 'entrypoint') and isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return [literal(v) for v in value]
+    raise ValueError(f'Use a string, string argv or null for {field}; user requires a string')
+
+
 def compose(cfg):
     """Keep placement fixed; site-specific images, restored data and routes are inputs."""
     kind = cfg.get('kind')
@@ -60,7 +71,10 @@ def compose(cfg):
             policy = 'missing'
         else:
             raise ValueError('Pin each image by registry digest or verified local image ID')
-        service = {'image': image, 'pull_policy': policy, 'restart': 'unless-stopped',
+        restart = value.get('restart', 'no')
+        if restart not in ('no', 'unless-stopped'):
+            raise ValueError('Select no restart for qualification, or the explicitly accepted ongoing policy')
+        service = {'image': image, 'pull_policy': policy, 'restart': restart,
                    'mem_limit': f"{value['memory_mib']}m", 'cpus': positive(value.get('cpus'), 'cpus'),
                    'pids_limit': positive(value.get('pids_limit'), 'pids_limit'),
                    'stop_grace_period': '60s',
@@ -89,7 +103,17 @@ def compose(cfg):
             # Existing custom images and helper entrypoints are preserved, not replaced.
             for key in ('command', 'entrypoint', 'user'):
                 if key in value:
-                    service[key] = copy.deepcopy(value[key])
+                    service[key] = preserved(value[key], key)
+        capabilities = value.get('cap_add', [])
+        if capabilities:
+            if name != 'homeassistant' or capabilities != ['NET_ADMIN']:
+                raise ValueError('Only the explicitly selected HA mDNS NET_ADMIN capability is supported')
+            service['cap_add'] = capabilities
+        if name == 'homeassistant' and 'HOMELAB_HA_IPV4' in value.get('environment', {}):
+            if ipaddress.ip_address(value['environment']['HOMELAB_HA_IPV4']).version != 4 or capabilities != ['NET_ADMIN']:
+                raise ValueError('The selected mDNS helper needs an explicit IPv4 address and guest network capability')
+            if f'{root}/ha-startup:/startup:ro' not in service['volumes']:
+                raise ValueError('Mount the captured HA startup directory read-only for the mDNS helper')
         result['services'][name] = service
     services = result['services']
     if kind == 'identity':

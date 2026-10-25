@@ -8,7 +8,7 @@
       - app.database.capture.coherent | default(false) | bool
       - app.database.capture.sha256 is match('^[0-9a-f]{64}$')
       - app.database.capture.path is match('^/')
-      - app.database.capture.format == ('influx-v2' if app.kind == 'influxdb' else 'sql')
+      - app.database.capture.format == ('influx-v2' if app.kind == 'influxdb' else ('pg-dumpall-clean' if app.kind == 'postgresql' else 'sql'))
     fail_msg: 'Use a coherent SQL/native backup and matching native package versions, never live Docker database files.'
 
 - name: Check the installed database version without changing it
@@ -68,6 +68,14 @@
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../restore.py"
     dest: /opt/homelab-app/restore.py
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install the selected clean PostgreSQL restore adapter
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../pg_clean.py"
+    dest: /opt/homelab-app/pg_clean.py
     owner: root
     group: root
     mode: '0700'

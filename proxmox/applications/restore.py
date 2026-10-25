@@ -37,6 +37,15 @@ def digest(path):
     return value.hexdigest()
 
 
+def sync_directory(path):
+    """Persist receipt names before a native command can start or complete."""
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def restore(archive, destination, receipt, expected):
     if digest(archive) != expected:
         raise ValueError('Capture SHA256 does not match')
@@ -56,12 +65,19 @@ def restore(archive, destination, receipt, expected):
         json.dump(status, stream)
         stream.flush()
         os.fsync(stream.fileno())
-    extracted = subprocess.run(['tar', '--extract', '--file', str(archive), '--directory', str(destination),
-                                '--numeric-owner', '--same-owner', '--same-permissions', '--acls', '--xattrs',
-                                '--xattrs-include=*', '--delay-directory-restore'], check=True,
-                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    if extracted.stderr:
-        raise ValueError('Tar reported a restore warning; preserve the partial target and receipt for review')
+    sync_directory(receipt.parent)
+    errors = receipt.with_suffix('.tar.stderr')
+    fd = os.open(errors, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    sync_directory(receipt.parent)
+    with os.fdopen(fd, 'w') as diagnostic:
+        extracted = subprocess.run(['tar', '--extract', '--file', str(archive), '--directory', str(destination),
+                                    '--numeric-owner', '--same-owner', '--same-permissions', '--acls', '--xattrs',
+                                    '--xattrs-include=*', '--delay-directory-restore'],
+                                   stdout=subprocess.DEVNULL, stderr=diagnostic)
+        diagnostic.flush()
+        os.fsync(diagnostic.fileno())
+    if extracted.returncode != 0 or errors.stat().st_size:
+        raise ValueError('Tar restore held; inspect the private .tar.stderr beside its receipt')
     status['state'] = 'complete'
     temporary = receipt.with_suffix('.tmp')
     fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -70,6 +86,7 @@ def restore(archive, destination, receipt, expected):
         stream.flush()
         os.fsync(stream.fileno())
     temporary.replace(receipt)
+    sync_directory(receipt.parent)
     return True
 
 

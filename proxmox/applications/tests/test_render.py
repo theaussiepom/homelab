@@ -44,6 +44,7 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(set(result['services']), {'homeassistant', 'node_red', 'mqtt'})
         self.assertEqual(result['services']['homeassistant']['network_mode'], 'host')
         self.assertNotIn('privileged', result['services']['homeassistant'])
+        self.assertEqual(result['services']['homeassistant']['restart'], 'no')
         self.assertGreaterEqual(int(result['services']['homeassistant']['stop_grace_period'][:-1]), 60)
         self.assertFalse(any('avahi' in str(s) for s in result['services'].values()))
 
@@ -111,6 +112,26 @@ class RenderTests(unittest.TestCase):
         """Compose interpolation must not rewrite restored passwords or settings."""
         cfg = fixture('automation'); cfg['services']['mqtt']['environment']['EXAMPLE'] = 'synthetic-$literal'
         self.assertEqual(render.compose(cfg)['services']['mqtt']['environment']['EXAMPLE'], 'synthetic-$$literal')
+
+    def test_mdns_helper_capability_and_mount_are_explicit(self):
+        cfg = fixture('automation'); ha = cfg['services']['homeassistant']
+        ha['environment']['HOMELAB_HA_IPV4'] = '198.18.100.20'
+        with self.assertRaises(ValueError): render.compose(cfg)
+        ha['cap_add'] = ['NET_ADMIN']
+        ha['extra_mounts'] = [{'source': '/srv/homelab/ha-startup', 'target': '/startup', 'read_only': True}]
+        self.assertEqual(render.compose(cfg)['services']['homeassistant']['cap_add'], ['NET_ADMIN'])
+        cfg['services']['mqtt']['cap_add'] = ['NET_ADMIN']
+        with self.assertRaises(ValueError): render.compose(cfg)
+
+    def test_preserved_commands_keep_container_variables_literal(self):
+        cfg = fixture('automation'); node = cfg['services']['node_red']
+        node.update(command=['sh', '-c', 'echo $CONTAINER_VALUE'], entrypoint=None, user='${LITERAL_USER}')
+        result = render.compose(cfg)['services']['node_red']
+        self.assertEqual(result['command'][-1], 'echo $$CONTAINER_VALUE')
+        self.assertIsNone(result['entrypoint']); self.assertEqual(result['user'], '$${LITERAL_USER}')
+        for field, value in [('user', ['root']), ('command', [1]), ('entrypoint', True)]:
+            bad = fixture('automation'); bad['services']['node_red'][field] = value
+            with self.assertRaises(ValueError): render.compose(bad)
 
 
 if __name__ == '__main__':

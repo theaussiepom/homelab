@@ -61,6 +61,16 @@
   no_log: true
   when: not ansible_check_mode
 
+- name: Adapt the existing HA helper to the selected rehearsal or production address
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../mdns-route.sh"
+    dest: /srv/homelab/ha-startup/mdns-route.sh
+    owner: root
+    group: root
+    mode: '0750'
+    backup: true
+  when: app.kind == 'automation' and stack.services.homeassistant.environment.HOMELAB_HA_IPV4 is defined
+
 - name: Require the explicit start step and retired old writers
   ansible.builtin.assert:
     that:

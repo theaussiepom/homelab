@@ -11,7 +11,13 @@ share bootstrap's global deployment concurrency group; a process lock also
 prevents competing application jobs. Never run another active state copy.
 
 The guest starts so Ansible can reach SSH; this does not start the restored
-applications. Use `start_on_boot: false` for rehearsal until boot behaviour is
+applications. On initial creation the provider starts it before the following
+guest-firewall resources are installed. Admit that initial SSH window only on
+the selected trusted network, after checking the datacenter firewall. If that
+window is unacceptable, select `started: false`; the guest then needs a separate
+reviewed start plan after firewall creation. Do not bypass this with a manual
+boot or treat interface `firewall: true` as proof the full firewall is active.
+Use `start_on_boot: false` for rehearsal until boot behaviour is
 accepted. Proxmox protection, `prevent_destroy` and the saved-plan checker reject
 replacement/deletion. The old staging framework and bootstrap guard are unchanged.
 
@@ -61,9 +67,24 @@ without a registry digest, supply its exact `sha256:…` image ID, `archive` and
 checks that exact ID. It never replaces it with a vendor tag. Automation inputs
 can preserve `command`, `entrypoint`, `user` and selected helper mounts.
 
+New stacks default to `restart: no` during qualification, so a failed first
+start does not become an automatic retry loop. Select `restart: unless-stopped`
+explicitly in the reviewed private service inputs after accepting its ongoing
+restart/boot behaviour. That change follows a fresh plan and explicit start.
+
 The renderer does not grant privileged mode, expose Docker control sockets,
 restore the broken Avahi socket mount or move radios. Bluetooth/DBus hardware
 access is not covered by this initial guest definition.
+
+For an existing HA image whose entrypoint runs `/startup/mdns-route.sh`, retain
+its helper mount at `/srv/homelab/ha-startup:/startup:ro` and set the selected
+guest address in `HOMELAB_HA_IPV4`. Ansible backs up that helper and installs the
+parameterised equivalent, retaining its IPv4/IPv6 multicast routes. Its only
+supported optional capability is an explicit `cap_add: [NET_ADMIN]` for HA,
+confined to this new automation guest's network namespace. Review that network
+administration grant in the concrete native guest/start decision. It is not
+enabled by the example or granted to other services. The address must belong
+to a declared guest interface; missing IPv4/IPv6 routing fails startup.
 
 ### Native databases
 
@@ -75,10 +96,16 @@ in `app.packages`. Supply reviewed deb822 sources with ASCII-armoured key files
 and SHA256s in `app.repositories` when Debian packages do not match. Each source
 must name its explicit Signed-By path. There is no silent database downgrade.
 
-MariaDB restores SQL through its local root socket. PostgreSQL restores plain
-SQL through its native postgres peer account with `ON_ERROR_STOP`. Prepare SQL
-that creates required roles/databases/grants without recreating built-in
-postgres/template objects. A raw Docker data directory is not this input.
+MariaDB restores SQL through its local root socket. PostgreSQL uses
+`format: pg-dumpall-clean`, the
+[existing clean restore contract](../../services/database-backup/POSTGRESQL-CLEAN-RECOVERY.md).
+Provide unchanged uncompressed SQL from that selected archive, retaining the
+original archive separately. A unique local maintenance superuser/database
+imports it without rewriting SQL. Only the exact ordered protected-bootstrap
+DROP/duplicate-CREATE diagnostics are accepted; all other errors/client failure
+hold the target. Bootstrap OID 10 is checked, then only those temporary objects
+are removed. Native confirmation still needs the retained account/grant/data
+comparisons and real credential checks. A raw Docker data directory is not an input.
 
 InfluxDB expects a tarred **v2 native backup directory**, `format: influx-v2`.
 Supply the source `influx_operator_token` and private setup
@@ -125,7 +152,7 @@ python3 proxmox/applications/deploy.py start --site /var/lib/homelab-inputs/auto
 python3 proxmox/applications/deploy.py verify --site /var/lib/homelab-inputs/automation.json
 ```
 
-Source/site hashes and private configuration/trust-file hashes bind the saved
+Source/site hashes and private configuration/CA-file hashes bind the saved
 plan; changes require a fresh plan. Starting
 requires `exclusive_writer_confirmed: true` after the selected cutover decision
 and retirement of old writers. Stage does not need it. HA can operate real
@@ -136,6 +163,14 @@ output. Define real DNS/database/MQTT/HTTP probes. Success is service evidence,
 not physical household acceptance. Plans, logs and state stay private; the
 driver prints compact results. Missing NAS recovery blocks execution. A failed
 mutation leaves `HOLD.json`; review closure/state before any corrected attempt.
+
+Guest SSH keys are verified **after guest creation**, before its first Ansible
+step, using the trusted Proxmox console/administrator route. The first step pins
+only this guest's exact key records; adding another guest to the shared
+known_hosts file does not invalidate earlier plans. A changed key is held for
+review. SSH uses only the declared key/trust file and direct route, without
+agent, global trust, DNS-trust or proxy fallback. The Proxmox root SSH key is not
+copied into the deployment runner.
 
 ## Offline source tests
 

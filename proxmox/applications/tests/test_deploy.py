@@ -1,6 +1,5 @@
 """Check target matching, required NAS custody, and exact saved-plan application."""
 import copy
-import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -68,6 +67,41 @@ class DeployTests(unittest.TestCase):
             deploy.write(work / 'plan.json', {'site_sha256': deploy.sha(site), 'source_sha256': deploy.source_hash(), 'plan_sha256': '1' * 64, 'input_hashes': {}})
             with self.assertRaises(ValueError): deploy.execute('apply', site, '2' * 64)
             run.assert_not_called()
+
+    def test_interrupted_apply_remains_held_before_a_native_command_can_escape(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(deploy, 'quiet', side_effect=KeyboardInterrupt), patch.object(deploy, 'backup'), patch.object(deploy, 'input_hashes', return_value={}):
+            root = Path(tmp); cfg = fixture(root); site = root / 'site.json'; site.write_text(json.dumps(cfg)); (root / 'api').write_text('synthetic')
+            work = root / 'state' / '6101'; work.mkdir(parents=True)
+            plan = work / 'guest.tfplan'; plan.write_bytes(b'synthetic-plan')
+            deploy.write(work / 'plan.json', {'site_sha256': deploy.sha(site), 'source_sha256': deploy.source_hash(), 'plan_sha256': deploy.sha(plan), 'input_hashes': {}})
+            with self.assertRaises(KeyboardInterrupt): deploy.execute('apply', site, deploy.sha(plan))
+            self.assertTrue((work / 'HOLD.json').exists())
+            with self.assertRaises(ValueError): deploy.execute('apply', site, deploy.sha(plan))
+
+    def test_unapplied_stage_repeated_apply_and_staging_started_guest_are_preflight_failures(self):
+        for scenario in ('unapplied-stage', 'repeated-apply', 'started-stage'):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp, patch.object(deploy, 'quiet') as run, patch.object(deploy, 'backup'), patch.object(deploy, 'input_hashes', return_value={}):
+                root = Path(tmp); cfg = fixture(root); site = root / 'site.json'; site.write_text(json.dumps(cfg)); (root / 'api').write_text('synthetic')
+                work = root / 'state' / '6101'; work.mkdir(parents=True)
+                plan = work / 'guest.tfplan'; plan.write_bytes(b'synthetic-plan')
+                receipt = {'site_sha256': deploy.sha(site), 'source_sha256': deploy.source_hash(), 'plan_sha256': deploy.sha(plan), 'input_hashes': {}}
+                deploy.write(work / 'plan.json', receipt)
+                if scenario != 'unapplied-stage': deploy.write(work / 'applied.json', receipt)
+                if scenario == 'started-stage': deploy.write(work / 'started.json', receipt)
+                action = 'apply' if scenario == 'repeated-apply' else 'stage'
+                with self.assertRaises(ValueError): deploy.execute(action, site, deploy.sha(plan))
+                self.assertFalse((work / 'HOLD.json').exists()); run.assert_not_called()
+
+    def test_guest_trust_is_bound_after_creation_and_cannot_silently_change(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); cfg = fixture(root)
+            line = '198.18.100.20 ssh-ed25519 AAAAsynthetic\n'
+            with patch.object(deploy.subprocess, 'check_output', return_value='# Host found: line 1\n' + line):
+                deploy.guest_trust(cfg, root)
+            with patch.object(deploy.subprocess, 'check_output', return_value='# Host found: line 7\n' + line):
+                deploy.guest_trust(cfg, root)
+            with patch.object(deploy.subprocess, 'check_output', return_value=line.replace('AAAAsynthetic', 'AAAAdifferent')):
+                with self.assertRaises(ValueError): deploy.guest_trust(cfg, root)
 
 
 if __name__ == '__main__':

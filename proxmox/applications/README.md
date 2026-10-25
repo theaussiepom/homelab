@@ -49,6 +49,8 @@ services and physical hosts stay in place.
   and verified guest SSH host key. Secrets stay in private runner files.
 - A coherent NAS capture of this guest's configuration/data, required database
   backups, preserved custom images and independently available keys.
+- NAS protection for new application/database writes, commissioned before the
+  live start. State recovery copies alone do not back up application data.
 
 Use database-native backups, not copies of files from running databases.
 Preserve numeric file owners, permissions, ACLs and extended attributes.
