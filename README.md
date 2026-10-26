@@ -70,17 +70,19 @@ Status updated on **26 October 2026**, including the physical results from 25 Oc
   permission fix; the verification record explains the failed attempt and correction.
 - **Your installation:** still needs your own disk, network and access checks.
   Another computer's successful installation does not verify yours.
-- **Later application deployment:** subsequent OpenTofu and Ansible jobs are
-  separate work. An online runner does not mean Home Assistant or other apps
-  have been migrated. PegaProx is planned in its own LXC; it is not installed yet.
+- **DNS and empty database servers:** private GitHub CD has installed and
+  checked DNS plus matching PostgreSQL, MariaDB and InfluxDB servers on the
+  physical host. Household database restores and later applications remain
+  separate work. PegaProx is planned in its own LXC; it is not installed yet.
 
 For the physical run, the initial OpenTofu backup was saved privately on the Mac.
-Ongoing NAS state backup is still required before further guest/application
-rollout on that physical host. The supported
-[existing-bootstrap update](proxmox/bootstrap/README.md#8-prepare-the-runner-to-deploy-your-applications)
-has passed in the isolated lab, including a repeat with no changes; it still
-needs to be applied and checked on the physical host. The
-[Proxmox guide](proxmox/README.md) separates completed and outstanding steps.
+The runner's ongoing NAS state-backup mount and immediate copy/readback have
+since passed on the physical host. The [existing-bootstrap update](proxmox/bootstrap/README.md#8-prepare-the-runner-to-deploy-your-applications)
+and merge-driven host job have also passed there, including the private backend
+bridge and declared database access. These checks cover state copies; restoring
+them and protecting live application data remain separate. The linked
+verification record also states which NAS security controls were not assessed.
+The [Proxmox guide](proxmox/README.md) separates completed and outstanding steps.
 
 See the [ISO verification record](proxmox/iso/verification/README.md) and
 [bootstrap verification record](proxmox/bootstrap/verification.md) for exact test

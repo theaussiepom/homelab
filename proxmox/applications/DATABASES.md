@@ -22,13 +22,29 @@ matching database versions, rather than upgrading the database during migration:
 | Database | Selected version | Preparation and test boundary |
 | --- | --- | --- |
 | MariaDB | 12.3.3 | Exact signed packages installed; unchanged full synthetic SQL dump restored from Unix999:999 into the package-created account, with restored users/grants and password login/query passing |
-| PostgreSQL | 16.10 | Matching signed Debian packages found; synthetic clean SQL restore checks rows, ownership, grants and removal of its temporary restore account |
-| InfluxDB | Server 2.7.12, CLI 2.7.5 | Exact signed packages installed and empty daemon health/CLI checks passed; synthetic full backup restore/query also passed. Service-manager startup still needs the LXC test |
+| PostgreSQL | 16.10 | Native LXC/systemd install and local SQL check passed; synthetic clean SQL restore checks rows, ownership, grants and temporary-account removal |
+| InfluxDB | Server 2.7.12, CLI 2.7.5 | Exact signed packages installed and empty daemon health/CLI checks passed; synthetic full backup restore/query also passed. Native LXC/systemd startup and backend health also passed |
 
-These Docker fixtures are useful confidence checks. **They do not mean a database
-LXC has passed a full GitHub deployment or that household data has migrated.**
-They do not test systemd startup or a real application's connection to its new
-server. Keep that distinction when reporting a successful test.
+The Docker fixtures check package and logical-restore behaviour. In addition,
+on 26 October 2026 the matching versions of all three empty servers passed a real
+private GitHub CD installation on protected, unprivileged Debian 13 LXCs. Native
+checks covered systemd active/enabled status, database readiness, local SQL
+queries where applicable and each backend TCP listener. InfluxDB remained
+uninitialised, ready for its separate restore/setup. No household data or
+application accounts were restored.
+
+The initial creation stopped at SSH identity admission because Proxmox reported
+a systemd compatibility warning. The approved correction retained the guests,
+verified their original SSH fingerprints and completed their installations.
+Failed evidence was preserved. The installation succeeded after that correction; a
+fresh uninterrupted deployment from the corrected baseline has not been
+retested. Autostart is configured and read back; a host reboot after database
+installation remains untested.
+
+For this Debian13 base, use `nesting: true`, `keyctl: false` and unprivileged
+LXCs. Use fixed management IPv4 plus the fixed private backend address. The
+initial management DHCP setup waited for DHCPv6 and delayed the backend
+interface on two guests; the tested fixed-address setup avoids that wait.
 
 ## Two separate steps
 
@@ -54,7 +70,8 @@ installer refuses to redeploy an already applied guest.
 1. Finish the DNS deployment so the next guests have working name resolution.
 2. Choose one unused database guest ID/address, its resource budget and the
    permitted client addresses. Add its access through bootstrap, then review the
-   OpenTofu plan. Start with MariaDB because Home Assistant uses it.
+   OpenTofu plan. PostgreSQL comes first when preparing Authentik; MariaDB
+   underpins HA history. InfluxDB can be prepared independently.
 3. Run **Plan**, review its fingerprint, then **Deploy** through the existing
    application workflow. It creates and checks the empty database server.
 4. Separately practise a restore with synthetic data and query it using a restored
@@ -66,8 +83,8 @@ installer refuses to redeploy an already applied guest.
 The existing one-time restore helpers remain available for the separate migration;
 see the [manual restore reference](OPERATIONS.md#manual-database-restore).
 Fresh household backups can wait until the migration window. The isolated test
-needs no private household rows. It still needs a real admitted LXC to prove the
-full deployment and startup path.
+needs no private household rows. The empty-server native checks above do not replace the later restore and
+application-connection checks.
 
 ## Preserve file owners
 
@@ -104,6 +121,6 @@ A pass checks the real restore helper with native database binaries. Its systemd
 calls are intercepted because ordinary Docker cannot prove LXC service startup.
 InfluxDB's earlier package retrieval failure has been preserved. Its exact signed
 packages and empty daemon have since passed an isolated check. That slim Docker
-root produced service-install script warnings, so a successful package/daemon
-check still does not establish service-manager startup in the real guest. Do not
-bypass signature checks or use an unreviewed mirror.
+root produced service-install script warnings; the subsequent native LXC test
+separately verified real systemd startup. Do not bypass signature checks or use
+an unreviewed mirror.
