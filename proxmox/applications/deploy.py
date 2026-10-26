@@ -87,6 +87,10 @@ def validate(cfg):
         address = stack.get('services', {}).get('homeassistant', {}).get('environment', {}).get('HOMELAB_HA_IPV4')
         if address and address not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
             raise ValueError('HA discovery must select an address assigned to this guest')
+    if app.get('kind') == 'db-tools':
+        stack = json.loads(Path(app['stack_config']).read_text())
+        if stack.get('pgadmin_bind_address') not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
+            raise ValueError('pgAdmin must select a backend address assigned to this guest')
     for key in ('state_root', 'backup_mount', 'backup_directory', 'api_token', 'ca_file', 'private_key', 'known_hosts'):
         if not Path(cfg['paths'][key]).is_absolute():
             raise ValueError(f'{key} must be an absolute private runner path')

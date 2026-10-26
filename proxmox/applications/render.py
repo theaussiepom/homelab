@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Render one application guest from private inputs; never print its credentials."""
 import argparse
+import ast
 import json
 import ipaddress
 import math
@@ -11,7 +12,8 @@ from urllib.parse import urlsplit
 
 KINDS = {'automation': {'homeassistant', 'node_red', 'mqtt'},
          'identity': {'server', 'worker', 'redis'},
-         'dns': {'pihole', 'unbound'}, 'ingress': {'traefik'}}
+         'dns': {'pihole', 'unbound'}, 'ingress': {'traefik'},
+         'db-tools': {'pgadmin'}}
 
 
 def positive(value, name, minimum=1):
@@ -45,11 +47,29 @@ def preserved(value, field):
     raise ValueError(f'Use a string, string argv or null for {field}; user requires a string')
 
 
+def pgadmin_environment(value):
+    """Check the retained native OAuth2 contract without evaluating config code."""
+    env = value.get('environment', {})
+    try:
+        sources = ast.literal_eval(env.get('PGADMIN_CONFIG_AUTHENTICATION_SOURCES', ''))
+        providers = ast.literal_eval(env.get('PGADMIN_CONFIG_OAUTH2_CONFIG', ''))
+    except (ValueError, SyntaxError, TypeError):
+        raise ValueError('Supply the existing pgAdmin OAuth2 settings as Python literals') from None
+    if sources != ['oauth2'] or not isinstance(providers, list) or not providers or any(
+            not isinstance(p, dict) or not all(isinstance(p.get(k), str) and p[k]
+                for k in ('OAUTH2_NAME', 'OAUTH2_CLIENT_ID', 'OAUTH2_CLIENT_SECRET')) for p in providers):
+        raise ValueError('Preserve OAuth2-only authentication and the existing provider/client credentials')
+    if (value.get('extra_mounts') or any(k in env for k in
+            ('PGADMIN_ENABLE_TLS', 'PGADMIN_CUSTOM_CONFIG_DISTRO_FILE'))
+            or str(env.get('PGADMIN_LISTEN_PORT', '80')) != '80'):
+        raise ValueError('pgAdmin uses its retained environment, data mount and HTTP port 80')
+
+
 def compose(cfg):
     """Keep placement fixed; site-specific images, restored data and routes are inputs."""
     kind = cfg.get('kind')
     if kind not in KINDS:
-        raise ValueError('Choose dns, identity, ingress or automation; databases are native')
+        raise ValueError('Choose dns, identity, ingress, automation or db-tools; databases are native')
     inputs = cfg.get('services', {})
     if set(inputs) != KINDS[kind]:
         raise ValueError('Supply exactly the services for this guest')
@@ -60,6 +80,8 @@ def compose(cfg):
     total = sum(positive(s.get('memory_mib'), 'memory_mib') for s in inputs.values())
     if total + 256 > budget:
         raise ValueError('Leave at least 256 MiB for the guest OS outside container limits')
+    if kind == 'db-tools':
+        pgadmin_environment(inputs['pgadmin'])
     result = {'name': f'homelab-{kind}', 'services': {}}
     for name, value in inputs.items():
         image = value.get('image', '')
@@ -90,7 +112,8 @@ def compose(cfg):
                   'worker': [('authentik/media', '/media'), ('authentik/templates', '/templates'), ('authentik/certs', '/certs')],
                   'redis': [('redis', '/data')], 'pihole': [('pihole', '/etc/pihole')],
                   'unbound': [('unbound', '/opt/unbound/etc/unbound')],
-                  'traefik': [('traefik', '/etc/traefik')]}[name]
+                  'traefik': [('traefik', '/etc/traefik')],
+                  'pgadmin': [('pgadmin', '/var/lib/pgadmin')]}[name]
         service['volumes'] = [f'{root}/{src}:{target}' for src, target in mounts]
         for mount in value.get('extra_mounts', []):
             src, target = mount.get('source', ''), mount.get('target', '')
@@ -138,6 +161,15 @@ def compose(cfg):
         services['unbound']['ports'] = ['127.0.0.1:5335:53/tcp', '127.0.0.1:5335:53/udp']
     if kind == 'ingress':
         services['traefik']['command'] = ['--configFile=/etc/traefik/traefik.yml']
+    if kind == 'db-tools':
+        address = ipaddress.IPv4Address(required(cfg, 'pgadmin_bind_address'))
+        if address.is_unspecified or address.is_loopback or address.is_multicast or address.is_link_local:
+            raise ValueError('Publish pgAdmin only on the selected backend IPv4 address')
+        del services['pgadmin']['network_mode']
+        services['pgadmin']['ports'] = [f'{address}:80:80']
+        # A missing capture must fail, rather than initializing a fresh profile.
+        services['pgadmin']['volumes'] = [{'type': 'bind', 'source': f'{root}/pgadmin',
+            'target': '/var/lib/pgadmin', 'bind': {'create_host_path': False}}]
     return result
 
 
