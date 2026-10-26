@@ -28,8 +28,11 @@ def serve():
                     self.send_header('X-authentik-username', 'fixture-user')
                 else:
                     self.send_response(302)
-                    self.send_header('Location', 'https://auth.example.invalid/login?host=' +
-                                     self.headers.get('X-Forwarded-Host', 'missing'))
+                    locations = {
+                        'flows.example.invalid': 'https://auth.example.invalid/login?host=flows.example.invalid',
+                        'flows.alias.invalid': 'https://auth.example.invalid/login?host=flows.alias.invalid'}
+                    self.send_header('Location', locations.get(self.headers.get('X-Forwarded-Host'),
+                                     'https://auth.example.invalid/login?host=missing'))
                 self.end_headers()
                 return
             self.send_response(200)
