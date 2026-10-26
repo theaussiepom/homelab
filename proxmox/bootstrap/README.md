@@ -493,11 +493,12 @@ failure-path details.
 
 ### Subsequent physical NAS/database result
 
-On 26 October 2026 the physical deployment guest also passed NAS state recovery
-and application-access configuration. Merge-driven host CD passed the isolated
+On 26 October 2026 the physical deployment guest also passed NAS mount/copy
+readback and application-access configuration. Merge-driven host CD passed the isolated
 backend bridge and declared database grants. All three empty database servers
 then passed native package/systemd/server checks after an approved startup
 correction; a normal follow-up run only verified them. Household restores and
-application data protection remain separate. See the dated
+application data protection remain separate. The checks did not audit NAS-side
+access controls, encryption at rest or protection against later modification. See the dated
 [physical verification record](verification.md#physical-nas-and-database-foundation-passed-on-26-october-2026)
 for the evidence boundary and the preserved failures.

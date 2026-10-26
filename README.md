@@ -76,11 +76,12 @@ Status updated on **26 October 2026**, including the physical results from 25 Oc
   separate work. PegaProx is planned in its own LXC; it is not installed yet.
 
 For the physical run, the initial OpenTofu backup was saved privately on the Mac.
-The runner's ongoing NAS state recovery has since been mounted and verified on
-the physical host. The [existing-bootstrap update](proxmox/bootstrap/README.md#8-prepare-the-runner-to-deploy-your-applications)
+The runner's ongoing NAS state-backup mount and immediate copy/readback have
+since passed on the physical host. The [existing-bootstrap update](proxmox/bootstrap/README.md#8-prepare-the-runner-to-deploy-your-applications)
 and merge-driven host job have also passed there, including the private backend
-bridge and declared database access. State recovery does not cover live
-application data; those restores and write-protection checks remain separate.
+bridge and declared database access. These checks cover state copies; restoring
+them and protecting live application data remain separate. The linked
+verification record also states which NAS security controls were not assessed.
 The [Proxmox guide](proxmox/README.md) separates completed and outstanding steps.
 
 See the [ISO verification record](proxmox/iso/verification/README.md) and

@@ -60,8 +60,11 @@ qualification below subsequently tested that source. This staged rehearsal did
 not establish physical installation, physical restart or application rollout.
 The later physical bootstrap is recorded separately below. That stage did not verify the
 independent NAS state-backup destination; the Mac snapshot was not that backup.
-The later physical NAS result is recorded below. The rehearsal firewall allowance persists until
-separately removed.
+The later physical NAS result is recorded below. The operator retains the
+rehearsal firewall allowance while the runner is approved for ongoing CD and
+keeps its address reserved. When retiring that runner, the operator removes the
+exact allowance before releasing or reassigning its address; removal remains a
+separately approved live change. See the [firewall operating reference](OPERATIONS.md#the-host-firewall-allowance).
 
 ## Fresh-machine qualification: passed on 25 October 2026
 
@@ -221,8 +224,10 @@ and shared only the dedicated backup directory into the unprivileged runner.
 Mount identity, mapped ownership, private modes, protection and deployment-account
 write/sync/readback were checked. The active OpenTofu states and failed-operation
 receipts were copied to that NAS destination and their contents were read back.
-This closes the earlier physical state-recovery/configuration gap; it does not
-establish application-data backup or a restore of those state copies.
+This establishes the physical NAS mount and immediate state/receipt copy
+readback. This run did not audit NAS-side access controls, encryption at rest
+or protection against later modification. It does not establish application-data
+backup or a restore of those state copies.
 
 Merge-triggered host CD then configured the isolated backend bridge and the three
 declared database guest grants. The host job's subsequent runs reported no bridge
@@ -242,7 +247,7 @@ with CLI 2.7.5. Actual LXC checks passed for the pinned native packages, active 
 enabled systemd services, backend listeners and local SQL/readiness probes. Only
 default databases were present; InfluxDB setup remained uninitialised. A normal
 follow-up merge returned only the shared read-only `verify` result for all three,
-without an apply, install or service restart.
+without applying changes, installing software or restarting services.
 
 The private installation run is 40328910928; the follow-up verification run
 is 40330643215. They used public application source
