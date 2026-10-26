@@ -83,7 +83,7 @@ def network_state(data):
 def isolated(row, active=False):
     require(row.get('type') == 'bridge' and row.get('autostart') == 1
             and row.get('bridge_ports', '') in ('', 'none')
-            and row.get('bridge_stp', 'off') == 'off' and str(row.get('bridge_fd', 0)) == '0'
+            and row.get('bridge_stp') == 'off' and str(row.get('bridge_fd')) == '0'
             and not row.get('bridge_vlan_aware') and row.get('method') == 'manual'
             and row.get('method6') == 'manual' and not any(row.get(k) for k in
                 ('address', 'address6', 'cidr', 'cidr6', 'gateway', 'gateway6', 'bridge_vids', 'slaves')),

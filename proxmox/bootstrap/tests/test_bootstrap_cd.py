@@ -31,13 +31,18 @@ class FakeAPI:
         self.writes = []
         self.fail_reload = False
         self.extra_pending = False
+        self.omit_bridge_field = None
         self.guests = [{'vmid': 900, 'node': 'pve', 'name': 'deploy', 'type': 'lxc', 'status': 'running'}]
 
     def call(self, path, method='GET', values=None):
         if method != 'GET':
             self.writes.append((path, method, values))
             if method == 'POST':
-                self.network.append({**values, 'active': 0, 'method': 'manual', 'method6': 'manual'})
+                # Installed PVE::INotify writes and reports these bridge defaults.
+                self.network.append({**values, 'active': 0, 'method': 'manual', 'method6': 'manual',
+                                     'bridge_stp': 'off', 'bridge_fd': '0'})
+                if self.omit_bridge_field:
+                    self.network[-1].pop(self.omit_bridge_field)
                 self.pending = 'isolated bridge addition'
                 if self.extra_pending:
                     self.network[0]['bridge_ports'] = 'different0'
@@ -103,6 +108,15 @@ class BootstrapCDTests(unittest.TestCase):
         request = next(values for _, method, values in self.api.writes if method == 'POST')
         # Proxmox 9.2's network create schema has no bridge_stp/bridge_fd parameters.
         self.assertEqual(set(request), {'iface', 'type', 'autostart', 'bridge_ports', 'comments'})
+
+    def test_created_bridge_requires_explicit_stp_and_forward_delay_before_reload(self):
+        for key in ('bridge_stp', 'bridge_fd'):
+            api = FakeAPI(); api.omit_bridge_field = key
+            before = cd.inspect(api, self.c)
+            evidence = self.root / key; evidence.mkdir()
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, 'backend bridge'):
+                cd.reconcile(api, self.c, before, evidence)
+            self.assertEqual([method for _, method, _ in api.writes], ['POST'])
 
     def test_existing_pending_networks_and_occupied_ids_refuse_before_any_write(self):
         for change in ('pending', 'occupied', 'acl'):
