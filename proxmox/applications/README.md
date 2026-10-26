@@ -8,8 +8,10 @@ The deployment guest receives GitHub jobs. These scripts are the next step:
 restores its saved configuration.**
 
 **Current status:** application source and synthetic tests are available. This
-application path has not yet created or restored a guest on the rehearsal
-Proxmox system. Passing Docker tests does not mean the house has migrated.
+application path has created its first isolated DNS guest through GitHub CD.
+Application restore failed before application start. The rehearsal target remains
+on HOLD, and the corrected source has not been replayed. Passing Docker tests
+does not mean the house has migrated.
 The earlier physical ISO/bootstrap result remains separate.
 
 ## What are we bringing across?

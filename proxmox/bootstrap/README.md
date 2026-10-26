@@ -402,7 +402,16 @@ job matched. **70 unit tests passed** for the corrected bootstrap source.
 The clean lab run and corrected physical run are separate results. The latter
 used an explicitly approved private Mac snapshot for initial handover; it did
 not establish a NAS backup. Application rollout and ongoing NAS state backup
-remain outstanding. See [verification evidence and limits](verification.md).
+on that physical host remain outstanding.
+
+On **26 October 2026**, step 8 passed on the existing isolated lab deployment
+guest: NAS write/readback, active-state recovery copies and the next application
+guest's API access were checked. Repeating the configuration made no Ansible
+changes and left OpenTofu with a no-change plan. The guest and runner were
+retained. **94 bootstrap unit tests passed.** That lab result does not update
+the physical host or prove its NAS path.
+
+See [verification evidence and limits](verification.md).
 Maintainers can use the
 [operating reference](OPERATIONS.md) for credential, firewall, locking and
 failure-path details.

@@ -53,9 +53,9 @@ def compose(cfg):
     inputs = cfg.get('services', {})
     if set(inputs) != KINDS[kind]:
         raise ValueError('Supply exactly the services for this guest')
-    root = cfg.get('data_root', '/srv/homelab')
-    if root != '/srv/homelab':
-        raise ValueError('Restored application data belongs under /srv/homelab')
+    root = cfg.get('data_root', '/srv/homelab/data')
+    if root != '/srv/homelab/data':
+        raise ValueError('Restored application data belongs under /srv/homelab/data')
     budget = positive(cfg.get('guest_memory_mib'), 'guest_memory_mib')
     total = sum(positive(s.get('memory_mib'), 'memory_mib') for s in inputs.values())
     if total + 256 > budget:
@@ -94,8 +94,8 @@ def compose(cfg):
         service['volumes'] = [f'{root}/{src}:{target}' for src, target in mounts]
         for mount in value.get('extra_mounts', []):
             src, target = mount.get('source', ''), mount.get('target', '')
-            if not re.fullmatch(r'/srv/homelab/[A-Za-z0-9_./-]+', src) or '..' in src.split('/') or ':' in target or not target.startswith('/') or '..' in target.split('/'):
-                raise ValueError('Extra mounts must come from the captured /srv/homelab tree')
+            if not re.fullmatch(re.escape(root) + r'/[A-Za-z0-9_./-]+', src) or '..' in src.split('/') or ':' in target or not target.startswith('/') or '..' in target.split('/'):
+                raise ValueError('Extra mounts must come from the captured /srv/homelab/data tree')
             if target in {'/var/run/docker.sock', '/run/docker.sock', '/run/avahi-daemon/socket'} or target in [t for _, t in mounts]:
                 raise ValueError('Do not expose host control sockets or override data mounts')
             service['volumes'].append(f"{src}:{target}:{'ro' if mount.get('read_only', True) else 'rw'}")

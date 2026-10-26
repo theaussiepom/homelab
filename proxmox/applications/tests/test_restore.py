@@ -32,6 +32,7 @@ class RestoreTests(unittest.TestCase):
 
     def test_escape_and_symlink_traversal_are_refused(self):
         for members in ([('../escape', None)], [('/etc/shadow', None)], [('link', '/etc')],
+                        [('config/link', '../../etc')], [('config/link', '..')],
                         [('link', 'config'), ('link/a', None)]):
             with self.subTest(members=members), tempfile.TemporaryDirectory() as tmp:
                 with self.assertRaises(ValueError):

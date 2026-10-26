@@ -113,7 +113,11 @@ from the runner and is not an HA prerequisite. Its installation is not yet
 implemented.
 
 Before creating more guests, finish the runner's ongoing NAS state backup and
-review access for the next guest. The bootstrap token covers its first guest;
+review access for the next guest using
+[bootstrap step 8](bootstrap/README.md#8-prepare-the-runner-to-deploy-your-applications).
+Already installed? Start at that step; it updates the existing deployment guest
+without reinstalling Proxmox or creating another runner.
+The bootstrap token covers its first guest;
 it does not automatically grant permission to create the rest of the homelab.
 
 If you boot back into a preserved original operating system, Proxmox and its
@@ -138,7 +142,7 @@ Status updated on **26 October 2026**, including the physical results from 25 Oc
 | Stage | Established | Still outstanding |
 | --- | --- | --- |
 | Installer | Packaged virtual checks plus a physical installation with a healthy two-drive mirror, separate original disk and working first-start access. | Each new machine needs its own checks; repeated physical restart behaviour is not established by that first start. See [ISO verification](iso/verification/README.md). |
-| Bootstrap | Clean lab handover, then physical host → one deployment container → real private GitHub no-change check with matching state. The physical run needed one reviewed tagged-VLAN correction. | Ongoing NAS state backup before further rollout. See [bootstrap verification](bootstrap/verification.md). |
+| Bootstrap | Clean lab handover, then physical host → one deployment container → real private GitHub no-change check with matching state. The physical run needed one reviewed tagged-VLAN correction. The existing lab guest also passed the NAS/application-access configuration and a no-change repeat on 26 October. | Apply and verify that configuration on the physical host before application rollout there. See [bootstrap verification](bootstrap/verification.md). |
 | PegaProx | Decision recorded: a separate management LXC. | Guest sizing/address, reviewed access, CD jobs, installation and actual use checks. See the [application plan](applications/README.md). |
 | Household applications | The runner provides the starting point for subsequent deployment jobs. | Guest-by-guest deployment and application acceptance. |
 

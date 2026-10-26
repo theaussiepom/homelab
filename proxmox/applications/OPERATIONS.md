@@ -42,6 +42,13 @@ database clients, proxy, MQTT, callbacks and device/discovery traffic. The guest
 firewall drops everything else. Host/router rules are not changed. Select IPv6
 explicitly where needed; IPv4-only tests do not prove Matter/HomeKit.
 
+For the API-token deployment route, use `nesting: true` and `keyctl: false`
+for a Docker application guest. Proxmox permits a token to enable nesting on an
+unprivileged container; enabling other feature flags requires a root session.
+The isolated rehearsal has proved guest creation with nesting alone. Docker
+runtime qualification is still separate; do not add root credentials to the
+runner to work around a rejected feature flag.
+
 Review actual guest lifecycle, API access and network changes before a native
 run. A valid plan alone does not authorize them. The existing bootstrap token
 cannot create these guests. NAS recovery and strict guest SSH trust must be in
@@ -50,11 +57,21 @@ place first; there is no local-backup or insecure-SSH fallback.
 ### Application captures and images
 
 `app.capture` contains `path`, `sha256`, `coherent`. The tar archive is rooted at
-the contents of `/srv/homelab` on the new guest: `homeassistant/config`,
+the contents of `/srv/homelab/data` on the new guest: `homeassistant/config`,
 `node-red/data`, `node-red/config`, `mqtt/config`, `mqtt/data`, `mqtt/log`, or
 equivalent DNS/identity/proxy directories. Include private settings, HACS,
 custom components and preserved helpers. Capture coherent frozen files; these
 scripts do not capture or stop the old system automatically.
+
+The data disk is mounted at `/srv/homelab`; restored applications use its
+`data` subdirectory. A new formatted disk can already contain a filesystem
+recovery directory such as `lost+found`. Leave that directory untouched;
+restore still requires the application destination itself to be empty.
+Use `/srv/homelab/data` for an explicit stack `data_root` and captured extra
+mounts. Do not move an already restored installation by changing this setting.
+This release accepts only the child-directory layout. An older experimental
+restore at the disk root needs a separately reviewed migration; changing the
+renderer setting cannot move its data or update its restore receipt.
 
 Restore checks hashes, paths/links, empty destination and the prior receipt.
 GNU tar restores numeric owners, modes, ACLs and xattrs. **Any tar warning holds
@@ -77,7 +94,7 @@ restore the broken Avahi socket mount or move radios. Bluetooth/DBus hardware
 access is not covered by this initial guest definition.
 
 For an existing HA image whose entrypoint runs `/startup/mdns-route.sh`, retain
-its helper mount at `/srv/homelab/ha-startup:/startup:ro` and set the selected
+its helper mount at `/srv/homelab/data/ha-startup:/startup:ro` and set the selected
 guest address in `HOMELAB_HA_IPV4`. Ansible backs up that helper and installs the
 parameterised equivalent, retaining its IPv4/IPv6 multicast routes. Its only
 supported optional capability is an explicit `cap_add: [NET_ADMIN]` for HA,

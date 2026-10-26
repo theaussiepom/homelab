@@ -36,10 +36,16 @@
   no_log: true
   when: not ansible_check_mode
 
+- name: Prepare the directory for generated ingress routes
+  ansible.builtin.file:
+    path: /srv/homelab/data/traefik/dynamic
+    state: directory
+  when: app.kind == 'ingress' and not ansible_check_mode
+
 - name: Install only the new ingress routes into the restored Traefik file directory
   ansible.builtin.copy:
     src: "{{ app.render_dir }}/routes.yml"
-    dest: /srv/homelab/traefik/dynamic/homelab-applications.yml
+    dest: /srv/homelab/data/traefik/dynamic/homelab-applications.yml
     owner: root
     group: root
     mode: '0600'
@@ -61,10 +67,16 @@
   no_log: true
   when: not ansible_check_mode
 
+- name: Prepare the directory for the selected HA helper
+  ansible.builtin.file:
+    path: /srv/homelab/data/ha-startup
+    state: directory
+  when: app.kind == 'automation' and stack.services.homeassistant.environment.HOMELAB_HA_IPV4 is defined
+
 - name: Adapt the existing HA helper to the selected rehearsal or production address
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../mdns-route.sh"
-    dest: /srv/homelab/ha-startup/mdns-route.sh
+    dest: /srv/homelab/data/ha-startup/mdns-route.sh
     owner: root
     group: root
     mode: '0750'

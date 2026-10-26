@@ -15,7 +15,7 @@
     "start_on_boot": false,
     "boot_order": 50,
     "nesting": true,
-    "keyctl": true,
+    "keyctl": false,
     "dns_servers": [
       "198.18.100.53"
     ],

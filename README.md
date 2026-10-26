@@ -76,8 +76,11 @@ Status updated on **26 October 2026**, including the physical results from 25 Oc
 
 For the physical run, the initial OpenTofu backup was saved privately on the Mac.
 Ongoing NAS state backup is still required before further guest/application
-rollout. The [Proxmox guide](proxmox/README.md) separates completed and outstanding
-steps.
+rollout on that physical host. The supported
+[existing-bootstrap update](proxmox/bootstrap/README.md#8-prepare-the-runner-to-deploy-your-applications)
+has passed in the isolated lab, including a repeat with no changes; it still
+needs to be applied and checked on the physical host. The
+[Proxmox guide](proxmox/README.md) separates completed and outstanding steps.
 
 See the [ISO verification record](proxmox/iso/verification/README.md) and
 [bootstrap verification record](proxmox/bootstrap/verification.md) for exact test

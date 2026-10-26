@@ -1,6 +1,6 @@
 {
   "kind": "ingress",
-  "data_root": "/srv/homelab",
+  "data_root": "/srv/homelab/data",
   "guest_memory_mib": 4096,
   "timezone": "Etc/UTC",
   "services": {
