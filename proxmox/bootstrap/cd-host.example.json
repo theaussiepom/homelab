@@ -1,0 +1,17 @@
+{
+  "schema": "homelab-bootstrap-cd-v1",
+  "endpoint": "https://198.18.25.10:8006/",
+  "node": "pve",
+  "deploy": {"vmid": 900, "mac": "02:00:00:00:09:00"},
+  "bridge": "vmbr30",
+  "applications": [{"vmid": 208, "hostname": "postgresql"}],
+  "existing_grants": [
+    {"path": "/nodes/pve", "role": "PVEAuditor", "propagate": 0},
+    {"path": "/sdn/zones/localnetwork/vmbr0", "role": "PVESDNUser", "propagate": 0},
+    {"path": "/sdn/zones/localnetwork/vmbr0/25", "role": "PVESDNUser", "propagate": 0},
+    {"path": "/storage/local", "role": "PVEAuditor", "propagate": 0},
+    {"path": "/storage/local-zfs", "role": "PVEDatastoreUser", "propagate": 0},
+    {"path": "/vms/900", "role": "PVEVMAdmin", "propagate": 0}
+  ],
+  "backup_source": "198.18.20.2:/volume1/backups/deploy"
+}

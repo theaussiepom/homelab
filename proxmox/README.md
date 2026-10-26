@@ -101,6 +101,10 @@ recovery copies safe and do not run a second active copy from your workstation.
 
 ## 4. Continue with application deployment
 
+For merge-driven host prerequisites, follow [bootstrap step 9](bootstrap/README.md#9-let-github-maintain-the-host-prerequisites).
+It prepares the private backend bridge and the declared application permissions
+without reinstalling the host. Application CD then creates and configures each guest.
+
 The initial setup ends at the successful GitHub check. The
 [application guide](applications/README.md) covers the next source path: one
 OpenTofu guest, Ansible staging, then an explicit application start and check.

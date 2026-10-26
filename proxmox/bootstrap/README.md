@@ -375,6 +375,79 @@ deliberately selecting a new absolute `expires_at` timestamp.
 Continue with the [application deployment plan](../applications/README.md).
 Keep this runner dedicated to deployment: PegaProx is planned in its own LXC.
 
+## 9. Let GitHub maintain the host prerequisites
+
+Once guest900 and its NAS backup are working, GitHub can prepare the private
+backend network and access for your next guests. You do not need to reinstall
+Proxmox, refresh the installation USB or recreate the deployment guest.
+
+```mermaid
+flowchart LR
+    A[One-time credential setup from Mac] --> B[Review and merge host settings]
+    B --> C[GitHub saves the plan on NAS]
+    C --> D[Create private bridge and add guest access]
+    D --> E[Check result and save NAS receipt]
+    E --> F[Application CD deploys the guests]
+```
+
+This option gives **bootstrap CD a separate Proxmox Administrator API token**.
+That credential can administer the host. Only enable it if you trust the private
+repository, its main-branch changes and its deployment runner. The regular
+application token keeps its individual guest permissions; the operator SSH key
+stays on your workstation. The CD token has no expiry and can be revoked in
+Proxmox under **Permissions → API Tokens**.
+
+Run the normal bootstrap command from your workstation, using the same private
+bundle and SSH environment variables from step 4:
+
+```sh
+./proxmox/bootstrap/bootstrap cd-access \
+  --bundle "$bootstrap_private/bundle" \
+  --out "$bootstrap_private/cd-access"
+```
+
+**Expected result:** `status: ready`. The command creates one separated API
+token, saves a private copy, and uploads it with your existing GitHub CLI login
+to the private repository's `homelab-bootstrap` environment as
+`PROXMOX_BOOTSTRAP_TOKEN`. That environment allows deployments from `main` only.
+A completed setup can be checked again without changing its token. Save its
+private copy in your password manager. A partial setup stops for inspection;
+do not delete its folder to force another attempt.
+
+In the private repository, adapt [the example host settings](cd-host.example.json)
+and add a main-branch push workflow that checks out this public source at a
+reviewed **full commit SHA**. Use environment `homelab-bootstrap`, your private
+runner labels, `contents: read`, and the same concurrency group as your application
+jobs. Pass the environment secret only to this step:
+
+```yaml
+- name: Configure host prerequisites
+  env:
+    PROXMOX_BOOTSTRAP_TOKEN: ${{ secrets.PROXMOX_BOOTSTRAP_TOKEN }}
+  run: python3 public-source/proxmox/bootstrap/bootstrap_cd.py --config bootstrap/host.json
+```
+
+Replace every example address, node, MAC, application ID and NAS source. The
+`existing_grants` list must match the current application token's saved grants;
+it is an explicit baseline, not a request for more permissions. Each declared
+application adds access only to that guest ID. The bridge adds only its network
+permission. Existing storage and management-network access must already be in
+the baseline. This small implementation expects the standard deployment guest900.
+
+**Merge the reviewed configuration PR.** The job creates an isolated bridge with
+no physical port, configured host address or gateway. That backend network stays
+inside Proxmox; it needs no switch/UDM VLAN or DHCP server. Give backend guests
+fixed addresses when their application CD creates them. The job does not create,
+start, stop or restart a guest and does not change token lifetimes.
+
+Proxmox applies this addition through its normal network reload. Do not edit
+host networking in the web interface during the job. Any already pending change,
+unexpected interface change, occupied guest ID, missing NAS mount or permission
+drift stops it. A successful repeat makes no further changes. A failure leaves
+the plan, a hold and a maintenance marker on the runner, with receipts on NAS;
+review the outcome before a separately approved correction. Other deployment
+jobs must check that maintenance marker before proceeding.
+
 ## When something goes wrong
 
 | What you see | What to do |
