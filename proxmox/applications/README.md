@@ -10,10 +10,14 @@ an empty database server; existing databases are restored separately before thei
 applications start.**
 
 **Current status:** DNS has been created, restored, started and checked on a
-physical Proxmox host through private GitHub CD, using its existing configuration
-and data. That deployment used separate workflow steps. The new combined
-**Deploy** mode still needs its first complete native deployment acceptance;
-source tests do not prove that every service or the house has migrated.
+physical Proxmox host through private GitHub CD. All three empty database servers
+have also passed native installation, systemd startup and service-specific checks
+through CD, using the matching versions listed in the [database guide](DATABASES.md).
+Their first creation stopped on a startup compatibility warning; the existing
+empty guests were corrected and finished through an explicitly reviewed
+continuation. A fresh, uninterrupted Deploy from that corrected baseline has
+not been retested. Database contents, later applications and household acceptance
+remain separate work.
 
 ## What are we bringing across?
 
@@ -57,6 +61,12 @@ services and physical hosts stay in place.
   backup. Existing database restores are a separate migration step.
 - NAS protection for new application/database writes, commissioned before the
   live start. State recovery copies alone do not back up application data.
+
+Use `nesting: true` and `keyctl: false` for the tested Debian13/systemd base,
+while keeping the guest unprivileged. The tested database guests use fixed
+management IPv4 and a separate fixed backend interface. An initial DHCP setup
+waited for DHCPv6 and delayed the second interface; fixed management IPv4 avoided
+that issue.
 
 Static IPv4 addresses and reservation-backed DHCP are supported. For DHCP use
 `"dhcp"` for both the selected interface's `ipv4` and the application's
@@ -117,7 +127,8 @@ the [technical reference](OPERATIONS.md); do not point unchanged examples at a s
 
 ## What is still outstanding?
 
-Native package installation, database restores, Docker inside the selected LXC,
-real VLAN discovery, application logins and household acceptance require the
-selected rehearsal and then the actual target. Keep the old working system
+The three empty database servers have passed native installation and startup.
+Their household database restores and real client connections remain untested.
+Later application guests still need their own Docker/configuration, network,
+login and household checks on the selected target. Keep the old working system
 available until those checks succeed.

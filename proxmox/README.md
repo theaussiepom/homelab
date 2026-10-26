@@ -109,8 +109,10 @@ The initial setup ends at the successful GitHub check. The
 [application guide](applications/README.md) covers the next source path: one
 OpenTofu guest, Ansible staging, then an explicit application start and check.
 DNS, native databases and login/proxy foundations come before the shared
-Home Assistant, Node-RED and MQTT guest. Native application acceptance remains
-outstanding; the bootstrap does not migrate those services itself.
+Home Assistant, Node-RED and MQTT guest. DNS and the three empty native database
+servers have passed CD installation/checks on the maintainer's host. Database
+restores, later apps and household acceptance remain outstanding; bootstrap
+does not migrate those services itself.
 
 [PegaProx has its own planned LXC](applications/pegaprox.md). It remains separate
 from the runner and is not an HA prerequisite. Its installation is not yet
