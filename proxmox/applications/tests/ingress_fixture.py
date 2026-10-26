@@ -7,6 +7,7 @@ import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import http.client
 import json
+import os
 from pathlib import Path
 import ssl
 import subprocess
@@ -128,8 +129,10 @@ def main():
             for side in ('backends', 'proxy'):
                 name = 'homelab-ingress-fixture-' + side + '-' + uuid.uuid4().hex[:10]
                 names.append(name)
+                # Match the 0700 temporary directory owner without DAC capabilities.
                 common = ['run', '-d', '--rm', '--platform', 'linux/amd64', '--read-only',
                           '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+                          '--user', f'{os.getuid()}:{os.getgid()}',
                           '--cpus', '1', '--memory', '256m', '--name', name,
                           '--tmpfs', '/tmp:rw,nosuid,nodev,size=16m']
                 if side == 'backends':
