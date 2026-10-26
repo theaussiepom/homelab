@@ -5,7 +5,9 @@
 
 The deployment guest receives GitHub jobs. These scripts are the next step:
 **OpenTofu creates one application guest; Ansible installs its applications and
-restores its saved configuration.**
+restores its saved configuration. Database guests are the exception: CD prepares
+an empty database server; existing databases are restored separately before their
+applications start.**
 
 **Current status:** DNS has been created, restored, started and checked on a
 physical Proxmox host through private GitHub CD, using its existing configuration
@@ -49,8 +51,10 @@ services and physical hosts stay in place.
 - The runner's NAS recovery directory, deployment SSH key and trusted Proxmox CA.
   Deploy verifies the new guest's SSH identity from its Proxmox creation log;
   no Proxmox root SSH private key goes onto the runner. Secrets stay private.
-- A coherent NAS capture of this guest's configuration/data, required database
-  backups, preserved custom images and independently available keys.
+- For application guests, a coherent NAS capture of their configuration/data,
+  preserved custom images and independently available keys. Database-server CD
+  needs its private server configuration, packages and health probes, without a
+  backup. Existing database restores are a separate migration step.
 - NAS protection for new application/database writes, commissioned before the
   live start. State recovery copies alone do not back up application data.
 
@@ -74,18 +78,22 @@ Select one guest:
 
 1. **Plan:** preview one guest and its firewall. Review the result and retain its
    plan SHA256, the fingerprint of the exact saved plan.
-2. **Deploy:** at the chosen migration window, supply that fingerprint. One run
-   verifies the capture, creates the guest, verifies its identity, restores and
-   installs its applications, starts them and runs the service checks. It does
+2. **Deploy:** supply that fingerprint. One run creates the guest, verifies its
+   identity, installs/configures it, starts the service and checks it. For an
+   application guest, this also verifies and restores its saved data during the
+   chosen migration window. For a database guest, it prepares an empty server
+   and leaves the data restore to the separate migration step. It does
    not need another button press between these phases. Replacement and deletion
    remain refused.
 3. Check the result, then check real devices and automations with the people
    using the house. **Verify** can run the service checks again without a restart.
 
-Deploy starts the selected service. Confirm its old writers are retired in the
-private inputs before choosing it. HA can control real devices: this is a
-deliberate migration action, not a preview. Missing or mismatched captures stop
-the run before guest creation.
+Deploy starts the selected service. For application guests, confirm their old
+writers are retired in the private inputs before choosing it. An empty database
+server can be prepared while the original database remains in use; do not point
+applications at it until the manual restore is complete. HA can control real devices: this is a
+deliberate migration action, not a preview. Missing or mismatched application captures stop
+the run before guest creation. Database CD never imports a backup.
 
 The separate **apply**, **stage** and **start** steps remain available for
 controlled qualification and reviewed recovery. They are not required during a

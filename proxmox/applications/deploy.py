@@ -21,6 +21,7 @@ from restore import sync_directory, validate_archive
 import guest_identity
 
 SOURCE = Path(__file__).resolve().parent
+DATABASE_KINDS = {'mariadb', 'postgresql', 'influxdb'}
 
 
 class InputNeeded(ValueError):
@@ -71,6 +72,8 @@ def validate(cfg):
         raise ValueError('Ansible must use a selected guest interface')
     if app.get('new_target') is not True:
         raise ValueError('This installer is for a selected new guest')
+    if app.get('kind') in DATABASE_KINDS and ('capture' in app or 'capture' in app.get('database', {})):
+        raise InputNeeded('Database restore is a separate migration step; remove capture inputs from server CD')
     if app.get('kind') == 'automation' and 'stack_config' in app:
         stack = json.loads(Path(app['stack_config']).read_text())
         address = stack.get('services', {}).get('homeassistant', {}).get('environment', {}).get('HOMELAB_HA_IPV4')
@@ -301,16 +304,14 @@ def execute(action, cfg_path, approved_plan=None):
                 or plan['site_sha256'] != sha(cfg_path) or plan['source_sha256'] != source_hash()
                 or plan.get('input_hashes') != input_hashes(cfg)):
             raise InputNeeded('Deploy needs the exact reviewed plan, source and private inputs')
-        if cfg['app'].get('exclusive_writer_confirmed') is not True:
-            raise InputNeeded('Confirm the selected service migration and retire its old writers before deploy')
-        captures = [cfg['app']['capture']]
-        if 'database' in cfg['app']:
-            captures.append(cfg['app']['database']['capture'])
-        for capture in captures:
+        if cfg['app'].get('kind') not in DATABASE_KINDS:
+            if cfg['app'].get('exclusive_writer_confirmed') is not True:
+                raise InputNeeded('Confirm the selected service migration and retire its old writers before deploy')
+            capture = cfg['app']['capture']
             path = Path(capture['path'])
             if capture.get('coherent') is not True or not path.is_file() or sha(path) != capture['sha256']:
                 raise InputNeeded('Finish and verify the selected coherent data capture before creating a guest')
-        validate_archive(Path(cfg['app']['capture']['path']))
+            validate_archive(path)
         hosts = Path(cfg['paths']['known_hosts'])
         instruction = 'Supply the deployment account private known_hosts file (regular file, mode 0600) before Deploy'
         try:

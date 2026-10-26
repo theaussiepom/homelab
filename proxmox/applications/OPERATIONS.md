@@ -33,7 +33,7 @@ files mode 0600 and directories 0700.
 | `guest` | One ID, hostname, resources, template/storage, NICs and firewall allowances |
 | `ssh_public_keys` | Deployment public key; private key stays on the runner |
 | `paths` | Existing token, CA, deployment key, verified known_hosts, state, NAS recovery paths and exact `backup_source` mount identity |
-| `app` | Same guest identity, selected kind, exact packages, coherent capture and health probes |
+| `app` | Same guest identity, selected kind, exact packages, health probes and an application capture where required |
 
 Kinds: `dns`, `mariadb`, `postgresql`, `influxdb`, `identity`, `ingress`,
 `automation`. Final IDs/addresses/VLANs are private site choices, not reserved
@@ -108,14 +108,52 @@ to a declared guest interface; missing IPv4/IPv6 routing fails startup.
 
 `app.database` supplies `user`, `group`, `uid`, `gid`, `home`,
 `version_command` (argv), `version_pattern` (required literal substring),
-`config_files` (`source`, `destination`) and coherent `capture`
-(`path`, `sha256`, `format`, `coherent`). Exact vendor packages/clients belong
+`config_files` (`source`, `destination`). Database CD does not take `app.capture`,
+`app.database.capture` or restore credentials; legacy capture inputs are refused.
+It uses the same plan/deploy/identity/stage/start/verify pipeline as other guests.
+Stage installs the configuration without starting the server. Start enables and
+starts the selected native systemd service; Verify runs the private server health
+probes. No application database, login, grant or backup is imported by CD.
+Exact vendor packages/clients belong
 in `app.packages`. Supply reviewed deb822 sources with ASCII-armoured key files
 and SHA256s in `app.repositories` when Debian packages do not match. Each source
 must name its explicit Signed-By path. There is no silent database downgrade.
 
-MariaDB restores SQL through its local root socket. PostgreSQL uses
-`format: pg-dumpall-clean`, the
+Use server-only probes in `app.health_checks`: for example MariaDB's local
+administrative `SELECT 1`, PostgreSQL's `pg_isready` plus a local `SELECT 1`, and
+InfluxDB's `/health` endpoint. An uninitialised InfluxDB server is not proof of
+restored organisations, buckets or tokens. Real client access is accepted after
+the separate restore. Configure the selected data directory and its persistent
+guest storage before deployment; do not assume a backup is active merely because
+OpenTofu state has NAS recovery copies.
+
+### Manual database restore
+
+This is a separate, deliberate migration action inside the selected guest,
+**never a CD step**. Keep the old writers stopped for the final coherent capture
+and restore. Preserve its original recovery copy and checksum. Verify the
+restored users, grants, known data and application login before application CD.
+
+The existing `database.py`, `pg_clean.py` and `restore.py` helpers remain in this
+repository for that step; server CD neither installs nor invokes them. If using
+the helper, copy these three files from the same reviewed source revision into
+`/opt/homelab-app` in the selected guest (root-owned, directory/files mode `0700`).
+Privately copy the checked input to `/opt/homelab-app/database.capture`, mode `0600`.
+Prepare a root-owned mode `0600` `database-restore.json` with `kind`,
+`exclusive_writer_confirmed: true` and `capture` containing `sha256` and `format`,
+plus the engine-specific settings below. Then, from that guest's trusted
+administrator session, run:
+
+```sh
+python3 /opt/homelab-app/database.py --config /opt/homelab-app/database-restore.json
+```
+
+The helper retains its persistent incomplete-attempt hold and exact capture
+receipt. Do not remove a failed receipt or repeat a partial restore automatically.
+Restore approval, final backup and application acceptance remain operator tasks.
+
+MariaDB uses `kind: mariadb`, `format: sql` and restores SQL through its local root socket. PostgreSQL uses
+`kind: postgresql`, `user: postgres`, `format: pg-dumpall-clean` and the
 [existing clean restore contract](../../services/database-backup/POSTGRESQL-CLEAN-RECOVERY.md).
 Provide unchanged uncompressed SQL from that selected archive, retaining the
 original archive separately. A unique local maintenance superuser/database
@@ -125,7 +163,7 @@ hold the target. Bootstrap OID 10 is checked, then only those temporary objects
 are removed. Native confirmation still needs the retained account/grant/data
 comparisons and real credential checks. A raw Docker data directory is not an input.
 
-InfluxDB expects a tarred **v2 native backup directory**, `format: influx-v2`.
+InfluxDB uses `kind: influxdb` and expects a tarred **v2 native backup directory**, `format: influx-v2`.
 Supply the source `influx_operator_token` and private setup
 `influx_username`, `influx_password`, `influx_org`, `influx_bucket`.
 The original token is used for setup and full restore, following
@@ -168,17 +206,19 @@ python3 proxmox/applications/deploy.py deploy --site /var/lib/homelab-inputs/aut
 python3 proxmox/applications/deploy.py verify --site /var/lib/homelab-inputs/automation.json
 ```
 
-`deploy` is for a new, unapplied guest. It checks coherent capture hashes and
-archive safety before creation, then runs apply, identity, stage, start and
-verify under one workflow lock. Select the migration window and set
-`exclusive_writer_confirmed: true` before this complete run. Individual
+`deploy` is for a new, unapplied guest. It runs apply, identity, stage, start and
+verify under one workflow lock. For application guests it first checks coherent
+capture hashes and archive safety; select the migration window and set
+`exclusive_writer_confirmed: true`. Database-server deployment needs neither a
+capture nor retirement of the original database: it prepares an empty server.
+The manual restore and application cutover come later. Individual
 apply/stage/start commands remain available for separately reviewed qualification
 and partial-installation recovery. They do not bypass an interrupted rollout's
 `ROLLOUT-HOLD.json`. Existing installations use verify; Deploy does not reinstall
 them or replay a saved plan.
 
 Source/site hashes and private configuration/CA-file hashes bind the saved
-plan; changes require a fresh plan. Starting
+plan; changes require a fresh plan. Starting an application guest
 requires `exclusive_writer_confirmed: true` after the selected cutover decision
 and retirement of old writers. Stage does not need it. HA can operate real
 devices even if its data is a copy: do not start it casually for rehearsal.

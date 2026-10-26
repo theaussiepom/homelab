@@ -30,6 +30,42 @@ class RolloutTests(unittest.TestCase):
             'input_hashes': deploy.input_hashes(cfg)})
         return cfg, site, work, deploy.sha(plan)
 
+    def database(self, root):
+        cfg, site, work, plan = self.prepare(root)
+        cfg['app']['kind'] = 'mariadb'
+        cfg['app']['database'] = {'config_files': []}
+        cfg['app'].pop('capture')
+        cfg['app'].pop('exclusive_writer_confirmed')
+        site.write_text(json.dumps(cfg))
+        receipt = json.loads((work / 'plan.json').read_text())
+        receipt['site_sha256'] = deploy.sha(site)
+        deploy.write(work / 'plan.json', receipt)
+        return cfg, site, work, plan
+
+    def test_empty_database_uses_the_same_pipeline_without_capture_or_cutover(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); cfg, site, work, plan = self.database(root); calls = []
+            def step(action, *args):
+                calls.append(action)
+                return {'step': action, 'status': 'passed'}
+            with patch.object(deploy, '_execute_step', side_effect=step), \
+                    patch.object(deploy.guest_identity, 'pin', return_value={'fingerprint': 'synthetic'}):
+                result = deploy.execute('deploy', site, plan)
+            self.assertEqual(calls, ['apply', 'stage', 'start', 'verify'])
+            self.assertEqual(result['status'], 'passed')
+            self.assertFalse((work / 'ROLLOUT-HOLD.json').exists())
+
+    def test_legacy_database_capture_inputs_are_refused_before_any_native_action(self):
+        for field in ('app', 'database'):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp); cfg, site, work, plan = self.database(root)
+                target = cfg['app'] if field == 'app' else cfg['app']['database']
+                target['capture'] = {'path': '/nonexistent/old-backup.sql'}
+                site.write_text(json.dumps(cfg))
+                with patch.object(deploy, '_execute_step') as runner, self.assertRaisesRegex(deploy.InputNeeded, 'restore.*separate'):
+                    deploy.execute('plan', site)
+                runner.assert_not_called()
+
     def test_one_call_runs_apply_identity_stage_start_verify_in_order(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); cfg, site, work, plan = self.prepare(root); calls = []
