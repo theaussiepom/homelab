@@ -61,6 +61,9 @@ The backend must be a private IPv4 address on that guest. This avoids guessing
 which of a guest's network interfaces should serve the application. The provider
 is pinned to `v0.7.0`; the installer emits `key: value` Notes because that
 version's parser can misread an equals-form URL containing a colon.
+The catalog ZIP is also pinned by its SHA256 archive hash, independently
+matched to tested commit `e35cce5af139328b8e424836a0b32638ed777016`. Traefik refuses
+to start if the archive changes or the required plugin cannot load.
 
 Shared HTTPS settings live in freshly generated Traefik configuration. No Docker
 socket or old collection of routing files is copied across. Authentik and
@@ -68,7 +71,7 @@ pgAdmin use their own sign-in; they do not receive a second forward-auth layer.
 
 The ingress `foundation` settings must also list the recursive DNS servers its
 firewall allows, including port 53, for example
-`"acme_dns_resolvers": ["10.77.40.2:53", "192.168.100.4:53"]`.
+`"acme_dns_resolvers": ["198.18.40.2:53", "198.18.100.4:53"]`.
 For certificate creation and renewal, Traefik checks the challenge TXT record at
 every listed resolver. It avoids direct queries to external authoritative DNS
 servers, which the restricted guest firewall blocks. These resolvers must be

@@ -13,6 +13,9 @@ from urllib.parse import urlsplit
 
 RUNTIME = '/opt/homelab-app/runtime'
 PLUGIN = 'traefik-proxmox-provider'
+# SHA256 of the catalog ZIP, independently matched to tested commit e35cce5.
+# Traefik3.7.1 compares plain archive hex, not a normalized tree or sha256: URI.
+PLUGIN_ARCHIVE_SHA256 = '9e3b91e0ba79fc27dd2587e8b92db725a424a9c21cb17cfcf07b1ef6e354efd7'
 AUTH_ENV = {'AUTHENTIK_EMAIL__HOST', 'AUTHENTIK_EMAIL__PORT', 'AUTHENTIK_EMAIL__USE_TLS',
             'AUTHENTIK_EMAIL__USE_SSL', 'AUTHENTIK_EMAIL__FROM', 'AUTHENTIK_EMAIL__TIMEOUT',
             'AUTHENTIK_EMAIL__USERNAME', 'AUTHENTIK_HOST'}
@@ -260,7 +263,9 @@ def files(cfg):
                     'health': {'address': '127.0.0.1:8082'}},
                   'ping': {'entryPoint': 'health'},
                   'api': {'dashboard': False},
-                  'experimental': {'plugins': {PLUGIN: {'moduleName': 'github.com/NX211/traefik-proxmox-provider', 'version': 'v0.7.0'}}},
+                  'experimental': {'abortOnPluginFailure': True, 'plugins': {PLUGIN: {
+                      'moduleName': 'github.com/NX211/traefik-proxmox-provider',
+                      'version': 'v0.7.0', 'hash': PLUGIN_ARCHIVE_SHA256}}},
                   'providers': {'file': {'filename': '/etc/traefik/shared.yml', 'watch': True},
                     'plugin': {PLUGIN: {'pollInterval': '30s', 'apiEndpoint': origin(selected['proxmox_url'], 'proxmox_url'),
                         'apiTokenId': selected['proxmox_token_id'], 'apiToken': values['proxmox_token'],

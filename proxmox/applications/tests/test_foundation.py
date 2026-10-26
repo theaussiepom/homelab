@@ -115,6 +115,9 @@ class FoundationTests(unittest.TestCase):
             self.assertEqual(provider['apiToken'], 'synthetic-$proxmox_token')
             self.assertEqual(provider['apiValidateSSL'], 'true')
             self.assertEqual(static['experimental']['plugins']['traefik-proxmox-provider']['version'], 'v0.7.0')
+            self.assertEqual(static['experimental']['plugins']['traefik-proxmox-provider']['hash'],
+                             '9e3b91e0ba79fc27dd2587e8b92db725a424a9c21cb17cfcf07b1ef6e354efd7')
+            self.assertTrue(static['experimental']['abortOnPluginFailure'])
             challenge = static['certificatesResolvers']['letsencrypt']['acme']['dnsChallenge']
             self.assertEqual(challenge['resolvers'], ['198.18.40.2:53', '198.18.100.4:53'])
             self.assertEqual(challenge['propagation'], {'disableANSChecks': True, 'requireAllRNS': True})

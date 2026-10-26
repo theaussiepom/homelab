@@ -338,10 +338,21 @@ def execute(action, cfg_path, approved_plan=None):
                 or plan['site_sha256'] != sha(cfg_path) or plan['source_sha256'] != source_hash()
                 or plan.get('input_hashes') != input_hashes(cfg)):
             raise InputNeeded('Deploy needs the exact reviewed plan, source and private inputs')
-        if cfg['app'].get('kind') in DATABASE_KINDS:
-            if plan.get('creates_guest') is not True:
-                raise InputNeeded('Empty database Deploy requires a plan creating a fresh guest, never an existing database target')
-        else:
+        if (plan.get('creates_guest') is not True or type(plan.get('vmid')) is not int
+                or plan['vmid'] != vmid):
+            raise InputNeeded('Deploy requires a saved plan creating this fresh guest; use reviewed steps for an existing installation')
+        json_plan = work / 'guest.tfplan.json'
+        if (not isinstance(plan.get('plan_json_sha256'), str) or not json_plan.is_file()
+                or json_plan.is_symlink() or sha(json_plan) != plan['plan_json_sha256']):
+            raise InputNeeded('Deploy needs its matching saved JSON plan; prepare and review a new plan')
+        # This entry point is also exposed by the public CLI/workflow template,
+        # so its first-install guard cannot depend on the private CD adapter.
+        # Individual reviewed apply/start paths retain ordinary convergence.
+        try:
+            check_merge_create_plan(json.loads(json_plan.read_text()), cfg['site']['node'], vmid)
+        except ValueError:
+            raise InputNeeded('Deploy needs three fresh creates for the selected guest and node; use reviewed steps for an existing installation') from None
+        if cfg['app'].get('kind') not in DATABASE_KINDS:
             if cfg['app'].get('exclusive_writer_confirmed') is not True:
                 raise InputNeeded('Confirm the selected service migration and retire its old writers before deploy')
             capture = cfg['app']['capture']

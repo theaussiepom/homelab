@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import http.client
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import ssl
 import subprocess
 import sys
@@ -19,11 +19,13 @@ import tempfile
 import threading
 import time
 import uuid
+import zipfile
 
 IMAGE = 'traefik@sha256:6b9cbca6fac42ab0075f5437d8dc1685cfd188626d8d515839ea94f8b6271c42'
 MODULE = 'github.com/NX211/traefik-proxmox-provider'
 PLUGIN_COMMIT = 'e35cce5af139328b8e424836a0b32638ed777016'
 PLUGIN_TREE_SHA256 = 'b1154d92f81ef7c1b85b2f572735839b82c352f4e1fc5da8d398301e63bfc247'
+PLUGIN_ARCHIVE_SHA256 = '9e3b91e0ba79fc27dd2587e8b92db725a424a9c21cb17cfcf07b1ef6e354efd7'
 TOKEN = 'PVEAPIToken=fixture@pve!discovery=synthetic-not-a-secret'
 SERVICES = {211: ('authentik', 'sso.example.invalid', 9000),
             202: ('pgadmin', 'pgadmin.example.invalid', 8080)}
@@ -39,6 +41,29 @@ def source_digest(root):
         digest.update(path.relative_to(root).as_posix().encode() + b'\0')
         digest.update(path.read_bytes() + b'\0')
     return digest.hexdigest()
+
+
+def verify_archive(path):
+    if path.stat().st_size > 2 * 1024 * 1024 or hashlib.sha256(path.read_bytes()).hexdigest() != PLUGIN_ARCHIVE_SHA256:
+        raise ValueError('Catalog ZIP differs from the pinned archive bytes')
+    files = {}
+    with zipfile.ZipFile(path) as archive:
+        for item in archive.infolist():
+            if item.is_dir():
+                continue
+            parts = PurePosixPath(item.filename).parts
+            if (len(parts) < 2 or '..' in parts or item.filename.startswith('/')
+                    or item.file_size > 1024 * 1024):
+                raise ValueError('Unexpected catalog archive member')
+            name = '/'.join(parts[1:])
+            if name in files:
+                raise ValueError('Duplicate catalog archive member')
+            files[name] = archive.read(item)
+    digest = hashlib.sha256()
+    for name, value in sorted(files.items()):
+        digest.update(name.encode() + b'\0' + value + b'\0')
+    if digest.hexdigest() != PLUGIN_TREE_SHA256:
+        raise ValueError('Catalog archive code differs from the tested commit tree')
 
 
 def notes(name, host, port):
@@ -83,6 +108,10 @@ def serve():
             if self.path == '/fixture/requests':
                 with lock:
                     return self.send_json(200, list(calls))
+            if self.path == '/fixture/reset':
+                with lock:
+                    calls.clear()
+                    return self.send_json(200, [])
             with lock:
                 calls.append({'method': self.command, 'path': self.path,
                               'authorized': self.headers.get('Authorization') == TOKEN})
@@ -126,6 +155,42 @@ def serve():
     context.load_cert_chain('/fixture/server.pem', '/fixture/server.key')
     api.socket = context.wrap_socket(api.socket, server_side=True)
     threading.Thread(target=api.serve_forever, daemon=True).start()
+
+    class Catalog(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path != '/public/download/' + MODULE + '/v0.7.0':
+                self.send_error(404)
+                return
+            payload = Path('/fixture/plugin.zip').read_bytes()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Length', str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    class CatalogProxy(BaseHTTPRequestHandler):
+        def do_CONNECT(self):
+            if self.path != 'plugins.traefik.io:443':
+                self.send_error(403)
+                return
+            self.connection.settimeout(10)
+            self.send_response(200, 'Connection Established')
+            self.end_headers()
+            # This explicitly synthetic proxy never forwards traffic. It lets
+            # the real pinned downloader verify the supplied archive offline.
+            with context.wrap_socket(self.connection, server_side=True) as secured:
+                Catalog(secured, self.client_address, self.server)
+            self.close_connection = True
+
+        def log_message(self, *args):
+            pass
+
+    if Path('/fixture/plugin.zip').exists():
+        catalog = ThreadingHTTPServer(('127.0.0.1', 9999), CatalogProxy)
+        threading.Thread(target=catalog.serve_forever, daemon=True).start()
     threading.Event().wait()
 
 
@@ -140,11 +205,11 @@ def request(host, path):
         conn.close()
 
 
-def api_calls():
+def api_calls(reset=False):
     conn = http.client.HTTPSConnection('127.0.0.1', 8006, timeout=3,
                                       context=ssl.create_default_context(cafile='/fixture/ca.pem'))
     try:
-        conn.request('GET', '/fixture/requests')
+        conn.request('GET', '/fixture/reset' if reset else '/fixture/requests')
         response = conn.getresponse()
         assert response.status == 200, response.status
         return json.loads(response.read())
@@ -210,7 +275,7 @@ def certificate_files(root):
                 '-keyout', str(root / f'{name}.key'), '-out', str(root / f'{name}.pem'))
     openssl('req', '-new', '-newkey', 'rsa:2048', '-nodes', '-subj', '/CN=127.0.0.1',
             '-keyout', str(root / 'server.key'), '-out', str(root / 'server.csr'))
-    (root / 'server.ext').write_text('subjectAltName=IP:127.0.0.1,DNS:sso.example.invalid\n'
+    (root / 'server.ext').write_text('subjectAltName=IP:127.0.0.1,DNS:sso.example.invalid,DNS:plugins.traefik.io\n'
                                     'extendedKeyUsage=serverAuth\n')
     openssl('x509', '-req', '-in', str(root / 'server.csr'), '-CA', str(root / 'ca.pem'),
             '-CAkey', str(root / 'ca.key'), '-CAcreateserial', '-days', '1',
@@ -224,14 +289,24 @@ def main():
     parser.add_argument('--tools-image', default='homelab-app-test')
     parser.add_argument('--plugin-source', type=Path, required=True,
                         help=f'Unmodified source at {MODULE}@{PLUGIN_COMMIT}')
+    parser.add_argument('--plugin-archive', type=Path,
+                        help='Exact catalog ZIP; also prove the production downloader accepts only the pinned hash')
     args = parser.parse_args()
     plugin_source = args.plugin_source.resolve(strict=True)
     if source_digest(plugin_source) != PLUGIN_TREE_SHA256:
         raise ValueError('Plugin source differs from the pinned v0.7.0 source tree')
+    if args.plugin_archive:
+        verify_archive(args.plugin_archive)
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from foundation import PLUGIN_ARCHIVE_SHA256 as production_hash
+        if production_hash != PLUGIN_ARCHIVE_SHA256:
+            raise ValueError('Production and proven archive pins differ')
     names = []
     with tempfile.TemporaryDirectory(prefix='homelab-provider-fixture-') as tmp:
         root = Path(tmp)
         certificate_files(root)
+        if args.plugin_archive:
+            (root / 'plugin.zip').write_bytes(args.plugin_archive.read_bytes())
         dynamic = {'http': {'middlewares': {'fixture-policy': {'headers': {
             'customResponseHeaders': {'X-Fixture-Policy': 'notes-discovery'},
             'stsSeconds': 31536000}}}},
@@ -282,6 +357,38 @@ def main():
                     print('Provider rejected the unrelated PVE CA with TLS verification enabled.')
                 docker('rm', '-f', proxy_name, stdout=subprocess.DEVNULL)
                 names.remove(proxy_name)
+            if args.plugin_archive:
+                for correct_hash in (False, True):
+                    docker('exec', backend_name, 'python3', '/fixture.py', 'reset-api')
+                    remote = json.loads(json.dumps(static))
+                    remote['experimental'] = {'abortOnPluginFailure': True, 'plugins': {'proxmox': {
+                        'moduleName': MODULE, 'version': 'v0.7.0',
+                        'hash': PLUGIN_ARCHIVE_SHA256 if correct_hash else '0' * 64}}}
+                    (root / 'remote.json').write_text(json.dumps(remote))
+                    proxy_name = 'homelab-provider-archive-' + uuid.uuid4().hex[:10]
+                    names.append(proxy_name)
+                    docker(*common, '--name', proxy_name, '--network', 'container:' + backend_name,
+                           '-e', 'SSL_CERT_FILE=/fixture/ca.pem', '-e', 'SSL_CERT_DIR=/fixture/no-certs',
+                           '-e', 'HTTPS_PROXY=http://127.0.0.1:9999',
+                           '--tmpfs', f'/plugins-storage:rw,nosuid,nodev,size=8m,uid={os.getuid()},gid={os.getgid()},mode=0700',
+                           IMAGE, '--configFile=/fixture/remote.json', stdout=subprocess.DEVNULL)
+                    if correct_hash:
+                        docker('exec', backend_name, 'python3', '/fixture.py', 'check')
+                    else:
+                        for attempt in range(90):
+                            logs = docker('logs', proxy_name, capture_output=True, text=True)
+                            running = docker('inspect', '--format', '{{.State.Running}}', proxy_name,
+                                             capture_output=True, text=True).stdout.strip()
+                            if 'invalid hash for plugin' in logs.stdout + logs.stderr and running == 'false':
+                                break
+                            if attempt == 89:
+                                raise RuntimeError('Pinned downloader did not fail closed on the wrong archive hash')
+                            time.sleep(0.5)
+                        docker('exec', backend_name, 'python3', '/fixture.py', 'check-untrusted')
+                        print('Pinned production downloader rejected the wrong ZIP hash before any PVE API read.')
+                    docker('rm', '-f', proxy_name, stdout=subprocess.DEVNULL)
+                    names.remove(proxy_name)
+                print('Pinned production downloader accepted only the verified catalog ZIP and routed both services.')
         except Exception:
             for name in names:
                 subprocess.run(['docker', 'logs', '--tail', '60', name], check=False, timeout=20)
@@ -299,5 +406,7 @@ if __name__ == '__main__':
         check()
     elif sys.argv[1:] == ['check-untrusted']:
         assert not api_calls(), 'The untrusted plugin must not reach the API'
+    elif sys.argv[1:] == ['reset-api']:
+        api_calls(reset=True)
     else:
         main()

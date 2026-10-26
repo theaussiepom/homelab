@@ -51,7 +51,14 @@ jobs:
           path: provider-fixture-source
           persist-credentials: false
       - name: Exercise the pinned Proxmox provider over trusted HTTPS
-        run: python3 proxmox/applications/tests/provider_fixture.py --plugin-source provider-fixture-source --tools-image homelab-app-test
+        run: |
+          curl --fail --silent --show-error --max-time 60 --max-filesize 1048576 \
+            --user-agent 'Go-http-client/1.1' \
+            https://plugins.traefik.io/public/download/github.com/NX211/traefik-proxmox-provider/v0.7.0 \
+            --output "$RUNNER_TEMP/provider.zip"
+          python3 proxmox/applications/tests/provider_fixture.py \
+            --plugin-source provider-fixture-source --tools-image homelab-app-test \
+            --plugin-archive "$RUNNER_TEMP/provider.zip"
       - name: Exercise a preserved pgAdmin profile and its HTTPS OAuth redirect
         run: |
           docker pull --platform linux/amd64 dpage/pgadmin4@sha256:cefc4cc6b7d9d71a9e81e76fb9d7e14038ab5661b539a190eea1b63fa612589a

@@ -305,8 +305,9 @@ verify under one workflow lock. For application guests it first checks coherent
 capture hashes and archive safety; select the migration window and set
 `exclusive_writer_confirmed: true`. Database-server deployment needs neither a
 capture nor retirement of the original database: it prepares an empty server.
-The saved plan must create the database guest: updates, no-ops and older plans
-without that creation evidence are refused by database Deploy. The manual
+Every Deploy must create a fresh guest and its two firewall resources. It checks
+the saved JSON plan against its recorded digest and guest identity before apply;
+updates, no-ops and older plans without that creation evidence are refused. The manual
 restore and application cutover come later. Individual
 apply/stage/start commands remain available for separately reviewed qualification
 and partial-installation recovery. They do not bypass an interrupted rollout's
