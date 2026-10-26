@@ -97,7 +97,7 @@ with tempfile.TemporaryDirectory(dir='/var/tmp') as tmp:
         result = subprocess.run(helper_command, capture_output=True, text=True)
         if result.returncode:
             raise AssertionError(result.stdout + result.stderr)
-        os.chown(directory, 70, 1000); os.chmod(directory, 0o750)
+        os.chown(directory, 70, 1000); os.chmod(directory, 0o700)
         before = directory.stat()
         result = subprocess.run(helper_command, capture_output=True, text=True)
         if result.returncode:
