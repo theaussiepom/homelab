@@ -24,13 +24,14 @@ def github(repo, path, method='GET', payload=None):
     return json.loads(proc.stdout) if proc.stdout.strip() else None
 
 
-def environment(repo):
+def environment(repo, create=True):
     metadata = github(repo, '')
     require(metadata['private'] and metadata['permissions']['admin'], 'Use a private repository with administration access')
     envs = github(repo, '/environments?per_page=100')
     require(envs['total_count'] <= 100, 'Environment inventory exceeds this bounded setup')
     existing = [e for e in envs['environments'] if e['name'] == ENVIRONMENT]
     if not existing:
+        require(create, 'The bootstrap environment is missing; setup is not ready')
         github(repo, '/environments/' + ENVIRONMENT, 'PUT', {
             'deployment_branch_policy': {'protected_branches': False, 'custom_branch_policies': True}})
         github(repo, '/environments/' + ENVIRONMENT + '/deployment-branch-policies', 'POST', {'name': 'main', 'type': 'branch'})
@@ -41,6 +42,13 @@ def environment(repo):
     require(policies['total_count'] == 1 and policies['branch_policies'][0]['name'] == 'main'
             and policies['branch_policies'][0].get('type') == 'branch', 'The bootstrap secret must be restricted to main')
     return value
+
+
+def verify_environment_and_secret(repo):
+    environment(repo, create=False)
+    secret = github(repo, '/environments/' + ENVIRONMENT + '/secrets/PROXMOX_BOOTSTRAP_TOKEN')
+    require(isinstance(secret, dict) and secret.get('name') == 'PROXMOX_BOOTSTRAP_TOKEN',
+            'The bootstrap environment secret is missing')
 
 
 def setup(bundle, out):
@@ -63,6 +71,7 @@ def setup(bundle, out):
         api = API(site['api_endpoint'], token, bundle / 'pve-ca.pem')
         metadata = api.call('/access/users/root@pam/token/homelab-bootstrap-cd-900')['data']
         require(metadata.get('expire') == 0 and metadata.get('privsep') == 1, 'Saved bootstrap token metadata differs')
+        verify_environment_and_secret(repo)
         return {**saved, 'changed': False}
     key = Path(os.environ['HOMELAB_SSH_KEY']).resolve(strict=True)
     hosts = Path(os.environ['HOMELAB_KNOWN_HOSTS']).resolve(strict=True)
@@ -89,6 +98,7 @@ def setup(bundle, out):
                            '--repo', repo], input=token, text=True, capture_output=True, timeout=30,
                           env=dict(os.environ, GH_DEBUG=''))
     require(proc.returncode == 0, 'GitHub secret upload failed; preserve the saved credential without retrying')
+    verify_environment_and_secret(repo)
     result = {'status': 'ready', 'repository': repo, 'endpoint': site['api_endpoint'],
               'token_id': lines[1]['token_id'], 'environment': ENVIRONMENT,
               'allowed_branch': 'main', 'expires_at': 0, 'bitwarden_save': 'pending',
