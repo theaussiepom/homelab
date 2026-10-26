@@ -42,7 +42,7 @@ if p['apply']:
  nas=n.ensure(r['nas'],r['vmid'],c,restart=r['restart_deploy'])
  print(json.dumps({'step':'nas','result':nas}),flush=True)
 key=n.command(['pct','exec',str(r['vmid']),'--','cat','/etc/ssh/ssh_host_ed25519_key.pub']).strip()
-addresses=n.command(['pct','exec',str(r['vmid']),'--','hostname','-I']).split()
+addresses=n.guest_addresses(r['vmid'])
 print(json.dumps({'status':'ready','plan':plan,'plan_sha256':fingerprint,'guest_host_key':key,'addresses':addresses,'access':access,'nas':nas}),flush=True)
 '''
 

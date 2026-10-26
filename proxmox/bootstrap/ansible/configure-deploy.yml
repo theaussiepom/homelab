@@ -3,6 +3,9 @@
   hosts: deploy
   become: true
   gather_facts: true
+  vars:
+    # Match initial installation: root and runner tasks need an accessible temp parent.
+    ansible_remote_tmp: /tmp
   tasks:
     - name: Verify the existing deployment guest before updating its setup
       ansible.builtin.assert:

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import time
 
 HOST_MOUNT = Path('/mnt/homelab_backups')
 GUEST_MOUNT = '/srv/homelab-backups'
@@ -91,6 +92,18 @@ def same_binding(actual, wanted):
             result[pair[0]] = pair[1]
         return result
     return parse(actual) is not None and parse(actual) == parse(wanted)
+
+
+def guest_addresses(vmid, execute=command):
+    """Allow DHCP a short, bounded interval after the admitted guest restart."""
+    for attempt in range(30):
+        addresses = execute(['pct', 'exec', str(vmid), '--', 'hostname', '-I']).split()
+        if any(ipaddress.ip_address(x).version == 4 and not ipaddress.ip_address(x).is_loopback
+               and not ipaddress.ip_address(x).is_link_local for x in addresses):
+            return addresses
+        if attempt < 29:
+            time.sleep(1)
+    raise RuntimeError('The deployment guest has no usable IPv4 address after the bounded DHCP wait')
 
 
 def ensure(nas, vmid, guest_config, execute=command, root=Path('/'), restart=False):

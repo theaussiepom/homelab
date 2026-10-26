@@ -108,6 +108,20 @@ class NasTests(unittest.TestCase):
         self.assertFalse(host_nas.same_binding(wanted + ',shared=1', wanted))
         self.assertFalse(host_nas.same_binding(wanted + ',backup=1', wanted))
 
+    def test_restart_dhcp_wait_is_bounded_and_uses_only_the_selected_guest(self):
+        calls = []
+        answers = iter(['', 'fe80::1', '198.18.25.10 fe80::1'])
+        def execute(args):
+            calls.append(args); return next(answers)
+        with patch.object(host_nas.time, 'sleep') as pause:
+            self.assertEqual(host_nas.guest_addresses(4917, execute), ['198.18.25.10', 'fe80::1'])
+            self.assertEqual(pause.call_count, 2)
+        self.assertEqual(calls, [['pct', 'exec', '4917', '--', 'hostname', '-I']] * 3)
+        with patch.object(host_nas.time, 'sleep') as pause:
+            with self.assertRaisesRegex(RuntimeError, 'bounded DHCP wait'):
+                host_nas.guest_addresses(4917, lambda args: '')
+            self.assertEqual(pause.call_count, 29)
+
 
 if __name__ == '__main__':
     unittest.main()
