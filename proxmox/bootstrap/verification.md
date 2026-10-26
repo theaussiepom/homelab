@@ -185,3 +185,28 @@ The maintainer retains the private host readback, source/test bindings, failed
 attempt, corrected-attempt approval, backup/handover receipts and GitHub job
 metadata/logs. Real credentials, addresses, keys, plans and state remain outside
 this public record.
+
+## Existing lab bootstrap configuration: passed on 26 October 2026
+
+The supported `configure` step was exercised on the retained lab deployment
+guest after its GitHub handover. The Proxmox host mounted the selected NAS NFS
+export and shared only the dedicated private backup directory into the guest.
+Readback confirmed the intended mount, mapped numeric owner, owner-only mode
+and restored deletion protection.
+
+The completed configuration checked NAS write/sync/readback as the deployment
+account, saved active-state recovery copies, prepared the application SSH key
+and verified the declared next guest's API access. A repeat with the same
+settings returned `configured` with `changed: false`; Ansible made no changes
+and OpenTofu proposed none. The existing guest, runner registration, token and
+state were retained. The final continuation required no guest restart.
+
+This was not a clean first-attempt result. Earlier NFS, directory-permission,
+protected-mount and mount-identity failures were inspected and corrected under
+separate approvals; their failed receipts and logs remain preserved privately.
+**94 bootstrap unit tests passed** for the corrected source.
+
+This establishes the existing-bootstrap configuration path in that lab. It
+does not apply the update to the physical host, qualify its network/NAS path,
+back up application data or prove application startup. Those remain separate
+steps before household migration.
