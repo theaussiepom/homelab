@@ -171,11 +171,23 @@ def ensure(nas, vmid, guest_config, execute=command, root=Path('/'), restart=Fal
                                   '--current', '1', '--output-format', 'json']))
     def active():
         current_pid = int(execute(['lxc-info', '-n', str(vmid), '-p', '-H']).strip())
-        for line in (root / 'proc' / str(current_pid) / 'mountinfo').read_text().splitlines():
-            fields = line.split()
-            if len(fields) > 6 and fields[4] == GUEST_MOUNT and fields[fields.index('-') + 1] in ('nfs', 'nfs4'):
-                return True
-        return False
+        def mounts(path, target_path):
+            rows = []
+            for line in path.read_text().splitlines():
+                fields = line.split(); separator = fields.index('-')
+                if fields[4] == target_path and fields[separator + 1] in ('nfs', 'nfs4'):
+                    rows.append({'device': fields[2], 'root': fields[3], 'source': fields[separator + 2]})
+            return rows
+        host = mounts(root / 'proc/self/mountinfo', str(HOST_MOUNT))
+        guest = mounts(root / 'proc' / str(current_pid) / 'mountinfo', GUEST_MOUNT)
+        if len(host) != 1 or host[0]['source'] != source:
+            raise RuntimeError('The current host NAS mount identity differs')
+        if not guest:
+            return False
+        expected = dict(host[0], root=host[0]['root'].rstrip('/') + '/' + nas['directory'])
+        if guest != [expected]:
+            raise RuntimeError('The existing guest NAS bind is stale or differs; preserve it for review')
+        return True
     if not same_binding(current.get('mp0'), result['binding']) or not active():
         if not restart:
             raise RuntimeError('NAS bind needs a deployment-guest restart; select it in the reviewed configuration')
@@ -187,5 +199,10 @@ def ensure(nas, vmid, guest_config, execute=command, root=Path('/'), restart=Fal
                                      '--current', '1', '--output-format', 'json']))
         if not same_binding(current.get('mp0'), result['binding']) or not active():
             raise RuntimeError('The selected guest restart did not activate its exact NAS bind')
+    guest_source = execute(['pct', 'exec', str(vmid), '--', 'findmnt', '-rn', '-t', 'nfs,nfs4',
+                            '-o', 'FSTYPE,SOURCE', '--mountpoint', GUEST_MOUNT]).strip().split()
+    if len(guest_source) != 2 or guest_source[0] not in ('nfs', 'nfs4'):
+        raise RuntimeError('The verified guest NAS bind has no unambiguous filesystem source')
+    result['backup_source'] = guest_source[1]
     result.update(changed=bool(result['units_to_create'] or result['bind_to_add']), mapped_uid=mapped[0], mapped_gid=mapped[1])
     return result

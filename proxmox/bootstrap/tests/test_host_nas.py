@@ -54,13 +54,15 @@ class NasTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(RuntimeError):
                 host_nas.units(dict(self.nas, **change))
 
-    def test_one_graceful_restart_activates_bind_then_rerun_is_a_noop(self, fail_mount=False):
+    def test_one_graceful_restart_activates_bind_then_rerun_is_a_noop(self, fail_mount=False, stale_bind=False):
         """Exercise host setup and default UID mapping without a real mount."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             (root / 'etc/systemd/system').mkdir(parents=True)
             proc = root / 'proc/123'; proc.mkdir(parents=True)
             (proc / 'mountinfo').write_text('')
+            (root / 'proc/self').mkdir()
+            (root / 'proc/self/mountinfo').write_text('1 2 0:1 / /mnt/homelab_backups rw - nfs4 198.18.20.2:/volume1/test rw\n')
             for kind in ('uid', 'gid'): (proc / (kind + '_map')).write_text('0 100000 65536\n')
             calls, owners, active, pending, mounted = [], {}, {'protection': 1}, {}, [False]
             private = root / str(host_nas.HOST_MOUNT / self.nas['directory']).lstrip('/')
@@ -86,7 +88,8 @@ class NasTests(unittest.TestCase):
                     # systemd leaves an autofs mount under the active NFS mount.
                     return 'nfs4 198.18.20.2:/volume1/test\n' if ['-t', 'nfs,nfs4'] == args[2:4] else 'autofs systemd-1\nnfs4 198.18.20.2:/volume1/test\n'
                 if args == ['lxc-info', '-n', '4917', '-p', '-H']: return '123\n'
-                if args[:2] == ['pct', 'exec']: return '1000\n'
+                if args[:2] == ['pct', 'exec']:
+                    return 'nfs4 198.18.20.2:/volume1/test[/bootstrap-state]\n' if args[4] == 'findmnt' else '1000\n'
                 if args[0] == 'pvesh': return json.dumps(active)
                 if args[:2] == ['pct', 'set']:
                     if args[3] == '--protection': active['protection'] = int(args[-1])
@@ -115,6 +118,13 @@ class NasTests(unittest.TestCase):
                     return
                 first = host_nas.ensure(self.nas, 4917, guest, execute, root, restart=True, unprotect=True)
                 self.assertTrue(first['changed']); self.assertEqual(first['mapped_uid'], 101000)
+                if stale_bind:
+                    (proc / 'mountinfo').write_text('1 2 0:2 /wrong-folder /srv/homelab-backups rw - nfs4 198.18.20.9:/different rw\n')
+                    count = len(calls)
+                    with self.assertRaisesRegex(RuntimeError, 'stale or differs'):
+                        host_nas.ensure(self.nas, 4917, dict(guest, **active), execute, root, restart=True)
+                    self.assertFalse(any(c[:2] == ['pct', 'shutdown'] for c in calls[count:]))
+                    return
                 second = host_nas.ensure(self.nas, 4917, dict(guest, **active), execute, root, restart=True)
                 self.assertFalse(second['changed'])
             self.assertEqual([c for c in calls if c[:2] == ['pct', 'shutdown']], [['pct', 'shutdown', '4917', '--timeout', '30']])
@@ -124,6 +134,9 @@ class NasTests(unittest.TestCase):
 
     def test_protection_is_restored_if_the_admitted_bind_command_fails(self):
         self.test_one_graceful_restart_activates_bind_then_rerun_is_a_noop(fail_mount=True)
+
+    def test_stale_guest_bind_is_held_without_an_automatic_restart(self):
+        self.test_one_graceful_restart_activates_bind_then_rerun_is_a_noop(stale_bind=True)
 
     def test_proxmox_mount_option_order_is_harmless_but_other_options_are_not(self):
         wanted = '/mnt/homelab_backups/bootstrap-state,mp=/srv/homelab-backups,backup=0'
