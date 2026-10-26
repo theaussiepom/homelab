@@ -156,3 +156,5 @@ Status updated on **26 October 2026**, including the physical results from 25 Oc
 Physical installation and first-start networking are part of the actual migration.
 They are separate from software-only tests. Keep real
 credentials, settings, state, plans and installation media outside Git.
+
+For the next service stage, see [HTTPS, sign-in and database administration](applications/FOUNDATION.md).

@@ -104,6 +104,47 @@ administration grant in the concrete native guest/start decision. It is not
 enabled by the example or granted to other services. The address must belong
 to a declared guest interface; missing IPv4/IPv6 routing fails startup.
 
+### Existing-version Authentik
+
+Use the `identity` stack for the existing Authentik server, worker and Redis.
+Server and worker must select the same pinned image. Retain the installed version;
+this path does not upgrade Authentik or create OAuth/proxy providers. The restored
+PostgreSQL database retains users, flows, provider/client secrets and outpost
+configuration. Restore it separately before starting this guest, and keep its
+original `AUTHENTIK_SECRET_KEY` in the private `authentik_secret_key` input.
+
+Supply the existing database credentials in the top-level PostgreSQL inputs.
+The renderer sets both modes to that database and the stack's internal `redis`
+host. Preserve other private `AUTHENTIK_*` settings, including SMTP, in each
+service's `environment`. Dollar signs are escaped for Compose and arrive intact
+inside the containers. Do not copy a new-install bootstrap password/token into a
+restored deployment. Keep existing external hostnames, callbacks and proxy
+settings; login acceptance belongs to the restored integrations.
+
+The capture archive must contain `authentik/media`, `authentik/templates`
+(the original custom-templates contents), `authentik/certs` and `redis` at its
+root. Server and worker share media/templates; only worker mounts certs. Preserve
+numeric owners, modes, ACLs and xattrs. Identity services accept an explicit
+captured `user`; no permission repair or Docker socket is added. Redis accepts
+its captured `command` as a string, argv list or null, so its persistence mode
+can match the capture; omission retains the previous append-only default. Record
+its exact image and persistence command before binding real private inputs.
+
+Server/worker wait for Redis to answer `PING` with `PONG` on its default local
+port without authentication, matching the [2025.2.1 upstream Compose
+contract](https://github.com/goauthentik/authentik/blob/version/2025.2.1/docker-compose.yml).
+A Redis setup with a different port or authentication needs a reviewed matching
+probe before use. Redis has no published guest port. Authentik retains the
+image's mode-aware `ak healthcheck`; Compose `up --wait` checks both modes, rather
+than considering a running container sufficient. PostgreSQL is external to this
+stack: it is neither created nor restored by Compose.
+
+Require private read-only probes for server readiness and worker/Redis health.
+Then check a real existing login, the embedded outpost/Node-RED forward-auth
+path, and pgAdmin's OAuth callback separately. Startup/config tests do not prove
+those integrations, TLS, SMTP delivery, Docker inside the native LXC, or restored
+file access. No test email is sent by this path.
+
 ### Native databases
 
 `app.database` supplies `user`, `group`, `uid`, `gid`, `home`,
@@ -190,19 +231,63 @@ certify a real dump. Failed restore receipts and partial targets stay held.
 ### Proxy and login
 
 Restore Traefik static configuration/certificates under `traefik/`. Its file
-provider must watch `/etc/traefik/dynamic`, with a `websecure` entrypoint and the
-restored certificate. Generated routes go into `dynamic/homelab-applications.yml`.
+provider must watch `/etc/traefik/dynamic`, with the selected HTTPS entrypoint and
+restored certificate configuration. Generated routes go into `dynamic/homelab-applications.yml`.
 Prepare that directory and remove conflicting routes in the private capture.
 No certificate or Cloudflare credential is requested/copied implicitly.
+
+Keep each existing FQDN in `<application>_hosts` (a nonempty list), or retain
+the original `<application>_host` string; do not supply both. This applies to
+`homeassistant`, `node_red`, `identity` and the optional `pgadmin` route. Each
+needs a credential-free `<application>_url` backend origin. Hosts must be unique
+across applications. Original Host headers pass through, so issuer and OAuth
+callback URLs keep the requested hostname. This does not rewrite an application's
+canonical issuer, callback allowlist or cookie configuration.
+
+`ingress_entrypoint` defaults to `websecure`; select the restored entrypoint
+name explicitly when different (for example `https`). Optional
+`ingress_cert_resolver` selects the existing resolver (for example `cloudflare`);
+omitting it keeps `tls: {}` and uses the restored TLS certificate configuration.
+The renderer does not create a resolver, request a new certificate policy, or
+change DNS. Keep the existing ACME store, TLS options/defaults and certificate
+paths in the private capture. The guest starts `/etc/traefik/traefik.yml`, so
+prepare the captured static config at that path and reconcile its file-provider
+directory and certificate mounts before admission. Disable its old Docker
+provider: there is no guest-to-guest Docker socket. Preserve required middleware
+definitions and review conflicting old routers and public/LAN exposure rules
+before installing these generated routes; the renderer does not import them.
 
 HA uses its own login. Node-RED gets Authentik forward auth and an unprotected
 outpost callback route following the
 [Authentik pattern](https://docs.goauthentik.io/add-secure-apps/providers/proxy/server_traefik/).
+Application routers use explicit priority 10 and the outpost uses 100, so adding
+hostname aliases cannot let Traefik's default rule-length priority send an outpost
+callback through forward-auth again. See [Traefik's priority rules](https://doc.traefik.io/traefik/reference/routing-configuration/http/routing/rules-and-priority/).
 Restrict Node-RED's backend port to the proxy/explicit administration; SSO does
 not protect a separately exposed backend. Restore its existing provider/outpost
 and verify login. The installed Authentik version's PostgreSQL and Redis
 dependencies are retained. Restore HA's exact trusted proxy settings using
 the [HA HTTP guidance](https://www.home-assistant.io/integrations/http/).
+
+pgAdmin uses its existing native OAuth2 integration, with no generated forward
+auth or path rewriting. Supplying any `pgadmin_*` route input requires its host(s)
+and backend URL together. Optional `pgadmin_middlewares` retains existing file
+middleware references, for example `["chain-lan-unsafe@file"]`; the referenced
+definitions must be restored and must not add forward-auth to this native login.
+The renderer rejects its own `authentik` middleware on pgAdmin. This route does
+not create a pgAdmin service or change its OAuth provider/client. Verify both
+hostname callbacks (`/oauth2/authorize`), the original issuer/discovery URLs,
+proxy-header settings, browser login and a database connection after admission.
+Node-RED requires its own separate forward-auth acceptance; pgAdmin OAuth success
+does not qualify it.
+
+Synthetic route contracts run in the application unit suite. To additionally
+exercise the rendered rules through pinned Traefik with stub backends, run
+`python3 proxmox/applications/tests/ingress_fixture.py --tools-image homelab-app-test`
+after building the source-tools image as in CI. It publishes no ports and uses
+only an isolated container network namespace, generated TLS and invented hosts.
+It proves routing and proxy-header behaviour, not real Authentik/pgAdmin login,
+origin certificates, restored middleware policy or production reachability.
 
 ## Workflow commands
 

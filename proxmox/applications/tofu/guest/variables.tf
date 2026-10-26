@@ -2,10 +2,11 @@ variable "node" { type = string }
 variable "ssh_public_keys" { type = list(string) }
 variable "guest" {
   type = object({
-    vmid     = number, hostname = string, cpu = number, memory_mib = number,
-    root_gib = number, storage_id = string, template_file_id = string,
-    started  = bool, start_on_boot = bool, boot_order = number,
-    nesting  = bool, keyctl = bool, dns_servers = list(string),
+    vmid           = number, hostname = string, cpu = number, memory_mib = number,
+    root_gib       = number, storage_id = string, template_file_id = string,
+    started        = bool, start_on_boot = bool, boot_order = number,
+    nesting        = bool, keyctl = bool, dns_servers = list(string),
+    routing_labels = optional(map(string), {}),
     interfaces = list(object({
       bridge  = string, vlan = optional(number), mac = string, ipv4 = string,
       gateway = optional(string), ipv6 = optional(string)
@@ -16,6 +17,13 @@ variable "guest" {
       source    = optional(string), destination = optional(string), comment = string
     }))
   })
+  validation {
+    condition = alltrue([for key, value in var.guest.routing_labels :
+      can(regex("^traefik\\.[A-Za-z0-9_.-]+$", key)) && length(value) <= 2048 &&
+      length(regexall("[\r\n]", value)) == 0
+    ])
+    error_message = "Discovery labels must be single-line Traefik routing facts generated from typed app routes."
+  }
   validation {
     condition = (
       var.guest.vmid >= 100 && floor(var.guest.vmid) == var.guest.vmid &&

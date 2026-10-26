@@ -1,7 +1,10 @@
 resource "proxmox_virtual_environment_container" "guest" {
-  node_name        = var.node
-  vm_id            = var.guest.vmid
-  description      = "Homelab application guest managed by its private deployment repository"
+  node_name = var.node
+  vm_id     = var.guest.vmid
+  description = join("\n", concat(
+    ["Homelab application guest managed by its private deployment repository"],
+    [for key in sort(keys(var.guest.routing_labels)) : "${key}: ${var.guest.routing_labels[key]}"]
+  ))
   unprivileged     = true
   protection       = true
   started          = var.guest.started

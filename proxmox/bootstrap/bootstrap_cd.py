@@ -12,6 +12,8 @@ from urllib.parse import quote, urlencode, urlsplit
 from urllib.error import HTTPError
 from urllib.request import HTTPSHandler, HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
+import provider_access
+
 
 class BootstrapDiagnostic(ValueError):
     """An approved, fixed refusal message safe to show in a job log."""
@@ -32,8 +34,9 @@ def save(path, value):
 
 
 def validate(c):
-    require(set(c) == {'schema', 'endpoint', 'node', 'deploy', 'bridge', 'applications',
-                       'existing_grants', 'backup_source'}, 'Use the closed bootstrap CD configuration')
+    fields = {'schema', 'endpoint', 'node', 'deploy', 'bridge', 'applications',
+              'existing_grants', 'backup_source'}
+    require(set(c) in (fields, fields | {'service_discovery'}), 'Use the closed bootstrap CD configuration')
     require(c['schema'] == 'homelab-bootstrap-cd-v1', 'Unsupported bootstrap CD schema')
     endpoint = urlsplit(c['endpoint'])
     require(endpoint.scheme == 'https' and endpoint.hostname and endpoint.port == 8006
@@ -62,6 +65,8 @@ def validate(c):
                 'Invalid nonpropagating baseline ACL')
     require(len(rows(c['existing_grants'])) == len(c['existing_grants']), 'Duplicate baseline ACL')
     require(isinstance(c['backup_source'], str) and ':' in c['backup_source'], 'Declare the existing NAS backup source')
+    if 'service_discovery' in c:
+        provider_access.validate(c)
 
 
 def rows(items):
@@ -101,10 +106,17 @@ class API:
     def __init__(self, endpoint, token, ca):
         require(re.fullmatch(r'root@pam!homelab-bootstrap-cd-900=[A-Za-z0-9-]+', token),
                 'Use the separate bootstrap CD token')
+        self.configure(endpoint, token, ca)
+
+    def configure(self, endpoint, token, ca):
+        self.endpoint, self.ca = endpoint, ca
         self.base = endpoint.rstrip('/') + '/api2/json'
         self.token = token
         self.opener = build_opener(ProxyHandler({}), NoRedirect(),
                                   HTTPSHandler(context=ssl.create_default_context(cafile=str(ca))))
+
+    def discovery(self, token):
+        return DiscoveryAPI(self.endpoint, token, self.ca)
 
     def call(self, path, method='GET', values=None):
         request = Request(self.base + path, method=method,
@@ -120,6 +132,18 @@ class API:
         except Exception as exc:
             # Never include credential headers or response bodies in job output.
             raise BootstrapDiagnostic('Proxmox API request failed: ' + method + ' ' + path) from exc
+
+
+class DiscoveryAPI(API):
+    """Authenticate the retained provider secret without offering a write path."""
+    def __init__(self, endpoint, token, ca):
+        require(re.fullmatch(r'root@pam!homelab-traefik-[0-9]+=[A-Za-z0-9-]+', token),
+                'Use the selected service discovery token')
+        self.configure(endpoint, token, ca)
+
+    def call(self, path, method='GET', values=None):
+        require(method == 'GET' and values is None, 'Service discovery verification is read-only')
+        return super().call(path, method, values)
 
 
 def inspect(api, c):
@@ -160,8 +184,13 @@ def inspect(api, c):
             'missing': [list(r) for r in sorted(missing)]}
 
 
-def reconcile(api, c, before, evidence):
-    require(inspect(api, c) == before, 'Host changed after the saved plan')
+def reconcile(api, c, before, evidence, root=None, backup=None):
+    base_before = {key: value for key, value in before.items() if key != 'service_discovery'}
+    require(inspect(api, c) == base_before, 'Host changed after the saved plan')
+    if 'service_discovery' in c:
+        require(root is not None and backup is not None, 'Service discovery needs its private state and NAS backup')
+        require(provider_access.inspect(api, c, root, backup) == before['service_discovery'],
+                'Service discovery changed after the saved plan')
     node = '/nodes/' + c['node']
     if not before['bridge_exists']:
         # Omit bridge_ports: the API treats 'none' as a literal device name.
@@ -203,9 +232,13 @@ def reconcile(api, c, before, evidence):
         require(required in permissions.get(path, {}) and permissions[path][required] == 0,
                 'Application-token effective permissions failed readback')
     save(evidence / 'after.json', after)
-    return {'status': 'passed', 'bridge': c['bridge'], 'bridge_created': not before['bridge_exists'],
+    result = {'status': 'passed', 'bridge': c['bridge'], 'bridge_created': not before['bridge_exists'],
             'new_acl_rows': len(before['missing']), 'token_lifetime_changed': False,
             'guest_lifecycle_changed': False, 'trigger_commit': os.environ.get('GITHUB_SHA')}
+    if 'service_discovery' in c:
+        result['service_discovery'] = provider_access.reconcile(
+            api, c, before['service_discovery'], root, backup)
+    return result
 
 
 def run(c, api, root=Path('/var/lib/homelab-bootstrap'), backup=Path('/srv/homelab-backups')):
@@ -221,6 +254,8 @@ def run(c, api, root=Path('/var/lib/homelab-bootstrap'), backup=Path('/srv/homel
     evidence = root / ('cd-' + str(time.time_ns()))
     evidence.mkdir(mode=0o700)
     before = inspect(api, c)
+    if 'service_discovery' in c:
+        before['service_discovery'] = provider_access.inspect(api, c, root, backup)
     payload = {'configuration': c, 'plan': before}
     save(evidence / 'plan.json', payload)
     destination = backup / evidence.name
@@ -233,7 +268,7 @@ def run(c, api, root=Path('/var/lib/homelab-bootstrap'), backup=Path('/srv/homel
     marker.chmod(0o600)
     save(hold, receipt)
     try:
-        result = reconcile(api, c, before, evidence)
+        result = reconcile(api, c, before, evidence, root, backup)
     except Exception as exc:
         failure = {'status': 'held', 'error': str(exc), 'automatic_retry': False}
         save(evidence / 'failure.json', failure)
@@ -260,7 +295,7 @@ def main():
         validate(c)
         api = API(c['endpoint'], os.environ['PROXMOX_BOOTSTRAP_TOKEN'], args.ca)
         print(json.dumps(run(c, api)))
-    except BootstrapDiagnostic as exc:
+    except (BootstrapDiagnostic, provider_access.ProviderAccessError) as exc:
         raise SystemExit('Bootstrap CD stopped: ' + str(exc) + '. Inspect its private plan/hold; do not automatically rerun.') from None
     except Exception:
         raise SystemExit('Bootstrap CD stopped. Inspect its private plan/hold; do not automatically rerun.') from None
