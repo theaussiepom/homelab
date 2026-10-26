@@ -164,8 +164,10 @@ def reconcile(api, c, before, evidence):
     require(inspect(api, c) == before, 'Host changed after the saved plan')
     node = '/nodes/' + c['node']
     if not before['bridge_exists']:
+        # Omit bridge_ports: the API treats 'none' as a literal device name.
+        # PVE serializes an absent port list as `bridge-ports none` itself.
         api.call(node + '/network', 'POST', {'iface': c['bridge'], 'type': 'bridge',
-                 'autostart': 1, 'bridge_ports': 'none',
+                 'autostart': 1,
                  'comments': 'HomeLab CD private backend; no physical uplink'})
         pending = api.call(node + '/network')
         proposed = network_state(pending['data'])

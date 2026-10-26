@@ -38,9 +38,12 @@ class FakeAPI:
         if method != 'GET':
             self.writes.append((path, method, values))
             if method == 'POST':
+                # PVE::INotify validates API port names before serializing interfaces.
+                if values.get('bridge_ports') == 'none':
+                    raise ValueError("bridge 'vmbr30' - unable to find bridge port 'none'")
                 # Installed PVE::INotify writes and reports these bridge defaults.
                 self.network.append({**values, 'active': 0, 'method': 'manual', 'method6': 'manual',
-                                     'bridge_stp': 'off', 'bridge_fd': '0'})
+                                     'bridge_stp': 'off', 'bridge_fd': '0', 'bridge_ports': ''})
                 if self.omit_bridge_field:
                     self.network[-1].pop(self.omit_bridge_field)
                 self.pending = 'isolated bridge addition'
@@ -107,7 +110,13 @@ class BootstrapCDTests(unittest.TestCase):
         self.run_cd()
         request = next(values for _, method, values in self.api.writes if method == 'POST')
         # Proxmox 9.2's network create schema has no bridge_stp/bridge_fd parameters.
-        self.assertEqual(set(request), {'iface', 'type', 'autostart', 'bridge_ports', 'comments'})
+        self.assertEqual(set(request), {'iface', 'type', 'autostart', 'comments'})
+
+    def test_empty_bridge_omits_ports_and_reads_back_no_uplink(self):
+        self.run_cd()
+        request = next(values for _, method, values in self.api.writes if method == 'POST')
+        self.assertNotIn('bridge_ports', request)
+        self.assertEqual(self.api.network[-1]['bridge_ports'], '')
 
     def test_created_bridge_requires_explicit_stp_and_forward_delay_before_reload(self):
         for key in ('bridge_stp', 'bridge_fd'):
