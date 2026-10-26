@@ -54,7 +54,7 @@ class NasTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(RuntimeError):
                 host_nas.units(dict(self.nas, **change))
 
-    def test_one_graceful_restart_activates_bind_then_rerun_is_a_noop(self):
+    def test_one_graceful_restart_activates_bind_then_rerun_is_a_noop(self, fail_mount=False):
         """Exercise host setup and default UID mapping without a real mount."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -62,7 +62,7 @@ class NasTests(unittest.TestCase):
             proc = root / 'proc/123'; proc.mkdir(parents=True)
             (proc / 'mountinfo').write_text('')
             for kind in ('uid', 'gid'): (proc / (kind + '_map')).write_text('0 100000 65536\n')
-            calls, owners, active, pending, mounted = [], {}, {}, {}, [False]
+            calls, owners, active, pending, mounted = [], {}, {'protection': 1}, {}, [False]
             private = root / str(host_nas.HOST_MOUNT / self.nas['directory']).lstrip('/')
             real_stat = Path.stat
             real_mkdir = Path.mkdir
@@ -88,7 +88,10 @@ class NasTests(unittest.TestCase):
                 if args == ['lxc-info', '-n', '4917', '-p', '-H']: return '123\n'
                 if args[:2] == ['pct', 'exec']: return '1000\n'
                 if args[0] == 'pvesh': return json.dumps(active)
-                if args[:2] == ['pct', 'set']: pending['mp0'] = args[-1]
+                if args[:2] == ['pct', 'set']:
+                    if args[3] == '--protection': active['protection'] = int(args[-1])
+                    elif fail_mount: raise RuntimeError('synthetic drive failure')
+                    else: pending['mp0'] = args[-1]
                 if args[:2] == ['pct', 'status']: return 'status: stopped\n'
                 if args[:2] == ['pct', 'start']:
                     active.update(pending)
@@ -96,18 +99,31 @@ class NasTests(unittest.TestCase):
                 if args == ['systemctl', 'start', host_nas.UNIT]: mounted[0] = True
                 return ''
 
-            guest = dict(self.guest, node='test-pve')
+            guest = dict(self.guest, node='test-pve', protection=1)
             with patch.object(host_nas.os, 'chown', side_effect=lambda p,u,g: owners.update({p: [u,g]})), \
                     patch.object(host_nas.os.path, 'ismount', side_effect=lambda p: mounted[0]), \
                     patch.object(Path, 'mkdir', nas_mkdir), \
                     patch.object(Path, 'stat', fake_stat):
-                first = host_nas.ensure(self.nas, 4917, guest, execute, root, restart=True)
+                with self.assertRaisesRegex(RuntimeError, 'Explicitly select'):
+                    host_nas.ensure(self.nas, 4917, guest, execute, root, restart=True)
+                self.assertEqual(calls, [])
+                if fail_mount:
+                    with self.assertRaisesRegex(RuntimeError, 'synthetic drive failure'):
+                        host_nas.ensure(self.nas, 4917, guest, execute, root, restart=True, unprotect=True)
+                    self.assertEqual(active['protection'], 1)
+                    self.assertEqual([c for c in calls if c[:2] == ['pct', 'shutdown']], [])
+                    return
+                first = host_nas.ensure(self.nas, 4917, guest, execute, root, restart=True, unprotect=True)
                 self.assertTrue(first['changed']); self.assertEqual(first['mapped_uid'], 101000)
                 second = host_nas.ensure(self.nas, 4917, dict(guest, **active), execute, root, restart=True)
                 self.assertFalse(second['changed'])
             self.assertEqual([c for c in calls if c[:2] == ['pct', 'shutdown']], [['pct', 'shutdown', '4917', '--timeout', '30']])
             self.assertEqual([c for c in calls if c[:2] == ['pct', 'start']], [['pct', 'start', '4917']])
-            self.assertEqual(len([c for c in calls if c[:2] == ['pct', 'set']]), 1)
+            self.assertEqual([c[3:] for c in calls if c[:2] == ['pct', 'set']],
+                             [['--protection', '0'], ['--mp0', first['binding']], ['--protection', '1']])
+
+    def test_protection_is_restored_if_the_admitted_bind_command_fails(self):
+        self.test_one_graceful_restart_activates_bind_then_rerun_is_a_noop(fail_mount=True)
 
     def test_proxmox_mount_option_order_is_harmless_but_other_options_are_not(self):
         wanted = '/mnt/homelab_backups/bootstrap-state,mp=/srv/homelab-backups,backup=0'

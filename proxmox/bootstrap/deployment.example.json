@@ -14,5 +14,6 @@
     "version": "4.1",
     "directory": "deployment-recovery"
   },
-  "restart_deploy": false
+  "restart_deploy": false,
+  "temporarily_unprotect_deploy": false
 }

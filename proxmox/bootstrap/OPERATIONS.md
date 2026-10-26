@@ -89,6 +89,14 @@ OpenTofu ignores the deployment guest's `mount_point` field because the
 host-side bootstrap owns and verifies it; the runner gets no arbitrary host-path
 mount permission. Application managed data volumes remain OpenTofu-owned.
 
+Proxmox treats a mount addition as a drive change, blocked by guest protection.
+The plan reports `protection_toggle_required`. The operator must explicitly
+select `temporarily_unprotect_deploy: true` to allow that one change window.
+Only this guest is temporarily unprotected; a `finally` step restores protection
+and verifies its readback even if adding the bind fails. A failure to restore
+remains held and must be reported as unprotected until confirmed otherwise.
+An already installed bind never toggles protection on a rerun.
+
 If activation requires a restart, `restart_deploy: true` allows one graceful
 shutdown/start of the deployment guest only. Failure to stop has no forced
 fallback. After a timeout, preserve the local hold and remote marker: local

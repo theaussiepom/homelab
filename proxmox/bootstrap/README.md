@@ -325,6 +325,7 @@ folder as `deployment.json`. Its values are invented; replace them:
 | `nas.version` | The NFS version supported by that share, for example `4.1`. The script does not guess another version. |
 | `nas.directory` | A new dedicated backup folder inside that share, private to this deployment runner. Do not select an existing application-data folder. |
 | `restart_deploy` | Use `true` to allow one graceful restart of **only the deployment guest** if the new shared folder needs it. Leave `false` when no restart is intended. |
+| `temporarily_unprotect_deploy` | Proxmox blocks adding a mount to a protected guest. Choose `true` only to allow protection off during this guest's one mount addition; the script immediately restores and verifies it, including after a failed addition. It defaults to `false`. |
 
 Proxmox mounts the export and shares only that backup folder into the
 unprivileged guest, at `/srv/homelab-backups`. The script creates the missing

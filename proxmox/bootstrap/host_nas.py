@@ -71,7 +71,9 @@ def plan(nas, guest_config, root=Path('/'), execute=command):
             raise RuntimeError('Existing NAS mount configuration differs; preserve it for review')
         if not path.exists():
             changed.append(name)
-    return {'units_to_create': changed, 'bind_to_add': not same_binding(guest_config.get('mp0'), binding),
+    add_bind = not same_binding(guest_config.get('mp0'), binding)
+    return {'units_to_create': changed, 'bind_to_add': add_bind,
+            'protection_toggle_required': add_bind and guest_config.get('protection') in (1, True),
             'binding': binding, 'guest_mount': GUEST_MOUNT,
             'backup_source': nas['server'] + ':' + nas['export'] + '[' + '/' + nas['directory'] + ']'}
 
@@ -106,9 +108,11 @@ def guest_addresses(vmid, execute=command):
     raise RuntimeError('The deployment guest has no usable IPv4 address after the bounded DHCP wait')
 
 
-def ensure(nas, vmid, guest_config, execute=command, root=Path('/'), restart=False):
+def ensure(nas, vmid, guest_config, execute=command, root=Path('/'), restart=False, unprotect=False):
     """Add missing configuration; restart only this guest when explicitly selected."""
     result = plan(nas, guest_config, root, execute)
+    if result['protection_toggle_required'] and not unprotect:
+        raise RuntimeError('Explicitly select temporary deployment-guest unprotection and review a new plan before adding its bind')
     target = root / str(HOST_MOUNT).lstrip('/')
     target.mkdir(mode=0o700, parents=True, exist_ok=True)
     if not os.path.ismount(target) and any(target.iterdir()):
@@ -149,7 +153,20 @@ def ensure(nas, vmid, guest_config, execute=command, root=Path('/'), restart=Fal
     if (metadata.st_uid, metadata.st_gid) != tuple(mapped) or metadata.st_mode & 0o077:
         raise RuntimeError('NAS backup directory permissions differ; existing files are not chowned')
     if result['bind_to_add']:
-        execute(['pct', 'set', str(vmid), '--mp0', result['binding']])
+        if result['protection_toggle_required']:
+            # The operator explicitly selected this one drive-change window.
+            # Restore protection even if the drive command fails; never retry it.
+            try:
+                execute(['pct', 'set', str(vmid), '--protection', '0'])
+                execute(['pct', 'set', str(vmid), '--mp0', result['binding']])
+            finally:
+                execute(['pct', 'set', str(vmid), '--protection', '1'])
+                protected = json.loads(execute(['pvesh', 'get', '/nodes/' + guest_config['node'] + '/lxc/' + str(vmid) + '/config',
+                                                '--output-format', 'json']))
+                if protected.get('protection') not in (1, True):
+                    raise RuntimeError('Deployment guest protection was not restored; preserve the hold and inspect this guest')
+        else:
+            execute(['pct', 'set', str(vmid), '--mp0', result['binding']])
     current = json.loads(execute(['pvesh', 'get', '/nodes/' + guest_config['node'] + '/lxc/' + str(vmid) + '/config',
                                   '--current', '1', '--output-format', 'json']))
     def active():

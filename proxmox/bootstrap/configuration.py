@@ -31,15 +31,16 @@ access=a.reconcile(r)
 c=a.command(['pvesh','get','/nodes/'+r['node']+'/lxc/'+str(r['vmid'])+'/config','--output-format','json'])
 c['node']=r['node']
 nas=n.plan(r['nas'],c)
-plan={'access':access,'nas':nas,'restart_deploy':r['restart_deploy'],'identity':{'node':r['node'],'vmid':r['vmid'],'mac':r['guest_mac']}}
+plan={'access':access,'nas':nas,'restart_deploy':r['restart_deploy'],'temporarily_unprotect_deploy':r['temporarily_unprotect_deploy'],'identity':{'node':r['node'],'vmid':r['vmid'],'mac':r['guest_mac']}}
 fingerprint=hashlib.sha256(json.dumps(plan,sort_keys=True).encode()).hexdigest()
 if p['apply']:
  if p['apply']!=fingerprint:raise RuntimeError('Live configuration changed after its reviewed plan')
+ if nas['protection_toggle_required'] and not r['temporarily_unprotect_deploy']:raise RuntimeError('Select temporary deployment-guest unprotection and review its new plan before applying')
  code="import json,sys;from pathlib import Path;p=Path(sys.argv[1]);f=p.open('x');f.write(json.dumps({'attempt':sys.argv[2]}));f.close();p.chmod(0o600)"
  n.command(['pct','exec',str(r['vmid']),'--','python3','-c',code,marker,p['attempt']])
  access=a.reconcile(r,apply=True)
  print(json.dumps({'step':'access','result':access}),flush=True)
- nas=n.ensure(r['nas'],r['vmid'],c,restart=r['restart_deploy'])
+ nas=n.ensure(r['nas'],r['vmid'],c,restart=r['restart_deploy'],unprotect=r['temporarily_unprotect_deploy'])
  print(json.dumps({'step':'nas','result':nas}),flush=True)
 key=n.command(['pct','exec',str(r['vmid']),'--','cat','/etc/ssh/ssh_host_ed25519_key.pub']).strip()
 addresses=n.guest_addresses(r['vmid'])
@@ -50,10 +51,12 @@ print(json.dumps({'status':'ready','plan':plan,'plan_sha256':fingerprint,'guest_
 def check(value):
     """Keep the bootstrap update contract small and reject undeclared operations."""
     fields = {'schema', 'applications', 'nas', 'restart_deploy'}
-    if set(value) not in (fields, fields | {'expires_at'}) or value['schema'] != 'homelab-bootstrap-deployment-v1':
+    if not fields <= set(value) or set(value) - fields - {'expires_at', 'temporarily_unprotect_deploy'} or value['schema'] != 'homelab-bootstrap-deployment-v1':
         raise Refused('Use the documented bootstrap deployment configuration')
     if type(value['restart_deploy']) is not bool:
         raise Refused('Select deployment-guest restart explicitly')
+    if type(value.get('temporarily_unprotect_deploy', False)) is not bool:
+        raise Refused('Select temporary deployment-guest unprotection explicitly')
     host_nas.validate(value['nas'])
 
 
@@ -88,7 +91,8 @@ def configure(work, deployment, apply=''):
                    'storage_id': guest['storage_id'], 'template_storage': guest['template_file_id'].split(':', 1)[0],
                    'bridge': guest['bridge'], 'vlan': guest.get('vlan'), 'guest_mac': guest['mac'],
                    'expected': expected, 'applications': value['applications'], 'nas': value['nas'],
-                   'restart_deploy': value['restart_deploy']}
+                   'restart_deploy': value['restart_deploy'],
+                   'temporarily_unprotect_deploy': value.get('temporarily_unprotect_deploy', False)}
         if 'expires_at' in value:
             request['expires_at'] = value['expires_at']
         host_access.declared_grants(request)
@@ -147,7 +151,8 @@ def configure(work, deployment, apply=''):
                                  'configuration_sha256': configuration_hash})
                 return {'phase': 'plan', 'plan_sha256': report['plan_sha256'],
                         'access': report['plan']['access'], 'nas': report['plan']['nas'],
-                        'restart_deploy': value['restart_deploy']}
+                        'restart_deploy': value['restart_deploy'],
+                        'temporarily_unprotect_deploy': value.get('temporarily_unprotect_deploy', False)}
             saved.update({k: report['access'][k] for k in ['grants', 'expires_at']})
             write(work / 'access.json', saved)
             addresses = report['addresses']
