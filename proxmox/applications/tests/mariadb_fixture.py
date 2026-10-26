@@ -4,9 +4,12 @@ Run only in a disposable Docker image with matching native MariaDB packages.
 The helper's systemctl calls are intercepted: this is not a systemd/LXC test.
 No production inputs, network listeners or published ports are used.
 """
+from contextlib import ExitStack
+import grp
 import json
 import os
 from pathlib import Path
+import pwd
 import subprocess
 import sys
 import tempfile
@@ -30,22 +33,38 @@ def main():
     require(Path('/.dockerenv').exists() and os.geteuid() == 0, 'Run only as root inside a disposable Docker container')
     version = subprocess.check_output(['mariadb', '--version'], text=True)
     require('12.3.3-MariaDB' in version, version)
+    mysql = pwd.getpwnam('mysql')
+    mysql_group = grp.getgrnam('mysql')
+    journal_before = subprocess.check_output(['getent', 'group', 'systemd-journal'], text=True)
+    require(grp.getgrnam('systemd-journal').gr_gid == 999, 'The fixture must reproduce the journal GID999 collision')
+    require(mysql.pw_gid == mysql_group.gr_gid and mysql_group.gr_gid != 999,
+            'The target must use its actual package-created service account')
+    # Reproduce the original Docker data ownership in a separate synthetic
+    # source. Its SQL dump must not depend on the new daemon's Unix IDs.
+    subprocess.run(['useradd', '--uid', '999', '--gid', '999', '--no-create-home',
+                    '--shell', '/usr/sbin/nologin', 'fixture_legacy_mysql'], check=True)
     socket_directory = Path('/run/mysqld')
     socket_directory.mkdir(mode=0o755, exist_ok=True)
-    os.chown(socket_directory, 999, 999)
-    with tempfile.TemporaryDirectory(prefix='homelab-native-db-', dir='/var/lib') as tmp:
-        root = Path(tmp)
-        os.chown(root, 999, 999)
+    with ExitStack() as contexts:
+        root = Path(contexts.enter_context(tempfile.TemporaryDirectory(prefix='homelab-native-db-', dir='/var/lib')))
         os.chmod(root, 0o700)
+        identities = {'source': ('fixture_legacy_mysql', 999, 999),
+                      'target': ('mysql', mysql.pw_uid, mysql_group.gr_gid)}
+        data_directories = {}
+        for side, (_, uid, gid) in identities.items():
+            data = Path(contexts.enter_context(tempfile.TemporaryDirectory(prefix='homelab-mariadb-' + side + '-', dir='/var/lib')))
+            os.chown(data, uid, gid)
+            os.chmod(data, 0o700)
+            data_directories[side] = data
         processes = []
         def start(side):
-            data = root / side
-            data.mkdir(mode=0o700)
-            os.chown(data, 999, 999)
-            subprocess.run(['mariadb-install-db', '--no-defaults', '--user=mysql', '--datadir=' + str(data),
+            data = data_directories[side]
+            user, uid, gid = identities[side]
+            os.chown(socket_directory, uid, gid)
+            subprocess.run(['mariadb-install-db', '--no-defaults', '--user=' + user, '--datadir=' + str(data),
                             '--auth-root-authentication-method=socket'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             log = (root / (side + '.stderr')).open('wb')
-            process = subprocess.Popen(['mariadbd', '--no-defaults', '--user=mysql', '--datadir=' + str(data),
+            process = subprocess.Popen(['mariadbd', '--no-defaults', '--user=' + user, '--datadir=' + str(data),
                 '--socket=/run/mysqld/mysqld.sock', '--skip-networking', '--pid-file=' + str(data / 'server.pid')],
                 stdout=log, stderr=log)
             processes.append((process, log))
@@ -63,6 +82,7 @@ def main():
             capture = root / 'database.capture'
             with capture.open('wb') as stream:
                 subprocess.run(['mariadb-dump', '--protocol=socket', '--user=root', '--all-databases', '--routines', '--events', '--triggers'], check=True, stdout=stream)
+            capture_sha256 = database.digest(capture)
             source.terminate()
             source.wait(timeout=20)
             start('target')
@@ -85,7 +105,21 @@ def main():
                 env=dict(os.environ, MYSQL_PWD='synthetic-only-password'), text=True)
             require(client.strip() == '42', 'Synthetic database fixture check failed')
             require(json.loads((root / 'database-restore.json').read_text())['state'] == 'complete', 'Synthetic database fixture check failed')
-            print('MariaDB 12.3.3 native SQL restore passed: unchanged full dump, restored row/account/grant and no-replay receipt')
+            require(database.digest(capture) == capture_sha256, 'The all-databases dump must remain unchanged')
+            require(subprocess.check_output(['getent', 'group', 'systemd-journal'], text=True) == journal_before,
+                    'The existing journal identity must remain unchanged')
+            for side, (_, uid, gid) in identities.items():
+                owner = (data_directories[side] / 'mysql').stat()
+                require((owner.st_uid, owner.st_gid) == (uid, gid), 'Source/target file ownership changed unexpectedly')
+            result = {'source_uid': 999, 'source_gid': 999, 'target_uid': mysql.pw_uid,
+                      'target_gid': mysql_group.gr_gid, 'journal_gid': 999, 'journal_unchanged': True,
+                      'unchanged_all_databases_dump_sha256': capture_sha256,
+                      'restored_row_account_grant_and_application_login': True,
+                      'original_and_target_file_ownership_preserved': True,
+                      'no_replay_receipt': True, 'native_systemd_lxc_qualified': False}
+            Path('/tmp/mariadb-native-identity-restore.json').write_text(json.dumps(result, indent=2) + '\n')
+            print('MariaDB12.3.3 full SQL restore passed: source999:999 to package-created target, unchanged journal999/dump, restored account/grant/login and no-replay receipt')
+            print(json.dumps(result))
         except Exception:
             for log in root.glob('*.stderr'):
                 print(log.name + ':\n' + log.read_text()[-6000:], file=sys.stderr)

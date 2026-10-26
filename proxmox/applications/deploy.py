@@ -74,6 +74,14 @@ def validate(cfg):
         raise ValueError('This installer is for a selected new guest')
     if app.get('kind') in DATABASE_KINDS and ('capture' in app or 'capture' in app.get('database', {})):
         raise InputNeeded('Database restore is a separate migration step; remove capture inputs from server CD')
+    if app.get('kind') in DATABASE_KINDS:
+        database = app.get('database', {})
+        mode = database.get('account_mode', 'fixed')
+        if mode not in {'fixed', 'package'}:
+            raise InputNeeded('Select fixed database account IDs or the explicit MariaDB package account mode')
+        if mode == 'package' and (app['kind'] != 'mariadb' or database.get('user') != 'mysql'
+                                  or database.get('group') != 'mysql' or 'uid' in database or 'gid' in database):
+            raise InputNeeded('Package account mode is only for a new empty MariaDB mysql account; remove fixed uid/gid inputs')
     if app.get('kind') == 'automation' and 'stack_config' in app:
         stack = json.loads(Path(app['stack_config']).read_text())
         address = stack.get('services', {}).get('homeassistant', {}).get('environment', {}).get('HOMELAB_HA_IPV4')

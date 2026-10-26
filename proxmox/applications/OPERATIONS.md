@@ -127,6 +127,15 @@ the separate restore. Configure the selected data directory and its persistent
 guest storage before deployment; do not assume a backup is active merely because
 OpenTofu state has NAS recovery copies.
 
+For a **new empty MariaDB guest only**, `account_mode: package` uses the `mysql`
+user/group created by the signed native package. Supply `user: mysql` and
+`group: mysql`, and omit `uid`/`gid`; the script never guesses new numeric IDs or
+renumbers an existing account. It records the actual IDs and refuses drift on
+repeat. The default `account_mode: fixed` retains the existing numeric-identity
+guards, including for PostgreSQL and InfluxDB. This exception does not admit a
+raw old-data bind or filesystem-level restore. The later logical SQL restore
+preserves database usernames/passwords/grants separately from Linux file owners.
+
 ### Manual database restore
 
 This is a separate, deliberate migration action inside the selected guest,

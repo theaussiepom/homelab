@@ -1,4 +1,11 @@
 ---
+- name: Limit database account selection to the explicit supported modes
+  ansible.builtin.assert:
+    that:
+      - app.database.account_mode | default('fixed') in ['fixed', 'package']
+      - app.database.account_mode | default('fixed') != 'package' or app.kind == 'mariadb'
+  when: app.kind in ['mariadb', 'postgresql', 'influxdb']
+
 - name: Verify each privately supplied package repository key
   ansible.builtin.stat:
     path: "{{ item.key_path }}"
@@ -38,4 +45,10 @@
 
 - name: Prepare preserved database account IDs before vendor packages
   ansible.builtin.include_tasks: database-account.yml
-  when: app.kind in ['mariadb', 'postgresql', 'influxdb']
+  when: app.kind in ['mariadb', 'postgresql', 'influxdb'] and app.database.account_mode | default('fixed') == 'fixed'
+
+- name: Check the package-created MariaDB identity before vendor packages
+  ansible.builtin.include_tasks: database-package-account.yml
+  vars:
+    database_account_after_packages: false
+  when: app.kind == 'mariadb' and app.database.account_mode | default('fixed') == 'package'

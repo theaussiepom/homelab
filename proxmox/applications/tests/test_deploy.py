@@ -27,6 +27,20 @@ def fixture(root):
 
 
 class DeployTests(unittest.TestCase):
+    def test_package_account_exception_is_explicit_and_only_for_new_empty_mariadb(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = fixture(Path(tmp))
+            cfg['app'].update(kind='mariadb', database={'account_mode': 'package', 'user': 'mysql', 'group': 'mysql'})
+            self.assertEqual(deploy.validate(cfg), 6101)
+            for key, value in [('uid', 999), ('gid', 999), ('user', 'root'), ('group', 'root'), ('account_mode', 'other')]:
+                bad = copy.deepcopy(cfg); bad['app']['database'][key] = value
+                with self.subTest(key=key), self.assertRaises(deploy.InputNeeded):
+                    deploy.validate(bad)
+            for kind in ('postgresql', 'influxdb'):
+                bad = copy.deepcopy(cfg); bad['app']['kind'] = kind
+                with self.subTest(kind=kind), self.assertRaises(deploy.InputNeeded):
+                    deploy.validate(bad)
+
     def test_plan_records_fresh_creation_from_the_actual_tofu_change(self):
         from test_plan import fixture as plan_fixture
         for action in ('create', 'update', 'no-op'):

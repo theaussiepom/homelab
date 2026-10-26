@@ -21,6 +21,12 @@
         fail_on_autoremove: true
       when: not ansible_check_mode
 
+    - name: Read back and record the package-created MariaDB identity
+      ansible.builtin.include_tasks: tasks/database-package-account.yml
+      vars:
+        database_account_after_packages: true
+      when: app.kind == 'mariadb' and app.database.account_mode | default('fixed') == 'package' and not ansible_check_mode
+
     - name: Prepare the private installation directory
       ansible.builtin.file:
         path: /opt/homelab-app
