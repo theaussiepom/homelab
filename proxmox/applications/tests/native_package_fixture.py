@@ -16,7 +16,7 @@ import uuid
 BASE_IMAGE = 'debian@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad'
 PROFILES = {
     'mariadb': {
-        'user': 'mysql', 'group': 'mysql', 'uid': 999, 'gid': 999, 'home': '/var/lib/mysql',
+        'user': 'mysql', 'group': 'mysql', 'account_mode': 'package', 'home': '/var/lib/mysql',
         'key_url': 'https://mariadb.org/mariadb_release_signing_key.asc',
         'key_sha256': '00adb387f4c12e8982cfc28165d225695621494354cd58108c6845063bfb74b5',
         'fingerprint': '177F4010FE56CA3336300305F1656F24C74CD1D8',
@@ -41,13 +41,20 @@ PROFILES = {
 def package_script(profile):
     """Only fixed public profiles enter this shell, never operator input."""
     names = ' '.join(pin.split('=')[0] for pin in profile['pins'])
-    return f'''set -eu
-export DEBIAN_FRONTEND=noninteractive
-getent passwd {profile['uid']} && exit 12 || test "$?" -eq 2
+    if profile.get('account_mode') == 'package':
+        identity = '''getent group 999 && exit 13 || test "$?" -eq 2
+groupadd --system --gid 999 systemd-journal
+getent group systemd-journal > /tmp/journal-before
+'''
+    else:
+        identity = f'''getent passwd {profile['uid']} && exit 12 || test "$?" -eq 2
 getent group {profile['gid']} && exit 13 || test "$?" -eq 2
 groupadd --system --gid {profile['gid']} {profile['group']}
 useradd --system --uid {profile['uid']} --gid {profile['group']} --home-dir {profile['home']} --no-create-home --shell /usr/sbin/nologin {profile['user']}
-printf '#!/bin/sh\\nexit 101\\n' > /usr/sbin/policy-rc.d
+'''
+    return f'''set -eu
+export DEBIAN_FRONTEND=noninteractive
+{identity}printf '#!/bin/sh\\nexit 101\\n' > /usr/sbin/policy-rc.d
 chmod 755 /usr/sbin/policy-rc.d
 apt-get update
 apt-get install -y --no-install-recommends ca-certificates gnupg python3
@@ -111,6 +118,9 @@ def main():
                 restored = subprocess.run(['docker', 'exec', name, 'python3', '/fixture/tests/' + profile['fixture']],
                                           stdout=output, stderr=output, timeout=180)
                 receipt['synthetic_restore_exit_code'] = restored.returncode
+                if restored.returncode == 0 and profile.get('account_mode') == 'package':
+                    docker('cp', name + ':/tmp/mariadb-native-identity-restore.json',
+                           str(root / 'mariadb-native-identity-restore.json'))
     finally:
         if created:
             inspected = subprocess.run(['docker', 'inspect', name], capture_output=True, text=True, timeout=30)

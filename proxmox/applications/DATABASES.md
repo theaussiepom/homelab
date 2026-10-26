@@ -21,7 +21,7 @@ matching database versions, rather than upgrading the database during migration:
 
 | Database | Selected version | Preparation and test boundary |
 | --- | --- | --- |
-| MariaDB | 12.3.3 | Matching signed Debian packages found; synthetic full SQL restore fixture checks rows, restored accounts/grants and an application login |
+| MariaDB | 12.3.3 | Exact signed packages installed; unchanged full synthetic SQL dump restored from Unix999:999 into the package-created account, with restored users/grants and password login/query passing |
 | PostgreSQL | 16.10 | Matching signed Debian packages found; synthetic clean SQL restore checks rows, ownership, grants and removal of its temporary restore account |
 | InfluxDB | Server 2.7.12, CLI 2.7.5 | Exact signed packages installed and empty daemon health/CLI checks passed; synthetic full backup restore/query also passed. Service-manager startup still needs the LXC test |
 
@@ -71,12 +71,16 @@ full deployment and startup path.
 
 ## Preserve file owners
 
-The database account must retain the selected numeric user and group IDs.
-The scripts refuse numeric identity changes and ID collisions before creating
-anything. A reused account can still receive the configured home and shell;
-review those private settings before deployment. For example, if a template already uses the required MariaDB group ID
-for `systemd-journal`, stop and choose a compatible fresh template. Do not
-renumber the template's existing account to make the test pass.
+The default fixed-account setup retains the selected numeric user/group IDs
+and refuses collisions. For a new empty MariaDB guest, explicitly selecting
+`account_mode: package` lets the native package create its own `mysql` account.
+The script records its actual IDs and refuses later changes. This avoids the
+old Docker999 conflict with Debian's journal group without renumbering either
+old data or an existing account. It does not permit attaching old raw data.
+Database users/grants restored from SQL are separate from those Linux file IDs. A reused account can still receive the configured home and shell;
+review those private settings before deployment. If fixed mode's required ID
+belongs to another account, stop and select compatible inputs. Do not renumber
+the template's existing account to make the test pass.
 
 ## Repeat the local confidence checks
 

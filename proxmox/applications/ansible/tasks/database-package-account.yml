@@ -1,0 +1,91 @@
+---
+- name: Require the explicit new empty MariaDB package-account selection
+  ansible.builtin.assert:
+    that:
+      - app.kind == 'mariadb'
+      - app.new_target | default(false) | bool
+      - app.database.account_mode == 'package'
+      - app.database.user == 'mysql'
+      - app.database.group == 'mysql'
+      - app.database.uid is not defined
+      - app.database.gid is not defined
+      - app.capture is not defined
+      - app.database.capture is not defined
+
+- name: Read the installed service user
+  ansible.builtin.getent:
+    database: passwd
+
+- name: Read the installed service group
+  ansible.builtin.getent:
+    database: group
+
+- name: Inspect the previously recorded package-created identity
+  ansible.builtin.stat:
+    path: /etc/homelab-database-account.json
+    follow: false
+  register: database_package_account_file
+
+- name: Require a regular root-only identity record
+  ansible.builtin.assert:
+    that:
+      - database_package_account_file.stat.isreg | default(false)
+      - not database_package_account_file.stat.islnk | default(false)
+      - database_package_account_file.stat.uid == 0
+      - database_package_account_file.stat.mode == '0600'
+  when: database_package_account_file.stat.exists
+
+- name: Refuse adopting an unrecorded existing account before package installation
+  ansible.builtin.assert:
+    that:
+      - "'mysql' not in ansible_facts.getent_passwd"
+      - "'mysql' not in ansible_facts.getent_group"
+    fail_msg: 'An existing mysql account has no recorded package identity. Stop rather than adopting or renumbering it.'
+  when: not database_package_account_file.stat.exists and not database_account_after_packages | default(false) | bool
+
+- name: Verify the actual package-created account without changing it
+  ansible.builtin.assert:
+    that:
+      - "'mysql' in ansible_facts.getent_passwd"
+      - "'mysql' in ansible_facts.getent_group"
+      - ansible_facts.getent_passwd.mysql[1] | int > 0
+      - ansible_facts.getent_group.mysql[1] | int > 0
+      - ansible_facts.getent_passwd.mysql[2] | int == ansible_facts.getent_group.mysql[1] | int
+      - ansible_facts.getent_passwd | dict2items | rejectattr('key', 'equalto', 'mysql') | map(attribute='value') | map(attribute='1') | map('int') | select('equalto', ansible_facts.getent_passwd.mysql[1] | int) | list | length == 0
+      - ansible_facts.getent_group | dict2items | rejectattr('key', 'equalto', 'mysql') | map(attribute='value') | map(attribute='1') | map('int') | select('equalto', ansible_facts.getent_group.mysql[1] | int) | list | length == 0
+    fail_msg: 'The package-created mysql identity is missing, inconsistent or shared. Stop without changing accounts.'
+  when: database_package_account_file.stat.exists or database_account_after_packages | default(false) | bool
+
+- name: Keep the actual package-selected numeric identity
+  ansible.builtin.set_fact:
+    database_package_identity:
+      account_mode: package
+      kind: mariadb
+      user: mysql
+      group: mysql
+      uid: "{{ ansible_facts.getent_passwd.mysql[1] | int }}"
+      gid: "{{ ansible_facts.getent_group.mysql[1] | int }}"
+  when: database_package_account_file.stat.exists or database_account_after_packages | default(false) | bool
+
+- name: Read the prior numeric identity before any package mutation
+  ansible.builtin.slurp:
+    src: /etc/homelab-database-account.json
+  register: database_package_saved_identity
+  when: database_package_account_file.stat.exists
+
+- name: Refuse package-account drift rather than repairing it
+  ansible.builtin.assert:
+    that:
+      - database_package_saved_identity.content | b64decode | from_json == database_package_identity
+    fail_msg: 'The recorded package-created mysql identity changed. Stop without renumbering accounts or replacing the record.'
+  when: database_package_account_file.stat.exists
+
+- name: Record the new package-created identity once
+  ansible.builtin.copy:
+    content: "{{ database_package_identity | to_nice_json }}\n"
+    dest: /etc/homelab-database-account.json
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
+  when: database_account_after_packages | default(false) | bool and not database_package_account_file.stat.exists
