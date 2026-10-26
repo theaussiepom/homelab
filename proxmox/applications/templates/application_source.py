@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 
 GUESTS = ('dns', 'mariadb', 'postgresql', 'influxdb', 'identity', 'ingress', 'automation')
-STEPS = ('plan', 'apply', 'stage', 'start', 'verify')
+STEPS = ('plan', 'deploy', 'apply', 'stage', 'start', 'verify')
 
 
 def resolve(lock, guest, step, plan_hash=''):
@@ -13,8 +13,8 @@ def resolve(lock, guest, step, plan_hash=''):
         raise ValueError('Pin the reviewed public homelab commit, never a mutable branch')
     if guest not in GUESTS or step not in STEPS:
         raise ValueError('Select a listed guest and step')
-    if step == 'apply' and not re.fullmatch(r'[0-9a-f]{64}', plan_hash):
-        raise ValueError('Apply needs the exact reviewed plan fingerprint')
+    if step in ('apply', 'deploy') and not re.fullmatch(r'[0-9a-f]{64}', plan_hash):
+        raise ValueError('Apply/deploy needs the exact reviewed plan fingerprint')
     return {'revision': lock['revision'], 'input_path': f'/var/lib/homelab-inputs/{guest}.json'}
 
 

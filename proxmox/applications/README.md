@@ -7,12 +7,11 @@ The deployment guest receives GitHub jobs. These scripts are the next step:
 **OpenTofu creates one application guest; Ansible installs its applications and
 restores its saved configuration.**
 
-**Current status:** application source and synthetic tests are available. This
-application path has created its first isolated DNS guest through GitHub CD.
-Application restore failed before application start. The rehearsal target remains
-on HOLD, and the corrected source has not been replayed. Passing Docker tests
-does not mean the house has migrated.
-The earlier physical ISO/bootstrap result remains separate.
+**Current status:** DNS has been created, restored, started and checked on a
+physical Proxmox host through private GitHub CD, using its existing configuration
+and data. That deployment used separate workflow steps. The new combined
+**Deploy** mode still needs its first complete native deployment acceptance;
+source tests do not prove that every service or the house has migrated.
 
 ## What are we bringing across?
 
@@ -47,8 +46,9 @@ services and physical hosts stay in place.
   host and switches. These scripts do not configure your router or switches.
 - API access for that guest/storage/network, declared through
   [bootstrap step 8](../bootstrap/README.md#8-prepare-the-runner-to-deploy-your-applications).
-- The runner's NAS recovery directory, deployment SSH key, trusted Proxmox CA
-  and verified guest SSH host key. Secrets stay in private runner files.
+- The runner's NAS recovery directory, deployment SSH key and trusted Proxmox CA.
+  Deploy verifies the new guest's SSH identity from its Proxmox creation log;
+  no Proxmox root SSH private key goes onto the runner. Secrets stay private.
 - A coherent NAS capture of this guest's configuration/data, required database
   backups, preserved custom images and independently available keys.
 - NAS protection for new application/database writes, commissioned before the
@@ -58,7 +58,8 @@ Static IPv4 addresses and reservation-backed DHCP are supported. For DHCP use
 `"dhcp"` for both the selected interface's `ipv4` and the application's
 `address`, and omit that interface's gateway. The deployment job obtains the
 lease from the verified Proxmox API by the selected MAC address before Ansible.
-It still requires a verified guest SSH host key; it does not trust a network scan.
+The new SSH key must match the fingerprint recorded by Proxmox during this
+reviewed creation. A network scan alone is never accepted.
 
 Use database-native backups, not copies of files from running databases.
 Preserve numeric file owners, permissions, ACLs and extended attributes.
@@ -69,23 +70,31 @@ First, copy the [private-repository workflow templates](templates/README.md)
 into your own private deployment repository and supply its private inputs.
 
 Use **Application guest deployment** in the private repository's Actions tab.
-Select one guest and one step:
+Select one guest:
 
 1. **Plan:** preview one guest and its firewall. Review the result and retain its
    plan SHA256, the fingerprint of the exact saved plan.
-2. **Apply:** supply that fingerprint to create/update only the reviewed guest.
-   Replacement and deletion are refused.
-3. **Stage:** install packages, restore files into the new guest and validate
-   configuration. Restored application/database services remain stopped.
-4. **Start:** at the chosen migration window, after confirming the old writers
-   are retired for this service. HA can control real devices: choose this step
-   deliberately.
-5. **Verify:** run the service checks, then check real devices and automations
-   with the people using the house.
+2. **Deploy:** at the chosen migration window, supply that fingerprint. One run
+   verifies the capture, creates the guest, verifies its identity, restores and
+   installs its applications, starts them and runs the service checks. It does
+   not need another button press between these phases. Replacement and deletion
+   remain refused.
+3. Check the result, then check real devices and automations with the people
+   using the house. **Verify** can run the service checks again without a restart.
+
+Deploy starts the selected service. Confirm its old writers are retired in the
+private inputs before choosing it. HA can control real devices: this is a
+deliberate migration action, not a preview. Missing or mismatched captures stop
+the run before guest creation.
+
+The separate **apply**, **stage** and **start** steps remain available for
+controlled qualification and reviewed recovery. They are not required during a
+normal new-guest Deploy run. Existing or partly applied installations are held
+for inspection rather than automatically reinstalled.
 
 Active state stays outside the checkout, with NAS copies before and after each
-step. A failed change leaves a **HOLD** and private logs for review; rerunning a
-job does not automatically retry or clean up that target.
+phase. A failed change or interrupted Deploy leaves a **HOLD** and private logs
+for review; rerunning a job does not automatically retry or clean up that target.
 
 ## Where do settings live?
 
