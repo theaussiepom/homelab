@@ -43,7 +43,12 @@ resource "proxmox_virtual_environment_container" "guest" {
   }
   startup { order = 1 }
   wait_for_ip { ipv4 = true }
-  lifecycle { prevent_destroy = true }
+  lifecycle {
+    prevent_destroy = true
+    # The host-side bootstrap owns and verifies its sole NAS bind mount.
+    # A separated API token must not gain arbitrary host-path mount authority.
+    ignore_changes = [mount_point]
+  }
 }
 
 resource "proxmox_virtual_environment_firewall_options" "guest" {

@@ -1,5 +1,6 @@
 """Check target matching, required NAS custody, and exact saved-plan application."""
 import copy
+import io
 import json
 from pathlib import Path
 import sys
@@ -26,6 +27,25 @@ def fixture(root):
 
 
 class DeployTests(unittest.TestCase):
+    def test_dhcp_resolves_only_the_selected_mac_over_verified_api_tls(self):
+        """Never guess a guest address or weaken TLS for DHCP deployments."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); cfg = fixture(root)
+            cfg['guest']['interfaces'][0]['ipv4'] = cfg['app']['address'] = 'dhcp'
+            (root / 'api').write_text('synthetic-token')
+            self.assertEqual(deploy.validate(cfg), 6101)
+            rows = [{'hwaddr': cfg['app']['mac'], 'inet': '198.18.100.42/24'},
+                    {'hwaddr': '02:00:00:00:99:99', 'inet': '198.18.100.43/24'}]
+            with patch.object(deploy.ssl, 'create_default_context') as tls, \
+                    patch.object(deploy, 'urlopen', return_value=io.BytesIO(json.dumps({'data': rows}).encode())) as api:
+                self.assertEqual(deploy.application_address(cfg), '198.18.100.42')
+                tls.assert_called_once_with(cafile=str(root / 'ca'))
+                self.assertIn('/nodes/practice-pve/lxc/6101/interfaces', api.call_args.args[0].full_url)
+            rows[0]['hwaddr'] = '02:00:00:00:99:98'
+            with patch.object(deploy.ssl, 'create_default_context'), \
+                    patch.object(deploy, 'urlopen', return_value=io.BytesIO(json.dumps({'data': rows}).encode())):
+                with self.assertRaises(deploy.InputNeeded): deploy.application_address(cfg)
+
     def test_tofu_and_ansible_cannot_select_different_targets(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = fixture(Path(tmp)); self.assertEqual(deploy.validate(cfg), 6101)

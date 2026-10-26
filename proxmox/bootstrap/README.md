@@ -282,8 +282,8 @@ private key are not installed as deployment credentials. Keep repository access
 restricted; labels select runners and do not provide access control.
 
 See [runner trust and handover](OPERATIONS.md#runner-trust-and-one-way-handover)
-for failure handling and backing up the runner's later state. Providing its NAS
-mount and scheduling ongoing backups are subsequent site configuration.
+for failure handling. Step 8 connects the NAS recovery folder and declares which
+application guests this runner may create.
 
 ## 7. Confirm GitHub has taken over
 
@@ -309,10 +309,64 @@ private runner is online, and the GitHub job succeeds using the transferred
 state. A no-change plan means GitHub can see the same guest without trying to
 recreate it. It does not deploy your household applications.
 
+## 8. Prepare the runner to deploy your applications
+
+**Already bootstrapped? Start here.** There is no need to reinstall Proxmox,
+recreate the deployment guest or register another runner. This is the supported
+configuration step for both a new setup and an existing one.
+
+Copy [deployment.example.json](deployment.example.json) to your private settings
+folder as `deployment.json`. Its values are invented; replace them:
+
+| Setting | What to enter |
+| --- | --- |
+| `applications` | The guest IDs, existing disk/template storage, bridges and VLANs your runner will manage. Add one entry per planned application guest. |
+| `nas.server`, `nas.export` | Your NAS address and its existing NFS shared-folder path. The NAS must permit this Proxmox host as a client. |
+| `nas.version` | The NFS version supported by that share, for example `4.1`. The script does not guess another version. |
+| `nas.directory` | A new dedicated backup folder inside that share, private to this deployment runner. Do not select an existing application-data folder. |
+| `restart_deploy` | Use `true` to allow one graceful restart of **only the deployment guest** if the new shared folder needs it. Leave `false` when no restart is intended. |
+
+Proxmox mounts the export and shares only that backup folder into the
+unprivileged guest, at `/srv/homelab-backups`. The script creates the missing
+configuration, adds only the declared application permissions, keeps the same
+API token and creates a separate guest-local SSH key for application deployment.
+The workstation's powerful operator key stays on the workstation. It does not
+change your NAS export rules, router, VLANs or existing application data.
+
+Keep the existing bundle and SSH environment from step 4. With the runner idle:
+
+```sh
+./proxmox/bootstrap/bootstrap configure "$bootstrap_bundle" \
+  "$bootstrap_private/deployment.json"
+```
+
+**Expected result:** a read-only plan listing missing permissions and NAS setup,
+plus `plan_sha256`. Review it, then copy that exact fingerprint below:
+
+```sh
+./proxmox/bootstrap/bootstrap configure "$bootstrap_bundle" \
+  "$bootstrap_private/deployment.json" --apply THE_PRINTED_PLAN_SHA256
+```
+
+**Expected result:** `"status": "configured"`. The script checks NAS write and
+readback as the actual deployment account, saves the runner's active state to
+the NAS, and verifies that OpenTofu still proposes no guest changes. The normal
+application jobs save their state before and after each deployment step.
+These are **infrastructure recovery copies**; application/database data needs
+its own NAS protection before migration.
+
+You can repeat this plan/apply pair with the same settings. It preserves the
+guest, registration, key, token and state; completed setup does not add another
+mount or restart. Changed inputs require a newly reviewed plan. A failed or
+interrupted configuration leaves `CONFIGURATION-HOLD.json` and blocks app jobs;
+inspect the actual outcome before authorising a corrected attempt.
+
+An expired token is not silently extended. See the
+[credential reference](OPERATIONS.md#credential-lifetime-and-rotation) before
+deliberately selecting a new absolute `expires_at` timestamp.
+
 Continue with the [application deployment plan](../applications/README.md).
 Keep this runner dedicated to deployment: PegaProx is planned in its own LXC.
-The bootstrap's token only covers this first guest, so later guest creation
-needs its own reviewed access and jobs.
 
 ## When something goes wrong
 

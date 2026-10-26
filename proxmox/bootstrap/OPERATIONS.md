@@ -61,6 +61,42 @@ before another attempt. Do not delete state or clear a hold to make a retry run.
 
 ## State locking
 
+### Reconfiguring a completed bootstrap
+
+`bootstrap configure BUNDLE DEPLOYMENT.json` uses the existing pinned operator
+SSH route to plan application ACLs and the NFS connection. Apply requires the
+printed plan SHA256 and unchanged source/inputs/live plan. The separate
+configuration lock permits this operation after handover, but never unlocks
+workstation OpenTofu writes or copies stale workstation state back to the guest.
+The existing runner must be idle. An attempt-owned maintenance marker blocks
+application jobs until configuration and the NAS readback/backup finish.
+
+The API token keeps its identity, secret and separated-privilege setting.
+Permissions are nonpropagating and limited to the listed guest/storage/bridge
+and VLAN paths. Existing grants must match the saved receipt exactly. No
+permission removal, automatic token replacement or adoption of occupied guest
+IDs is performed. The token expiry stays unchanged unless `expires_at` is
+explicitly provided as a future Unix timestamp (or deliberately `0`). An expired
+token requires this explicit decision; there is no implicit renewal.
+
+The host owns `mnt-homelab_backups.mount` and its automount, using one selected
+NFS version, `hard,nosuid,nodev,noexec`. The automount does not make NAS
+availability a Proxmox boot requirement. One newly created directory is owned
+by the mapped runner UID/GID under the existing default unprivileged map.
+Existing directory ownership, export permissions and user maps are never
+rewritten. Only that directory is bound as `mp0`; unexpected mounts cause a hold.
+OpenTofu ignores the deployment guest's `mount_point` field because the
+host-side bootstrap owns and verifies it; the runner gets no arbitrary host-path
+mount permission. Application managed data volumes remain OpenTofu-owned.
+
+If activation requires a restart, `restart_deploy: true` allows one graceful
+shutdown/start of the deployment guest only. Failure to stop has no forced
+fallback. After a timeout, preserve the local hold and remote marker: local
+process exit does not establish remote closure. Bind-mount contents are not
+included in Proxmox container backups; retain the NAS recovery files themselves.
+
+### Active state
+
 State is the file `tofu/terraform.tfstate` inside the private bundle.
 There is no PostgreSQL dependency. Keep this file private and available for
 recovery. Use one bootstrap workstation and the documented launcher: it holds

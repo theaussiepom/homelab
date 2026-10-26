@@ -31,6 +31,32 @@ case "${1:-help}" in
     test "$#" -eq 3 || { echo "Use: ./bootstrap backup /absolute/private/bundle /new/private/backup-directory"; exit 2; }
     exec python3 "$base/bootstrap.py" container-backup --work "$2" --out "$3"
     ;;
+  configure)
+    test "$#" -eq 3 || test "$#" -eq 5 || { echo "Use: ./bootstrap configure /private/bundle /private/deployment.json [--apply PLAN_SHA256]"; exit 2; }
+    work=$(CDPATH= cd -- "$2" && pwd)
+    config=$(python3 -c 'import pathlib,sys;print(pathlib.Path(sys.argv[1]).resolve(strict=True))' "$3")
+    apply_hash=''
+    if [ "$#" -eq 5 ]; then
+      test "$4" = --apply || { echo "Use --apply PLAN_SHA256"; exit 2; }
+      apply_hash=$5
+      repository=$(python3 -c 'import json,re,sys;v=json.load(open(sys.argv[1]))["repository"];assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9_.-]*",v);print(v)' "$work/settings.json")
+      runner=$(python3 -c 'import json,re,sys;v=json.load(open(sys.argv[1]))["runner_name"];assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*",v);print(v)' "$work/settings.json")
+      idle=$(GH_DEBUG= gh api --hostname github.com "repos/$repository/actions/runners" \
+        --jq ".runners | map(select(.name == \"$runner\")) | if length == 1 then (.[0].busy | not) else false end")
+      test "$idle" = true || { echo "The selected runner is busy or its GitHub identity is missing; finish its job before configuration."; exit 2; }
+    fi
+    test -n "${HOMELAB_SSH_KEY:-}" && test -n "${HOMELAB_KNOWN_HOSTS:-}" || {
+      echo "Supply the existing bootstrap SSH key and verified Proxmox host keys."; exit 2;
+    }
+    exec python3 "$base/workstation.py" --configuration "$work" \
+      docker run --rm --platform linux/amd64 --read-only --cap-drop ALL --security-opt no-new-privileges \
+      --cpus 2 --memory 2g --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,exec,nosuid,nodev,size=768m,mode=1777 \
+      -e HOME=/tmp -e ANSIBLE_LOCAL_TEMP=/tmp/ansible-local -e ANSIBLE_REMOTE_TEMP=/tmp/ansible-remote \
+      -v "$base:/src/proxmox/bootstrap:ro" -v "$work:/work" -v "$config:/configuration.json:ro" \
+      -v "$HOMELAB_SSH_KEY:/keys/bootstrap-key:ro" -v "$HOMELAB_KNOWN_HOSTS:/keys/known_hosts:ro" \
+      homelab-bootstrap-test:1 python3 /src/proxmox/bootstrap/configuration.py \
+      --work /work --deployment /configuration.json --apply "$apply_hash"
+    ;;
   access|plan|apply|verify|runner)
     action=$1
     if [ "$action" = access ]; then
@@ -112,5 +138,6 @@ print(repository)
     echo "Install private runner: ./bootstrap runner /private/bundle"
     echo "Verify fresh provider no-op: ./bootstrap verify /private/bundle"
     echo "Save private state/configuration: ./bootstrap backup /private/bundle /new/private/backup-directory"
+    echo "Prepare CD access and NAS, or verify a completed setup: ./bootstrap configure /private/bundle /private/deployment.json [--apply PLAN_SHA256]"
     ;;
 esac

@@ -68,7 +68,7 @@ resource "proxmox_virtual_environment_firewall_options" "guest" {
   node_name     = var.node
   container_id  = var.guest.vmid
   enabled       = true
-  dhcp          = false
+  dhcp          = anytrue([for nic in var.guest.interfaces : nic.ipv4 == "dhcp"])
   ndp           = true
   radv          = false
   input_policy  = "DROP"

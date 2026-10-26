@@ -50,6 +50,21 @@ run "fractional_memory_is_rejected" {
   expect_failures = [var.guest]
 }
 
+run "dhcp_guest_has_automatic_dhcp_firewall_support" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      interfaces = [{ bridge = "vmbr0", mac = "02:00:00:00:61:01", ipv4 = "dhcp" }]
+    })
+  }
+  assert {
+    condition     = proxmox_virtual_environment_firewall_options.guest.dhcp
+    error_message = "DHCP leases must not be blocked by the guest firewall."
+  }
+}
+
 run "fractional_root_disk_is_rejected" {
   command = plan
   module { source = "./guest" }

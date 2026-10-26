@@ -63,6 +63,8 @@ def copy_workspace(work, destination):
             target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             shutil.copyfile(source, target)
             target.chmod(0o600)
+            with target.open('rb') as stream:
+                os.fsync(stream.fileno())
     if sha(destination / 'tofu/terraform.tfstate') != sha(state):
         raise Refused('The state copy changed; preserve this attempt before investigating')
     return {'state_sha256': sha(state), 'lineage': metadata['lineage'], 'serial': metadata['serial']}
