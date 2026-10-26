@@ -62,7 +62,7 @@ services and physical hosts stay in place.
 - NAS protection for new application/database writes, commissioned before the
   live start. State recovery copies alone do not back up application data.
 
-Use `nesting: true` and `keyctl: false` for the tested Debian13/systemd base,
+Use `nesting: true` and `keyctl: false` for the tested Debian 13/systemd base,
 while keeping the guest unprivileged. The tested database guests use fixed
 management IPv4 and a separate fixed backend interface. An initial DHCP setup
 waited for DHCPv6 and delayed the second interface; fixed management IPv4 avoided

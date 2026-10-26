@@ -26,8 +26,8 @@ matching database versions, rather than upgrading the database during migration:
 | InfluxDB | Server 2.7.12, CLI 2.7.5 | Exact signed packages installed and empty daemon health/CLI checks passed; synthetic full backup restore/query also passed. Native LXC/systemd startup and backend health also passed |
 
 The Docker fixtures check package and logical-restore behaviour. In addition,
-on26October2026 the matching versions of all three empty servers passed a real
-private GitHub CD installation on protected, unprivileged Debian13 LXCs. Native
+on 26 October 2026 the matching versions of all three empty servers passed a real
+private GitHub CD installation on protected, unprivileged Debian 13 LXCs. Native
 checks covered systemd active/enabled status, database readiness, local SQL
 queries where applicable and each backend TCP listener. InfluxDB remained
 uninitialised, ready for its separate restore/setup. No household data or
