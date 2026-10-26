@@ -67,17 +67,22 @@ class ConfigurationTests(unittest.TestCase):
                 configuration.configure(self.work, self.deployment, 'a' * 64)
             remote.assert_not_called()
 
-    def test_interrupted_apply_leaves_hold_and_never_automatically_retries(self):
+    def test_interrupted_apply_leaves_hold_and_never_automatically_retries(self, unprotect=False):
+        value = read(self.deployment); value['temporarily_unprotect_deploy'] = unprotect; write(self.deployment, value)
         with patch.object(configuration, 'remote', side_effect=self.remote):
             configuration.configure(self.work, self.deployment)
         with patch.object(configuration, 'remote', side_effect=KeyboardInterrupt):
             with self.assertRaises(KeyboardInterrupt):
                 configuration.configure(self.work, self.deployment, 'a' * 64)
-        self.assertTrue((self.work / 'CONFIGURATION-HOLD.json').exists())
+        hold = read(self.work / 'CONFIGURATION-HOLD.json')
+        self.assertEqual(hold['guest_protection_readback'], 'required' if unprotect else 'not_required')
         with patch.object(configuration, 'remote') as remote:
             with self.assertRaisesRegex(Refused, 'Previous configuration failed'):
                 configuration.configure(self.work, self.deployment, 'a' * 64)
             remote.assert_not_called()
+
+    def test_started_hold_records_selected_protection_window_before_remote_call(self):
+        self.test_interrupted_apply_leaves_hold_and_never_automatically_retries(unprotect=True)
 
     def test_guest_configuration_failure_keeps_hold_and_does_not_clear_remote_marker(self):
         with patch.object(configuration, 'remote', side_effect=self.remote) as remote:
