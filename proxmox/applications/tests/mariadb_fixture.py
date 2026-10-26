@@ -30,7 +30,8 @@ def main():
     os.chown(socket_directory, 999, 999)
     with tempfile.TemporaryDirectory(prefix='homelab-native-db-', dir='/var/lib') as tmp:
         root = Path(tmp)
-        os.chmod(root, 0o755)
+        os.chown(root, 999, 999)
+        os.chmod(root, 0o700)
         processes = []
         def start(side):
             data = root / side

@@ -32,7 +32,8 @@ def main():
     assert version.strip() == 'postgres (PostgreSQL) 16.10 (Debian 16.10-1.pgdg13+1)', version
     with tempfile.TemporaryDirectory(prefix='homelab-native-pg-', dir='/var/lib') as tmp:
         root = Path(tmp)
-        os.chmod(root, 0o755)
+        os.chown(root, 70, 1000)
+        os.chmod(root, 0o700)
         clusters = []
         try:
             socket = Path('/var/run/postgresql')
