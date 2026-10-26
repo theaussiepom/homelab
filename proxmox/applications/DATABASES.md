@@ -36,7 +36,7 @@ application accounts were restored.
 The initial creation stopped at SSH identity admission because Proxmox reported
 a systemd compatibility warning. The approved correction retained the guests,
 verified their original SSH fingerprints and completed their installations.
-Failed evidence was preserved. This is a successful corrected deployment; a
+Failed evidence was preserved. The installation succeeded after that correction; a
 fresh uninterrupted deployment from the corrected baseline has not been
 retested. Autostart is configured and read back; a host reboot after database
 installation remains untested.

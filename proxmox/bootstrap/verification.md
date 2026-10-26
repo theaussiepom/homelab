@@ -58,9 +58,9 @@ and the subsequent authenticated provider checks passed.
 This was a staged rehearsal with incremental corrections. The separate fresh
 qualification below subsequently tested that source. This staged rehearsal did
 not establish physical installation, physical restart or application rollout.
-The later physical bootstrap is recorded separately below. The
-independent NAS state-backup destination also remains unverified; the Mac
-snapshot is not that backup. The rehearsal firewall allowance persists until
+The later physical bootstrap is recorded separately below. That stage did not verify the
+independent NAS state-backup destination; the Mac snapshot was not that backup.
+The later physical NAS result is recorded below. The rehearsal firewall allowance persists until
 separately removed.
 
 ## Fresh-machine qualification: passed on 25 October 2026
@@ -176,8 +176,9 @@ frozen after handover.
   token without automatic expiry. Its token was subsequently saved and synced
   in the operator's password manager.
 - The initial state/configuration backup was an explicitly approved private Mac
-  snapshot. **Ongoing NAS state backup remains outstanding before further guest
-  or application rollout.** No NAS backup is claimed from that snapshot.
+  snapshot. At the end of that run, ongoing NAS state backup remained outstanding.
+  The later 26 October physical configuration below closed that gap; the initial
+  Mac snapshot itself was not NAS proof.
 - These results do not qualify PegaProx, household applications, new guest
   permissions or repeated physical restart behaviour.
 
@@ -209,4 +210,47 @@ separate approvals; their failed receipts and logs remain preserved privately.
 This establishes the existing-bootstrap configuration path in that lab. It
 does not apply the update to the physical host, qualify its network/NAS path,
 back up application data or prove application startup. Those remain separate
-steps before household migration.
+steps before household migration. The subsequent physical-host result below
+records what was actually completed after this lab result.
+
+## Physical NAS and database foundation: passed on 26 October 2026
+
+The existing physical deployment guest subsequently passed the supported
+NAS/application-access configuration. The host mounted the selected NFS export
+and shared only the dedicated backup directory into the unprivileged runner.
+Mount identity, mapped ownership, private modes, protection and deployment-account
+write/sync/readback were checked. The active OpenTofu states and failed-operation
+receipts were copied to that NAS destination and their contents were read back.
+This closes the earlier physical state-recovery/configuration gap; it does not
+establish application-data backup or a restore of those state copies.
+
+Merge-triggered host CD then configured the isolated backend bridge and the three
+declared database guest grants. The host job's subsequent runs reported no bridge
+creation, no new grants and no token-lifetime or guest-lifecycle changes. Earlier
+API-field failures remain preserved as failures; the accepted correction was
+separately approved and verified.
+
+All three empty database guests were created through OpenTofu CD. Their original
+identity phase stopped on Proxmox's Debian/systemd nesting warning. The maintainer
+explicitly approved the feature/address correction, one graceful restart per
+retained guest, original SSH fingerprint verification and one CD continuation.
+The disks and guests were preserved. Failed state, plans, inputs and logs were
+archived locally and verified on NAS before continuing.
+
+The corrected CD runs installed PostgreSQL 16.10, MariaDB 12.3.3 and InfluxDB 2.7.12
+with CLI 2.7.5. Actual LXC checks passed for the pinned native packages, active and
+enabled systemd services, backend listeners and local SQL/readiness probes. Only
+default databases were present; InfluxDB setup remained uninitialised. A normal
+follow-up merge returned only the shared read-only `verify` result for all three,
+without an apply, install or service restart.
+
+The private installation run is 40328910928; the follow-up verification run
+is 40330643215. They used public application source
+`f313136dbceeec6268d6f66d2ebb0a4d6bf4c1e3`. Exact private receipts bind the source,
+plans, workflow commits, host/guest identities and runtime readback. Credentials,
+site addresses, raw state and the underlying private receipts remain outside Git.
+
+These are results after approved corrections. A fresh uninterrupted database
+Deploy from the corrected baseline and a host reboot after database installation
+have not been retested. Household restores, database users/grants, real consumers,
+later application guests and live-data protection remain separate migration work.

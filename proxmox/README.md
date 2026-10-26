@@ -148,9 +148,10 @@ Status updated on **26 October 2026**, including the physical results from 25 Oc
 | Stage | Established | Still outstanding |
 | --- | --- | --- |
 | Installer | Packaged virtual checks plus a physical installation with a healthy two-drive mirror, separate original disk and working first-start access. | Each new machine needs its own checks; repeated physical restart behaviour is not established by that first start. See [ISO verification](iso/verification/README.md). |
-| Bootstrap | Clean lab handover, then physical host → one deployment container → real private GitHub no-change check with matching state. The physical run needed one reviewed tagged-VLAN correction. The existing lab guest also passed the NAS/application-access configuration and a no-change repeat on 26 October. | Apply and verify that configuration on the physical host before application rollout there. See [bootstrap verification](bootstrap/verification.md). |
+| Bootstrap | Clean lab handover, then a corrected physical handover. On 26 October the physical runner also passed NAS state recovery, application-access configuration and merge-driven host checks for the private backend bridge/database grants. | Each new host needs its own checks; state recovery does not protect live application data. See [bootstrap verification](bootstrap/verification.md#physical-nas-and-database-foundation-passed-on-26-october-2026). |
 | PegaProx | Decision recorded: a separate management LXC. | Guest sizing/address, reviewed access, CD jobs, installation and actual use checks. See the [application plan](applications/README.md). |
-| Household applications | The runner provides the starting point for subsequent deployment jobs. | Guest-by-guest deployment and application acceptance. |
+| DNS and database servers | DNS and the three empty native database servers passed deployment/checks; a normal follow-up CD run verified the database servers without reinstallation or restart. | Household database restores, real application clients and a post-install host reboot. See [databases](applications/DATABASES.md). |
+| Household applications | Deployment source is prepared for later guests. | Guest-by-guest deployment and application acceptance. |
 
 Physical installation and first-start networking are part of the actual migration.
 They are separate from software-only tests. Keep real

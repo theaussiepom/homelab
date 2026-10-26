@@ -474,17 +474,30 @@ job matched. **70 unit tests passed** for the corrected bootstrap source.
 
 The clean lab run and corrected physical run are separate results. The latter
 used an explicitly approved private Mac snapshot for initial handover; it did
-not establish a NAS backup. Application rollout and ongoing NAS state backup
-on that physical host remain outstanding.
+not establish a NAS backup. At that point, application rollout and ongoing NAS state backup
+on that physical host remained outstanding. The subsequent physical NAS and
+database foundation is recorded below.
 
 On **26 October 2026**, step 8 passed on the existing isolated lab deployment
 guest: NAS write/readback, active-state recovery copies and the next application
 guest's API access were checked. Repeating the configuration made no Ansible
 changes and left OpenTofu with a no-change plan. The guest and runner were
-retained. **94 bootstrap unit tests passed.** That lab result does not update
-the physical host or prove its NAS path.
+retained. **94 bootstrap unit tests passed.** That lab result did not itself update
+the physical host or verify its NAS path. The subsequent physical result is
+recorded below.
 
 See [verification evidence and limits](verification.md).
 Maintainers can use the
 [operating reference](OPERATIONS.md) for credential, firewall, locking and
 failure-path details.
+
+### Subsequent physical NAS/database result
+
+On 26 October 2026 the physical deployment guest also passed NAS state recovery
+and application-access configuration. Merge-driven host CD passed the isolated
+backend bridge and declared database grants. All three empty database servers
+then passed native package/systemd/server checks after an approved startup
+correction; a normal follow-up run only verified them. Household restores and
+application data protection remain separate. See the dated
+[physical verification record](verification.md#physical-nas-and-database-foundation-passed-on-26-october-2026)
+for the evidence boundary and the preserved failures.

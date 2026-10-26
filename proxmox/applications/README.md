@@ -66,7 +66,9 @@ Use `nesting: true` and `keyctl: false` for the tested Debian 13/systemd base,
 while keeping the guest unprivileged. The tested database guests use fixed
 management IPv4 and a separate fixed backend interface. An initial DHCP setup
 waited for DHCPv6 and delayed the second interface; fixed management IPv4 avoided
-that issue.
+that issue. The maintainer explicitly approved this profile for the three
+empty database guests on 26 October 2026. Review and approve the feature, address
+and allowed-traffic scope for your own host before applying it.
 
 Static IPv4 addresses and reservation-backed DHCP are supported. For DHCP use
 `"dhcp"` for both the selected interface's `ipv4` and the application's
