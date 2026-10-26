@@ -123,7 +123,15 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(list(inventory['all']['hosts']), ['deploy'])
             self.assertEqual(inventory['all']['hosts']['deploy']['ansible_user'], 'root')
             before = (out / 'preparation.json').read_bytes()
-            with self.assertRaises(ValueError): bootstrap.prepare(site, settings, out)
+            state = out / 'tofu/terraform.tfstate'
+            state.write_bytes(b'preserve this active state')
+            self.assertFalse(bootstrap.prepare(site, settings, out)['changed'])
+            self.assertEqual(before, (out / 'preparation.json').read_bytes())
+            self.settings['runner_name'] = 'another-runner'
+            bootstrap.write(settings, self.settings)
+            with self.assertRaisesRegex(ValueError, 'differs'):
+                bootstrap.prepare(site, settings, out)
+            self.assertEqual(state.read_bytes(), b'preserve this active state')
             self.assertEqual(before, (out / 'preparation.json').read_bytes())
 
     def test_small_standalone_example_prepares_without_full_estate_or_database(self):

@@ -3,13 +3,17 @@
 import argparse
 import fcntl
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import ssl
 import time
+from urllib.parse import urlparse, quote
+from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHandler, ProxyHandler
 
 from plan import check_plan
 from restore import sync_directory
@@ -19,6 +23,12 @@ SOURCE = Path(__file__).resolve().parent
 
 class InputNeeded(ValueError):
     """A deliberately non-secret operator instruction, safe for the job summary."""
+
+
+class RefuseRedirects(HTTPRedirectHandler):
+    """A token-bearing request must stay on its explicitly trusted endpoint."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise InputNeeded('Proxmox API redirected; inspect its trusted endpoint before continuing')
 
 
 def sha(path):
@@ -85,6 +95,29 @@ def input_hashes(cfg):
     paths.extend(item['key_path'] for item in app.get('repositories', []))
     paths.extend(item['source'] for item in app.get('database', {}).get('config_files', []))
     return {path: sha(path) for path in sorted(set(paths))}
+
+
+def application_address(cfg):
+    """Resolve DHCP from the trusted PVE API and the selected MAC, never a scan."""
+    if cfg['app']['address'] != 'dhcp':
+        return cfg['app']['address']
+    endpoint = urlparse(cfg['site']['api_endpoint'])
+    if endpoint.scheme != 'https' or not endpoint.hostname or endpoint.port != 8006 or endpoint.username:
+        raise ValueError('DHCP discovery requires the trusted Proxmox HTTPS endpoint')
+    path = '/api2/json/nodes/' + quote(cfg['site']['node'], safe='') + '/lxc/' + str(cfg['guest']['vmid']) + '/interfaces'
+    request = Request('https://' + endpoint.netloc + path,
+                      headers={'Authorization': 'PVEAPIToken=' + Path(cfg['paths']['api_token']).read_text().strip()})
+    context = ssl.create_default_context(cafile=cfg['paths']['ca_file'])
+    opener = build_opener(ProxyHandler({}), HTTPSHandler(context=context), RefuseRedirects())
+    with opener.open(request, timeout=15) as response:
+        rows = json.load(response)['data']
+    selected = [row for row in rows if row.get('hwaddr', '').lower() == cfg['app']['mac'].lower()]
+    if len(selected) != 1 or not selected[0].get('inet'):
+        raise InputNeeded('The selected guest has no IPv4 lease yet; inspect its DHCP reservation before configuration')
+    address = ipaddress.ip_interface(selected[0]['inet']).ip
+    if address.version != 4 or address.is_loopback or address.is_link_local or address.is_unspecified:
+        raise InputNeeded('The selected guest has no usable DHCP IPv4 address')
+    return str(address)
 
 
 def guest_trust(cfg, work):
@@ -197,6 +230,7 @@ def execute(action, cfg_path, approved_plan=None):
         if action == 'stage' and (work / 'started.json').exists():
             raise ValueError('This guest has already started; stage is only for a new installation')
         if action != 'apply':
+            cfg = dict(cfg, app=dict(cfg['app'], address=application_address(cfg)))
             guest_trust(cfg, work)
         # Mark BEFORE a native command: SIGKILL/job cancellation cannot run an
         # exception handler, and local process exit never proves remote closure.

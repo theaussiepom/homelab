@@ -43,14 +43,20 @@ services and physical hosts stay in place.
 - A working [bootstrap](../bootstrap/README.md) and private GitHub deployment repository.
 - An unused guest ID/address and resource budget, with its VLAN carried by the
   host and switches. These scripts do not configure your router or switches.
-- API access for that guest/storage/network. **The bootstrap token covers only
-  the deployment guest; it cannot create application guests.**
+- API access for that guest/storage/network, declared through
+  [bootstrap step 8](../bootstrap/README.md#8-prepare-the-runner-to-deploy-your-applications).
 - The runner's NAS recovery directory, deployment SSH key, trusted Proxmox CA
   and verified guest SSH host key. Secrets stay in private runner files.
 - A coherent NAS capture of this guest's configuration/data, required database
   backups, preserved custom images and independently available keys.
 - NAS protection for new application/database writes, commissioned before the
   live start. State recovery copies alone do not back up application data.
+
+Static IPv4 addresses and reservation-backed DHCP are supported. For DHCP use
+`"dhcp"` for both the selected interface's `ipv4` and the application's
+`address`, and omit that interface's gateway. The deployment job obtains the
+lease from the verified Proxmox API by the selected MAC address before Ansible.
+It still requires a verified guest SSH host key; it does not trust a network scan.
 
 Use database-native backups, not copies of files from running databases.
 Preserve numeric file owners, permissions, ACLs and extended attributes.

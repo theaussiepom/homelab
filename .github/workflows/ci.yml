@@ -25,6 +25,14 @@ jobs:
             --tmpfs /tmp:rw,exec,nosuid,nodev,size=768m,mode=1777 \
             -v "$PWD:/src:ro" -e HOME=/tmp homelab-app-test \
             sh /src/proxmox/applications/tests/check.sh
+      - name: Rehearse the bootstrap with synthetic provider and runner fixtures
+        run: |
+          docker run --rm --platform linux/amd64 --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges --cpus 2 --memory 2g \
+            --tmpfs /tmp:rw,exec,nosuid,nodev,size=768m,mode=1777 \
+            -v "$PWD:/src:ro" -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 \
+            -e ANSIBLE_LOCAL_TEMP=/tmp/ansible-local -e ANSIBLE_REMOTE_TEMP=/tmp/ansible-remote \
+            homelab-app-test python3 /src/proxmox/bootstrap/bootstrap.py rehearse --evidence /tmp/evidence
       - name: Validate all four rendered stacks with Docker Compose
         run: |
           python3 proxmox/applications/tests/compose_fixture.py "$RUNNER_TEMP/app-compose"

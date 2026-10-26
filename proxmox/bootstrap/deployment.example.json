@@ -1,0 +1,19 @@
+{
+  "schema": "homelab-bootstrap-deployment-v1",
+  "applications": [
+    {
+      "vmid": 6101,
+      "storage_id": "local-lvm",
+      "template_storage": "local",
+      "interfaces": [{"bridge": "vmbr0", "vlan": 30}]
+    }
+  ],
+  "nas": {
+    "server": "198.18.20.2",
+    "export": "/volume1/example-backups",
+    "version": "4.1",
+    "directory": "deployment-recovery"
+  },
+  "restart_deploy": false,
+  "temporarily_unprotect_deploy": false
+}

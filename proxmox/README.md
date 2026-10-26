@@ -17,7 +17,8 @@ flowchart TD
     C --> D[Run bootstrap from your workstation]
     D --> E[One deployment container starts]
     E --> F[GitHub runner runs a successful check]
-    F --> G[Jobs deploy one application guest at a time]
+    F --> N[Bootstrap connects NAS backups and application access]
+    N --> G[Jobs deploy one application guest at a time]
 ```
 
 ## Does this fit your setup?

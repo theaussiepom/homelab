@@ -28,6 +28,8 @@ jobs:
     runs-on: [self-hosted, linux, x64, homelab-private-deploy, homelab-deploy-SITE]
     timeout-minutes: 40
     steps:
+      - name: Refuse deployment during a bootstrap configuration update
+        run: test ! -e /var/lib/homelab-bootstrap/CONFIGURING
       - name: Check out reviewed private workflow and source lock
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

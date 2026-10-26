@@ -33,14 +33,15 @@ variable "guest" {
     condition = (
       length(var.guest.interfaces) > 0 &&
       length(distinct([for nic in var.guest.interfaces : nic.mac])) == length(var.guest.interfaces) &&
-      length([for nic in var.guest.interfaces : nic.gateway if nic.gateway != null]) == 1 &&
+      length([for nic in var.guest.interfaces : nic.gateway if nic.gateway != null]) +
+      length([for nic in var.guest.interfaces : nic if nic.ipv4 == "dhcp"]) == 1 &&
       alltrue([for nic in var.guest.interfaces :
-        can(cidrnetmask(nic.ipv4)) && can(regex("^([0-9a-f]{2}:){5}[0-9a-f]{2}$", nic.mac)) &&
+        (nic.ipv4 == "dhcp" ? nic.gateway == null : can(cidrnetmask(nic.ipv4))) && can(regex("^([0-9a-f]{2}:){5}[0-9a-f]{2}$", nic.mac)) &&
         (nic.ipv6 == null ? true : contains(["auto", "dhcp", "manual"], nic.ipv6) || can(cidrhost(nic.ipv6, 0))) &&
         (nic.vlan == null ? true : nic.vlan >= 1 && nic.vlan <= 4094 && floor(nic.vlan) == nic.vlan)
       ])
     )
-    error_message = "Use explicit static IPv4 addresses, unique literal MACs, valid VLANs and exactly one default gateway."
+    error_message = "Use static IPv4 or one DHCP interface, unique literal MACs, valid VLANs and exactly one default route. DHCP supplies its own gateway."
   }
   validation {
     condition = alltrue([for volume in values(var.guest.volumes) :

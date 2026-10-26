@@ -42,9 +42,17 @@ def read(path):
 
 
 def write(path, value):
-    """Save a JSON receipt with private file permissions."""
-    path.write_text(json.dumps(value, indent=2) + '\n')
-    path.chmod(0o600)
+    """Atomically save a private receipt and synchronise its file and directory."""
+    fd, temporary = tempfile.mkstemp(prefix='.' + path.name + '-', dir=path.parent)
+    with os.fdopen(fd, 'w') as stream:
+        stream.write(json.dumps(value, indent=2) + '\n')
+        stream.flush(); os.fsync(stream.fileno())
+    os.replace(temporary, path)
+    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def settings_check(value):
@@ -93,7 +101,12 @@ def prepare(catalog_path, settings_path, destination):
     guest = select(catalog)
     settings_check(settings)
     if destination.exists() or destination.is_symlink():
-        raise Refused('Choose a new output directory; previous work is preserved')
+        receipt = destination / 'preparation.json'
+        if (destination.is_symlink() or not receipt.is_file()
+                or read(receipt).get('catalog_sha256') != sha(catalog_path)
+                or read(receipt).get('settings_sha256') != sha(settings_path)):
+            raise Refused('Existing preparation differs; preserve it and review the new inputs')
+        return {**read(receipt), 'changed': False}
     destination = destination.absolute()
     if catalog['site']['environment'] != 'synthetic' and destination.resolve().is_relative_to(ROOT):
         raise Refused('Prepare actual private settings outside the public source checkout')
@@ -176,7 +189,11 @@ def container_prepare(catalog, settings, destination):
     if read(catalog)['site']['environment'] != 'synthetic' and destination.resolve().is_relative_to(ROOT):
         raise Refused('Keep actual preparation output outside the public checkout')
     if destination.exists() or destination.is_symlink():
-        raise Refused('Choose a new output directory; previous work is preserved')
+        if destination.is_symlink() or not (destination / 'bundle/preparation.json').is_file():
+            raise Refused('Existing preparation is incomplete; preserve it before another attempt')
+        result = prepare(catalog, settings, destination / 'bundle')
+        return {'prepared_bundle': str(destination / 'bundle'), 'changed': result['changed'],
+                'live_execution_admitted': False}
     cache = ROOT / '.work'
     cache.mkdir(exist_ok=True)
     run = Path(tempfile.mkdtemp(prefix='bootstrap-prepare-', dir=cache))
@@ -271,6 +288,7 @@ def rehearse(evidence):
     import os
     os.environ['ANSIBLE_ROLES_PATH'] = str(ROOT / 'ansible/roles')
     log_run(['ansible-playbook', '-i', 'localhost,', '--syntax-check', str(HERE / 'ansible/install-runner.yml')], ROOT, evidence / 'native-ansible-syntax.log')
+    log_run(['ansible-playbook', '-i', 'localhost,', '--syntax-check', str(HERE / 'ansible/configure-deploy.yml')], ROOT, evidence / 'configuration-ansible-syntax.log')
     log_run(['python3', str(HERE / 'tests/runner_fixture.py'), str(work / 'runner'), str(evidence)], ROOT, evidence / 'runner-fixture.log')
     files = {str(p.relative_to(ROOT)): sha(p) for p in ROOT.rglob('*')
              if p.is_file() and '__pycache__' not in p.parts}

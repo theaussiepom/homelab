@@ -1,0 +1,196 @@
+---
+- name: Complete the existing deployment guest for private application CD
+  hosts: deploy
+  become: true
+  gather_facts: true
+  vars:
+    # Match initial installation: root and runner tasks need an accessible temp parent.
+    ansible_remote_tmp: /tmp
+  tasks:
+    - name: Verify the existing deployment guest before updating its setup
+      ansible.builtin.assert:
+        that:
+          - ansible_hostname == 'deploy'
+          - ansible_distribution == 'Debian'
+          - ansible_virtualization_type == 'lxc'
+          - ansible_default_ipv4.macaddress | lower == deployment_mac | lower
+
+    - name: Read the existing runner registration
+      ansible.builtin.slurp:
+        src: /opt/homelab-runner/.runner
+      register: deployment_registration
+      no_log: true
+
+    - name: Keep the existing runner bound to its intended private repository
+      ansible.builtin.assert:
+        that:
+          - (deployment_registration.content | b64decode(encoding='utf-8-sig') | from_json).gitHubUrl == 'https://github.com/' + deployment_repository
+          - (deployment_registration.content | b64decode(encoding='utf-8-sig') | from_json).agentName == deployment_runner
+      no_log: true
+
+    - name: Read the NAS filesystem from inside the unprivileged guest
+      ansible.builtin.command:
+        argv: [findmnt, -rn, -o, 'FSTYPE,SOURCE', --mountpoint, /srv/homelab-backups]
+      register: deployment_nas
+      changed_when: false
+
+    - name: Refuse a local directory or a different NAS export
+      ansible.builtin.assert:
+        that:
+          - deployment_nas.stdout.split() | length == 2
+          - deployment_nas.stdout.split()[0] in ['nfs', 'nfs4']
+          - deployment_nas.stdout.split()[1] == nas_source
+
+    - name: Prove NAS write, sync and readback as the actual deployment account
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import hashlib,os,secrets,tempfile
+            from pathlib import Path
+            root=Path('/srv/homelab-backups')
+            data=secrets.token_bytes(64)
+            fd,name=tempfile.mkstemp(prefix='.bootstrap-probe-',dir=root)
+            with os.fdopen(fd,'wb') as stream:
+                stream.write(data);stream.flush();os.fsync(stream.fileno())
+            assert Path(name).read_bytes()==data
+            Path(name).unlink()
+            fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY)
+            try:os.fsync(fd)
+            finally:os.close(fd)
+            print('NAS write/sync/readback passed')
+      become_user: homelab-runner
+      changed_when: false
+
+    - name: Save current active state before updating bootstrap source
+      ansible.builtin.command:
+        argv:
+          - /opt/homelab-tools/bin/python3
+          - /opt/homelab-bootstrap/bootstrap.py
+          - backup
+          - --work
+          - /var/lib/homelab-bootstrap
+          - --out
+          - '/srv/homelab-backups/bootstrap-before-{{ configuration_attempt }}'
+      become_user: homelab-runner
+      changed_when: false
+      no_log: true
+
+    - name: Update the normal bootstrap caller on the existing deployment guest
+      ansible.builtin.copy:
+        src: '{{ bootstrap_source }}/{{ item }}'
+        dest: '/opt/homelab-bootstrap/{{ item }}'
+        owner: root
+        group: root
+        mode: '0644'
+      loop: [bootstrap.py, native.py]
+
+    - name: Install the declared bootstrap module with NAS bind ownership
+      ansible.builtin.copy:
+        src: '{{ bootstrap_source }}/templates/module/main.tf'
+        dest: /var/lib/homelab-bootstrap/tofu/modules/deploy/main.tf
+        owner: homelab-runner
+        group: homelab-runner
+        mode: '0600'
+
+    - name: Prepare private application inputs and deployment key directory
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: homelab-runner
+        group: homelab-runner
+        mode: '0700'
+      loop:
+        - /var/lib/homelab-inputs
+        - /var/lib/homelab-applications
+        - /home/homelab-runner/.ssh
+
+    - name: Inspect the existing application deployment key pair
+      ansible.builtin.stat:
+        path: '/home/homelab-runner/.ssh/applications{{ item }}'
+      loop: ['', '.pub']
+      register: application_keys
+
+    - name: Preserve a partial or externally changed key pair for inspection
+      ansible.builtin.assert:
+        that:
+          - application_keys.results[0].stat.exists == application_keys.results[1].stat.exists
+          - not application_keys.results[0].stat.exists or application_keys.results[0].stat.isreg | default(false)
+          - not application_keys.results[1].stat.exists or application_keys.results[1].stat.isreg | default(false)
+
+    - name: Generate the guest-local application key only when no pair exists
+      ansible.builtin.command:
+        argv: [ssh-keygen, -q, -t, ed25519, -N, '', -C, homelab-application-deployment, -f, /home/homelab-runner/.ssh/applications]
+      become_user: homelab-runner
+      when: not application_keys.results[0].stat.exists
+      no_log: true
+
+    - name: Verify the application key pair and private ownership
+      # The operator SSH key never enters this guest. This is its own key pair.
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import os,stat,subprocess
+            from pathlib import Path
+            p=Path('/home/homelab-runner/.ssh/applications')
+            assert not p.is_symlink() and not p.with_suffix('.pub').is_symlink()
+            assert stat.S_IMODE(p.stat().st_mode)==0o600 and p.stat().st_uid==os.getuid()
+            public=subprocess.check_output(['ssh-keygen','-y','-f',str(p)],text=True).split()[:2]
+            assert public==p.with_suffix('.pub').read_text().split()[:2]
+      become_user: homelab-runner
+      changed_when: false
+      no_log: true
+
+    - name: Save the same scoped API credential for application jobs
+      ansible.builtin.copy:
+        content: '{{ bootstrap_api_token }}'
+        dest: /var/lib/homelab-inputs/pve-token
+        owner: homelab-runner
+        group: homelab-runner
+        mode: '0600'
+      no_log: true
+
+    - name: Create the private application host-trust file without replacing it
+      ansible.builtin.copy:
+        content: ''
+        dest: /var/lib/homelab-inputs/known_hosts
+        force: false
+        owner: homelab-runner
+        group: homelab-runner
+        mode: '0600'
+
+    - name: Read the NAS source identity for future application recovery copies
+      ansible.builtin.copy:
+        content: "{{ {'backup_mount':'/srv/homelab-backups','backup_source':nas_source,'backup_directory':'/srv/homelab-backups/applications','state_root':'/var/lib/homelab-applications','api_token':'/var/lib/homelab-inputs/pve-token','ca_file':'/usr/local/share/ca-certificates/homelab-pve.crt','private_key':'/home/homelab-runner/.ssh/applications','known_hosts':'/var/lib/homelab-inputs/known_hosts'} | to_nice_json }}\n"
+        dest: /var/lib/homelab-inputs/paths.json
+        owner: homelab-runner
+        group: homelab-runner
+        mode: '0600'
+
+    - name: Verify transferred state still gives a provider no-change plan
+      ansible.builtin.command:
+        argv: [/opt/homelab-tools/bin/python3, /opt/homelab-bootstrap/bootstrap.py, native, verify, --work, /var/lib/homelab-bootstrap]
+      become_user: homelab-runner
+      environment:
+        PROXMOX_VE_API_TOKEN: '{{ bootstrap_api_token }}'
+        SSL_CERT_FILE: /usr/local/share/ca-certificates/homelab-pve.crt
+        PATH: /opt/homelab-tools/bin:/usr/local/bin:/usr/bin:/bin
+      changed_when: false
+      no_log: true
+
+    - name: Save the updated active deployment state to the NAS
+      ansible.builtin.command:
+        argv:
+          - /opt/homelab-tools/bin/python3
+          - /opt/homelab-bootstrap/bootstrap.py
+          - backup
+          - --work
+          - /var/lib/homelab-bootstrap
+          - --out
+          - '/srv/homelab-backups/bootstrap-ready-{{ configuration_attempt }}'
+      become_user: homelab-runner
+      changed_when: false
+      no_log: true
