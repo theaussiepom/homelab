@@ -51,6 +51,33 @@ class DatabaseTests(unittest.TestCase):
     def test_no_start_without_exclusive_writer_decision(self):
         with self.assertRaises(ValueError): database.run({'exclusive_writer_confirmed': False})
 
+    def test_mariadb_reload_grants_before_completing_the_restore(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            capture = root / 'database.capture'
+            capture.write_text('-- synthetic SQL, including mysql grant tables')
+            cfg = {'kind': 'mariadb', 'exclusive_writer_confirmed': True,
+                   'capture': {'sha256': database.digest(capture)}}
+            with patch.object(database.subprocess, 'run') as run:
+                self.assertTrue(database.run(cfg, root))
+            calls = run.call_args_list
+            self.assertEqual(calls[2].args[0], ['mariadb', '--protocol=socket', '--user=root', '--binary-mode'])
+            self.assertEqual(calls[2].kwargs['input'], b'FLUSH PRIVILEGES;\n')
+            self.assertEqual(calls[3].args[0], ['systemctl', 'enable', 'mariadb'])
+
+    def test_mariadb_failed_grant_reload_remains_held(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            capture = root / 'database.capture'
+            capture.write_text('-- synthetic SQL')
+            cfg = {'kind': 'mariadb', 'exclusive_writer_confirmed': True,
+                   'capture': {'sha256': database.digest(capture)}}
+            import subprocess
+            with patch.object(database.subprocess, 'run', side_effect=[None, None, subprocess.CalledProcessError(1, ['mariadb'])]):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    database.run(cfg, root)
+            self.assertEqual(json.loads((root / 'database-restore.json').read_text())['state'], 'started')
+
 
 if __name__ == '__main__':
     unittest.main()

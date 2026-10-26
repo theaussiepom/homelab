@@ -93,6 +93,6 @@
   ansible.builtin.command:
     argv: [python3, /opt/homelab-app/database.py, --config, /opt/homelab-app/database.json]
   register: native_restore
-  changed_when: (native_restore.stdout | from_json).restored
+  changed_when: native_restore.rc == 0 and (native_restore.stdout | from_json).restored
   when: app.start_services | default(false) | bool and not ansible_check_mode
   no_log: true

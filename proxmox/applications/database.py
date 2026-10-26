@@ -106,6 +106,11 @@ def run(cfg, root=ROOT):
             # SQL goes to stdin; Influx reads the checked native backup directory.
             subprocess.run(command, stdin=stream if cfg['kind'] != 'influxdb' else subprocess.DEVNULL,
                            env=environment, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if cfg['kind'] == 'mariadb':
+        # A full SQL capture can restore mysql's grant tables directly. Reload
+        # those restored accounts before claiming the database is ready.
+        subprocess.run(restore_commands[0], input=b'FLUSH PRIVILEGES;\n', env=environment,
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(['systemctl', 'enable', service], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     complete_path = receipt.with_suffix('.complete')
     fd = os.open(complete_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
