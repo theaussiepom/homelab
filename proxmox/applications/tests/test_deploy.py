@@ -27,6 +27,31 @@ def fixture(root):
 
 
 class DeployTests(unittest.TestCase):
+    def test_plan_records_fresh_creation_from_the_actual_tofu_change(self):
+        from test_plan import fixture as plan_fixture
+        for action in ('create', 'update', 'no-op'):
+            with self.subTest(action=action), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp); cfg = fixture(root)
+                cfg['guest']['vmid'] = cfg['app']['vmid'] = 6100
+                cfg['site']['node'] = 'pve-lab'
+                cfg['ssh_public_keys'] = json.loads((ROOT / 'examples/site.example.json').read_text())['ssh_public_keys']
+                site = root / 'site.json'; site.write_text(json.dumps(cfg))
+                (root / 'api').write_text('synthetic')
+                (root / 'ca').write_text('synthetic CA')
+                value = plan_fixture()
+                for row in value['resource_changes']:
+                    row['change']['actions'] = [action]
+                    if action != 'create':
+                        row['change']['before'] = copy.deepcopy(row['change']['after'])
+                def quiet(command, *args):
+                    for argument in command:
+                        if argument.startswith('-out='):
+                            Path(argument.removeprefix('-out=')).write_bytes(b'synthetic saved plan')
+                with patch.object(deploy, 'backup'), patch.object(deploy, 'quiet', side_effect=quiet), \
+                        patch.object(deploy.subprocess, 'check_output', return_value=json.dumps(value).encode()):
+                    receipt = deploy.execute('plan', site)
+                self.assertEqual(receipt['creates_guest'], action == 'create')
+
     def test_dhcp_resolves_only_the_selected_mac_over_verified_api_tls(self):
         """Never guess a guest address or weaken TLS for DHCP deployments."""
         with tempfile.TemporaryDirectory() as tmp:

@@ -8,7 +8,7 @@ on:
         options: [dns, mariadb, postgresql, influxdb, identity, ingress, automation]
         required: true
       step:
-        description: Plan first; deploy completes one reviewed service migration
+        description: Plan first; deploy prepares and checks one reviewed guest
         type: choice
         options: [plan, deploy, apply, stage, start, verify]
         default: plan

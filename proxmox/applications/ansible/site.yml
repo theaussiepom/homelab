@@ -36,6 +36,7 @@
         owner: root
         group: root
         mode: '0700'
+      when: app.kind in ['dns', 'identity', 'ingress', 'automation']
 
     - name: Restore frozen application data before starting services
       ansible.builtin.import_tasks: tasks/restore.yml

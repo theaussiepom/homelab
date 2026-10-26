@@ -36,13 +36,15 @@ versions, images and addresses are placeholders; they cannot be deployed as-is.
 Restrict the directory to the runner account and its files to mode `0600`.
 
 Before running, complete the application guide's prerequisites: API access
-for that guest, network paths, NAS recovery copies and coherent source captures.
+for that guest, network paths and NAS state recovery copies. Application guests
+also need coherent source captures; database-server CD does not take a backup.
 Declare the application's API access through bootstrap configuration first;
 Deploy does not grant extra token permissions.
 
 Commit the workflow and source lock to the private repository's `main` branch.
 Open **Actions → Application guest deployment**, select one guest and choose
 **plan** first. Review its fingerprint, then choose **deploy** with that
-fingerprint during the selected service's migration window. That one run creates
-the guest, verifies its SSH identity through Proxmox, installs/restores, starts
-and checks the service. Copying these templates does not start a deployment.
+fingerprint. That one run creates the guest, verifies its SSH identity through
+Proxmox, installs/configures, starts and checks the service. Application guests
+also restore their capture during the migration window. Database guests remain
+empty until their separate manual data restore. Copying these templates does not start a deployment.
