@@ -27,8 +27,11 @@ flowchart LR
 
 Keep site settings in your **private deployment repository**:
 
-- One `site.json` and `stack.json` for each guest: addresses, resources, pinned
-  images and selected health checks.
+- One `foundation/site.json`, copied from the public
+  [site example](examples/foundation.site.example.json): your addresses, guest
+  IDs, DNS names, NAS path, public SSH key and selected capture hashes.
+- One `foundation/source.json` with the exact reviewed public implementation
+  commit. Keep already commissioned DNS/database source locks unchanged.
 - A coherent copy of Authentik's media/templates/certificates and its selected
   Redis state, plus a separate restore of its PostgreSQL database. Retain the
   original Authentik secret key; changing it can make restored credentials unusable.
@@ -42,6 +45,37 @@ Keep site settings in your **private deployment repository**:
 Keep the same application versions for this migration. Upgrading them is a
 separate change. If pgAdmin's saved profile is present, its pinned image can
 start without inventing another local administrator password.
+
+## One place to enter your settings
+
+The public `homelab` repository contains the profile structure, resource and image
+pins, validation, firewall/route generation, and deployment/DNS helpers. Your
+private repository contains the actual site settings and the Actions graph.
+Passwords stay in GitHub Secrets; do not put them in the site file.
+
+Enter each address once. For example, changing the proxy's frontend address
+updates its listener, firewall destinations, HTTPS checks and selected DNS
+answers together. Changing a guest ID updates its bootstrap grant, rollout
+policy and discovery identity. IDs are stable inventory labels; they do not
+select a VLAN or control startup order.
+
+To preview the generated files without contacting Proxmox, run this using your
+checked-out public implementation (Python 3 only):
+
+```sh
+python3 public-source/proxmox/applications/site_config.py \
+  --config foundation/site.json --output /tmp/my-foundation-preview
+```
+
+Use a new output directory each time. Read `bootstrap.json`, the guest
+`site.json`/`stack.json` pairs and `dns-settings.json` before merging. They are
+generated inputs, so edit the original site file rather than these previews.
+The renderer rejects missing fields, duplicate identities, overlapping networks
+and addresses outside their declared subnet. It does not verify live availability.
+
+The selected profiles use unprivileged Debian LXCs with Docker Compose for the
+three applications. Existing state/input files are never rewritten by this
+preview, and no guest is created until the reviewed CD workflow runs.
 
 ## How addresses become HTTPS routes
 
@@ -98,7 +132,7 @@ but that does not make arbitrary diagnostic output safe to publish.
 
 ## What happens on merge
 
-The private foundation adapter plans once, checks that the plan creates only the
+The public foundation adapter plans once, checks that the plan creates only the
 selected new guest and its two firewall resources, and deploys **that same saved
 plan**. The reviewed merge authorizes this narrow creation policy. Updates,
 imports, replacements and adoption of an existing guest are refused.
@@ -107,7 +141,7 @@ A completed repeat verifies the existing guest and unchanged inputs; it does
 not reinstall, restore or restart the application. A failed or interrupted
 rollout keeps its receipts and hold. A later job cannot silently retry it.
 
-Use separate immutable source locks for the new foundation and bootstrap jobs.
+The new foundation and bootstrap jobs share one immutable foundation source lock.
 Do not change the source pin or saved input files of already commissioned
 DNS/database guests just to deploy these services.
 

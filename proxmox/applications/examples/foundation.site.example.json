@@ -1,0 +1,157 @@
+{
+  "schema": "homelab-foundation-site-v1",
+  "host": {
+    "node": "pve-lab",
+    "address": "10.88.25.10"
+  },
+  "runner": {
+    "vmid": 900,
+    "mac": "02:25:00:00:09:00",
+    "address": "10.88.25.11",
+    "backup_source": "192.168.200.2:/exports/backups/bootstrap-900"
+  },
+  "networks": {
+    "management": {
+      "bridge": "vmbr0",
+      "vlan": 25,
+      "cidr": "10.88.25.0/24",
+      "gateway": "10.88.25.1"
+    },
+    "backend": {
+      "bridge": "vmbr30",
+      "cidr": "10.88.30.0/24"
+    },
+    "frontend": {
+      "bridge": "vmbr1",
+      "vlan": 40,
+      "cidr": "10.88.40.0/24"
+    }
+  },
+  "dns": {
+    "vmid": 6101,
+    "hostname": "dns",
+    "mac": "02:40:00:00:61:01",
+    "address": "10.88.40.2",
+    "fallback": "192.168.200.4",
+    "legacy_proxy": "192.168.200.254"
+  },
+  "databases": {
+    "postgresql": {
+      "vmid": 208,
+      "hostname": "postgresql",
+      "address": "10.88.30.23"
+    },
+    "mariadb": {
+      "vmid": 206,
+      "hostname": "mariadb"
+    },
+    "influxdb": {
+      "vmid": 204,
+      "hostname": "influxdb"
+    }
+  },
+  "storage": {
+    "id": "local-zfs",
+    "template": "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst"
+  },
+  "ssh_public_keys": [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  ],
+  "timezone": "Australia/Brisbane",
+  "domains": {
+    "identity": "sso.lab.example.org",
+    "db_tools": "pgadmin.lab.example.org",
+    "redirect": [
+      "old.example.org",
+      "lab.example.org"
+    ],
+    "preserve": [
+      {
+        "name": "kept-one.example.org",
+        "address": "192.168.201.254"
+      },
+      {
+        "name": "kept-two.example.org",
+        "address": "192.168.202.254"
+      }
+    ]
+  },
+  "smtp": {
+    "AUTHENTIK_EMAIL__FROM": "sso@old.example.org",
+    "AUTHENTIK_EMAIL__USE_TLS": "true",
+    "AUTHENTIK_EMAIL__HOST": "smtp-relay.gmail.com",
+    "AUTHENTIK_EMAIL__PORT": "587",
+    "AUTHENTIK_EMAIL__USERNAME": "",
+    "AUTHENTIK_EMAIL__USE_SSL": "false"
+  },
+  "ingress": {
+    "acme_email": "ben@lab.example.org",
+    "client_networks": [
+      "192.168.200.0/24",
+      "10.88.15.0/24",
+      "10.88.25.0/24",
+      "10.88.30.0/24",
+      "10.88.40.0/24",
+      "10.88.50.0/24"
+    ]
+  },
+  "identity": {
+    "postgresql_user": "authentik",
+    "postgresql_database": "authentik"
+  },
+  "db_tools": {
+    "oauth_client_id": "example-public-oauth-client",
+    "provider_slug": "pgadmin4"
+  },
+  "guests": {
+    "ingress": {
+      "vmid": 212,
+      "hostname": "traefik",
+      "interfaces": {
+        "management": {
+          "address": "10.88.25.33",
+          "mac": "02:77:00:d4:19:01"
+        },
+        "backend": {
+          "address": "10.88.30.33",
+          "mac": "02:77:00:d4:1e:01"
+        },
+        "frontend": {
+          "address": "10.88.40.33",
+          "mac": "02:77:00:d4:28:01"
+        }
+      },
+      "capture_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "identity": {
+      "vmid": 211,
+      "hostname": "security",
+      "interfaces": {
+        "management": {
+          "address": "10.88.25.20",
+          "mac": "02:77:00:d3:19:01"
+        },
+        "backend": {
+          "address": "10.88.30.20",
+          "mac": "02:77:00:d3:1e:01"
+        }
+      },
+      "capture_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "db-tools": {
+      "vmid": 202,
+      "hostname": "db-tools",
+      "interfaces": {
+        "management": {
+          "address": "10.88.25.32",
+          "mac": "02:77:00:ca:19:01"
+        },
+        "backend": {
+          "address": "10.88.30.32",
+          "mac": "02:77:00:ca:1e:01"
+        }
+      },
+      "capture_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    }
+  }
+}
