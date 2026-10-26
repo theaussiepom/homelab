@@ -39,6 +39,7 @@ class RolloutTests(unittest.TestCase):
         site.write_text(json.dumps(cfg))
         receipt = json.loads((work / 'plan.json').read_text())
         receipt['site_sha256'] = deploy.sha(site)
+        receipt['creates_guest'] = True
         deploy.write(work / 'plan.json', receipt)
         return cfg, site, work, plan
 
@@ -65,6 +66,21 @@ class RolloutTests(unittest.TestCase):
                 with patch.object(deploy, '_execute_step') as runner, self.assertRaisesRegex(deploy.InputNeeded, 'restore.*separate'):
                     deploy.execute('plan', site)
                 runner.assert_not_called()
+
+    def test_empty_database_cannot_deploy_an_existing_or_unclassified_guest(self):
+        for fresh in (False, None):
+            with self.subTest(fresh=fresh), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp); cfg, site, work, plan = self.database(root)
+                receipt = json.loads((work / 'plan.json').read_text())
+                if fresh is None:
+                    receipt.pop('creates_guest')
+                else:
+                    receipt['creates_guest'] = fresh
+                deploy.write(work / 'plan.json', receipt)
+                with patch.object(deploy, '_execute_step') as runner, self.assertRaisesRegex(deploy.InputNeeded, 'fresh guest'):
+                    deploy.execute('deploy', site, plan)
+                runner.assert_not_called()
+                self.assertFalse((work / 'ROLLOUT-HOLD.json').exists())
 
     def test_one_call_runs_apply_identity_stage_start_verify_in_order(self):
         with tempfile.TemporaryDirectory() as tmp:

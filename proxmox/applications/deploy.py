@@ -219,9 +219,14 @@ def _execute_step(action, cfg_path, approved_plan=None):
             quiet(tofu + ['init', '-input=false', '-lockfile=readonly', '-backend-config=path=' + str(state)], environment, logfile)
             quiet(tofu + ['plan', '-input=false', '-lock-timeout=30s', '-out=' + str(work / 'guest.tfplan')], environment, logfile)
             output = subprocess.check_output(tofu + ['show', '-json', str(work / 'guest.tfplan')], env=environment)
-            check_plan(json.loads(output), cfg['site']['node'], vmid)
+            plan_value = json.loads(output)
+            check_plan(plan_value, cfg['site']['node'], vmid)
+            creates_guest = any(row['address'] == 'module.guest.proxmox_virtual_environment_container.guest'
+                                and row['change']['actions'] == ['create'] and row['change'].get('before') is None
+                                for row in plan_value['resource_changes'])
             receipt = {'plan_sha256': sha(work / 'guest.tfplan'), 'site_sha256': sha(cfg_path),
-                       'source_sha256': source_hash(), 'input_hashes': input_hashes(cfg), 'vmid': vmid}
+                       'source_sha256': source_hash(), 'input_hashes': input_hashes(cfg), 'vmid': vmid,
+                       'creates_guest': creates_guest}
             write(work / 'plan.json', receipt)
             return receipt
         receipt = json.loads((work / 'plan.json').read_text())
@@ -304,7 +309,10 @@ def execute(action, cfg_path, approved_plan=None):
                 or plan['site_sha256'] != sha(cfg_path) or plan['source_sha256'] != source_hash()
                 or plan.get('input_hashes') != input_hashes(cfg)):
             raise InputNeeded('Deploy needs the exact reviewed plan, source and private inputs')
-        if cfg['app'].get('kind') not in DATABASE_KINDS:
+        if cfg['app'].get('kind') in DATABASE_KINDS:
+            if plan.get('creates_guest') is not True:
+                raise InputNeeded('Empty database Deploy requires a plan creating a fresh guest, never an existing database target')
+        else:
             if cfg['app'].get('exclusive_writer_confirmed') is not True:
                 raise InputNeeded('Confirm the selected service migration and retire its old writers before deploy')
             capture = cfg['app']['capture']
