@@ -7,7 +7,7 @@
   ansible.builtin.getent:
     database: group
 
-- name: Refuse existing account changes or numeric identity collisions
+- name: Refuse numeric identity changes or collisions
   ansible.builtin.assert:
     that:
       - app.database.uid | int > 0

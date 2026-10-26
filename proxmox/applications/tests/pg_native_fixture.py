@@ -14,6 +14,12 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import database
 
+
+def require(condition, message):
+    if not condition:
+        raise AssertionError(message)
+
+
 BIN = '/usr/lib/postgresql/16/bin/'
 
 
@@ -27,9 +33,9 @@ def sql(text, port=5432, db='postgres'):
 
 
 def main():
-    assert Path('/.dockerenv').exists() and os.geteuid() == 0
+    require(Path('/.dockerenv').exists() and os.geteuid() == 0, 'Run only as root inside a disposable Docker container')
     version = subprocess.check_output([BIN + 'postgres', '--version'], text=True)
-    assert version.strip() == 'postgres (PostgreSQL) 16.10 (Debian 16.10-1.pgdg13+1)', version
+    require(version.strip() == 'postgres (PostgreSQL) 16.10 (Debian 16.10-1.pgdg13+1)', version)
     with tempfile.TemporaryDirectory(prefix='homelab-native-pg-', dir='/var/lib') as tmp:
         root = Path(tmp)
         os.chown(root, 70, 1000)
@@ -62,16 +68,16 @@ def main():
                     return subprocess.CompletedProcess(command, 0)
                 return execute(command, **kwargs)
             with patch.object(database.subprocess, 'run', side_effect=selected):
-                assert database.run(cfg, root)
-                assert not database.run(cfg, root)
-            assert database.digest(capture) == cfg['capture']['sha256']
-            assert service_calls == [['systemctl', 'start', 'postgresql'], ['systemctl', 'enable', 'postgresql']]
-            assert sql('SELECT value FROM fixture_data;\n', db='fixture_home').strip() == '42'
-            assert sql("SELECT pg_get_userbyid(datdba)||':'||shobj_description(oid,'pg_database') FROM pg_database WHERE datname='fixture_home';\n").strip() == 'fixture_app:synthetic-only'
-            assert sql("SELECT has_database_privilege('fixture_app','postgres','CONNECT');\n").strip() == 't'
-            assert sql("SELECT oid FROM pg_roles WHERE rolname='postgres';\n").strip() == '10'
-            assert sql("SELECT count(*) FROM pg_roles WHERE rolname LIKE 'homelab_restore_%';\n").strip() == '0'
-            assert json.loads((root / 'database-restore.json').read_text())['state'] == 'complete'
+                require(database.run(cfg, root), 'Synthetic database fixture check failed')
+                require(not database.run(cfg, root), 'Synthetic database fixture check failed')
+            require(database.digest(capture) == cfg['capture']['sha256'], 'Synthetic database fixture check failed')
+            require(service_calls == [['systemctl', 'start', 'postgresql'], ['systemctl', 'enable', 'postgresql']], 'Synthetic database fixture check failed')
+            require(sql('SELECT value FROM fixture_data;\n', db='fixture_home').strip() == '42', 'Synthetic database fixture check failed')
+            require(sql("SELECT pg_get_userbyid(datdba)||':'||shobj_description(oid,'pg_database') FROM pg_database WHERE datname='fixture_home';\n").strip() == 'fixture_app:synthetic-only', 'Synthetic database fixture check failed')
+            require(sql("SELECT has_database_privilege('fixture_app','postgres','CONNECT');\n").strip() == 't', 'Synthetic database fixture check failed')
+            require(sql("SELECT oid FROM pg_roles WHERE rolname='postgres';\n").strip() == '10', 'Synthetic database fixture check failed')
+            require(sql("SELECT count(*) FROM pg_roles WHERE rolname LIKE 'homelab_restore_%';\n").strip() == '0', 'Synthetic database fixture check failed')
+            require(json.loads((root / 'database-restore.json').read_text())['state'] == 'complete', 'Synthetic database fixture check failed')
             print('Native PostgreSQL 16.10 clean restore passed: unchanged dump, exact exception pair, restored data/owner/comment/grant, OID 10 and maintenance identity removal')
         except Exception:
             for log in [root / 'postgresql-clean.stderr'] + list(root.glob('*/server.log')):

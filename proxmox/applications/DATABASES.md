@@ -47,8 +47,9 @@ full deployment and startup path.
 ## Preserve file owners
 
 The database account must retain the selected numeric user and group IDs.
-The scripts refuse existing account changes and ID collisions before creating
-anything. For example, if a template already uses the required MariaDB group ID
+The scripts refuse numeric identity changes and ID collisions before creating
+anything. A reused account can still receive the configured home and shell;
+review those private settings before deployment. For example, if a template already uses the required MariaDB group ID
 for `systemd-journal`, stop and choose a compatible fresh template. Do not
 renumber the template's existing account to make the test pass.
 
