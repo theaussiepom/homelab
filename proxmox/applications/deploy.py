@@ -11,6 +11,7 @@ import shlex
 import shutil
 import subprocess
 import ssl
+import stat
 import time
 from urllib.parse import urlparse, quote
 from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHandler, ProxyHandler
@@ -306,9 +307,18 @@ def execute(action, cfg_path, approved_plan=None):
         if 'database' in cfg['app']:
             captures.append(cfg['app']['database']['capture'])
         for capture in captures:
-            if capture.get('coherent') is not True or sha(Path(capture['path'])) != capture['sha256']:
+            path = Path(capture['path'])
+            if capture.get('coherent') is not True or not path.is_file() or sha(path) != capture['sha256']:
                 raise InputNeeded('Finish and verify the selected coherent data capture before creating a guest')
         validate_archive(Path(cfg['app']['capture']['path']))
+        hosts = Path(cfg['paths']['known_hosts'])
+        instruction = 'Supply the deployment account private known_hosts file (regular file, mode 0600) before Deploy'
+        try:
+            info = hosts.lstat()
+        except OSError:
+            raise InputNeeded(instruction) from None
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
+            raise InputNeeded(instruction)
         # This marker survives a killed job, including between completed phases.
         # Each original step retains its own native-operation HOLD as well.
         started = time.time_ns()
@@ -318,7 +328,10 @@ def execute(action, cfg_path, approved_plan=None):
                          'started_at_ns': started, 'automatic_retry': False})
             if step == 'identity':
                 address = application_address(cfg)
-                result = guest_identity.pin(cfg, work, address, lambda path: api_get(cfg, path), write)
+                try:
+                    result = guest_identity.pin(cfg, work, address, lambda path: api_get(cfg, path), write)
+                except ValueError as error:
+                    raise InputNeeded(f'Guest identity verification failed: {error}') from None
             else:
                 result = _execute_step(step, cfg_path, approved_plan)
             results.append({'step': step, 'result': result})

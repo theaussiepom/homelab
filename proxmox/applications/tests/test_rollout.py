@@ -15,6 +15,7 @@ class RolloutTests(unittest.TestCase):
     def prepare(self, root):
         cfg = fixture(root)
         (root / 'ca').write_text('synthetic CA fixture')
+        Path(cfg['paths']['known_hosts']).touch(mode=0o600)
         archive = root / 'capture.tar'
         with tarfile.open(archive, 'w') as stream:
             item = tarfile.TarInfo('synthetic-config'); item.size = 2
@@ -92,6 +93,39 @@ class RolloutTests(unittest.TestCase):
             with patch.object(deploy, '_execute_step', side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
                 deploy.execute('deploy', site, plan)
             self.assertTrue((work / 'ROLLOUT-HOLD.json').is_file())
+
+    def test_missing_capture_has_an_actionable_preflight_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); cfg, site, work, plan = self.prepare(root)
+            Path(cfg['app']['capture']['path']).unlink()
+            with patch.object(deploy, '_execute_step') as runner, self.assertRaisesRegex(deploy.InputNeeded, 'coherent data capture'):
+                deploy.execute('deploy', site, plan)
+            runner.assert_not_called()
+            self.assertFalse((work / 'ROLLOUT-HOLD.json').exists())
+
+    def test_invalid_private_trust_file_cannot_create_a_guest(self):
+        for problem in ('missing', 'mode', 'symlink'):
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp); cfg, site, work, plan = self.prepare(root)
+                hosts = Path(cfg['paths']['known_hosts'])
+                if problem == 'mode': hosts.chmod(0o644)
+                else:
+                    hosts.unlink()
+                    if problem == 'symlink': hosts.symlink_to(root / 'ca')
+                with patch.object(deploy, '_execute_step') as runner, self.assertRaisesRegex(deploy.InputNeeded, 'known_hosts'):
+                    deploy.execute('deploy', site, plan)
+                runner.assert_not_called()
+                self.assertFalse((work / 'ROLLOUT-HOLD.json').exists())
+
+    def test_identity_failure_reports_its_safe_reason_and_stops(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); cfg, site, work, plan = self.prepare(root)
+            with patch.object(deploy, '_execute_step', return_value={'status': 'passed'}) as runner, \
+                    patch.object(deploy.guest_identity, 'pin', side_effect=ValueError('Guest SSH identity differs')):
+                with self.assertRaisesRegex(deploy.InputNeeded, 'Guest identity verification failed: Guest SSH identity differs'):
+                    deploy.execute('deploy', site, plan)
+            self.assertEqual([call.args[0] for call in runner.call_args_list], ['apply'])
+            self.assertEqual(json.loads((work / 'ROLLOUT-HOLD.json').read_text())['step'], 'identity')
 
 
 if __name__ == '__main__':
