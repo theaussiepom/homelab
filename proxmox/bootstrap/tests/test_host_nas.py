@@ -54,7 +54,7 @@ class NasTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(RuntimeError):
                 host_nas.units(dict(self.nas, **change))
 
-    def test_one_graceful_restart_activates_bind_then_rerun_is_a_noop(self, fail_mount=False, stale_bind=False):
+    def test_one_graceful_restart_activates_bind_then_rerun_is_a_noop(self, fail_mount=False, stale_bind=False, nfs_subdirectory_source=False, wrong_directory=False):
         """Exercise host setup and default UID mapping without a real mount."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -67,6 +67,7 @@ class NasTests(unittest.TestCase):
             calls, owners, active, pending, mounted = [], {}, {'protection': 1}, {}, [False]
             private = root / str(host_nas.HOST_MOUNT / self.nas['directory']).lstrip('/')
             real_stat = Path.stat
+            identity_mismatch = [False]
             real_mkdir = Path.mkdir
 
             def nas_mkdir(path, *args, **kwargs):
@@ -76,7 +77,13 @@ class NasTests(unittest.TestCase):
                 return result
 
             def fake_stat(path, *args, **kwargs):
+                is_guest = path == proc / 'root/srv/homelab-backups'
+                if is_guest:
+                    path = private
                 result = real_stat(path, *args, **kwargs)
+                if is_guest and identity_mismatch[0]:
+                    values = list(result); values[1] += 1
+                    result = os.stat_result(values)
                 if path == private and path in owners:
                     values = list(result); values[4:6] = owners[path]
                     return os.stat_result(values)
@@ -98,7 +105,10 @@ class NasTests(unittest.TestCase):
                 if args[:2] == ['pct', 'status']: return 'status: stopped\n'
                 if args[:2] == ['pct', 'start']:
                     active.update(pending)
-                    (proc / 'mountinfo').write_text('1 2 0:1 /bootstrap-state /srv/homelab-backups rw - nfs4 198.18.20.2:/volume1/test rw\n')
+                    if nfs_subdirectory_source:
+                        (proc / 'mountinfo').write_text('1 2 0:1 / /srv/homelab-backups rw - nfs4 198.18.20.2:/volume1/test/bootstrap-state rw\n')
+                    else:
+                        (proc / 'mountinfo').write_text('1 2 0:1 /bootstrap-state /srv/homelab-backups rw - nfs4 198.18.20.2:/volume1/test rw\n')
                 if args == ['systemctl', 'start', host_nas.UNIT]: mounted[0] = True
                 return ''
 
@@ -118,8 +128,10 @@ class NasTests(unittest.TestCase):
                     return
                 first = host_nas.ensure(self.nas, 4917, guest, execute, root, restart=True, unprotect=True)
                 self.assertTrue(first['changed']); self.assertEqual(first['mapped_uid'], 101000)
-                if stale_bind:
-                    (proc / 'mountinfo').write_text('1 2 0:2 /wrong-folder /srv/homelab-backups rw - nfs4 198.18.20.9:/different rw\n')
+                if stale_bind or wrong_directory:
+                    if stale_bind:
+                        (proc / 'mountinfo').write_text('1 2 0:2 /wrong-folder /srv/homelab-backups rw - nfs4 198.18.20.9:/different rw\n')
+                    identity_mismatch[0] = wrong_directory
                     count = len(calls)
                     with self.assertRaisesRegex(RuntimeError, 'stale or differs'):
                         host_nas.ensure(self.nas, 4917, dict(guest, **active), execute, root, restart=True)
@@ -134,6 +146,12 @@ class NasTests(unittest.TestCase):
 
     def test_protection_is_restored_if_the_admitted_bind_command_fails(self):
         self.test_one_graceful_restart_activates_bind_then_rerun_is_a_noop(fail_mount=True)
+
+    def test_native_nfs_subdirectory_source_is_the_same_binding(self):
+        self.test_one_graceful_restart_activates_bind_then_rerun_is_a_noop(nfs_subdirectory_source=True)
+
+    def test_different_directory_on_the_same_filesystem_is_held(self):
+        self.test_one_graceful_restart_activates_bind_then_rerun_is_a_noop(wrong_directory=True)
 
     def test_stale_guest_bind_is_held_without_an_automatic_restart(self):
         self.test_one_graceful_restart_activates_bind_then_rerun_is_a_noop(stale_bind=True)

@@ -184,8 +184,12 @@ def ensure(nas, vmid, guest_config, execute=command, root=Path('/'), restart=Fal
             raise RuntimeError('The current host NAS mount identity differs')
         if not guest:
             return False
-        expected = dict(host[0], root=host[0]['root'].rstrip('/') + '/' + nas['directory'])
-        if guest != [expected]:
+        # NFS may report a bind subdirectory in either its source or root.
+        # Compare the actual directory object, retaining the filesystem check.
+        guest_directory = (root / 'proc' / str(current_pid) / 'root' / GUEST_MOUNT.lstrip('/')).stat()
+        host_directory = private.stat()
+        if (len(guest) != 1 or guest[0]['device'] != host[0]['device']
+                or (guest_directory.st_dev, guest_directory.st_ino) != (host_directory.st_dev, host_directory.st_ino)):
             raise RuntimeError('The existing guest NAS bind is stale or differs; preserve it for review')
         return True
     if not same_binding(current.get('mp0'), result['binding']) or not active():
