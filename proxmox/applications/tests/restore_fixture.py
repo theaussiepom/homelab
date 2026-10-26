@@ -7,6 +7,7 @@ import subprocess
 import struct
 import sys
 import tempfile
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import restore
@@ -69,3 +70,41 @@ with tempfile.TemporaryDirectory(dir='/var/tmp') as tmp:
     assert 'Capture SHA256 does not match' in failed.stdout + failed.stderr
     assert "filter plugin 'ansible.builtin.from_json' failed" not in failed.stdout + failed.stderr
     print('Ansible restore: formatted-volume metadata preserved, exact data metadata, repeat and original error reporting passed')
+
+    # A coherent capture need not contain directories for generated helper files.
+    # Run their real Ansible file/copy tasks, in source order, without Docker or
+    # systemd. This also checks that a repeat preserves restored directory IDs.
+    compose_tasks = yaml.safe_load((tasks.parent / 'compose.yml').read_text())
+    destinations = {'/srv/homelab/data/traefik/dynamic/homelab-applications.yml',
+                    '/srv/homelab/data/ha-startup/mdns-route.sh'}
+    parents = {str(Path(path).parent) for path in destinations}
+    helper_tasks = [task for task in compose_tasks
+                    if task.get('ansible.builtin.copy', {}).get('dest') in destinations
+                    or task.get('ansible.builtin.file', {}).get('path') in parents]
+    fixture_ansible = root / 'ansible'; fixture_ansible.mkdir()
+    shutil.copyfile(tasks.parents[2] / 'mdns-route.sh', root / 'mdns-route.sh')
+    routes = root / 'routes.yml'; routes.write_text('http: {}\n')
+    helper_playbook = fixture_ansible / 'helpers.yml'
+    helper_playbook.write_text(json.dumps([{'hosts':'all', 'connection':'local',
+                                           'gather_facts':False, 'tasks':helper_tasks}]))
+    helper_command = ['ansible-playbook', '-i', 'localhost,', str(helper_playbook),
+                      '--extra-vars', '@'+str(variables)]
+    for kind, directory in [('ingress', volume / 'data/traefik/dynamic'),
+                            ('automation', volume / 'data/ha-startup')]:
+        assert not directory.exists()
+        variables.write_text(json.dumps({'app':{'kind':kind, 'render_dir':str(root)},
+            'stack':{'services':{'homeassistant':{'environment':{'HOMELAB_HA_IPV4':'198.18.0.2'}}}}}))
+        result = subprocess.run(helper_command, capture_output=True, text=True)
+        if result.returncode:
+            raise AssertionError(result.stdout + result.stderr)
+        os.chown(directory, 70, 1000); os.chmod(directory, 0o750)
+        before = directory.stat()
+        result = subprocess.run(helper_command, capture_output=True, text=True)
+        if result.returncode:
+            raise AssertionError(result.stdout + result.stderr)
+        after = directory.stat()
+        assert (after.st_ino,after.st_uid,after.st_gid,after.st_mode) == (before.st_ino,before.st_uid,before.st_gid,before.st_mode)
+        assert 'changed=0' in result.stdout
+    assert (volume / 'data/traefik/dynamic/homelab-applications.yml').read_bytes() == routes.read_bytes()
+    assert (volume / 'data/ha-startup/mdns-route.sh').read_bytes() == (root / 'mdns-route.sh').read_bytes()
+    print('Ansible generated helpers: absent parent directories, exact copies and repeat directory metadata passed')

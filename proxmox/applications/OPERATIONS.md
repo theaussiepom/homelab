@@ -69,6 +69,9 @@ recovery directory such as `lost+found`. Leave that directory untouched;
 restore still requires the application destination itself to be empty.
 Use `/srv/homelab/data` for an explicit stack `data_root` and captured extra
 mounts. Do not move an already restored installation by changing this setting.
+This release accepts only the child-directory layout. An older experimental
+restore at the disk root needs a separately reviewed migration; changing the
+renderer setting cannot move its data or update its restore receipt.
 
 Restore checks hashes, paths/links, empty destination and the prior receipt.
 GNU tar restores numeric owners, modes, ACLs and xattrs. **Any tar warning holds
