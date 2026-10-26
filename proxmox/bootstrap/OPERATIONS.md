@@ -103,6 +103,11 @@ fallback. After a timeout, preserve the local hold and remote marker: local
 process exit does not establish remote closure. Bind-mount contents are not
 included in Proxmox container backups; retain the NAS recovery files themselves.
 
+If the hold says `guest_protection_readback: required`, read back the selected
+deployment guest's `protection` value before clearing the hold or retrying. Keep
+the hold until protection is confirmed enabled. An interrupted operation leaves
+protection **unknown** until that independent readback; local exit is not proof.
+
 The automount avoids a **host** boot dependency, but the guest's `mp0` source
 creates a **deployment-guest** startup dependency on NAS availability. A hard
 NFS operation can remain blocked during an outage. Restore NAS connectivity

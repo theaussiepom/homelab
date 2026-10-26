@@ -89,12 +89,12 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(self.state.read_bytes(), b'old backup only')
         self.assertTrue((self.work / 'CONFIGURATION-HOLD.json').exists())
 
-    def test_embedded_nas_timeout_is_recorded_as_unknown_by_the_local_apply(self):
+    def test_embedded_nas_timeout_is_recorded_as_unknown_by_the_local_apply(self, unprotect=False):
         request = {'node': 'pve', 'vmid': 900, 'guest_mac': '02:00:00:00:09:00',
-                   'nas': {}, 'restart_deploy': False, 'temporarily_unprotect_deploy': False}
+                   'nas': {}, 'restart_deploy': False, 'temporarily_unprotect_deploy': unprotect}
         access = {k: self.saved[k] for k in ['status', 'token_id', 'expires_at', 'grants']}
         plan = {'access': access, 'nas': {'protection_toggle_required': False},
-                'restart_deploy': False, 'temporarily_unprotect_deploy': False,
+                'restart_deploy': False, 'temporarily_unprotect_deploy': unprotect,
                 'identity': {k: request[k] for k in ['node', 'vmid']}}
         plan['identity']['mac'] = request['guest_mac']
         modules = {
@@ -106,6 +106,7 @@ class ConfigurationTests(unittest.TestCase):
                                  capture_output=True, text=True)
         self.assertEqual(outcome.returncode, 75)
         self.assertEqual(json.loads(outcome.stdout.splitlines()[-1])['status'], 'unknown')
+        value = read(self.deployment); value['temporarily_unprotect_deploy'] = unprotect; write(self.deployment, value)
         with patch.object(configuration, 'remote', side_effect=self.remote):
             configuration.configure(self.work, self.deployment)
         with patch.object(configuration, 'remote', return_value=outcome):
@@ -115,6 +116,10 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(hold['status'], 'UNKNOWN')
         self.assertEqual(hold['remote_closure'], 'unconfirmed')
         self.assertEqual((Path(hold['attempt']) / 'stdout').read_text(), outcome.stdout)
+        self.assertEqual(hold['guest_protection_readback'], 'required' if unprotect else 'not_required')
+
+    def test_remote_timeout_after_selected_protection_window_requires_readback(self):
+        self.test_embedded_nas_timeout_is_recorded_as_unknown_by_the_local_apply(unprotect=True)
 
     def test_completed_access_is_saved_when_a_later_nas_step_fails(self):
         with patch.object(configuration, 'remote', side_effect=self.remote):
@@ -129,6 +134,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertTrue((self.work / 'CONFIGURATION-HOLD.json').exists())
 
     def test_timeout_preserves_partial_output_and_completed_access_without_claiming_closure(self):
+        value = read(self.deployment); value['temporarily_unprotect_deploy'] = True; write(self.deployment, value)
         with patch.object(configuration, 'remote', side_effect=self.remote):
             configuration.configure(self.work, self.deployment)
         access = dict(self.saved, expires_at=25000)
@@ -143,6 +149,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(read(self.work / 'access.json')['expires_at'], 25000)
         self.assertEqual((Path(hold['attempt']) / 'stdout').read_bytes(), output)
         self.assertEqual((Path(hold['attempt']) / 'stderr').read_text(), 'bounded partial error')
+        self.assertEqual(hold['guest_protection_readback'], 'required')
 
 
 if __name__ == '__main__':

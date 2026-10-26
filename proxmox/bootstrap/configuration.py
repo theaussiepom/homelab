@@ -146,12 +146,16 @@ def configure(work, deployment, apply=''):
             if result is None:
                 if apply:
                     write(work / 'CONFIGURATION-HOLD.json', {'attempt': str(attempt), 'status': 'UNKNOWN',
-                        'remote_closure': 'unconfirmed', 'automatic_retry': False})
+                        'remote_closure': 'unconfirmed',
+                        'guest_protection_readback': 'required' if request['temporarily_unprotect_deploy'] else 'not_required',
+                        'automatic_retry': False})
                 raise Refused('Remote configuration timed out; preserve its unknown outcome and inspect ' + str(attempt))
             report = json.loads(lines[-1]) if lines else {}
             if apply and report.get('status') == 'unknown':
                 write(work / 'CONFIGURATION-HOLD.json', {'attempt': str(attempt), 'status': 'UNKNOWN',
-                    'remote_closure': 'unconfirmed', 'automatic_retry': False})
+                    'remote_closure': 'unconfirmed',
+                        'guest_protection_readback': 'required' if request['temporarily_unprotect_deploy'] else 'not_required',
+                        'automatic_retry': False})
                 raise Refused('Remote NAS configuration has an unknown outcome; preserve its hold and inspect ' + str(attempt))
             if result.returncode or report.get('status') != 'ready':
                 raise Refused('Bootstrap configuration did not complete; inspect ' + str(attempt))
