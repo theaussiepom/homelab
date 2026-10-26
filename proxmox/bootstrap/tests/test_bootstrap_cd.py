@@ -149,10 +149,10 @@ class BootstrapCDTests(unittest.TestCase):
 
     def test_routed_or_physical_existing_bridge_is_refused(self):
         for field, value in [('bridge_ports', 'eth0'), ('address', '10.77.30.1'), ('gateway6', 'fe80::1'),
-                             ('bridge_vlan_aware', 1), ('active', 0)]:
+                             ('bridge_vlan_aware', 1), ('active', 0), ('bridge_stp', 'on'), ('bridge_fd', '15')]:
             self.api = FakeAPI()
             row = {'iface': 'vmbr30', 'type': 'bridge', 'autostart': 1, 'active': 1,
-                   'method': 'manual', 'method6': 'manual'}
+                   'method': 'manual', 'method6': 'manual', 'bridge_stp': 'off', 'bridge_fd': '0'}
             row[field] = value
             self.api.network.append(row)
             with self.subTest(field=field), self.assertRaises(ValueError): self.run_cd()
