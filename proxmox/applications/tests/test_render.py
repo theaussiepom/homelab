@@ -46,6 +46,19 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(services['pihole']['volumes'], ['/srv/homelab/data/pihole:/etc/pihole'])
         self.assertEqual(services['unbound']['volumes'], ['/srv/homelab/data/unbound:/opt/unbound/etc/unbound'])
 
+    def test_extra_mount_boundary_excludes_the_disk_root_and_siblings(self):
+        """The application child directory does not admit filesystem metadata."""
+        cfg = fixture('dns'); cfg['data_root'] = '/srv/homelab'
+        with self.assertRaises(ValueError):
+            render.compose(cfg)
+        for source in ('/srv/homelab/lost+found', '/srv/homelab/data-other/config'):
+            with self.subTest(source=source):
+                cfg = fixture('automation')
+                cfg['services']['homeassistant']['extra_mounts'] = [
+                    {'source': source, 'target': '/startup', 'read_only': True}]
+                with self.assertRaises(ValueError):
+                    render.compose(cfg)
+
     def test_automation_shares_one_guest_and_keeps_discovery(self):
         """HA, Node-RED and authenticated MQTT remain together, without radio moves."""
         result = render.compose(fixture('automation'))

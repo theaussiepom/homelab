@@ -9,8 +9,9 @@ restores its saved configuration.**
 
 **Current status:** application source and synthetic tests are available. This
 application path has created its first isolated DNS guest through GitHub CD.
-Application restore and startup checks are still in progress. Passing Docker
-tests does not mean the house has migrated.
+Application restore failed before application start. The rehearsal target remains
+on HOLD, and the corrected source has not been replayed. Passing Docker tests
+does not mean the house has migrated.
 The earlier physical ISO/bootstrap result remains separate.
 
 ## What are we bringing across?
