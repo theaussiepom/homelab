@@ -133,7 +133,7 @@ class FoundationTests(unittest.TestCase):
             for value in (None, [], '198.18.40.2:53', ['dns.example.invalid:53'],
                           ['127.0.0.1:53'], ['0.0.0.0:53'], ['198.18.40.2:853'],
                           ['198.18.40.2:53', '198.18.40.2:53'],
-                          ['198.18.40.2:53'] * 4):
+                          ['198.18.40.2:53', '198.18.40.3:53', '198.18.40.4:53', '198.18.40.5:53']):
                 cfg = fixture(directory, 'ingress')
                 if value is None:
                     cfg['foundation'].pop('acme_dns_resolvers')
