@@ -129,7 +129,7 @@ def ensure(nas, vmid, guest_config, execute=command, root=Path('/'), restart=Fal
     # The target runner account remains unchanged. No broad UID/GID passthrough.
     uid = int(execute(['pct', 'exec', str(vmid), '--', 'id', '-u', 'homelab-runner']).strip())
     gid = int(execute(['pct', 'exec', str(vmid), '--', 'id', '-g', 'homelab-runner']).strip())
-    pid = int(execute(['pct', 'pid', str(vmid)]).strip())
+    pid = int(execute(['lxc-info', '-n', str(vmid), '-p', '-H']).strip())
     mapped = []
     for kind, value in [('uid', uid), ('gid', gid)]:
         rows = [list(map(int, line.split())) for line in (root / 'proc' / str(pid) / (kind + '_map')).read_text().splitlines()]
@@ -150,7 +150,7 @@ def ensure(nas, vmid, guest_config, execute=command, root=Path('/'), restart=Fal
     current = json.loads(execute(['pvesh', 'get', '/nodes/' + guest_config['node'] + '/lxc/' + str(vmid) + '/config',
                                   '--current', '1', '--output-format', 'json']))
     def active():
-        current_pid = int(execute(['pct', 'pid', str(vmid)]).strip())
+        current_pid = int(execute(['lxc-info', '-n', str(vmid), '-p', '-H']).strip())
         for line in (root / 'proc' / str(current_pid) / 'mountinfo').read_text().splitlines():
             fields = line.split()
             if len(fields) > 6 and fields[4] == GUEST_MOUNT and fields[fields.index('-') + 1] in ('nfs', 'nfs4'):
