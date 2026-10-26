@@ -53,6 +53,8 @@ def compose(cfg):
     inputs = cfg.get('services', {})
     if set(inputs) != KINDS[kind]:
         raise ValueError('Supply exactly the services for this guest')
+    if kind == 'identity' and inputs['server'].get('image') != inputs['worker'].get('image'):
+        raise ValueError('Authentik server and worker require the same pinned image')
     root = cfg.get('data_root', '/srv/homelab/data')
     if root != '/srv/homelab/data':
         raise ValueError('Restored application data belongs under /srv/homelab/data')
@@ -104,6 +106,8 @@ def compose(cfg):
             for key in ('command', 'entrypoint', 'user'):
                 if key in value:
                     service[key] = preserved(value[key], key)
+        if kind == 'identity' and 'user' in value:
+            service['user'] = preserved(value['user'], 'user')
         capabilities = value.get('cap_add', [])
         if capabilities:
             if name != 'homeassistant' or capabilities != ['NET_ADMIN']:
@@ -127,9 +131,13 @@ def compose(cfg):
             del services[name]['network_mode']
             services[name]['command'] = name
             services[name]['environment'].update({k: literal(v) for k, v in env.items()})
-            services[name]['depends_on'] = ['redis']
+            services[name]['depends_on'] = {'redis': {'condition': 'service_healthy'}}
         del services['redis']['network_mode']
-        services['redis']['command'] = ['redis-server', '--appendonly', 'yes']
+        services['redis']['command'] = preserved(
+            inputs['redis'].get('command', ['redis-server', '--appendonly', 'yes']), 'command')
+        services['redis']['healthcheck'] = {
+            'test': ['CMD-SHELL', 'redis-cli ping | grep -qx PONG'],
+            'start_period': '20s', 'interval': '30s', 'retries': 5, 'timeout': '3s'}
         services['server']['ports'] = ['9000:9000', '9443:9443']
     if kind == 'dns':
         services['pihole']['environment'].update({'FTLCONF_dhcp_active': 'false',

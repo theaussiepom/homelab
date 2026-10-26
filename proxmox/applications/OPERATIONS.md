@@ -104,6 +104,47 @@ administration grant in the concrete native guest/start decision. It is not
 enabled by the example or granted to other services. The address must belong
 to a declared guest interface; missing IPv4/IPv6 routing fails startup.
 
+### Existing-version Authentik
+
+Use the `identity` stack for the existing Authentik server, worker and Redis.
+Server and worker must select the same pinned image. Retain the installed version;
+this path does not upgrade Authentik or create OAuth/proxy providers. The restored
+PostgreSQL database retains users, flows, provider/client secrets and outpost
+configuration. Restore it separately before starting this guest, and keep its
+original `AUTHENTIK_SECRET_KEY` in the private `authentik_secret_key` input.
+
+Supply the existing database credentials in the top-level PostgreSQL inputs.
+The renderer sets both modes to that database and the stack's internal `redis`
+host. Preserve other private `AUTHENTIK_*` settings, including SMTP, in each
+service's `environment`. Dollar signs are escaped for Compose and arrive intact
+inside the containers. Do not copy a new-install bootstrap password/token into a
+restored deployment. Keep existing external hostnames, callbacks and proxy
+settings; login acceptance belongs to the restored integrations.
+
+The capture archive must contain `authentik/media`, `authentik/templates`
+(the original custom-templates contents), `authentik/certs` and `redis` at its
+root. Server and worker share media/templates; only worker mounts certs. Preserve
+numeric owners, modes, ACLs and xattrs. Identity services accept an explicit
+captured `user`; no permission repair or Docker socket is added. Redis accepts
+its captured `command` as a string, argv list or null, so its persistence mode
+can match the capture; omission retains the previous append-only default. Record
+its exact image and persistence command before binding real private inputs.
+
+Server/worker wait for Redis to answer `PING` with `PONG` on its default local
+port without authentication, matching the [2025.2.1 upstream Compose
+contract](https://github.com/goauthentik/authentik/blob/version/2025.2.1/docker-compose.yml).
+A Redis setup with a different port or authentication needs a reviewed matching
+probe before use. Redis has no published guest port. Authentik retains the
+image's mode-aware `ak healthcheck`; Compose `up --wait` checks both modes, rather
+than considering a running container sufficient. PostgreSQL is external to this
+stack: it is neither created nor restored by Compose.
+
+Require private read-only probes for server readiness and worker/Redis health.
+Then check a real existing login, the embedded outpost/Node-RED forward-auth
+path, and pgAdmin's OAuth callback separately. Startup/config tests do not prove
+those integrations, TLS, SMTP delivery, Docker inside the native LXC, or restored
+file access. No test email is sent by this path.
+
 ### Native databases
 
 `app.database` supplies `user`, `group`, `uid`, `gid`, `home`,
