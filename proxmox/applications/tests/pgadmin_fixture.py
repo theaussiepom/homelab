@@ -52,6 +52,7 @@ def serve():
 
     server = ThreadingHTTPServer(('127.0.0.1', 9444), OIDC)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain('/fixture/server.pem', '/fixture/server.key')
     server.socket = context.wrap_socket(server.socket, server_side=True)
     server.serve_forever()

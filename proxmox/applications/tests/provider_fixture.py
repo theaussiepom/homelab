@@ -122,6 +122,7 @@ def serve():
         threading.Thread(target=server.serve_forever, daemon=True).start()
     api = ThreadingHTTPServer(('127.0.0.1', 8006), PVE)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain('/fixture/server.pem', '/fixture/server.key')
     api.socket = context.wrap_socket(api.socket, server_side=True)
     threading.Thread(target=api.serve_forever, daemon=True).start()
