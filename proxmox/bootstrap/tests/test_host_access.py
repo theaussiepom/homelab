@@ -2,6 +2,7 @@
 from pathlib import Path
 import sys
 import unittest
+import subprocess
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -9,6 +10,12 @@ import host_access
 
 
 class HostAccessTests(unittest.TestCase):
+    def test_mutation_command_accepts_native_plain_text_but_json_reads_stay_strict(self):
+        with patch.object(host_access.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, 'update token homelab-deploy-900\n', '')):
+            self.assertEqual(host_access.command(['pveum', 'user', 'token', 'modify', 'root@pam', 'homelab-deploy-900', '--expire', '22600']), 'update token homelab-deploy-900')
+            with self.assertRaises(ValueError):
+                host_access.command(['pveum', 'user', 'token', 'list', 'root@pam', '--output-format', 'json'])
+
     def setUp(self):
         """Create isolated synthetic inputs for this test case."""
         self.request = dict(node='pve', vmid=900, storage_id='local-lvm',

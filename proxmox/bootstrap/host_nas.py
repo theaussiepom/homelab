@@ -101,7 +101,7 @@ def ensure(nas, vmid, guest_config, execute=command, root=Path('/'), restart=Fal
     for name in result['units_to_create']:
         path = root / 'etc/systemd/system' / name
         with path.open('x') as stream:
-            os.chmod(path, 0o644)
+            os.chmod(path, 0o600)
             stream.write(units(nas)[name]); stream.flush(); os.fsync(stream.fileno())
     if result['units_to_create']:
         execute(['systemctl', 'daemon-reload'])

@@ -20,7 +20,9 @@ def command(args):
     proc = subprocess.run(args, capture_output=True, text=True, timeout=20)
     if proc.returncode:
         raise RuntimeError('Proxmox access setup failed; ' + proc.stderr.strip())
-    return json.loads(proc.stdout) if proc.stdout.strip() else None
+    if '--output-format' in args and args[args.index('--output-format') + 1] == 'json':
+        return json.loads(proc.stdout)
+    return proc.stdout.strip() or None
 
 
 def declared_grants(request):
