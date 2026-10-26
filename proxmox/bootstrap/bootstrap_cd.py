@@ -165,7 +165,7 @@ def reconcile(api, c, before, evidence):
     node = '/nodes/' + c['node']
     if not before['bridge_exists']:
         api.call(node + '/network', 'POST', {'iface': c['bridge'], 'type': 'bridge',
-                 'autostart': 1, 'bridge_ports': 'none', 'bridge_stp': 'off', 'bridge_fd': 0,
+                 'autostart': 1, 'bridge_ports': 'none',
                  'comments': 'HomeLab CD private backend; no physical uplink'})
         pending = api.call(node + '/network')
         proposed = network_state(pending['data'])

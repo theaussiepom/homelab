@@ -98,6 +98,12 @@ class BootstrapCDTests(unittest.TestCase):
         for source in self.root.glob('cd-*/result.json'):
             self.assertEqual(source.read_bytes(), (self.nas / source.parent.name / 'result.json').read_bytes())
 
+    def test_bridge_creation_uses_only_the_installed_pve_api_parameters(self):
+        self.run_cd()
+        request = next(values for _, method, values in self.api.writes if method == 'POST')
+        # Proxmox 9.2's network create schema has no bridge_stp/bridge_fd parameters.
+        self.assertEqual(set(request), {'iface', 'type', 'autostart', 'bridge_ports', 'comments'})
+
     def test_existing_pending_networks_and_occupied_ids_refuse_before_any_write(self):
         for change in ('pending', 'occupied', 'acl'):
             with self.subTest(change=change):
