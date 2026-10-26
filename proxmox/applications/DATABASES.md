@@ -23,7 +23,7 @@ matching database versions, rather than upgrading the database during migration:
 | --- | --- | --- |
 | MariaDB | 12.3.3 | Matching signed Debian packages found; synthetic full SQL restore fixture checks rows, restored accounts/grants and an application login |
 | PostgreSQL | 16.10 | Matching signed Debian packages found; synthetic clean SQL restore checks rows, ownership, grants and removal of its temporary restore account |
-| InfluxDB | Server 2.7.12, CLI 2.7.5 | Synthetic full backup restore/query passed with exact matching binaries; current official package/key retrieval is blocked. Do not substitute a newer version silently |
+| InfluxDB | Server 2.7.12, CLI 2.7.5 | Exact signed packages installed and empty daemon health/CLI checks passed; synthetic full backup restore/query also passed. Service-manager startup still needs the LXC test |
 
 These Docker fixtures are useful confidence checks. **They do not mean a database
 LXC has passed a full GitHub deployment or that household data has migrated.**
@@ -98,6 +98,8 @@ devices. It removes only the container it created and retains the result/logs.
 
 A pass checks the real restore helper with native database binaries. Its systemd
 calls are intercepted because ordinary Docker cannot prove LXC service startup.
-For InfluxDB, retain the package retrieval failure and resolve it before adding
-a similar installation claim. Do not bypass signature checks or use an
-unreviewed mirror.
+InfluxDB's earlier package retrieval failure has been preserved. Its exact signed
+packages and empty daemon have since passed an isolated check. That slim Docker
+root produced service-install script warnings, so a successful package/daemon
+check still does not establish service-manager startup in the real guest. Do not
+bypass signature checks or use an unreviewed mirror.
