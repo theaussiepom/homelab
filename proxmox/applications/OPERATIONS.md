@@ -190,19 +190,63 @@ certify a real dump. Failed restore receipts and partial targets stay held.
 ### Proxy and login
 
 Restore Traefik static configuration/certificates under `traefik/`. Its file
-provider must watch `/etc/traefik/dynamic`, with a `websecure` entrypoint and the
-restored certificate. Generated routes go into `dynamic/homelab-applications.yml`.
+provider must watch `/etc/traefik/dynamic`, with the selected HTTPS entrypoint and
+restored certificate configuration. Generated routes go into `dynamic/homelab-applications.yml`.
 Prepare that directory and remove conflicting routes in the private capture.
 No certificate or Cloudflare credential is requested/copied implicitly.
+
+Keep each existing FQDN in `<application>_hosts` (a nonempty list), or retain
+the original `<application>_host` string; do not supply both. This applies to
+`homeassistant`, `node_red`, `identity` and the optional `pgadmin` route. Each
+needs a credential-free `<application>_url` backend origin. Hosts must be unique
+across applications. Original Host headers pass through, so issuer and OAuth
+callback URLs keep the requested hostname. This does not rewrite an application's
+canonical issuer, callback allowlist or cookie configuration.
+
+`ingress_entrypoint` defaults to `websecure`; select the restored entrypoint
+name explicitly when different (for example `https`). Optional
+`ingress_cert_resolver` selects the existing resolver (for example `cloudflare`);
+omitting it keeps `tls: {}` and uses the restored TLS certificate configuration.
+The renderer does not create a resolver, request a new certificate policy, or
+change DNS. Keep the existing ACME store, TLS options/defaults and certificate
+paths in the private capture. The guest starts `/etc/traefik/traefik.yml`, so
+prepare the captured static config at that path and reconcile its file-provider
+directory and certificate mounts before admission. Disable its old Docker
+provider: there is no guest-to-guest Docker socket. Preserve required middleware
+definitions and review conflicting old routers and public/LAN exposure rules
+before installing these generated routes; the renderer does not import them.
 
 HA uses its own login. Node-RED gets Authentik forward auth and an unprotected
 outpost callback route following the
 [Authentik pattern](https://docs.goauthentik.io/add-secure-apps/providers/proxy/server_traefik/).
+Application routers use explicit priority 10 and the outpost uses 100, so adding
+hostname aliases cannot let Traefik's default rule-length priority send an outpost
+callback through forward-auth again. See [Traefik's priority rules](https://doc.traefik.io/traefik/reference/routing-configuration/http/routing/rules-and-priority/).
 Restrict Node-RED's backend port to the proxy/explicit administration; SSO does
 not protect a separately exposed backend. Restore its existing provider/outpost
 and verify login. The installed Authentik version's PostgreSQL and Redis
 dependencies are retained. Restore HA's exact trusted proxy settings using
 the [HA HTTP guidance](https://www.home-assistant.io/integrations/http/).
+
+pgAdmin uses its existing native OAuth2 integration, with no generated forward
+auth or path rewriting. Supplying any `pgadmin_*` route input requires its host(s)
+and backend URL together. Optional `pgadmin_middlewares` retains existing file
+middleware references, for example `["chain-lan-unsafe@file"]`; the referenced
+definitions must be restored and must not add forward-auth to this native login.
+The renderer rejects its own `authentik` middleware on pgAdmin. This route does
+not create a pgAdmin service or change its OAuth provider/client. Verify both
+hostname callbacks (`/oauth2/authorize`), the original issuer/discovery URLs,
+proxy-header settings, browser login and a database connection after admission.
+Node-RED requires its own separate forward-auth acceptance; pgAdmin OAuth success
+does not qualify it.
+
+Synthetic route contracts run in the application unit suite. To additionally
+exercise the rendered rules through pinned Traefik with stub backends, run
+`python3 proxmox/applications/tests/ingress_fixture.py --tools-image homelab-app-test`
+after building the source-tools image as in CI. It publishes no ports and uses
+only an isolated container network namespace, generated TLS and invented hosts.
+It proves routing and proxy-header behaviour, not real Authentik/pgAdmin login,
+origin certificates, restored middleware policy or production reachability.
 
 ## Workflow commands
 

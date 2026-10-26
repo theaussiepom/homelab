@@ -141,23 +141,79 @@ def compose(cfg):
     return result
 
 
+def dns_name(host):
+    return (isinstance(host, str) and len(host) <= 253 and
+            all(re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', label)
+                for label in host.split('.')))
+
+
+def route_hosts(cfg, name):
+    """Keep old single-host inputs while admitting explicit hostname aliases."""
+    single, multiple = f'{name}_host', f'{name}_hosts'
+    if single in cfg and multiple in cfg:
+        raise ValueError('Supply either a single route host or a host list')
+    hosts = cfg[multiple] if multiple in cfg else [required(cfg, single)]
+    if not isinstance(hosts, list) or not hosts or any(not dns_name(host) for host in hosts):
+        raise ValueError('Use literal DNS names for routes')
+    if len(set(hosts)) != len(hosts):
+        raise ValueError('Route hostnames must be unique')
+    return hosts
+
+
+def backend_url(cfg, name):
+    url = required(cfg, f'{name}_url')
+    if any(c.isspace() for c in url) or '\\' in url:
+        raise ValueError('Use credential-free backend HTTP origins')
+    parsed = urlsplit(url)
+    if (parsed.scheme not in ('http', 'https') or not parsed.hostname or
+            parsed.username is not None or parsed.password is not None or
+            parsed.path not in ('', '/') or parsed.query or parsed.fragment or
+            (parsed.port is not None and not 1 <= parsed.port <= 65535)):
+        raise ValueError('Use credential-free backend HTTP origins')
+    try:
+        ipaddress.ip_address(parsed.hostname)
+    except ValueError:
+        if not dns_name(parsed.hostname):
+            raise ValueError('Use a literal backend address or DNS name') from None
+    return url
+
+
 def ingress(cfg):
-    """A file provider reaches other guests without a Docker socket or HA SSO."""
+    """Reach guest backends; only Node-RED delegates login to forward-auth."""
     if cfg.get('kind') != 'ingress':
         raise ValueError('Ingress settings belong to the ingress guest')
-    routers, services = {}, {}
-    for name in ('homeassistant', 'node_red', 'identity'):
-        host, url = required(cfg, f'{name}_host'), required(cfg, f'{name}_url')
-        if not re.fullmatch(r'[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?', host):
-            raise ValueError('Use literal DNS names for routes')
-        parsed = urlsplit(url)
-        if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError('Use credential-free backend HTTP URLs')
-        routers[name] = {'rule': f'Host(`{host}`)', 'entryPoints': ['websecure'], 'tls': {}, 'service': name}
+    entrypoint = cfg.get('ingress_entrypoint', 'websecure')
+    resolver = cfg.get('ingress_cert_resolver')
+    for value in [entrypoint] + ([resolver] if 'ingress_cert_resolver' in cfg else []):
+        if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]+', value):
+            raise ValueError('Use literal entrypoint and certificate resolver names')
+    tls = {'certResolver': resolver} if resolver else {}
+    names = ['homeassistant', 'node_red', 'identity']
+    if any(key in cfg for key in ('pgadmin_host', 'pgadmin_hosts', 'pgadmin_url', 'pgadmin_middlewares')):
+        names.append('pgadmin')
+    routers, services, claimed = {}, {}, set()
+    for name in names:
+        hosts, url = route_hosts(cfg, name), backend_url(cfg, name)
+        if claimed.intersection(hosts):
+            raise ValueError('Different applications cannot share a route hostname')
+        claimed.update(hosts)
+        rule = ' || '.join(f'Host(`{host}`)' for host in hosts)
+        if len(hosts) > 1:
+            rule = f'({rule})'
+        routers[name] = {'rule': rule, 'priority': 10, 'entryPoints': [entrypoint],
+                         'tls': dict(tls), 'service': name}
         services[name] = {'loadBalancer': {'servers': [{'url': url}], 'passHostHeader': True}}
+    if 'pgadmin' in names:
+        middlewares = cfg.get('pgadmin_middlewares', [])
+        if (not isinstance(middlewares, list) or any(
+                not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]+(?:@file)?', value) or
+                value in ('authentik', 'authentik@file') for value in middlewares)):
+            raise ValueError('pgAdmin uses native OAuth2; supply only its restored file middlewares')
+        if middlewares:
+            routers['pgadmin']['middlewares'] = list(middlewares)
     routers['node_red']['middlewares'] = ['authentik']
-    routers['outpost'] = {'rule': f"Host(`{cfg['node_red_host']}`) && PathPrefix(`/outpost.goauthentik.io/`)",
-                          'priority': 100, 'entryPoints': ['websecure'], 'tls': {}, 'service': 'identity'}
+    routers['outpost'] = {'rule': routers['node_red']['rule'] + ' && PathPrefix(`/outpost.goauthentik.io/`)',
+                          'priority': 100, 'entryPoints': [entrypoint], 'tls': dict(tls), 'service': 'identity'}
     middleware = {'authentik': {'forwardAuth': {
         'address': cfg['identity_url'].rstrip('/') + '/outpost.goauthentik.io/auth/traefik',
         'trustForwardHeader': False,

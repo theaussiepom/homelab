@@ -13,10 +13,15 @@
       "extra_mounts": []
     }
   },
-  "homeassistant_host": "ha.example.invalid",
-  "node_red_host": "flows.example.invalid",
-  "identity_host": "auth.example.invalid",
+  "ingress_entrypoint": "https",
+  "ingress_cert_resolver": "cloudflare",
+  "homeassistant_hosts": ["ha.example.invalid", "ha.alias.invalid"],
+  "node_red_hosts": ["flows.example.invalid", "flows.alias.invalid"],
+  "identity_hosts": ["auth.example.invalid", "auth.alias.invalid"],
+  "pgadmin_hosts": ["pgadmin.example.invalid", "pgadmin.alias.invalid"],
+  "pgadmin_middlewares": ["chain-lan-unsafe@file"],
   "homeassistant_url": "http://198.18.100.20:8123",
   "node_red_url": "http://198.18.100.20:1880",
-  "identity_url": "http://198.18.30.20:9000"
+  "identity_url": "http://198.18.30.20:9000",
+  "pgadmin_url": "http://198.18.30.32:80"
 }

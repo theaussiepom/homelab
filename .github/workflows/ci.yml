@@ -39,6 +39,10 @@ jobs:
           for kind in dns identity ingress automation; do
             docker compose -f "$RUNNER_TEMP/app-compose/$kind.json" config --quiet
           done
+      - name: Exercise ingress aliases and login boundaries through pinned Traefik
+        run: |
+          docker pull --platform linux/amd64 traefik@sha256:6b9cbca6fac42ab0075f5437d8dc1685cfd188626d8d515839ea94f8b6271c42
+          python3 proxmox/applications/tests/ingress_fixture.py
       - name: Prove the selected PostgreSQL clean SQL adapter with synthetic databases
         run: |
           docker pull --platform linux/amd64 postgres@sha256:9d4951e6dc70422022512ff05ac86e0ae360da051c563accbed85d6f654c3357
