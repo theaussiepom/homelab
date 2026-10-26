@@ -21,7 +21,8 @@ SCHEMAS = {
                  set(), {'secret_key', 'postgresql_password'}, {'smtp_password'}),
     'db-tools': ({'public_url', 'identity_url', 'oauth_client_id', 'oauth_name'},
                  {'oauth_display_name', 'provider_slug'}, {'oauth_client_secret'}, set()),
-    'ingress': ({'bind_address', 'proxmox_url', 'proxmox_token_id', 'acme_email', 'pve_ca_file'},
+    'ingress': ({'bind_address', 'proxmox_url', 'proxmox_token_id', 'acme_email', 'pve_ca_file',
+                 'acme_dns_resolvers'},
                 set(), {'proxmox_token', 'cloudflare_dns_token'}, set()),
 }
 
@@ -65,6 +66,24 @@ def file_path(value):
     return value
 
 
+def dns_resolvers(value):
+    message = 'Declare 1-3 unique recursive DNS IPv4 addresses on port 53'
+    if not isinstance(value, list) or not 1 <= len(value) <= 3:
+        raise ValueError(message)
+    result = []
+    for resolver in value:
+        if not isinstance(resolver, str):
+            raise ValueError(message)
+        host, separator, port = resolver.rpartition(':')
+        try:
+            if separator != ':' or port != '53' or address(host) != host or resolver in result:
+                raise ValueError(message)
+        except ValueError:
+            raise ValueError(message) from None
+        result.append(resolver)
+    return result
+
+
 def validate(cfg):
     if 'foundation' not in cfg:
         return None
@@ -82,7 +101,7 @@ def validate(cfg):
         raise ValueError('Supply only the selected foundation secret file references')
     for path in secrets.values():
         file_path(path)
-    for name in required | (optional & selected.keys()):
+    for name in (required | (optional & selected.keys())) - {'acme_dns_resolvers'}:
         text(selected[name], name)
     services = cfg.get('services', {})
     if kind == 'identity':
@@ -106,6 +125,7 @@ def validate(cfg):
             raise ValueError('Foundation pgAdmin uses the selected UID/GID 5050')
     else:
         address(selected['bind_address'])
+        dns_resolvers(selected['acme_dns_resolvers'])
         origin(selected['proxmox_url'], 'proxmox_url')
         file_path(selected['pve_ca_file'])
         if not re.fullmatch(r'[^\s!]+@[^\s!]+![A-Za-z0-9_.-]+', selected['proxmox_token_id']):
@@ -246,7 +266,9 @@ def files(cfg):
                         'apiTokenId': selected['proxmox_token_id'], 'apiToken': values['proxmox_token'],
                         'apiLogging': 'info', 'apiValidateSSL': 'true'}}},
                   'certificatesResolvers': {'letsencrypt': {'acme': {'email': selected['acme_email'],
-                      'storage': '/var/traefik/certs/acme.json', 'dnsChallenge': {'provider': 'cloudflare'}}}},
+                      'storage': '/var/traefik/certs/acme.json', 'dnsChallenge': {
+                          'provider': 'cloudflare', 'resolvers': dns_resolvers(selected['acme_dns_resolvers']),
+                          'propagation': {'disableANSChecks': True, 'requireAllRNS': True}}}}},
                   'log': {'level': 'INFO'}, 'accessLog': {}}
         shared = {'tls': {'options': {'default': {'minVersion': 'VersionTLS12'}}},
                   'http': {'middlewares': {'security-headers': {'headers': {'contentTypeNosniff': True}}}}}

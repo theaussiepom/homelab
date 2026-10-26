@@ -44,6 +44,7 @@ def fixture(directory, kind):
         ca.write_text('-----BEGIN CERTIFICATE-----\nsynthetic-public-fixture\n-----END CERTIFICATE-----\n')
         selected.update(bind_address='198.18.40.33', proxmox_url='https://198.18.25.10:8006',
                         proxmox_token_id='root@pam!traefik-provider', acme_email='operator@example.invalid',
+                        acme_dns_resolvers=['198.18.40.2:53', '198.18.100.4:53'],
                         pve_ca_file=str(ca))
     cfg['foundation'] = selected
     return cfg
@@ -114,6 +115,10 @@ class FoundationTests(unittest.TestCase):
             self.assertEqual(provider['apiToken'], 'synthetic-$proxmox_token')
             self.assertEqual(provider['apiValidateSSL'], 'true')
             self.assertEqual(static['experimental']['plugins']['traefik-proxmox-provider']['version'], 'v0.7.0')
+            challenge = static['certificatesResolvers']['letsencrypt']['acme']['dnsChallenge']
+            self.assertEqual(challenge['resolvers'], ['198.18.40.2:53', '198.18.100.4:53'])
+            self.assertEqual(challenge['propagation'], {'disableANSChecks': True, 'requireAllRNS': True})
+            self.assertNotIn('disableChecks', challenge['propagation'])
             self.assertNotIn('docker', static['providers'])
             self.assertEqual(static['entryPoints']['websecure']['address'], '198.18.40.33:443')
             self.assertEqual(static['entryPoints']['health']['address'], '127.0.0.1:8082')
@@ -122,6 +127,26 @@ class FoundationTests(unittest.TestCase):
             self.assertTrue(all((a['uid'], a['gid'], a['mode']) == (0, 0, '0400') for a in artifacts.values()))
             self.assertEqual(set(render.foundation_source_files(cfg)),
                              set(cfg['foundation']['secret_files'].values()) | {cfg['foundation']['pve_ca_file']})
+
+    def test_acme_requires_explicit_unique_recursive_dns_addresses_on_port_53(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for value in (None, [], '198.18.40.2:53', ['dns.example.invalid:53'],
+                          ['127.0.0.1:53'], ['0.0.0.0:53'], ['198.18.40.2:853'],
+                          ['198.18.40.2:53', '198.18.40.2:53'],
+                          ['198.18.40.2:53'] * 4):
+                cfg = fixture(directory, 'ingress')
+                if value is None:
+                    cfg['foundation'].pop('acme_dns_resolvers')
+                else:
+                    cfg['foundation']['acme_dns_resolvers'] = value
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    render.compose(cfg)
+            cfg = fixture(directory, 'ingress')
+            cfg['foundation']['acme_dns_resolvers'] = ['198.18.40.2:53']
+            artifacts = {item['path']: item for item in render.foundation_files(cfg)}
+            static = json.loads(artifacts['traefik.yml']['content'])
+            self.assertEqual(static['certificatesResolvers']['letsencrypt']['acme']['dnsChallenge']['resolvers'],
+                             ['198.18.40.2:53'])
 
     def test_closed_schema_rejects_inline_secret_listener_and_tls_bypasses(self):
         with tempfile.TemporaryDirectory() as directory:

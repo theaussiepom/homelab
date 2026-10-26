@@ -66,6 +66,15 @@ Shared HTTPS settings live in freshly generated Traefik configuration. No Docker
 socket or old collection of routing files is copied across. Authentik and
 pgAdmin use their own sign-in; they do not receive a second forward-auth layer.
 
+The ingress `foundation` settings must also list the recursive DNS servers its
+firewall allows, including port 53, for example
+`"acme_dns_resolvers": ["10.77.40.2:53", "192.168.100.4:53"]`.
+For certificate creation and renewal, Traefik checks the challenge TXT record at
+every listed resolver. It avoids direct queries to external authoritative DNS
+servers, which the restricted guest firewall blocks. These resolvers must be
+able to retrieve public TXT records; ordinary certificate and Proxmox TLS
+verification remain enabled. See the [Traefik DNS propagation settings](https://doc.traefik.io/traefik/v3.7/reference/install-configuration/tls/certificate-resolvers/acme/).
+
 The provider has its own read-only Proxmox token. Bootstrap CD creates it for
 only the declared node/guest scopes, verifies TLS using the host CA, saves the
 credential privately on the runner and NAS, and admits only the proxy's address
