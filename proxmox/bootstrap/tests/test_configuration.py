@@ -88,6 +88,34 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(self.state.read_bytes(), b'old backup only')
         self.assertTrue((self.work / 'CONFIGURATION-HOLD.json').exists())
 
+    def test_completed_access_is_saved_when_a_later_nas_step_fails(self):
+        with patch.object(configuration, 'remote', side_effect=self.remote):
+            configuration.configure(self.work, self.deployment)
+        access = dict(self.saved, grants=self.saved['grants'] + [
+            {'path': '/vms/6101', 'roles': 'PVEVMAdmin', 'propagate': False}])
+        line = json.dumps({'step': 'access', 'result': access}) + '\n'
+        with patch.object(configuration, 'remote', return_value=subprocess.CompletedProcess([], 1, line, 'NAS failure')):
+            with self.assertRaises(Refused):
+                configuration.configure(self.work, self.deployment, 'a' * 64)
+        self.assertEqual(read(self.work / 'access.json')['grants'], access['grants'])
+        self.assertTrue((self.work / 'CONFIGURATION-HOLD.json').exists())
+
+    def test_timeout_preserves_partial_output_and_completed_access_without_claiming_closure(self):
+        with patch.object(configuration, 'remote', side_effect=self.remote):
+            configuration.configure(self.work, self.deployment)
+        access = dict(self.saved, expires_at=25000)
+        output = (json.dumps({'step': 'access', 'result': access}) + '\n{"incomplete":').encode()
+        error = subprocess.TimeoutExpired(['ssh'], 300, output=output, stderr=b'bounded partial error')
+        with patch.object(configuration, 'remote', side_effect=error):
+            with self.assertRaisesRegex(Refused, 'unknown outcome'):
+                configuration.configure(self.work, self.deployment, 'a' * 64)
+        hold = read(self.work / 'CONFIGURATION-HOLD.json')
+        self.assertEqual(hold['status'], 'UNKNOWN')
+        self.assertEqual(hold['remote_closure'], 'unconfirmed')
+        self.assertEqual(read(self.work / 'access.json')['expires_at'], 25000)
+        self.assertEqual((Path(hold['attempt']) / 'stdout').read_bytes(), output)
+        self.assertEqual((Path(hold['attempt']) / 'stderr').read_text(), 'bounded partial error')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -75,7 +75,9 @@ class NasTests(unittest.TestCase):
 
             def execute(args):
                 calls.append(args)
-                if args[0] == 'findmnt': return 'nfs4 198.18.20.2:/volume1/test\n'
+                if args[0] == 'findmnt':
+                    # systemd leaves an autofs mount under the active NFS mount.
+                    return 'nfs4 198.18.20.2:/volume1/test\n' if ['-t', 'nfs,nfs4'] == args[2:4] else 'autofs systemd-1\nnfs4 198.18.20.2:/volume1/test\n'
                 if args[:2] == ['pct', 'pid']: return '123\n'
                 if args[:2] == ['pct', 'exec']: return '1000\n'
                 if args[0] == 'pvesh': return json.dumps(active)

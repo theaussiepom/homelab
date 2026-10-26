@@ -14,7 +14,9 @@ AUTOMOUNT = 'mnt-homelab_backups.automount'
 
 def command(args):
     """Run a bounded ordinary host operation without a shell."""
-    result = subprocess.run(args, capture_output=True, text=True, timeout=60, check=True)
+    result = subprocess.run(args, capture_output=True, text=True, timeout=60)
+    if result.returncode:
+        raise RuntimeError('NAS setup command failed; ' + result.stderr.strip())
     return result.stdout
 
 
@@ -107,7 +109,7 @@ def ensure(nas, vmid, guest_config, execute=command, root=Path('/'), restart=Fal
         execute(['systemctl', 'daemon-reload'])
     execute(['systemctl', 'enable', '--now', AUTOMOUNT])
     execute(['systemctl', 'start', UNIT])
-    found = execute(['findmnt', '-rn', '-o', 'FSTYPE,SOURCE', '--mountpoint', str(HOST_MOUNT)]).strip().split()
+    found = execute(['findmnt', '-rn', '-t', 'nfs,nfs4', '-o', 'FSTYPE,SOURCE', '--mountpoint', str(HOST_MOUNT)]).strip().split()
     source = nas['server'] + ':' + nas['export']
     if len(found) != 2 or found[0] not in ('nfs', 'nfs4') or found[1] != source:
         raise RuntimeError('The mounted filesystem is not the selected NAS export')

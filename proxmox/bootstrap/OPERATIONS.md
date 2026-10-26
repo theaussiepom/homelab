@@ -95,6 +95,15 @@ fallback. After a timeout, preserve the local hold and remote marker: local
 process exit does not establish remote closure. Bind-mount contents are not
 included in Proxmox container backups; retain the NAS recovery files themselves.
 
+The automount avoids a **host** boot dependency, but the guest's `mp0` source
+creates a **deployment-guest** startup dependency on NAS availability. A hard
+NFS operation can remain blocked during an outage. Restore NAS connectivity
+before retrying a guest start. If an administrator deliberately chooses to
+remove the exact `mp0` mapping for recovery, app jobs must remain held until the
+NAS bind and write/readback are restored; there is no automatic local fallback.
+No stopped-NAS guest-start test has been performed. Do not interrupt the NAS
+or other household services just to test this scenario.
+
 ### Active state
 
 State is the file `tofu/terraform.tfstate` inside the private bundle.

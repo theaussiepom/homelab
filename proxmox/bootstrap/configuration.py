@@ -110,10 +110,35 @@ def configure(work, deployment, apply=''):
             write(work / 'CONFIGURATION-HOLD.json', {'attempt': str(attempt), 'status': 'started', 'automatic_retry': False})
             write(attempt / 'access-before.json', saved)
         try:
-            result = remote(work, request, apply, attempt=attempt.name)
-            for name, text in [('stdout', result.stdout), ('stderr', result.stderr)]:
+            try:
+                result = remote(work, request, apply, attempt=attempt.name)
+                stdout, stderr = result.stdout, result.stderr
+            except subprocess.TimeoutExpired as error:
+                result = None
+                stdout = error.stdout or ''
+                stderr = error.stderr or ''
+            stdout = stdout.decode(errors='replace') if isinstance(stdout, bytes) else stdout
+            stderr = stderr.decode(errors='replace') if isinstance(stderr, bytes) else stderr
+            for name, text in [('stdout', stdout), ('stderr', stderr)]:
                 path = attempt / name; path.write_text(text); path.chmod(0o600)
-            lines = result.stdout.strip().splitlines()
+            lines = stdout.strip().splitlines()
+            if apply:
+                for line in lines:
+                    try:
+                        step = json.loads(line)
+                    except ValueError:
+                        continue  # A timeout may leave an incomplete final line.
+                    if step.get('step') == 'access':
+                        access = step['result']
+                        if access.get('status') != 'ready' or access.get('token_id') != saved['token_id']:
+                            raise Refused('Partial access receipt does not match this deployment token')
+                        saved.update({k: access[k] for k in ['grants', 'expires_at']})
+                        write(work / 'access.json', saved)
+            if result is None:
+                if apply:
+                    write(work / 'CONFIGURATION-HOLD.json', {'attempt': str(attempt), 'status': 'UNKNOWN',
+                        'remote_closure': 'unconfirmed', 'automatic_retry': False})
+                raise Refused('Remote configuration timed out; preserve its unknown outcome and inspect ' + str(attempt))
             report = json.loads(lines[-1]) if lines else {}
             if result.returncode or report.get('status') != 'ready':
                 raise Refused('Bootstrap configuration did not complete; inspect ' + str(attempt))

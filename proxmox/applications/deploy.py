@@ -13,7 +13,7 @@ import subprocess
 import ssl
 import time
 from urllib.parse import urlparse, quote
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHandler, ProxyHandler
 
 from plan import check_plan
 from restore import sync_directory
@@ -23,6 +23,12 @@ SOURCE = Path(__file__).resolve().parent
 
 class InputNeeded(ValueError):
     """A deliberately non-secret operator instruction, safe for the job summary."""
+
+
+class RefuseRedirects(HTTPRedirectHandler):
+    """A token-bearing request must stay on its explicitly trusted endpoint."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise InputNeeded('Proxmox API redirected; inspect its trusted endpoint before continuing')
 
 
 def sha(path):
@@ -102,7 +108,8 @@ def application_address(cfg):
     request = Request('https://' + endpoint.netloc + path,
                       headers={'Authorization': 'PVEAPIToken=' + Path(cfg['paths']['api_token']).read_text().strip()})
     context = ssl.create_default_context(cafile=cfg['paths']['ca_file'])
-    with urlopen(request, context=context, timeout=15) as response:
+    opener = build_opener(ProxyHandler({}), HTTPSHandler(context=context), RefuseRedirects())
+    with opener.open(request, timeout=15) as response:
         rows = json.load(response)['data']
     selected = [row for row in rows if row.get('hwaddr', '').lower() == cfg['app']['mac'].lower()]
     if len(selected) != 1 or not selected[0].get('inet'):

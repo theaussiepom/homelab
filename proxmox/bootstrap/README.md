@@ -355,6 +355,12 @@ application jobs save their state before and after each deployment step.
 These are **infrastructure recovery copies**; application/database data needs
 its own NAS protection before migration.
 
+The NAS must be available when this deployment guest starts. The shared folder
+can delay or prevent its start during a NAS outage, and an in-progress backup
+can wait for the NAS to return. Proxmox itself can still boot. Restore NAS
+availability before restarting the runner; do not replace the NAS mount with a
+local folder to make a failed backup appear successful.
+
 You can repeat this plan/apply pair with the same settings. It preserves the
 guest, registration, key, token and state; completed setup does not add another
 mount or restart. Changed inputs require a newly reviewed plan. A failed or
