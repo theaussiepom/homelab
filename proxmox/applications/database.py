@@ -95,7 +95,11 @@ def run(cfg, root=ROOT):
     environment = os.environ.copy()
     environment.update({'INFLUX_HOST': 'http://127.0.0.1:8086'})
     if cfg['kind'] == 'influxdb':
-        environment.update({'INFLUX_TOKEN': cfg['influx_operator_token'], 'INFLUX_ORG': cfg['influx_org']})
+        environment['INFLUX_TOKEN'] = cfg['influx_operator_token']
+        # The selected operation restores the whole instance. The CLI rejects
+        # --full when an org/bucket selector is also supplied, including env.
+        for key in ('INFLUX_ORG', 'INFLUX_ORG_ID', 'INFLUX_BUCKET', 'INFLUX_BUCKET_ID'):
+            environment.pop(key, None)
     subprocess.run(['systemctl', 'start', service], check=True, stdout=subprocess.DEVNULL)
     if cfg['kind'] == 'influxdb':
         setup_influx(cfg)
@@ -106,6 +110,11 @@ def run(cfg, root=ROOT):
             # SQL goes to stdin; Influx reads the checked native backup directory.
             subprocess.run(command, stdin=stream if cfg['kind'] != 'influxdb' else subprocess.DEVNULL,
                            env=environment, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if cfg['kind'] == 'mariadb':
+        # A full SQL capture can restore mysql's grant tables directly. Reload
+        # those restored accounts before claiming the database is ready.
+        subprocess.run(restore_commands[0], input=b'FLUSH PRIVILEGES;\n', env=environment,
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(['systemctl', 'enable', service], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     complete_path = receipt.with_suffix('.complete')
     fd = os.open(complete_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

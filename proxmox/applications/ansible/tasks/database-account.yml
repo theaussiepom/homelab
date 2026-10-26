@@ -1,17 +1,23 @@
 ---
-- name: Read the existing database account if present
+- name: Read numeric user identities before creating the database account
   ansible.builtin.getent:
     database: passwd
-    key: "{{ app.database.user }}"
-    fail_key: false
 
-- name: Refuse to renumber an existing service account
+- name: Read numeric group identities before creating the database group
+  ansible.builtin.getent:
+    database: group
+
+- name: Refuse numeric identity changes or collisions
   ansible.builtin.assert:
     that:
       - app.database.uid | int > 0
       - app.database.gid | int > 0
-      - ansible_facts.getent_passwd[app.database.user] == none or ansible_facts.getent_passwd[app.database.user][1] | int == app.database.uid | int
-      - ansible_facts.getent_passwd[app.database.user] == none or ansible_facts.getent_passwd[app.database.user][2] | int == app.database.gid | int
+      - app.database.user not in ansible_facts.getent_passwd or ansible_facts.getent_passwd[app.database.user][1] | int == app.database.uid | int
+      - app.database.user not in ansible_facts.getent_passwd or ansible_facts.getent_passwd[app.database.user][2] | int == app.database.gid | int
+      - app.database.group not in ansible_facts.getent_group or ansible_facts.getent_group[app.database.group][1] | int == app.database.gid | int
+      - ansible_facts.getent_passwd | dict2items | rejectattr('key', 'equalto', app.database.user) | map(attribute='value') | map(attribute='1') | map('int') | select('equalto', app.database.uid | int) | list | length == 0
+      - ansible_facts.getent_group | dict2items | rejectattr('key', 'equalto', app.database.group) | map(attribute='value') | map(attribute='1') | map('int') | select('equalto', app.database.gid | int) | list | length == 0
+    fail_msg: 'Preserve existing numeric identities. Use a compatible fresh database guest; do not renumber another account or group.'
 
 - name: Preserve the selected service group ID
   ansible.builtin.group:

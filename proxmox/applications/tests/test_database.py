@@ -36,6 +36,27 @@ class DatabaseTests(unittest.TestCase):
         with self.assertRaises(ValueError): database.setup_influx(cfg, request=request)
         self.assertEqual(request.call_count, 1)
 
+    def test_influx_full_restore_does_not_inherit_single_org_or_bucket_filters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            capture = root / 'database.capture'
+            capture.write_bytes(b'synthetic native backup')
+            cfg = dict(kind='influxdb', source_version='2.7.12', exclusive_writer_confirmed=True,
+                       capture={'sha256': database.digest(capture)},
+                       **{key: 'synthetic-' + key for key in ['influx_operator_token', 'influx_username',
+                           'influx_password', 'influx_org', 'influx_bucket']})
+            filters = {key: 'ambient-single-selection' for key in
+                       ['INFLUX_ORG', 'INFLUX_ORG_ID', 'INFLUX_BUCKET', 'INFLUX_BUCKET_ID']}
+            with patch.dict(database.os.environ, filters), patch.object(database, 'restore'), \
+                    patch.object(database, 'setup_influx') as setup, patch.object(database.subprocess, 'run') as run:
+                self.assertTrue(database.run(cfg, root))
+            setup.assert_called_once_with(cfg)
+            restore_call = run.call_args_list[1]
+            self.assertEqual(restore_call.args[0][:3], ['influx', 'restore', '--full'])
+            self.assertEqual(restore_call.kwargs['env']['INFLUX_TOKEN'], cfg['influx_operator_token'])
+            for key in filters:
+                self.assertNotIn(key, restore_call.kwargs['env'])
+
     def test_failed_sql_restore_is_held_without_automatic_replay(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); capture = root / 'database.capture'; capture.write_text('-- synthetic SQL')
@@ -50,6 +71,33 @@ class DatabaseTests(unittest.TestCase):
 
     def test_no_start_without_exclusive_writer_decision(self):
         with self.assertRaises(ValueError): database.run({'exclusive_writer_confirmed': False})
+
+    def test_mariadb_reload_grants_before_completing_the_restore(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            capture = root / 'database.capture'
+            capture.write_text('-- synthetic SQL, including mysql grant tables')
+            cfg = {'kind': 'mariadb', 'exclusive_writer_confirmed': True,
+                   'capture': {'sha256': database.digest(capture)}}
+            with patch.object(database.subprocess, 'run') as run:
+                self.assertTrue(database.run(cfg, root))
+            calls = run.call_args_list
+            self.assertEqual(calls[2].args[0], ['mariadb', '--protocol=socket', '--user=root', '--binary-mode'])
+            self.assertEqual(calls[2].kwargs['input'], b'FLUSH PRIVILEGES;\n')
+            self.assertEqual(calls[3].args[0], ['systemctl', 'enable', 'mariadb'])
+
+    def test_mariadb_failed_grant_reload_remains_held(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            capture = root / 'database.capture'
+            capture.write_text('-- synthetic SQL')
+            cfg = {'kind': 'mariadb', 'exclusive_writer_confirmed': True,
+                   'capture': {'sha256': database.digest(capture)}}
+            import subprocess
+            with patch.object(database.subprocess, 'run', side_effect=[None, None, subprocess.CalledProcessError(1, ['mariadb'])]):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    database.run(cfg, root)
+            self.assertEqual(json.loads((root / 'database-restore.json').read_text())['state'], 'started')
 
 
 if __name__ == '__main__':

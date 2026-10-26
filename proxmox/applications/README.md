@@ -1,7 +1,7 @@
 # After bootstrap: bring home automation across one guest at a time
 
 [Proxmox guide](../README.md) · [Bootstrap](../bootstrap/README.md) ·
-[PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
+[Databases](DATABASES.md) · [PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
 
 The deployment guest receives GitHub jobs. These scripts are the next step:
 **OpenTofu creates one application guest; Ansible installs its applications and
