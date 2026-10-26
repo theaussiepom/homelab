@@ -62,7 +62,9 @@ The later physical bootstrap is recorded separately below. That stage did not ve
 independent NAS state-backup destination; the Mac snapshot was not that backup.
 The later physical NAS result is recorded below. The operator retains the
 rehearsal firewall allowance while the runner is approved for ongoing CD and
-keeps its address reserved. When retiring that runner, the operator removes the
+keeps its address reserved. If ongoing-CD approval is revoked, the operator
+removes the exact TCP 8006 allowance even if the runner is retained.
+When retiring that runner, the operator removes the
 exact allowance before releasing or reassigning its address; removal remains a
 separately approved live change. See the [firewall operating reference](OPERATIONS.md#the-host-firewall-allowance).
 
