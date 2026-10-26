@@ -21,7 +21,7 @@ matching database versions, rather than upgrading the database during migration:
 | --- | --- | --- |
 | MariaDB | 12.3.3 | Matching signed Debian packages found; synthetic full SQL restore fixture checks rows, restored accounts/grants and an application login |
 | PostgreSQL | 16.10 | Matching signed Debian packages found; synthetic clean SQL restore checks rows, ownership, grants and removal of its temporary restore account |
-| InfluxDB | Server 2.7.12, CLI 2.7.5 | Restore code exists; current official package/key retrieval is blocked. Do not substitute a newer version silently |
+| InfluxDB | Server 2.7.12, CLI 2.7.5 | Synthetic full backup restore/query passed with exact matching binaries; current official package/key retrieval is blocked. Do not substitute a newer version silently |
 
 These Docker fixtures are useful confidence checks. **They do not mean a database
 LXC has passed a full GitHub deployment or that household data has migrated.**

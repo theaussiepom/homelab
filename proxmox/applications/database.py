@@ -95,7 +95,11 @@ def run(cfg, root=ROOT):
     environment = os.environ.copy()
     environment.update({'INFLUX_HOST': 'http://127.0.0.1:8086'})
     if cfg['kind'] == 'influxdb':
-        environment.update({'INFLUX_TOKEN': cfg['influx_operator_token'], 'INFLUX_ORG': cfg['influx_org']})
+        environment['INFLUX_TOKEN'] = cfg['influx_operator_token']
+        # The selected operation restores the whole instance. The CLI rejects
+        # --full when an org/bucket selector is also supplied, including env.
+        for key in ('INFLUX_ORG', 'INFLUX_ORG_ID', 'INFLUX_BUCKET', 'INFLUX_BUCKET_ID'):
+            environment.pop(key, None)
     subprocess.run(['systemctl', 'start', service], check=True, stdout=subprocess.DEVNULL)
     if cfg['kind'] == 'influxdb':
         setup_influx(cfg)
