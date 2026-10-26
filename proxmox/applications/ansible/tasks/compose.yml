@@ -39,7 +39,7 @@
 - name: Install only the new ingress routes into the restored Traefik file directory
   ansible.builtin.copy:
     src: "{{ app.render_dir }}/routes.yml"
-    dest: /srv/homelab/traefik/dynamic/homelab-applications.yml
+    dest: /srv/homelab/data/traefik/dynamic/homelab-applications.yml
     owner: root
     group: root
     mode: '0600'
@@ -64,7 +64,7 @@
 - name: Adapt the existing HA helper to the selected rehearsal or production address
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../mdns-route.sh"
-    dest: /srv/homelab/ha-startup/mdns-route.sh
+    dest: /srv/homelab/data/ha-startup/mdns-route.sh
     owner: root
     group: root
     mode: '0750'

@@ -24,11 +24,11 @@
       - --archive
       - /opt/homelab-app/capture.tar
       - --destination
-      - /srv/homelab
+      - /srv/homelab/data
       - --receipt
       - /opt/homelab-app/restore.json
       - --sha256
       - "{{ app.capture.sha256 }}"
   register: capture_restore
-  changed_when: (capture_restore.stdout | from_json).restored
+  changed_when: capture_restore.rc == 0 and (capture_restore.stdout | from_json).restored
   when: not ansible_check_mode

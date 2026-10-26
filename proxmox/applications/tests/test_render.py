@@ -19,7 +19,7 @@ def image():
 
 def fixture(kind):
     """Provide only synthetic configuration and deliberately non-real routes."""
-    cfg = {'kind': kind, 'data_root': '/srv/homelab', 'guest_memory_mib': 4096,
+    cfg = {'kind': kind, 'data_root': '/srv/homelab/data', 'guest_memory_mib': 4096,
            'timezone': 'Etc/UTC', 'services': {}}
     names = {'automation': ['homeassistant', 'node_red', 'mqtt'],
              'identity': ['server', 'worker', 'redis'],
@@ -37,6 +37,14 @@ def fixture(kind):
 
 class RenderTests(unittest.TestCase):
     """Check application behaviour and guard against the incidents already seen."""
+
+    def test_capture_mounts_use_a_directory_inside_the_data_disk(self):
+        """A freshly formatted volume may already contain filesystem recovery files."""
+        cfg = fixture('dns')
+        del cfg['data_root']
+        services = render.compose(cfg)['services']
+        self.assertEqual(services['pihole']['volumes'], ['/srv/homelab/data/pihole:/etc/pihole'])
+        self.assertEqual(services['unbound']['volumes'], ['/srv/homelab/data/unbound:/opt/unbound/etc/unbound'])
 
     def test_automation_shares_one_guest_and_keeps_discovery(self):
         """HA, Node-RED and authenticated MQTT remain together, without radio moves."""
@@ -70,8 +78,8 @@ class RenderTests(unittest.TestCase):
         """The frozen startup helper can be retained without the broken Avahi dependency."""
         cfg = fixture('automation')
         cfg['services']['homeassistant']['extra_mounts'] = [
-            {'source': '/srv/homelab/ha-startup', 'target': '/startup', 'read_only': True}]
-        self.assertIn('/srv/homelab/ha-startup:/startup:ro', render.compose(cfg)['services']['homeassistant']['volumes'])
+            {'source': '/srv/homelab/data/ha-startup', 'target': '/startup', 'read_only': True}]
+        self.assertIn('/srv/homelab/data/ha-startup:/startup:ro', render.compose(cfg)['services']['homeassistant']['volumes'])
         for path in ('/run/avahi-daemon/socket', '/var/run/docker.sock', '/etc/shadow'):
             bad = copy.deepcopy(cfg); bad['services']['homeassistant']['extra_mounts'][0]['source'] = path
             with self.assertRaises(ValueError): render.compose(bad)
@@ -118,7 +126,7 @@ class RenderTests(unittest.TestCase):
         ha['environment']['HOMELAB_HA_IPV4'] = '198.18.100.20'
         with self.assertRaises(ValueError): render.compose(cfg)
         ha['cap_add'] = ['NET_ADMIN']
-        ha['extra_mounts'] = [{'source': '/srv/homelab/ha-startup', 'target': '/startup', 'read_only': True}]
+        ha['extra_mounts'] = [{'source': '/srv/homelab/data/ha-startup', 'target': '/startup', 'read_only': True}]
         self.assertEqual(render.compose(cfg)['services']['homeassistant']['cap_add'], ['NET_ADMIN'])
         cfg['services']['mqtt']['cap_add'] = ['NET_ADMIN']
         with self.assertRaises(ValueError): render.compose(cfg)
