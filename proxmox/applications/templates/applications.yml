@@ -8,13 +8,13 @@ on:
         options: [dns, mariadb, postgresql, influxdb, identity, ingress, automation]
         required: true
       step:
-        description: Plan first; stage does not start restored applications
+        description: Plan first; deploy completes one reviewed service migration
         type: choice
-        options: [plan, apply, stage, start, verify]
+        options: [plan, deploy, apply, stage, start, verify]
         default: plan
         required: true
       plan_sha256:
-        description: Exact reviewed saved-plan SHA256, required for apply
+        description: Exact reviewed saved-plan SHA256, required for deploy/apply
         type: string
         required: false
 permissions:

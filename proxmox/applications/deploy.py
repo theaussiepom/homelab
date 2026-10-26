@@ -11,12 +11,14 @@ import shlex
 import shutil
 import subprocess
 import ssl
+import stat
 import time
 from urllib.parse import urlparse, quote
 from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHandler, ProxyHandler
 
 from plan import check_plan
-from restore import sync_directory
+from restore import sync_directory, validate_archive
+import guest_identity
 
 SOURCE = Path(__file__).resolve().parent
 
@@ -97,20 +99,27 @@ def input_hashes(cfg):
     return {path: sha(path) for path in sorted(set(paths))}
 
 
-def application_address(cfg):
-    """Resolve DHCP from the trusted PVE API and the selected MAC, never a scan."""
-    if cfg['app']['address'] != 'dhcp':
-        return cfg['app']['address']
+def api_get(cfg, path):
+    """Read only the declared Proxmox endpoint, with its existing CA and token."""
     endpoint = urlparse(cfg['site']['api_endpoint'])
     if endpoint.scheme != 'https' or not endpoint.hostname or endpoint.port != 8006 or endpoint.username:
-        raise ValueError('DHCP discovery requires the trusted Proxmox HTTPS endpoint')
-    path = '/api2/json/nodes/' + quote(cfg['site']['node'], safe='') + '/lxc/' + str(cfg['guest']['vmid']) + '/interfaces'
-    request = Request('https://' + endpoint.netloc + path,
+        raise ValueError('Guest discovery requires the trusted Proxmox HTTPS endpoint')
+    if not path.startswith('/nodes/'):
+        raise ValueError('Use the selected Proxmox node API')
+    request = Request('https://' + endpoint.netloc + '/api2/json' + path,
                       headers={'Authorization': 'PVEAPIToken=' + Path(cfg['paths']['api_token']).read_text().strip()})
     context = ssl.create_default_context(cafile=cfg['paths']['ca_file'])
     opener = build_opener(ProxyHandler({}), HTTPSHandler(context=context), RefuseRedirects())
     with opener.open(request, timeout=15) as response:
-        rows = json.load(response)['data']
+        return json.load(response)['data']
+
+
+def application_address(cfg):
+    """Resolve DHCP from the trusted PVE API and the selected MAC, never a scan."""
+    if cfg['app']['address'] != 'dhcp':
+        return cfg['app']['address']
+    path = '/nodes/' + quote(cfg['site']['node'], safe='') + '/lxc/' + str(cfg['guest']['vmid']) + '/interfaces'
+    rows = api_get(cfg, path)
     selected = [row for row in rows if row.get('hwaddr', '').lower() == cfg['app']['mac'].lower()]
     if len(selected) != 1 or not selected[0].get('inet'):
         raise InputNeeded('The selected guest has no IPv4 lease yet; inspect its DHCP reservation before configuration')
@@ -182,7 +191,7 @@ def backup(cfg, state, label):
         write(destination / f'{stamp}.json', {'state': 'not-created', 'vmid': cfg['guest']['vmid']})
 
 
-def execute(action, cfg_path, approved_plan=None):
+def _execute_step(action, cfg_path, approved_plan=None):
     os.umask(0o077)
     cfg = json.loads(cfg_path.read_text())
     vmid = validate(cfg)
@@ -239,7 +248,10 @@ def execute(action, cfg_path, approved_plan=None):
                                       'started_at_ns': time.time_ns(), 'remote_closure': 'unconfirmed'})
         try:
             if action == 'apply':
+                window = {'plan_sha256': receipt['plan_sha256'], 'started_at_ns': time.time_ns()}
+                write(work / 'apply-window.json', window)
                 quiet(tofu + ['apply', '-input=false', '-lock-timeout=30s', str(work / 'guest.tfplan')], environment, logfile)
+                write(work / 'apply-window.json', dict(window, finished_at_ns=time.time_ns()))
                 write(work / 'applied.json', receipt)
             else:
                 app = dict(cfg['app'], start_services=(action == 'start'), render_dir=str(work / 'rendered'))
@@ -265,9 +277,75 @@ def execute(action, cfg_path, approved_plan=None):
         return {'step': action, 'vmid': vmid, 'status': 'passed'}
 
 
+def execute(action, cfg_path, approved_plan=None):
+    """Keep one approved rollout running through all phases, with no retries."""
+    os.umask(0o077)
+    cfg = json.loads(cfg_path.read_text())
+    vmid = validate(cfg)
+    work = Path(cfg['paths']['state_root']) / str(vmid)
+    work.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with (work / 'workflow.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        hold = work / 'ROLLOUT-HOLD.json'
+        if hold.exists():
+            raise InputNeeded('An interrupted rollout is held; review its phase receipts before another job')
+        if action != 'deploy':
+            return _execute_step(action, cfg_path, approved_plan)
+        if (work / 'HOLD.json').exists():
+            raise InputNeeded('A failed deployment is held; preserve its state and logs for review')
+        if (work / 'applied.json').exists() or (work / 'started.json').exists():
+            raise InputNeeded('This guest has already been applied; use verify or review its existing phase receipts')
+        plan = json.loads((work / 'plan.json').read_text())
+        if (not approved_plan or approved_plan != plan['plan_sha256']
+                or sha(work / 'guest.tfplan') != approved_plan
+                or plan['site_sha256'] != sha(cfg_path) or plan['source_sha256'] != source_hash()
+                or plan.get('input_hashes') != input_hashes(cfg)):
+            raise InputNeeded('Deploy needs the exact reviewed plan, source and private inputs')
+        if cfg['app'].get('exclusive_writer_confirmed') is not True:
+            raise InputNeeded('Confirm the selected service migration and retire its old writers before deploy')
+        captures = [cfg['app']['capture']]
+        if 'database' in cfg['app']:
+            captures.append(cfg['app']['database']['capture'])
+        for capture in captures:
+            path = Path(capture['path'])
+            if capture.get('coherent') is not True or not path.is_file() or sha(path) != capture['sha256']:
+                raise InputNeeded('Finish and verify the selected coherent data capture before creating a guest')
+        validate_archive(Path(cfg['app']['capture']['path']))
+        hosts = Path(cfg['paths']['known_hosts'])
+        instruction = 'Supply the deployment account private known_hosts file (regular file, mode 0600) before Deploy'
+        try:
+            info = hosts.lstat()
+        except OSError:
+            raise InputNeeded(instruction) from None
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
+            raise InputNeeded(instruction)
+        # This marker survives a killed job, including between completed phases.
+        # Each original step retains its own native-operation HOLD as well.
+        started = time.time_ns()
+        results = []
+        for step in ('apply', 'identity', 'stage', 'start', 'verify'):
+            write(hold, {'step': step, 'vmid': vmid, 'plan_sha256': approved_plan,
+                         'started_at_ns': started, 'automatic_retry': False})
+            if step == 'identity':
+                address = application_address(cfg)
+                try:
+                    result = guest_identity.pin(cfg, work, address, lambda path: api_get(cfg, path), write)
+                except ValueError as error:
+                    raise InputNeeded(f'Guest identity verification failed: {error}') from None
+            else:
+                result = _execute_step(step, cfg_path, approved_plan)
+            results.append({'step': step, 'result': result})
+        receipt = {'step': 'deploy', 'vmid': vmid, 'status': 'passed',
+                   'plan_sha256': approved_plan, 'steps': results}
+        write(work / 'rollout-complete.json', receipt)
+        hold.unlink()
+        sync_directory(work)
+        return receipt
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['plan', 'apply', 'stage', 'start', 'verify'])
+    parser.add_argument('action', choices=['plan', 'deploy', 'apply', 'stage', 'start', 'verify'])
     parser.add_argument('--site', required=True, type=Path)
     parser.add_argument('--plan-sha256')
     args = parser.parse_args()

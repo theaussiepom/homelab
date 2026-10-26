@@ -37,9 +37,12 @@ Restrict the directory to the runner account and its files to mode `0600`.
 
 Before running, complete the application guide's prerequisites: API access
 for that guest, network paths, NAS recovery copies and coherent source captures.
-The bootstrap's guest-only API token does not create application guests.
+Declare the application's API access through bootstrap configuration first;
+Deploy does not grant extra token permissions.
 
 Commit the workflow and source lock to the private repository's `main` branch.
 Open **Actions → Application guest deployment**, select one guest and choose
-**plan** first. Follow the application guide for the subsequent steps. Copying
-these templates does not start a deployment.
+**plan** first. Review its fingerprint, then choose **deploy** with that
+fingerprint during the selected service's migration window. That one run creates
+the guest, verifies its SSH identity through Proxmox, installs/restores, starts
+and checks the service. Copying these templates does not start a deployment.

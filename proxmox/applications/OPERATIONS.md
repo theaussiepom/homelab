@@ -50,8 +50,9 @@ runtime qualification is still separate; do not add root credentials to the
 runner to work around a rejected feature flag.
 
 Review actual guest lifecycle, API access and network changes before a native
-run. A valid plan alone does not authorize them. The existing bootstrap token
-cannot create these guests. NAS recovery and strict guest SSH trust must be in
+run. A valid plan alone does not authorize them. Bootstrap must first declare
+the selected application's token access through its normal configuration
+command. Deploy grants no additional permissions. NAS recovery and strict guest SSH trust must be in
 place first; there is no local-backup or insecure-SSH fallback.
 
 ### Application captures and images
@@ -163,11 +164,18 @@ failover commands:
 
 ```sh
 python3 proxmox/applications/deploy.py plan --site /var/lib/homelab-inputs/automation.json
-python3 proxmox/applications/deploy.py apply --site /var/lib/homelab-inputs/automation.json --plan-sha256 REVIEWED_PLAN_SHA256
-python3 proxmox/applications/deploy.py stage --site /var/lib/homelab-inputs/automation.json
-python3 proxmox/applications/deploy.py start --site /var/lib/homelab-inputs/automation.json
+python3 proxmox/applications/deploy.py deploy --site /var/lib/homelab-inputs/automation.json --plan-sha256 REVIEWED_PLAN_SHA256
 python3 proxmox/applications/deploy.py verify --site /var/lib/homelab-inputs/automation.json
 ```
+
+`deploy` is for a new, unapplied guest. It checks coherent capture hashes and
+archive safety before creation, then runs apply, identity, stage, start and
+verify under one workflow lock. Select the migration window and set
+`exclusive_writer_confirmed: true` before this complete run. Individual
+apply/stage/start commands remain available for separately reviewed qualification
+and partial-installation recovery. They do not bypass an interrupted rollout's
+`ROLLOUT-HOLD.json`. Existing installations use verify; Deploy does not reinstall
+them or replay a saved plan.
 
 Source/site hashes and private configuration/CA-file hashes bind the saved
 plan; changes require a fresh plan. Starting
@@ -181,13 +189,21 @@ not physical household acceptance. Plans, logs and state stay private; the
 driver prints compact results. Missing NAS recovery blocks execution. A failed
 mutation leaves `HOLD.json`; review closure/state before any corrected attempt.
 
-Guest SSH keys are verified **after guest creation**, before its first Ansible
-step, using the trusted Proxmox console/administrator route. The first step pins
-only this guest's exact key records; adding another guest to the shared
-known_hosts file does not invalidate earlier plans. A changed key is held for
-review. SSH uses only the declared key/trust file and direct route, without
-agent, global trust, DNS-trust or proxy fallback. The Proxmox root SSH key is not
-copied into the deployment runner.
+Deploy verifies guest SSH keys **after creation**, before the first Ansible step.
+The current token reads its own successful `vzcreate` task over the pinned
+Proxmox TLS route. Its node, guest ID, creator and time must match the reviewed
+apply window. The Ed25519 fingerprint in that task must match the key scanned
+from the address assigned to the selected guest MAC. Missing, ambiguous or changed
+evidence holds the run; it never falls back to trusting the scan alone. No new
+host permission or Proxmox root SSH key is required.
+
+Only the verified guest entry is appended to the private known_hosts file;
+existing pins are preserved. Adding an unrelated guest does not invalidate an
+earlier plan. Legacy separately staged guests can still receive their exact key
+through the trusted Proxmox administrator route. SSH uses only the declared
+key/trust file and direct route, without agent, global trust, DNS-trust or proxy
+fallback. Automatic first-creation verification requires the Proxmox creation
+log format above; an incompatible or expired log needs review.
 
 ## Offline source tests
 
