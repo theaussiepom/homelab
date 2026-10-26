@@ -1,5 +1,6 @@
 """Configuration reruns must never copy stale workstation state or replay failures."""
 import json
+import hashlib
 from pathlib import Path
 import subprocess
 import sys
@@ -87,6 +88,33 @@ class ConfigurationTests(unittest.TestCase):
             self.assertFalse(any(c.kwargs.get('finish') for c in remote.call_args_list))
         self.assertEqual(self.state.read_bytes(), b'old backup only')
         self.assertTrue((self.work / 'CONFIGURATION-HOLD.json').exists())
+
+    def test_embedded_nas_timeout_is_recorded_as_unknown_by_the_local_apply(self):
+        request = {'node': 'pve', 'vmid': 900, 'guest_mac': '02:00:00:00:09:00',
+                   'nas': {}, 'restart_deploy': False, 'temporarily_unprotect_deploy': False}
+        access = {k: self.saved[k] for k in ['status', 'token_id', 'expires_at', 'grants']}
+        plan = {'access': access, 'nas': {'protection_toggle_required': False},
+                'restart_deploy': False, 'temporarily_unprotect_deploy': False,
+                'identity': {k: request[k] for k in ['node', 'vmid']}}
+        plan['identity']['mac'] = request['guest_mac']
+        modules = {
+            'host_access': 'def reconcile(r,apply=False):return ' + repr(access) + '\ndef command(a):return {}\n',
+            'host_nas': "import subprocess\ndef plan(n,c):return {'protection_toggle_required':False}\ndef command(a):return ''\ndef ensure(*a,**k):raise subprocess.TimeoutExpired(['systemctl','start','mount'],60)\n"}
+        payload = {'modules': modules, 'request': request, 'attempt': 'synthetic-timeout',
+                   'apply': hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()}
+        outcome = subprocess.run([sys.executable, '-c', configuration.REMOTE, json.dumps(payload)],
+                                 capture_output=True, text=True)
+        self.assertEqual(outcome.returncode, 75)
+        self.assertEqual(json.loads(outcome.stdout.splitlines()[-1])['status'], 'unknown')
+        with patch.object(configuration, 'remote', side_effect=self.remote):
+            configuration.configure(self.work, self.deployment)
+        with patch.object(configuration, 'remote', return_value=outcome):
+            with self.assertRaisesRegex(Refused, 'unknown outcome'):
+                configuration.configure(self.work, self.deployment, 'a' * 64)
+        hold = read(self.work / 'CONFIGURATION-HOLD.json')
+        self.assertEqual(hold['status'], 'UNKNOWN')
+        self.assertEqual(hold['remote_closure'], 'unconfirmed')
+        self.assertEqual((Path(hold['attempt']) / 'stdout').read_text(), outcome.stdout)
 
     def test_completed_access_is_saved_when_a_later_nas_step_fails(self):
         with patch.object(configuration, 'remote', side_effect=self.remote):

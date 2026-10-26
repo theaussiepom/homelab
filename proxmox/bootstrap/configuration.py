@@ -17,7 +17,7 @@ import host_access
 import host_nas
 
 
-REMOTE = '''import hashlib,json,sys,types
+REMOTE = '''import hashlib,json,sys,types,traceback
 p=json.loads(sys.argv[1])
 for name,code in p['modules'].items():
  m=types.ModuleType(name);sys.modules[name]=m;exec(compile(code,name,'exec'),m.__dict__)
@@ -40,7 +40,12 @@ if p['apply']:
  n.command(['pct','exec',str(r['vmid']),'--','python3','-c',code,marker,p['attempt']])
  access=a.reconcile(r,apply=True)
  print(json.dumps({'step':'access','result':access}),flush=True)
- nas=n.ensure(r['nas'],r['vmid'],c,restart=r['restart_deploy'],unprotect=r['temporarily_unprotect_deploy'])
+ try:
+  nas=n.ensure(r['nas'],r['vmid'],c,restart=r['restart_deploy'],unprotect=r['temporarily_unprotect_deploy'])
+ except n.subprocess.TimeoutExpired:
+  traceback.print_exc(file=sys.stderr)
+  print(json.dumps({'status':'unknown','reason':'NAS command timed out'}),flush=True)
+  sys.exit(75)
  print(json.dumps({'step':'nas','result':nas}),flush=True)
 key=n.command(['pct','exec',str(r['vmid']),'--','cat','/etc/ssh/ssh_host_ed25519_key.pub']).strip()
 addresses=n.guest_addresses(r['vmid'])
@@ -144,6 +149,10 @@ def configure(work, deployment, apply=''):
                         'remote_closure': 'unconfirmed', 'automatic_retry': False})
                 raise Refused('Remote configuration timed out; preserve its unknown outcome and inspect ' + str(attempt))
             report = json.loads(lines[-1]) if lines else {}
+            if apply and report.get('status') == 'unknown':
+                write(work / 'CONFIGURATION-HOLD.json', {'attempt': str(attempt), 'status': 'UNKNOWN',
+                    'remote_closure': 'unconfirmed', 'automatic_retry': False})
+                raise Refused('Remote NAS configuration has an unknown outcome; preserve its hold and inspect ' + str(attempt))
             if result.returncode or report.get('status') != 'ready':
                 raise Refused('Bootstrap configuration did not complete; inspect ' + str(attempt))
             if not apply:
