@@ -142,6 +142,9 @@ def ensure(nas, vmid, guest_config, execute=command, root=Path('/'), restart=Fal
     if not private.exists():
         private.mkdir(mode=0o700)
         os.chown(private, *mapped)
+        # NAS defaults may widen mkdir's requested mode. Correct only the folder
+        # created by this call; existing folders remain inspection-only.
+        os.chmod(private, 0o700)
     metadata = private.stat()
     if (metadata.st_uid, metadata.st_gid) != tuple(mapped) or metadata.st_mode & 0o077:
         raise RuntimeError('NAS backup directory permissions differ; existing files are not chowned')

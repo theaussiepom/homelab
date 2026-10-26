@@ -65,6 +65,13 @@ class NasTests(unittest.TestCase):
             calls, owners, active, pending, mounted = [], {}, {}, {}, [False]
             private = root / str(host_nas.HOST_MOUNT / self.nas['directory']).lstrip('/')
             real_stat = Path.stat
+            real_mkdir = Path.mkdir
+
+            def nas_mkdir(path, *args, **kwargs):
+                result = real_mkdir(path, *args, **kwargs)
+                if path == private:
+                    path.chmod(0o777)  # Reproduce the Synology create-mode readback.
+                return result
 
             def fake_stat(path, *args, **kwargs):
                 result = real_stat(path, *args, **kwargs)
@@ -92,6 +99,7 @@ class NasTests(unittest.TestCase):
             guest = dict(self.guest, node='test-pve')
             with patch.object(host_nas.os, 'chown', side_effect=lambda p,u,g: owners.update({p: [u,g]})), \
                     patch.object(host_nas.os.path, 'ismount', side_effect=lambda p: mounted[0]), \
+                    patch.object(Path, 'mkdir', nas_mkdir), \
                     patch.object(Path, 'stat', fake_stat):
                 first = host_nas.ensure(self.nas, 4917, guest, execute, root, restart=True)
                 self.assertTrue(first['changed']); self.assertEqual(first['mapped_uid'], 101000)
