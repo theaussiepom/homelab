@@ -8,7 +8,7 @@ import shlex
 import subprocess
 from urllib.parse import urlsplit
 
-from bootstrap_cd import API, require, save
+from bootstrap_cd import API, BootstrapDiagnostic, require, save
 
 ENVIRONMENT = 'homelab-bootstrap'
 
@@ -104,5 +104,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     try:
         print(json.dumps(setup(args.bundle.resolve(strict=True), args.out.resolve())))
+    except BootstrapDiagnostic as exc:
+        raise SystemExit('Bootstrap CD credential setup stopped: ' + str(exc) + '. Inspect private receipts; do not automatically retry.') from None
     except Exception:
         raise SystemExit('Bootstrap CD credential setup stopped. Inspect private receipts; do not automatically retry.') from None

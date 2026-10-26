@@ -398,7 +398,7 @@ stays on your workstation. The CD token has no expiry and can be revoked in
 Proxmox under **Permissions → API Tokens**.
 
 Run the normal bootstrap command from your workstation, using the same private
-bundle and SSH environment variables from step 5:
+bundle and SSH environment variables from step 4:
 
 ```sh
 ./proxmox/bootstrap/bootstrap cd-access \

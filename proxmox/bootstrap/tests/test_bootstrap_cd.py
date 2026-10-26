@@ -169,9 +169,27 @@ class CredentialTests(unittest.TestCase):
         self.assertEqual(emitted[0]['status'], 'credential_created_acl_pending')
         self.assertIn('synthetic-only', emitted[0]['token'])
         calls.clear()
+        def existing(args):
+            calls.append(args)
+            return [{'tokenid': access.TOKEN}]
         with self.assertRaisesRegex(ValueError, 'already exists'):
-            self.provision(lambda args: [{'tokenid': access.TOKEN}], emitted.append)
-        self.assertEqual(calls, [])
+            self.provision(existing, emitted.append)
+        self.assertEqual(calls, [['pveum', 'user', 'token', 'list', 'root@pam', '--output-format', 'json']])
+
+
+class DiagnosticTests(unittest.TestCase):
+    def test_cli_prints_fixed_refusals_but_hides_unexpected_value_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'config.json'
+            c = config(); c['schema'] = 'invalid'; path.write_text(json.dumps(c))
+            with patch.object(sys, 'argv', ['bootstrap_cd', '--config', str(path)]), \
+                    self.assertRaisesRegex(SystemExit, 'Unsupported bootstrap CD schema'):
+                cd.main()
+            c = config(); c['endpoint'] = 'https://198.18.25.10:private-input/'; path.write_text(json.dumps(c))
+            with patch.object(sys, 'argv', ['bootstrap_cd', '--config', str(path)]), self.assertRaises(SystemExit) as error:
+                cd.main()
+            self.assertNotIn('private-input', str(error.exception))
+            self.assertEqual(str(error.exception), 'Bootstrap CD stopped. Inspect its private plan/hold; do not automatically rerun.')
 
 
 if __name__ == '__main__':

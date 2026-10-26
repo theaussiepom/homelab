@@ -13,9 +13,13 @@ from urllib.error import HTTPError
 from urllib.request import HTTPSHandler, HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 
+class BootstrapDiagnostic(ValueError):
+    """An approved, fixed refusal message safe to show in a job log."""
+
+
 def require(condition, message):
     if not condition:
-        raise ValueError(message)
+        raise BootstrapDiagnostic(message)
 
 
 def save(path, value):
@@ -90,7 +94,7 @@ def isolated(row, active=False):
 
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise ValueError('Proxmox redirects are forbidden')
+        raise BootstrapDiagnostic('Proxmox redirects are forbidden')
 
 
 class API:
@@ -112,10 +116,10 @@ class API:
                 require(len(raw) <= 8 * 1024 * 1024, 'Oversized API response')
                 return json.loads(raw)
         except HTTPError as exc:
-            raise ValueError('Proxmox API returned HTTP ' + str(exc.code) + ': ' + method + ' ' + path) from None
+            raise BootstrapDiagnostic('Proxmox API returned HTTP ' + str(exc.code) + ': ' + method + ' ' + path) from None
         except Exception as exc:
             # Never include credential headers or response bodies in job output.
-            raise ValueError('Proxmox API request failed: ' + method + ' ' + path) from exc
+            raise BootstrapDiagnostic('Proxmox API request failed: ' + method + ' ' + path) from exc
 
 
 def inspect(api, c):
@@ -254,6 +258,8 @@ def main():
         validate(c)
         api = API(c['endpoint'], os.environ['PROXMOX_BOOTSTRAP_TOKEN'], args.ca)
         print(json.dumps(run(c, api)))
+    except BootstrapDiagnostic as exc:
+        raise SystemExit('Bootstrap CD stopped: ' + str(exc) + '. Inspect its private plan/hold; do not automatically rerun.') from None
     except Exception:
         raise SystemExit('Bootstrap CD stopped. Inspect its private plan/hold; do not automatically rerun.') from None
 
