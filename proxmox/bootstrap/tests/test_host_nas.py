@@ -60,6 +60,7 @@ class NasTests(unittest.TestCase):
             root = Path(tmp).resolve()
             (root / 'etc/systemd/system').mkdir(parents=True)
             proc = root / 'proc/123'; proc.mkdir(parents=True)
+            (proc / 'mountinfo').write_text('')
             for kind in ('uid', 'gid'): (proc / (kind + '_map')).write_text('0 100000 65536\n')
             calls, owners, active, pending, mounted = [], {}, {}, {}, [False]
             private = root / str(host_nas.HOST_MOUNT / self.nas['directory']).lstrip('/')
@@ -80,7 +81,9 @@ class NasTests(unittest.TestCase):
                 if args[0] == 'pvesh': return json.dumps(active)
                 if args[:2] == ['pct', 'set']: pending['mp0'] = args[-1]
                 if args[:2] == ['pct', 'status']: return 'status: stopped\n'
-                if args[:2] == ['pct', 'start']: active.update(pending)
+                if args[:2] == ['pct', 'start']:
+                    active.update(pending)
+                    (proc / 'mountinfo').write_text('1 2 0:1 /bootstrap-state /srv/homelab-backups rw - nfs4 198.18.20.2:/volume1/test rw\n')
                 if args == ['systemctl', 'start', host_nas.UNIT]: mounted[0] = True
                 return ''
 

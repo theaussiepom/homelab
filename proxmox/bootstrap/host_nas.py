@@ -134,7 +134,14 @@ def ensure(nas, vmid, guest_config, execute=command, root=Path('/'), restart=Fal
         execute(['pct', 'set', str(vmid), '--mp0', result['binding']])
     current = json.loads(execute(['pvesh', 'get', '/nodes/' + guest_config['node'] + '/lxc/' + str(vmid) + '/config',
                                   '--current', '1', '--output-format', 'json']))
-    if not same_binding(current.get('mp0'), result['binding']):
+    def active():
+        current_pid = int(execute(['pct', 'pid', str(vmid)]).strip())
+        for line in (root / 'proc' / str(current_pid) / 'mountinfo').read_text().splitlines():
+            fields = line.split()
+            if len(fields) > 6 and fields[4] == GUEST_MOUNT and fields[fields.index('-') + 1] in ('nfs', 'nfs4'):
+                return True
+        return False
+    if not same_binding(current.get('mp0'), result['binding']) or not active():
         if not restart:
             raise RuntimeError('NAS bind needs a deployment-guest restart; select it in the reviewed configuration')
         execute(['pct', 'shutdown', str(vmid), '--timeout', '30'])
@@ -143,7 +150,7 @@ def ensure(nas, vmid, guest_config, execute=command, root=Path('/'), restart=Fal
         execute(['pct', 'start', str(vmid)])
         current = json.loads(execute(['pvesh', 'get', '/nodes/' + guest_config['node'] + '/lxc/' + str(vmid) + '/config',
                                      '--current', '1', '--output-format', 'json']))
-        if not same_binding(current.get('mp0'), result['binding']):
+        if not same_binding(current.get('mp0'), result['binding']) or not active():
             raise RuntimeError('The selected guest restart did not activate its exact NAS bind')
     result.update(changed=bool(result['units_to_create'] or result['bind_to_add']), mapped_uid=mapped[0], mapped_gid=mapped[1])
     return result
