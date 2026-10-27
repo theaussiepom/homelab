@@ -54,4 +54,12 @@
 
     - name: Configure the application stack
       ansible.builtin.import_tasks: tasks/compose.yml
-      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools']
+      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'monitoring']
+
+    - name: Adopt future commissioned guests through the same active agent tasks
+      ansible.builtin.include_tasks: ../../common/ansible/zabbix-agent.yml
+      vars:
+        # guard.yml and trusted creation receipts already bind this new LXC.
+        # Existing fleet/host updates require their previously recorded ID.
+        zabbix_agent: "{{ app.zabbix_agent | combine({'hostname': app.hostname, 'address': app.address, 'machine_id': ansible_facts.machine_id, 'virtualization_type': 'lxc'}) }}"
+      when: app.zabbix_agent is defined and app.start_services | default(false) | bool

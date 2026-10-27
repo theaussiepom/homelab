@@ -10,6 +10,9 @@ import os
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
+_monitoring_spec = importlib.util.spec_from_file_location('homelab_monitoring', Path(__file__).with_name('monitoring.py'))
+monitoring = importlib.util.module_from_spec(_monitoring_spec)
+_monitoring_spec.loader.exec_module(monitoring)
 _foundation_spec = importlib.util.spec_from_file_location('homelab_foundation', Path(__file__).with_name('foundation.py'))
 foundation = importlib.util.module_from_spec(_foundation_spec)
 _foundation_spec.loader.exec_module(foundation)
@@ -80,6 +83,8 @@ def pgadmin_environment(value):
 
 def compose(cfg):
     """Keep placement fixed; site-specific images, restored data and routes are inputs."""
+    if cfg.get('kind') == 'monitoring':
+        return monitoring.compose(cfg)
     kind = cfg.get('kind')
     if kind not in KINDS:
         raise ValueError('Choose dns, identity, ingress, automation or db-tools; databases are native')
@@ -296,9 +301,9 @@ def main():
         with os.fdopen(fd, 'w') as stream:
             json.dump(document, stream, indent=2)
             stream.write('\n')
-    if 'foundation' in cfg:
+    if 'foundation' in cfg or cfg['kind'] == 'monitoring':
         manifest = []
-        for artifact in foundation_files(cfg):
+        for artifact in (monitoring.files(cfg) if cfg['kind'] == 'monitoring' else foundation_files(cfg)):
             path = args.output / artifact['path']
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
             os.fchmod(fd, 0o600)

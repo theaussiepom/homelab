@@ -1,0 +1,155 @@
+{
+  "site": {
+    "node": "practice-pve",
+    "api_endpoint": "https://pve.example.invalid:8006/"
+  },
+  "guest": {
+    "vmid": 6199,
+    "hostname": "practice-monitoring",
+    "cpu": 2,
+    "memory_mib": 2048,
+    "root_gib": 8,
+    "storage_id": "practice-zfs",
+    "template_file_id": "practice:vztmpl/debian.tar.zst",
+    "started": true,
+    "start_on_boot": false,
+    "boot_order": 50,
+    "nesting": true,
+    "keyctl": false,
+    "dns_servers": [
+      "198.18.100.53"
+    ],
+    "interfaces": [
+      {
+        "bridge": "vmbr0",
+        "vlan": 100,
+        "mac": "02:00:00:00:61:99",
+        "ipv4": "198.18.30.50/24",
+        "gateway": "198.18.30.1",
+        "ipv6": "auto"
+      }
+    ],
+    "volumes": {},
+    "rules": [
+      {
+        "direction": "in",
+        "proto": "tcp",
+        "port": "22",
+        "source": "198.18.25.11/32",
+        "comment": "Deployment SSH"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "80,443",
+        "destination": "0.0.0.0/0",
+        "comment": "Package and image downloads"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "53",
+        "destination": "198.18.100.53/32",
+        "comment": "Selected DNS only"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": "53",
+        "destination": "198.18.100.53/32",
+        "comment": "Selected DNS only"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "5432",
+        "destination": "198.18.30.23/32",
+        "comment": "Dedicated PostgreSQL database"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "8006",
+        "destination": "198.18.25.10/32",
+        "comment": "Trusted Proxmox API"
+      },
+      {
+        "direction": "in",
+        "proto": "tcp",
+        "port": "10051",
+        "source": "198.18.25.10/32",
+        "comment": "One selected active agent"
+      },
+      {
+        "direction": "in",
+        "proto": "tcp",
+        "port": "10051",
+        "source": "198.18.30.23/32",
+        "comment": "One selected active agent"
+      },
+      {
+        "direction": "in",
+        "proto": "tcp",
+        "port": "10051",
+        "source": "198.18.30.50/32",
+        "comment": "One selected active agent"
+      },
+      {
+        "direction": "in",
+        "proto": "tcp",
+        "port": "8080",
+        "source": "198.18.30.33/32",
+        "comment": "Selected Traefik backend; route admission follows password setup"
+      }
+    ]
+  },
+  "ssh_public_keys": [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  ],
+  "paths": {
+    "state_root": "/var/lib/homelab-applications",
+    "backup_mount": "/mnt/nas",
+    "backup_source": "nas.example.invalid:/backups",
+    "backup_directory": "/mnt/nas/homelab-state",
+    "api_token": "/var/lib/homelab-inputs/application-api-token",
+    "ca_file": "/var/lib/homelab-inputs/proxmox-ca.crt",
+    "private_key": "/var/lib/homelab-inputs/application-ssh",
+    "known_hosts": "/var/lib/homelab-inputs/known_hosts"
+  },
+  "app": {
+    "kind": "monitoring",
+    "new_target": true,
+    "vmid": 6199,
+    "hostname": "practice-monitoring",
+    "memory_mib": 2048,
+    "address": "198.18.30.50",
+    "mac": "02:00:00:00:61:99",
+    "packages": [
+      "docker.io=0.0.0-REPLACE",
+      "docker-cli=0.0.0-REPLACE",
+      "docker-compose=0.0.0-REPLACE",
+      "curl=0.0.0-REPLACE"
+    ],
+    "stack_config": "/var/lib/homelab-inputs/monitoring/stack.json",
+    "health_checks": [
+      {
+        "name": "Zabbix frontend",
+        "argv": [
+          "curl",
+          "--retry",
+          "30",
+          "--retry-all-errors",
+          "--retry-max-time",
+          "180",
+          "--max-time",
+          "10",
+          "--fail",
+          "--silent",
+          "http://198.18.30.50:8080/"
+        ],
+        "expect": "Zabbix"
+      }
+    ],
+    "installation": "clean"
+  }
+}
