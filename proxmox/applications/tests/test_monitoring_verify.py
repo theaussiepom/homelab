@@ -1,16 +1,52 @@
 import sys
 import json
+import io
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import monitoring_verify as verification
 
 
 class InitialCollectionTests(unittest.TestCase):
+    def test_logout_failure_preserves_acceptance_and_freshness_errors_but_fails_success(self):
+        now = int(verification.time.time())
+        with tempfile.TemporaryDirectory() as tmp:
+            password = Path(tmp) / 'password'; password.write_text('synthetic-password')
+            config = {'url': 'https://fixture.invalid', 'password_file': str(password), 'not_before': 0,
+                      'agents': [{'hostname': 'fixture-linux', 'psk_identity': 'fixture-linux'}],
+                      'proxmox_hostname': 'fixture-pve', 'commissioned_vmids': [213]}
+            def response(result): return io.StringIO(json.dumps({'result': result}))
+            for outcome in ('identity', 'pending', 'passed'):
+                with self.subTest(outcome=outcome):
+                    values = [response('fixture-token')]
+                    if outcome == 'identity':
+                        values.append(response([]))
+                        expected, message = verification.AcceptanceFailure, 'individual PSK'
+                    else:
+                        values.extend([
+                            response([{'hostid': '1', 'tls_accept': '2',
+                                       'description': 'HomeLab active agent; PSK identity=fixture-linux'}]),
+                            response([{'type': '7', 'state': '0',
+                                       'lastclock': str(0 if outcome == 'pending' else now), 'lastvalue': '1'}]),
+                            response([{'hostid': '2', 'macros': [{'macro': '{$HTTP.TLS.VERIFY}', 'value': 'full'}]}]),
+                            response([{'key_': key, 'state': '0', 'lastclock': str(now), 'lastvalue': value}
+                                      for key, value in [('proxmox.api.available', '200'),
+                                          ('proxmox.cluster.resources', '{"data":[{"type":"node"},{"vmid":213}]}')]]),
+                            response([{'verify_peer': '1', 'verify_host': '1'}]),
+                            response([{'verify_peer': '1', 'verify_host': '1'}])])
+                        expected, message = verification.FreshnessPending, 'Waiting for fresh'
+                        if outcome == 'passed':
+                            ui = io.BytesIO(b'Zabbix'); ui.status = 200; values.append(ui)
+                            expected, message = OSError, 'synthetic logout failure'
+                    values.append(OSError('synthetic logout failure'))
+                    opener = Mock(); opener.open.side_effect = values
+                    with patch.object(verification, 'build_opener', return_value=opener):
+                        with self.assertRaisesRegex(expected, message): verification._verify_once(config)
+
     def test_resource_inventory_rejects_malformed_samples_with_fixed_safe_reason(self):
         for raw in ('private-synthetic-data', 'null', '{}', '{"data":null}', '{"data":{}}',
                     '{"data":[null]}', '{"data":["private-synthetic-data"]}', '{"data":[{"vmid":[]}]}'):

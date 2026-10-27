@@ -3,6 +3,7 @@ import argparse
 import json
 from pathlib import Path
 import ssl
+import sys
 import time
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPSHandler, ProxyHandler
@@ -92,7 +93,12 @@ def _verify_once(c):
         return {'status': 'passed', 'fresh_agents': len(c['agents']), 'proxmox_api_data': True, 'https_ui': True,
                 'browser_sign_in_verified': False}
     finally:
-        call('user.logout', [], token)
+        acceptance_exception_active = sys.exc_info()[0] is not None
+        try:
+            call('user.logout', [], token)
+        except Exception:
+            if not acceptance_exception_active:
+                raise
 
 
 def verify(c):
