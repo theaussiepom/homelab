@@ -2,7 +2,7 @@
 - name: Select only a managed homelab service
   ansible.builtin.assert:
     that:
-      - network_ready_unit in ['docker.service', 'mariadb.service', 'postgresql@.service', 'influxdb.service', 'homelab-deploy.service']
+      - network_ready_unit in ['docker.service', 'mariadb.service', 'postgresql@.service', 'influxdb.service', 'homelab-deploy.service', 'ssh.service']
       - network_ready_interfaces is sequence and network_ready_interfaces is not string
       - network_ready_interfaces | length > 0
       - network_ready_interfaces | unique | length == network_ready_interfaces | length

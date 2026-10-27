@@ -22,6 +22,7 @@ import guest_identity
 import discovery
 import foundation
 import ingress_routing
+import bastion
 
 check_merge_create_plan = discovery.check_merge_create_plan
 
@@ -75,12 +76,19 @@ def write(path, value):
     sync_directory(path.parent)
 
 
+def needs_capture(app):
+    """Native empty services have no migrated application data."""
+    return app.get('kind') not in DATABASE_KINDS | {'bastion'}
+
+
 def validate(cfg):
     vmid = cfg['guest']['vmid']
     if isinstance(vmid, bool) or not isinstance(vmid, int) or vmid < 100 or vmid in {900, 4914, 4915, 4920}:
         raise ValueError('Select one application guest, never the deployment controller or protected targets')
     app = cfg['app']
     discovery.labels(cfg)
+    if app.get('kind') == 'bastion':
+        bastion.validate(cfg)
     if 'frontend_routing' in app:
         if app.get('kind') != 'ingress':
             raise ValueError('Frontend source routing belongs only to ingress')
@@ -142,6 +150,8 @@ def input_hashes(cfg):
         paths.append(app['stack_config'])
         stack = json.loads(Path(app['stack_config']).read_text())
         paths.extend(foundation.source_files(stack))
+    if app.get('kind') == 'bastion':
+        paths.extend(bastion.source_files(app['bastion']))
     paths.extend(item['key_path'] for item in app.get('repositories', []))
     paths.extend(item['source'] for item in app.get('database', {}).get('config_files', []))
     return {path: sha(path) for path in sorted(set(paths))}
@@ -312,6 +322,8 @@ def _execute_step(action, cfg_path, approved_plan=None):
                 write(work / 'applied.json', receipt)
             else:
                 app = dict(cfg['app'], start_services=(action == 'start'), render_dir=str(work / 'rendered'))
+                if app.get('kind') == 'bastion':
+                    app['bastion_files'] = bastion.render(app['bastion'])
                 write(work / 'variables.json', {'app': app,
                       'network_ready_interfaces': required_network_interfaces(cfg)})
                 write(work / 'inventory.json', {'application': {'hosts': {app['hostname']: {'ansible_host': app['address'], 'ansible_user': 'root'}}}})
@@ -373,7 +385,7 @@ def execute(action, cfg_path, approved_plan=None):
             check_merge_create_plan(json.loads(json_plan.read_text()), cfg['site']['node'], vmid)
         except ValueError:
             raise InputNeeded('Deploy needs three fresh creates for the selected guest and node; use reviewed steps for an existing installation') from None
-        if cfg['app'].get('kind') not in DATABASE_KINDS:
+        if needs_capture(cfg['app']):
             if cfg['app'].get('exclusive_writer_confirmed') is not True:
                 raise InputNeeded('Confirm the selected service migration and retire its old writers before deploy')
             capture = cfg['app']['capture']

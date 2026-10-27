@@ -25,6 +25,13 @@ jobs:
             --tmpfs /tmp:rw,exec,nosuid,nodev,size=768m,mode=1777 \
             -v "$PWD:/src:ro" -e HOME=/tmp homelab-app-test \
             sh /src/proxmox/applications/tests/check.sh
+      - name: Exercise restricted OpenSSH with disposable identities and loopback tunnels
+        run: |
+          docker build --platform linux/amd64 --build-arg TOOLS_IMAGE=homelab-app-test -t homelab-bastion-test:1 proxmox/applications/tests/bastion
+          docker run --rm --platform linux/amd64 --network none --cpus 1 --memory 512m \
+            --tmpfs /tmp:rw,exec,nosuid,nodev,size=64m,mode=1777 \
+            -v "$PWD:/src:ro" homelab-bastion-test:1 \
+            python3 /src/proxmox/applications/tests/bastion_fixture.py
       - name: Rehearse the bootstrap with synthetic provider and runner fixtures
         run: |
           docker run --rm --platform linux/amd64 --network none --read-only \

@@ -13,7 +13,7 @@
 
     - name: Require the service-specific acceptance probes
       ansible.builtin.assert:
-        that: app.health_checks | default([]) | length > 0
+        that: app.kind == 'bastion' or app.health_checks | default([]) | length > 0
         fail_msg: 'Define real DNS, database, MQTT or HTTP probes before calling this guest verified.'
 
     - name: Verify frontend reply routing without changing it
@@ -28,7 +28,30 @@
       register: health_probe
       changed_when: false
       failed_when: health_probe.rc != 0 or (item.expect | default('')) not in health_probe.stdout
-      loop: "{{ app.health_checks }}"
+      loop: "{{ app.health_checks | default([]) }}"
       loop_control:
         label: "{{ item.name }}"
       no_log: true
+
+    - name: Check that the installed bastion verifier is the selected source
+      ansible.builtin.stat:
+        path: /opt/homelab-app/bastion.py
+        checksum_algorithm: sha256
+      register: bastion_verifier
+      when: app.kind == 'bastion'
+
+    - name: Refuse modified bastion verification code
+      ansible.builtin.assert:
+        that:
+          - bastion_verifier.stat.isreg
+          - not bastion_verifier.stat.islnk | default(false)
+          - bastion_verifier.stat.checksum == lookup('file', playbook_dir ~ '/../bastion.py', rstrip=false) | hash('sha256')
+      when: app.kind == 'bastion'
+
+    - name: Read back the installed bastion restrictions against the bound inputs
+      ansible.builtin.command:
+        argv: [python3, /opt/homelab-app/bastion.py, verify, --policy, /opt/homelab-app/bastion.json]
+        stdin: "{{ {'policy': app.bastion, 'files': app.bastion_files} | to_json }}"
+      changed_when: false
+      no_log: true
+      when: app.kind == 'bastion'
