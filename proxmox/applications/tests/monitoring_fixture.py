@@ -113,9 +113,12 @@ def mock_pve():
     from http.server import HTTPServer, BaseHTTPRequestHandler
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            payload = b'{"data":{"version":"fixture"}}'
             self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(payload)))
             self.end_headers()
-            self.wfile.write(b'{"data":{"version":"fixture"}}')
+            self.wfile.write(payload)
         def log_message(self, *args):
             pass
     server = HTTPServer(('0.0.0.0', 8006), Handler)
