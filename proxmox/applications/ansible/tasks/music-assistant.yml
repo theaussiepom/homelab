@@ -1,0 +1,15 @@
+---
+- name: Install the read-only restored Music Assistant configuration guard
+  ansible.builtin.copy:
+    src: '{{ playbook_dir }}/../music-assistant/profile.py'
+    dest: /opt/homelab-app/music-assistant-profile.py
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Require the selected UI and stream listeners without changing restored settings
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/music-assistant-profile.py, --address, '{{ app.music_address }}']
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode

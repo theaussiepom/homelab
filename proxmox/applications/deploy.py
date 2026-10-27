@@ -118,6 +118,11 @@ def validate(cfg):
         if selected and app.get('kind') in {'identity', 'ingress'}:
             if selected['bind_address'] not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
                 raise ValueError('Foundation listeners must select an address assigned to this guest')
+    if app.get('kind') == 'music-assistant':
+        stack = json.loads(Path(app['stack_config']).read_text())
+        address = stack.get('music_bind_address')
+        if address != app.get('music_address') or address not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
+            raise ValueError('Music Assistant must bind and publish an assigned player-facing address')
     if app.get('kind') == 'db-tools':
         stack = json.loads(Path(app['stack_config']).read_text())
         if stack.get('pgadmin_bind_address') not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:

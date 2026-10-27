@@ -1,0 +1,20 @@
+{
+  "kind": "music-assistant",
+  "data_root": "/srv/homelab/data",
+  "guest_memory_mib": 2048,
+  "timezone": "Etc/UTC",
+  "music_bind_address": "127.0.0.1",
+  "services": {
+    "music_assistant": {
+      "image": "ghcr.io/music-assistant/server:latest",
+      "memory_mib": 1536,
+      "cpus": 2,
+      "pids_limit": 256,
+      "restart": "no",
+      "environment": {
+        "LOG_LEVEL": "info"
+      },
+      "extra_mounts": []
+    }
+  }
+}
