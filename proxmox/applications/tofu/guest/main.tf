@@ -23,6 +23,15 @@ resource "proxmox_virtual_environment_container" "guest" {
     nesting = var.guest.nesting
     keyctl  = var.guest.keyctl
   }
+  dynamic "device_passthrough" {
+    for_each = var.guest.serial_device == null ? [] : [var.guest.serial_device]
+    content {
+      path = device_passthrough.value.path
+      uid  = 0
+      gid  = 20
+      mode = "0660"
+    }
+  }
   operating_system {
     template_file_id = var.guest.template_file_id
     type             = "debian"

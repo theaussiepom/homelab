@@ -7,6 +7,7 @@ variable "guest" {
     started        = bool, start_on_boot = bool, boot_order = number,
     nesting        = bool, keyctl = bool, dns_servers = list(string),
     routing_labels = optional(map(string), {}),
+    serial_device  = optional(object({ path = string })),
     interfaces = list(object({
       bridge  = string, vlan = optional(number), mac = string, ipv4 = string,
       gateway = optional(string), ipv6 = optional(string)
@@ -17,6 +18,10 @@ variable "guest" {
       source    = optional(string), destination = optional(string), comment = string
     }))
   })
+  validation {
+    condition     = var.guest.serial_device == null ? true : can(regex("^/dev/serial/by-id/usb-[A-Za-z0-9_-]+$", var.guest.serial_device.path))
+    error_message = "Select one stable USB serial by-id path, without wildcards or other host devices."
+  }
   validation {
     condition = alltrue([for key, value in var.guest.routing_labels :
       can(regex("^traefik\\.[A-Za-z0-9_.-]+$", key)) && length(value) <= 2048 &&

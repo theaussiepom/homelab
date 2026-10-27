@@ -22,6 +22,7 @@ import guest_identity
 import discovery
 import foundation
 import ingress_routing
+import zigbee2mqtt
 
 check_merge_create_plan = discovery.check_merge_create_plan
 
@@ -80,6 +81,16 @@ def validate(cfg):
     if isinstance(vmid, bool) or not isinstance(vmid, int) or vmid < 100 or vmid in {900, 4914, 4915, 4920}:
         raise ValueError('Select one application guest, never the deployment controller or protected targets')
     app = cfg['app']
+    device = cfg['guest'].get('serial_device')
+    if app.get('kind') == 'zigbee2mqtt':
+        stack = json.loads(Path(app['stack_config']).read_text())
+        radio = zigbee2mqtt.validate(stack.get('zigbee'))
+        if (stack.get('kind') != 'zigbee2mqtt' or not isinstance(device, dict) or
+                device != {'path': radio['serial_device']} or
+                radio['bind_address'] not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]):
+            raise ValueError('Zigbee must bind the same exact USB device and guest backend address')
+    elif device is not None:
+        raise ValueError('Serial passthrough belongs only to the selected Zigbee guest')
     discovery.labels(cfg)
     if 'frontend_routing' in app:
         if app.get('kind') != 'ingress':
@@ -340,6 +351,14 @@ def execute(action, cfg_path, approved_plan=None):
     os.umask(0o077)
     cfg = json.loads(cfg_path.read_text())
     vmid = validate(cfg)
+    if action == 'apply' and cfg['app'].get('kind') == 'zigbee2mqtt':
+        capture = cfg['app'].get('capture', {})
+        path = Path(capture.get('path', ''))
+        if (capture.get('coherent') is not True or path.is_symlink() or not path.is_file()
+                or sha(path) != capture.get('sha256')):
+            raise InputNeeded('Verify the selected Zigbee capture before creating its guest')
+        stack = json.loads(Path(cfg['app']['stack_config']).read_text())
+        zigbee2mqtt.check_archive(path, stack['zigbee'])
     work = Path(cfg['paths']['state_root']) / str(vmid)
     work.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (work / 'workflow.lock').open('a') as lock:
@@ -381,6 +400,9 @@ def execute(action, cfg_path, approved_plan=None):
             if capture.get('coherent') is not True or not path.is_file() or sha(path) != capture['sha256']:
                 raise InputNeeded('Finish and verify the selected coherent data capture before creating a guest')
             validate_archive(path)
+            if cfg['app'].get('kind') == 'zigbee2mqtt':
+                stack = json.loads(Path(cfg['app']['stack_config']).read_text())
+                zigbee2mqtt.check_archive(path, stack['zigbee'])
         hosts = Path(cfg['paths']['known_hosts'])
         instruction = 'Supply the deployment account private known_hosts file (regular file, mode 0600) before Deploy'
         try:

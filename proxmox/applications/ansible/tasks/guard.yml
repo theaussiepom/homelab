@@ -17,7 +17,7 @@
       - ansible_facts.virtualization_type == 'lxc'
       - ansible_facts.distribution == 'Debian'
       - not pve_directory.stat.exists
-      - app.kind in ['dns', 'mariadb', 'postgresql', 'influxdb', 'identity', 'ingress', 'automation', 'db-tools']
+      - app.kind in ['dns', 'mariadb', 'postgresql', 'influxdb', 'identity', 'ingress', 'automation', 'db-tools', 'zigbee2mqtt']
       - app.packages | length > 0
       - app.packages | select('match', '^[a-z0-9][a-z0-9+.-]*=[0-9][A-Za-z0-9.+:~\-]*$') | list | length == app.packages | length
     fail_msg: 'Stop: supply the selected new Debian LXC identity and exact package versions.'
@@ -29,3 +29,9 @@
     owner: root
     group: root
     mode: '0600'
+
+- name: Require the read-only Zigbee configuration parser package
+  ansible.builtin.assert:
+    that: app.packages | select('match', '^python3-yaml=') | list | length == 1
+    fail_msg: 'Include an exact python3-yaml package version for the Zigbee state check.'
+  when: app.kind == 'zigbee2mqtt'

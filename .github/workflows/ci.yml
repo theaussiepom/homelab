@@ -36,7 +36,7 @@ jobs:
       - name: Validate rendered stacks with Docker Compose
         run: |
           python3 proxmox/applications/tests/compose_fixture.py "$RUNNER_TEMP/app-compose"
-          for kind in dns identity ingress automation db-tools; do
+          for kind in dns identity ingress automation db-tools zigbee2mqtt; do
             docker compose -f "$RUNNER_TEMP/app-compose/$kind.json" config --quiet
           done
       - name: Prove symmetric frontend replies through an isolated stateful router
