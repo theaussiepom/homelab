@@ -58,10 +58,10 @@ def start():
         daemon_threads = True
     Path('/mock-docker').mkdir(exist_ok=True)
     # The exact fixture Agent2 image runs as UID 1997/GID 1995.
-    os.chown('/mock-docker', 0, 1995)
-    os.chmod('/mock-docker', 0o750)
+    os.chown('/mock-docker', 1997, 1995)
+    os.chmod('/mock-docker', 0o700)
     server = Server('/mock-docker/docker.sock', Handler)
-    os.chown('/mock-docker/docker.sock', 0, 1995)
-    os.chmod('/mock-docker/docker.sock', 0o660)
+    os.chown('/mock-docker/docker.sock', 1997, 1995)
+    os.chmod('/mock-docker/docker.sock', 0o600)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server

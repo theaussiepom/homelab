@@ -33,7 +33,12 @@ def client():
                               (Path('/postgresql.deb'), monitoring_profiles.POSTGRESQL_PLUGIN['sha256'])]:
         assert hashlib.sha256(archive.read_bytes()).hexdigest() == expected
         subprocess.run(['dpkg-deb', '-x', archive, '/'], check=True)
-    password = root / 'monitor-password'; password.chmod(0o600)
+    # Linux bind mounts retain the runner's UID (usually 1001), whereas this
+    # disposable extraction client is root. Copy into its private tmpfs instead
+    # of changing host file ownership or weakening the production owner guard.
+    secret_root = Path('/run/secrets'); secret_root.mkdir(mode=0o700, exist_ok=True)
+    password = secret_root / 'monitor-password'
+    write_new(password, (root / 'monitor-password').read_bytes())
     config = {'postgresql': {'uri':'tcp://198.18.157.2:5432', 'password_file':str(password)},
               'mysql': {'uri':'tcp://198.18.157.3:3306', 'password_file':str(password)}}
     tasks = yaml.safe_load(Path('/src/proxmox/common/ansible/zabbix-database-account.yml').read_text())
@@ -90,6 +95,7 @@ def main(args):
             wait(lambda: docker('exec',prefix+'-pg','pg_isready','-U','postgres',capture_output=True,check=False).returncode==0)
             wait(lambda: docker('exec',prefix+'-mysql','mariadb','-uroot','-psynthetic-admin','-e','SELECT 1',capture_output=True,check=False).returncode==0)
             docker('run','-d','--platform','linux/amd64','--network',prefix,'--ip','198.18.157.4','--name',prefix+'-client',
+                '--tmpfs','/run/secrets:rw,nosuid,nodev,size=1m,mode=0700',
                 '-v',str(Path(__file__).resolve().parents[3])+':/src:ro','-v',str(root)+':/fixture',
                 '-v',str(args.agent.resolve())+':/agent.deb:ro','-v',str(args.postgresql.resolve())+':/postgresql.deb:ro',
                 args.tools_image,'python3','/src/proxmox/applications/tests/monitoring_workload_fixture.py','--client',stdout=subprocess.DEVNULL)
