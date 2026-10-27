@@ -5,11 +5,31 @@ import tempfile
 import unittest
 import os
 import sys
+import json
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import ha_http
 
 
 class HaHttpTests(unittest.TestCase):
+    def test_migrated_store_changes_only_proxy_preserves_other_settings_and_refuses_pending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/'http';backup=root/'before'
+            value={'version':2,'minor_version':2,'key':'http','data':{'pending':None,'yaml_migration_done':True,
+                'stable':{'server_port':8123,'server_host':['172.20.0.7'],'ip_ban_enabled':True,'cors_allowed_origins':[],
+                          'error':None,'error_message':None,'use_x_forwarded_for':True,'trusted_proxies':['172.20.0.0/16']}}}
+            raw=json.dumps(value).encode();path.write_bytes(raw)
+            sha=hashlib.sha256(raw).hexdigest();inode=path.stat().st_ino
+            self.assertTrue(ha_http.configure_store(path,backup,sha,'10.88.30.33'))
+            self.assertFalse(ha_http.configure_store(path,backup,sha,'10.88.30.33'))
+            expected=json.loads(raw);expected['data']['stable']['trusted_proxies']=['10.88.30.33/32']
+            expected['data']['stable']['server_host']=['0.0.0.0']
+            self.assertEqual(json.loads(path.read_bytes()),expected)
+            self.assertEqual(backup.read_bytes(),raw);self.assertEqual(path.stat().st_ino,inode)
+            expected['data']['pending']={'server_port':8443}
+            path.write_text(json.dumps(expected))
+            with self.assertRaises(ValueError):ha_http.configure_store(path,root/'pending',ha_http.digest(path.read_bytes()),'10.88.30.33')
+            self.assertFalse((root/'pending').exists())
+
     def test_legacy_sensor_and_only_its_allowlist_entry_are_removed_with_originals_kept(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)/'config';root.mkdir();backup=Path(tmp)/'private';backup.mkdir()

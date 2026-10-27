@@ -45,10 +45,43 @@ def rewrite(path, backup, expected, transform):
     return True
 
 
-def configure(path, backup, expected, proxy):
+def private_proxy(proxy):
     ip = ipaddress.IPv4Address(proxy)
     if not ip.is_private or ip.is_loopback or ip.is_unspecified or ip.is_link_local or ip.is_multicast:
         raise ValueError('Select only the private Traefik backend address')
+    return str(ip)
+
+
+def configure_store(path, backup, expected, proxy):
+    """Adjust the offline restored v2.2 store before the first HA start."""
+    proxy = private_proxy(proxy)
+    def transform(value):
+        store = json.loads(value)
+        if (set(store) != {'version','minor_version','key','data'}
+                or store['version'] != 2 or store['minor_version'] != 2 or store['key'] != 'http'
+                or set(store['data']) != {'stable','pending','yaml_migration_done'}
+                or store['data']['pending'] is not None or store['data']['yaml_migration_done'] is not True
+                or not isinstance(store['data']['stable'], dict)):
+            raise ValueError('Review an unknown or pending HA HTTP configuration')
+        stable = store['data']['stable']
+        hosts = stable.get('server_host')
+        if hosts is not None and (not isinstance(hosts,list) or not 1 <= len(hosts) <= 8
+                or not all(ipaddress.ip_address(host).is_private or ipaddress.ip_address(host).is_unspecified for host in hosts)):
+            raise ValueError('Review the existing HA listener before moving it')
+        if (stable.get('server_port') != 8123
+                or any(k in stable for k in ('ssl_certificate','ssl_key','ssl_peer_certificate'))
+                or stable.get('error') is not None):
+            raise ValueError('Review the existing HA listener before moving it')
+        stable.update(server_host=['0.0.0.0'],use_x_forwarded_for=True, trusted_proxies=[proxy+'/32'])
+        return (json.dumps(store,ensure_ascii=False,indent=2)+'\n').encode()
+    return rewrite(path,backup,expected,transform)
+
+
+def configure(path, backup, expected, proxy):
+    ip = private_proxy(proxy)
+    store = path.parent/'.storage/http'
+    if store.exists() or store.is_symlink():
+        raise ValueError('Migrated HA HTTP settings require the exact offline store hash')
     block = ('\n# BEGIN HOMELAB HTTP PROXY\nhttp:\n  use_x_forwarded_for: true\n'
              '  trusted_proxies:\n    - ' + str(ip) + '\n# END HOMELAB HTTP PROXY\n').encode()
     def transform(value):
@@ -85,10 +118,19 @@ if __name__ == '__main__':
     parser.add_argument('--proxy', required=True)
     parser.add_argument('--legacy-home-sha256')
     parser.add_argument('--legacy-command-sha256')
+    parser.add_argument('--http-store-sha256')
     args = parser.parse_args()
     try:
-        changed = configure(Path('/srv/homelab/data/homeassistant/config/configuration.yaml'),
-                            Path('/opt/homelab-app/configuration.before-proxy.yaml'), args.expected_sha256, args.proxy)
+        if args.http_store_sha256:
+            configuration=Path('/srv/homelab/data/homeassistant/config/configuration.yaml')
+            if (configuration.is_symlink() or not configuration.is_file() or configuration.stat().st_size > 1048576
+                    or digest(configuration.read_bytes()) != args.expected_sha256):
+                raise ValueError('The original HA YAML changed; preserve it for review')
+            changed = configure_store(Path('/srv/homelab/data/homeassistant/config/.storage/http'),
+                Path('/opt/homelab-app/http.before-proxy.json'),args.http_store_sha256,args.proxy)
+        else:
+            changed = configure(Path('/srv/homelab/data/homeassistant/config/configuration.yaml'),
+                Path('/opt/homelab-app/configuration.before-proxy.yaml'), args.expected_sha256, args.proxy)
         if args.legacy_home_sha256 or args.legacy_command_sha256:
             if not args.legacy_home_sha256 or not args.legacy_command_sha256:
                 raise ValueError('Supply both original legacy configuration hashes')

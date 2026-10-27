@@ -10,6 +10,21 @@ import test_provider_access as fixture
 
 
 class ApplicationScopeTests(unittest.TestCase):
+    def test_untagged_application_bridge_gets_only_a_bridge_grant_without_network_reload(self):
+        host, original = self.setup()
+        host.api.network.append({'iface':'vmbr9','type':'bridge','active':1,'autostart':1})
+        host.c['application_networks'] = [{'vmid':200,'bridge':'vmbr9','vlan':None}]
+        network=copy.deepcopy(host.api.network)
+        start=len(host.api.writes)
+        host.run_cd()
+        writes=host.api.writes[start:]
+        self.assertEqual(len(writes),3)  # Guest admin, bridge use, provider guest read.
+        self.assertTrue(all(path == '/access/acl' and method == 'PUT' for path,method,_ in writes))
+        self.assertEqual(host.api.network,network)
+        paths={row[2].get('path') for row in writes}
+        self.assertIn('/sdn/zones/localnetwork/vmbr9',paths)
+        self.assertFalse(any(path and path.endswith('/None') for path in paths))
+
     def setup(self):
         host = fixture.DiscoveryTests()
         host.setUp(); self.addCleanup(host.doCleanups)

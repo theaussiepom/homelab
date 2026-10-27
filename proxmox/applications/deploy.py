@@ -7,6 +7,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
@@ -94,11 +95,15 @@ def validate(cfg, stack=None):
     if 'ha_http' in app:
         selected = app['ha_http']
         if (app.get('kind') != 'automation' or not isinstance(selected, dict)
-                or set(selected) != {'source_sha256', 'trusted_proxy'}
+                or not {'source_sha256', 'trusted_proxy'} <= set(selected)
+                or set(selected) - {'source_sha256', 'trusted_proxy', 'store_sha256'}
                 or not isinstance(selected['source_sha256'], str)
                 or len(selected['source_sha256']) != 64
                 or any(c not in '0123456789abcdef' for c in selected['source_sha256'])):
             raise ValueError('Select the original HA configuration hash and one trusted proxy')
+        if 'store_sha256' in selected and (not isinstance(selected['store_sha256'],str)
+                or not re.fullmatch('[0-9a-f]{64}',selected['store_sha256'])):
+            raise ValueError('Bind the exact migrated HA HTTP store')
         proxy = ipaddress.IPv4Address(selected['trusted_proxy'])
         if (not proxy.is_private or proxy.is_loopback or proxy.is_unspecified
                 or proxy.is_link_local or proxy.is_multicast):

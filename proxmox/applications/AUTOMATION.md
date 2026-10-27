@@ -101,6 +101,13 @@ size sensor and its directory allowlist entry from the restored HA files. It
 requires their original hashes and retains private originals. It does not mount
 the database server's files inside HA or replace the sensor with a false value.
 
+For an already migrated HA HTTP configuration, `ha_http.store_sha256` binds the
+original v2.2 HTTP settings file. During offline restoration CD moves the old
+Docker listener to the new guest and trusts only the selected Traefik address.
+It preserves the other HTTP settings and a private original. A pending setting
+change or unknown format stops preparation. Older unmigrated installs use the
+YAML path; a migrated store cannot silently fall through to an ignored YAML edit.
+
 ## Before switching the house
 
 1. Check the actual guest addresses and the networks needed by existing devices.

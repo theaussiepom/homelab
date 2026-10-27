@@ -24,6 +24,14 @@ def packet():
 
 
 class AutomationConfigurationTests(unittest.TestCase):
+    def test_untagged_backend_remains_a_bridge_only_bootstrap_grant(self):
+        foundation, value=packet()
+        value['site']['guest']['interfaces'].append(dict(bridge='vmbr30',vlan=None,ipv4='10.88.30.21/24',mac='02:88:00:c8:1e:01'))
+        boot=configuration.compile_config(foundation,value)['bootstrap.json']
+        self.assertIn({'vmid':200,'bridge':'vmbr30','vlan':None},boot['application_networks'])
+        self.assertIn(('/sdn/zones/localnetwork/vmbr30','PVESDNUser',0),configuration.bootstrap_cd.desired(boot))
+        self.assertNotIn(('/sdn/zones/localnetwork/vmbr30/None','PVESDNUser',0),configuration.bootstrap_cd.desired(boot))
+
     def test_broker_record_uses_the_selected_frontend_address_and_preserves_foundation_dns(self):
         foundation, value = packet()
         value['site']['app']['mqtt_hostname'] = 'broker.mqtt'

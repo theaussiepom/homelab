@@ -36,8 +36,8 @@ def compile_config(foundation, automation):
                         'The previous discovery scope must match the commissioned foundation')
     boot['service_discovery']['guests'] = sorted([*previous, vmid])
     boot['service_discovery_extension'] = {'previous_guests': previous}
-    boot['application_networks'] = [{'vmid': vmid, 'bridge': nic['bridge'], 'vlan': nic['vlan']}
-                                    for nic in cfg['guest']['interfaces'] if nic.get('vlan') is not None]
+    boot['application_networks'] = [{'vmid': vmid, 'bridge': nic['bridge'], 'vlan': nic.get('vlan')}
+                                    for nic in cfg['guest']['interfaces']]
     # This validates the plan structure only. Bootstrap CD independently checks
     # the existing live bridges, original owner record and exact effective ACLs.
     bootstrap_cd.validate(boot)

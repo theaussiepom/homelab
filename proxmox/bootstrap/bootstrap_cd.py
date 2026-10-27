@@ -77,7 +77,7 @@ def validate(c):
         require(isinstance(row, dict) and set(row) == {'vmid', 'bridge', 'vlan'}
                 and type(row['vmid']) is int and row['vmid'] in {app['vmid'] for app in c['applications']}
                 and re.fullmatch(r'vmbr[0-9]{1,4}', row['bridge'])
-                and type(row['vlan']) is int and 1 <= row['vlan'] <= 4094,
+                and (row['vlan'] is None or type(row['vlan']) is int and 1 <= row['vlan'] <= 4094),
                 'Network access must select a declared application and existing VLAN bridge')
     require(len({(r['vmid'],r['bridge'],r['vlan']) for r in networks}) == len(networks),
             'Duplicate application network access')
@@ -92,7 +92,8 @@ def desired(c):
                                       for a in c['applications']} | {
         ('/sdn/zones/localnetwork/' + c['bridge'], 'PVESDNUser', 0)} | {
         (path, 'PVESDNUser', 0) for row in c.get('application_networks', []) for path in
-        ('/sdn/zones/localnetwork/' + row['bridge'], '/sdn/zones/localnetwork/' + row['bridge'] + '/' + str(row['vlan']))}
+        (['/sdn/zones/localnetwork/' + row['bridge']] +
+         ([] if row['vlan'] is None else ['/sdn/zones/localnetwork/' + row['bridge'] + '/' + str(row['vlan'])]))}
 
 
 def network_state(data):
@@ -194,7 +195,8 @@ def inspect(api, c):
     for row in c.get('application_networks', []):
         selected = [nic for nic in interfaces if nic['iface'] == row['bridge']]
         require(len(selected) == 1 and selected[0].get('type') == 'bridge'
-                and selected[0].get('active') == 1 and selected[0].get('bridge_vlan_aware') == 1,
+                and selected[0].get('active') == 1
+                and (row['vlan'] is None or selected[0].get('bridge_vlan_aware') == 1),
                 'Declared application VLAN bridge must already be active and VLAN-aware; no host-network correction')
     bridge = [r for r in interfaces if r['iface'] == c['bridge']]
     require(len(bridge) <= 1, 'Duplicate bridge identity')
