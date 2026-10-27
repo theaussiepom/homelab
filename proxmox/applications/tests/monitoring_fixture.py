@@ -52,8 +52,9 @@ def client():
     assert wait_for(lambda: api('apiinfo.version', {}), 'Zabbix schema/API did not become ready') == monitoring.VERSIONS['version']
     password = (root / 'admin-password').read_text()
     inventory = {'monitoring_api': {'hosts': {'zabbix_web': {
-        'ansible_host': 'zabbix_web', 'ansible_user': 'Admin', 'ansible_httpapi_pass': 'zabbix',
+        'ansible_host': 'zabbix_web', 'ansible_user': 'Admin',
         'ansible_httpapi_use_ssl': False, 'ansible_httpapi_port': 8080}}}}
+    http_password = 'zabbix'
     variables = {'ansible_httpapi_use_ssl': False, 'monitoring_initial_password': True, 'monitoring_admin_password': password,
                  'monitoring_hosts': [{'hostname': 'fixture-linux', 'psk_identity': 'fixture-linux',
                                        'psk': (root / 'agent.psk').read_text().strip()}],
@@ -61,17 +62,16 @@ def client():
                                         'token_id': 'fixture@pve!monitoring', 'token_secret': 'fixture-secret'}}
     def configure(pass_number):
         (root / 'inventory.json').write_text(json.dumps(inventory))
-        (root / 'variables.json').write_text(json.dumps(variables))
         result = subprocess.run(['ansible-playbook', '-i', str(root / 'inventory.json'),
             str(Path(__file__).resolve().parents[1] / 'ansible/monitoring-configure.yml'),
-            '-e', '@' + str(root / 'variables.json')], capture_output=True, text=True)
+            '-e', '@/dev/stdin'], input=json.dumps(dict(variables, ansible_httpapi_pass=http_password)), capture_output=True, text=True)
         (root / f'api-pass-{pass_number}.log').write_text(result.stdout + result.stderr)
         if result.returncode:
             print(result.stdout + result.stderr)
             raise RuntimeError('Upstream Zabbix configuration play failed')
         return result.stdout
     configure(1)
-    inventory['monitoring_api']['hosts']['zabbix_web']['ansible_httpapi_pass'] = password
+    http_password = password
     variables['monitoring_initial_password'] = False
     second = configure(2)
     assert 'changed=0' in second, second
@@ -88,7 +88,6 @@ def client():
         result = api('item.get', {'itemids': [item['itemid']], 'output': ['lastclock', 'lastvalue', 'state']}, token)
         return result[0] if int(result[0]['lastclock']) > 0 and float(result[0]['lastvalue']) > 0 else None
     sample = wait_for(samples, 'No authenticated active Agent 2 sample arrived')
-    (root / 'good-sample.json').write_text(json.dumps(sample))
     (root / 'test-wrong-key').write_text('ready')
     wait_for(lambda: (root / 'wrong-key-tested').exists(), 'Wrong-key test was not run', 90)
     assert 'unknown PSK identity' not in (root / 'wrong-agent.log').read_text()
@@ -123,6 +122,7 @@ def mock_pve():
             pass
     server = HTTPServer(('0.0.0.0', 8006), Handler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain('/fixture/proxmox-ca.pem', '/fixture/ca-key.pem')
     server.socket = context.wrap_socket(server.socket, server_side=True)
     server.serve_forever()
@@ -148,7 +148,7 @@ def main(args):
         service['platform'] = 'linux/amd64'
         service['volumes'] = [f'{root}/password:/run/secrets/database-password:ro']
         service['depends_on'] = {'postgres': {'condition': 'service_healthy'}}
-    docker('run', '--rm', '--network', 'none', '--platform', 'linux/amd64', '-v', f'{root}:/fixture', args.tools_image,
+    docker('run', '--rm', '--network', 'none', '--platform', 'linux/amd64', '--user', f'{os.getuid()}:{os.getgid()}', '-v', f'{root}:/fixture', args.tools_image,
            'openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
            '-subj', '/CN=pve.example.invalid', '-addext', 'subjectAltName=DNS:pve.example.invalid',
            '-keyout', '/fixture/ca-key.pem', '-out', '/fixture/proxmox-ca.pem',

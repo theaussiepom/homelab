@@ -5,6 +5,7 @@ arrive on stdin and are never put in command arguments, stdout or receipts.
 """
 import argparse
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -57,13 +58,17 @@ def provision(root, hba, expected, address, password):
         raise ValueError('Expected regular PostgreSQL input and state paths')
     root.mkdir(mode=0o700, exist_ok=True)
     owner = {'hba': str(hba), 'before_sha256': expected, 'address': address,
-             'password_sha256': digest(password.encode()), 'database': 'zabbix', 'role': 'zabbix'}
+             'database': 'zabbix', 'role': 'zabbix'}
     if (root / 'HOLD.json').exists():
         raise ValueError('A database attempt is held; no automatic replay')
     if (root / 'READY.json').exists():
         ready = json.loads((root / 'READY.json').read_text())
         if ready['owner'] != owner or ready['hba_sha256'] != digest(hba.read_bytes()):
             raise ValueError('Database input or HBA drift; no normalization')
+        check = ready['credential_check']
+        actual = hashlib.scrypt(password.encode(), salt=bytes.fromhex(check['salt']), n=16384, r=8, p=1).hex()
+        if not hmac.compare_digest(actual, check['scrypt']):
+            raise ValueError('Database credential drift; no implicit rotation')
         verify()
         return {'created': False}
     if list(root.iterdir()):
@@ -103,7 +108,9 @@ def provision(root, hba, expected, address, password):
     if sql('SELECT pg_reload_conf()') != 't':
         raise ValueError('PostgreSQL configuration reload failed; retain hold')
     verify()
-    save(root / 'READY.json', json.dumps({'owner': owner, 'hba_sha256': digest(updated)}).encode())
+    salt = os.urandom(16)
+    credential_check = {'salt': salt.hex(), 'scrypt': hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1).hex()}
+    save(root / 'READY.json', json.dumps({'owner': owner, 'hba_sha256': digest(updated), 'credential_check': credential_check}).encode())
     (root / 'HOLD.json').unlink()
     return {'created': True}
 
