@@ -55,3 +55,7 @@
     - name: Configure the application stack
       ansible.builtin.import_tasks: tasks/compose.yml
       when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools']
+
+    - name: Configure the restricted native SSH bastion
+      ansible.builtin.import_tasks: tasks/bastion.yml
+      when: app.kind == 'bastion'

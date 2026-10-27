@@ -1,0 +1,144 @@
+---
+- name: Require the source-validated restricted bastion settings
+  ansible.builtin.assert:
+    that:
+      - app.capture is not defined
+      - app.stack_config is not defined
+      - app.bastion_files.sshd_config | length > 0
+      - app.address == app.bastion.management_address
+
+- name: Read existing guest accounts without changing them
+  ansible.builtin.getent:
+    database: passwd
+
+- name: Install the bounded bastion readback helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../bastion.py"
+    dest: /opt/homelab-app/bastion.py
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Retain the selected policy separately from downstream credentials
+  ansible.builtin.copy:
+    content: "{{ app.bastion | to_nice_json }}\n"
+    dest: /opt/homelab-app/bastion.json
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Refuse account adoption or UID and GID collisions before provisioning
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/bastion.py, accounts, --policy, /opt/homelab-app/bastion.json]
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Create only the admitted new role groups
+  ansible.builtin.group:
+    name: "{{ item.name }}"
+    gid: "{{ item.gid }}"
+    state: present
+  loop: "{{ app.bastion.roles }}"
+  when: item.name not in ansible_facts.getent_passwd
+
+- name: Create only the admitted new key-only tunnel accounts
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    uid: "{{ item.uid }}"
+    group: "{{ item.name }}"
+    home: /nonexistent
+    create_home: false
+    shell: /usr/sbin/nologin
+    password_lock: true
+    state: present
+  loop: "{{ app.bastion.roles }}"
+  when: item.name not in ansible_facts.getent_passwd
+
+- name: Write the finite account receipt without copying authentication material
+  ansible.builtin.copy:
+    content: "[{% for role in app.bastion.roles %}{{ {'name': role.name, 'uid': role.uid, 'gid': role.gid} | to_json }}{{ ',' if not loop.last else '' }}{% endfor %}]\n"
+    dest: /etc/homelab-bastion-accounts.json
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Prepare root-owned public authentication keys
+  ansible.builtin.file:
+    path: /etc/ssh/bastion-keys
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install only the selected existing operator public keys
+  ansible.builtin.copy:
+    content: "{{ item.value }}"
+    dest: "/etc/ssh/bastion-keys/{{ item.key }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: "{{ app.bastion_files['keys'] | dict2items }}"
+  no_log: true
+
+- name: Validate the candidate before changing the running SSH listener
+  ansible.builtin.copy:
+    content: "{{ app.bastion_files.sshd_config }}"
+    dest: /opt/homelab-app/bastion-sshd.conf
+    owner: root
+    group: root
+    mode: '0600'
+    validate: /usr/sbin/sshd -t -f %s
+
+- name: Check for a socket-activated listener before an SSH configuration change
+  ansible.builtin.command:
+    argv: [systemctl, is-active, ssh.socket]
+  register: bastion_socket
+  changed_when: false
+  failed_when: bastion_socket.rc not in [3, 4]
+  when: not ansible_check_mode
+
+- name: Check for unreviewed SSH command-line overrides
+  ansible.builtin.command:
+    argv: [systemctl, show, ssh.service, --property=ExecStart, --value]
+  register: bastion_exec
+  changed_when: false
+  failed_when: "'/usr/sbin/sshd -D' not in bastion_exec.stdout or ' -f ' in bastion_exec.stdout or ' -o ' in bastion_exec.stdout"
+  when: not ansible_check_mode
+
+- name: Prepare guest networking before SSH service startup
+  ansible.builtin.import_tasks: ../../../common/ansible/network-ready.yml
+  vars:
+    network_ready_unit: ssh.service
+    network_ready_activate: "{{ app.start_services | default(false) | bool }}"
+
+- name: Save the explicit no-transit settings
+  ansible.builtin.copy:
+    content: "{{ app.bastion_files.sysctl }}"
+    dest: /etc/sysctl.d/90-homelab-bastion.conf
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+
+- name: Disable IPv4 and IPv6 forwarding for this guest only
+  ansible.builtin.command:
+    argv: [sysctl, -p, /etc/sysctl.d/90-homelab-bastion.conf]
+  when: app.start_services | default(false) | bool and not ansible_check_mode
+
+- name: Install the checked listener policy with an original backup
+  ansible.builtin.copy:
+    content: "{{ app.bastion_files.sshd_config }}"
+    dest: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: '0600'
+    backup: true
+    validate: /usr/sbin/sshd -t -f %s
+  when: app.start_services | default(false) | bool
+
+- name: Reload only SSH after the reviewed first-install policy is in place
+  ansible.builtin.systemd_service:
+    name: ssh
+    state: reloaded
+    enabled: true
+  when: app.start_services | default(false) | bool and not ansible_check_mode
