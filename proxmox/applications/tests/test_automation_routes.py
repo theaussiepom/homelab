@@ -39,6 +39,15 @@ class AutomationRoutes(unittest.TestCase):
         self.assertEqual(value['existing_authentik_settings_to_reconcile']['embedded_outpost_authentik_host'],
                          'https://login.lab.example.org/')
 
+    def test_preserved_dns_names_cannot_become_automation_records(self):
+        for key in ('homeassistant_host', 'node_red_host'):
+            base = copy.deepcopy(self.base)
+            base['domains']['preserve'][0]['name'] = self.cfg[key]
+            # A retained name inside a redirect zone is a valid foundation input.
+            site_config.validate(base)
+            with self.subTest(host=key), self.assertRaises(ValueError):
+                automation.preview(base, self.cfg)
+
     def test_collisions_unknown_fields_and_wrong_networks_are_refused(self):
         for key, value in [('vmid', 900), ('vmid', 208), ('vmid', True), ('backend_address', '10.88.25.21'),
                            ('backend_address', '10.88.30.20'), ('backend_address','10.88.30.0'),

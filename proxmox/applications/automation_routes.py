@@ -35,8 +35,10 @@ def preview(base, cfg):
                 or re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}', host) is None
                 or sum(host.endswith('.' + zone) for zone in base['domains']['redirect']) != 1):
             raise ValueError('Use a selected-zone hostname with a valid ACME challenge name')
-    if len(set(hosts)) != 2 or set(hosts) & {base['domains']['identity'], base['domains']['db_tools']}:
-        raise ValueError('Automation routes cannot collide with each other or the login endpoints')
+    protected_hosts = {base['domains']['identity'], base['domains']['db_tools'],
+                       *(row['name'] for row in base['domains']['preserve'])}
+    if len(set(hosts)) != 2 or set(hosts) & protected_hosts:
+        raise ValueError('Automation routes cannot collide with each other, login endpoints or preserved DNS names')
     routes = [{'name':'homeassistant', 'host':hosts[0], 'url':f'http://{address}:8123'},
               {'name':'node-red', 'host':hosts[1], 'url':f'http://{address}:1880', 'login':'authentik'}]
     identity = base['guests']['identity']['interfaces']['backend']['address']
