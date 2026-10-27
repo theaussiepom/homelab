@@ -55,16 +55,19 @@ def client():
         'ansible_host': 'zabbix_web', 'ansible_user': 'Admin',
         'ansible_httpapi_use_ssl': False, 'ansible_httpapi_port': 8080}}}}
     http_password = 'zabbix'
-    variables = {'ansible_httpapi_use_ssl': False, 'monitoring_initial_password': True, 'monitoring_admin_password': password,
+    variables = {'ansible_httpapi_use_ssl': False, 'monitoring_initial_password': True,
+                 'monitoring_admin_password': "{{ lookup('ansible.builtin.env', 'FIXTURE_ADMIN_PASSWORD') }}",
                  'monitoring_hosts': [{'hostname': 'fixture-linux', 'psk_identity': 'fixture-linux',
-                                       'psk': (root / 'agent.psk').read_text().strip()}],
+                                       'psk': "{{ lookup('ansible.builtin.env', 'FIXTURE_AGENT_PSK') }}"}],
                  'monitoring_proxmox': {'hostname': 'fixture-pve-api', 'address': 'pve.example.invalid',
                                         'token_id': 'fixture@pve!monitoring', 'token_secret': 'fixture-secret'}}
     def configure(pass_number):
         (root / 'inventory.json').write_text(json.dumps(inventory))
         result = subprocess.run(['ansible-playbook', '-i', str(root / 'inventory.json'),
             str(Path(__file__).resolve().parents[1] / 'ansible/monitoring-configure.yml'),
-            '-e', '@/dev/stdin'], input=json.dumps(dict(variables, ansible_httpapi_pass=http_password)), capture_output=True, text=True)
+            '-e', json.dumps(dict(variables, ansible_httpapi_pass="{{ lookup('ansible.builtin.env', 'FIXTURE_HTTP_PASSWORD') }}"))],
+            env=dict(os.environ, FIXTURE_ADMIN_PASSWORD=password, FIXTURE_HTTP_PASSWORD=http_password,
+                     FIXTURE_AGENT_PSK=(root / 'agent.psk').read_text().strip()), capture_output=True, text=True)
         (root / f'api-pass-{pass_number}.log').write_text(result.stdout + result.stderr)
         if result.returncode:
             print(result.stdout + result.stderr)
