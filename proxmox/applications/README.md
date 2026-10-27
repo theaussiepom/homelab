@@ -93,6 +93,9 @@ deployment runner. This checks local network readiness, without requiring the
 internet to answer. If readiness times out, the dependent service stays stopped
 instead of starting with only some of its addresses. Existing guests need an
 explicitly reviewed update; changing source does not silently restart them.
+For ingress guests, the routing helper must wait for that gate too, before Docker.
+An existing routing helper can receive this dependency through CD without
+restarting it or Docker; its original unit and network-gate hashes are checked first.
 
 First, copy the [private-repository workflow templates](templates/README.md)
 into your own private deployment repository and supply its private inputs.
