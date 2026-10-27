@@ -1,0 +1,16 @@
+{
+  "kind": "music-assistant",
+  "guest_memory_mib": 2048,
+  "music_bind_address": "198.18.100.20",
+  "services": {
+    "music_assistant": {
+      "image": "ghcr.io/music-assistant/server:latest",
+      "memory_mib": 1536,
+      "cpus": 2,
+      "pids_limit": 256,
+      "restart": "no",
+      "environment": {},
+      "extra_mounts": []
+    }
+  }
+}

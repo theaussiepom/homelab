@@ -14,13 +14,17 @@ _foundation_spec = importlib.util.spec_from_file_location('homelab_foundation', 
 foundation = importlib.util.module_from_spec(_foundation_spec)
 _foundation_spec.loader.exec_module(foundation)
 
+_music_spec = importlib.util.spec_from_file_location('homelab_music_assistant', Path(__file__).parent / 'music-assistant/profile.py')
+music_assistant = importlib.util.module_from_spec(_music_spec)
+_music_spec.loader.exec_module(music_assistant)
+
 foundation_files = foundation.files
 foundation_source_files = foundation.source_files
 
 KINDS = {'automation': {'homeassistant', 'node_red', 'mqtt'},
          'identity': {'server', 'worker', 'redis'},
          'dns': {'pihole', 'unbound'}, 'ingress': {'traefik'},
-         'db-tools': {'pgadmin'}}
+         'db-tools': {'pgadmin'}, 'music-assistant': {'music_assistant'}}
 
 
 def positive(value, name, minimum=1):
@@ -82,7 +86,7 @@ def compose(cfg):
     """Keep placement fixed; site-specific images, restored data and routes are inputs."""
     kind = cfg.get('kind')
     if kind not in KINDS:
-        raise ValueError('Choose dns, identity, ingress, automation or db-tools; databases are native')
+        raise ValueError('Choose a supported application kind; databases are native')
     inputs = cfg.get('services', {})
     if set(inputs) != KINDS[kind]:
         raise ValueError('Supply exactly the services for this guest')
@@ -101,7 +105,9 @@ def compose(cfg):
     result = {'name': f'homelab-{kind}', 'services': {}}
     for name, value in inputs.items():
         image = value.get('image', '')
-        if re.fullmatch(r'sha256:[0-9a-f]{64}', image):
+        if kind == 'music-assistant' and image == 'ghcr.io/music-assistant/server:latest':
+            policy = 'always'
+        elif re.fullmatch(r'sha256:[0-9a-f]{64}', image):
             if not str(value.get('archive', '')).startswith('/') or not re.fullmatch(r'[0-9a-f]{64}', value.get('archive_sha256', '')):
                 raise ValueError('A local image needs its SHA256-verified image archive')
             policy = 'never'
@@ -129,7 +135,8 @@ def compose(cfg):
                   'redis': [('redis', '/data')], 'pihole': [('pihole', '/etc/pihole')],
                   'unbound': [('unbound', '/opt/unbound/etc/unbound')],
                   'traefik': [('traefik', '/etc/traefik')],
-                  'pgadmin': [('pgadmin', '/var/lib/pgadmin')]}[name]
+                  'pgadmin': [('pgadmin', '/var/lib/pgadmin')],
+                  'music_assistant': [('music-assistant', '/data')]}[name]
         service['volumes'] = [f'{root}/{src}:{target}' for src, target in mounts]
         for mount in value.get('extra_mounts', []):
             src, target = mount.get('source', ''), mount.get('target', '')
@@ -196,6 +203,8 @@ def compose(cfg):
         # A missing capture must fail, rather than initializing a fresh profile.
         services['pgadmin']['volumes'] = [{'type': 'bind', 'source': f'{root}/pgadmin',
             'target': '/var/lib/pgadmin', 'bind': {'create_host_path': False}}]
+    if kind == 'music-assistant':
+        music_assistant.configure_compose(cfg, services['music_assistant'])
     return foundation.configure_compose(cfg, result)
 
 

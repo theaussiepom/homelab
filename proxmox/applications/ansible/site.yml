@@ -42,11 +42,15 @@
         owner: root
         group: root
         mode: '0700'
-      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools']
+      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'music-assistant']
 
     - name: Restore frozen application data before starting services
       ansible.builtin.import_tasks: tasks/restore.yml
-      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools']
+      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'music-assistant']
+
+    - name: Check the restored Music Assistant configuration before startup
+      ansible.builtin.import_tasks: tasks/music-assistant.yml
+      when: app.kind == 'music-assistant'
 
     - name: Configure the native database guest
       ansible.builtin.import_tasks: tasks/database.yml
@@ -54,4 +58,4 @@
 
     - name: Configure the application stack
       ansible.builtin.import_tasks: tasks/compose.yml
-      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools']
+      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'music-assistant']

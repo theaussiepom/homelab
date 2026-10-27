@@ -36,9 +36,13 @@ jobs:
       - name: Validate rendered stacks with Docker Compose
         run: |
           python3 proxmox/applications/tests/compose_fixture.py "$RUNNER_TEMP/app-compose"
-          for kind in dns identity ingress automation db-tools; do
+          for kind in dns identity ingress automation db-tools music-assistant; do
             docker compose -f "$RUNNER_TEMP/app-compose/$kind.json" config --quiet
           done
+      - name: Check latest Music Assistant with synthetic state and no external network
+        run: |
+          docker pull --platform linux/amd64 ghcr.io/music-assistant/server:latest
+          python3 proxmox/applications/tests/music_assistant_fixture.py --stack proxmox/applications/tests/music-assistant.fixture.stack.json
       - name: Prove symmetric frontend replies through an isolated stateful router
         run: |
           docker build --platform linux/amd64 --build-arg TOOLS_IMAGE=homelab-app-test -t homelab-routing-test:1 proxmox/applications/tests/routing
