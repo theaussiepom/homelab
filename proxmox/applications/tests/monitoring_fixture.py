@@ -58,7 +58,9 @@ def client():
     variables = {'ansible_httpapi_use_ssl': False, 'monitoring_initial_password': True,
                  'monitoring_admin_password': "{{ lookup('ansible.builtin.env', 'FIXTURE_ADMIN_PASSWORD') }}",
                  'monitoring_hosts': [{'hostname': 'fixture-linux', 'psk_identity': 'fixture-linux',
-                                       'psk': "{{ lookup('ansible.builtin.env', 'FIXTURE_AGENT_PSK') }}"}],
+                                       'psk': "{{ lookup('ansible.builtin.env', 'FIXTURE_AGENT_PSK') }}"},
+                                      {'hostname': 'fixture-wrong', 'psk_identity': 'fixture-wrong',
+                                       'psk': "{{ lookup('ansible.builtin.env', 'FIXTURE_EXPECTED_WRONG_HOST_PSK') }}"}],
                  'monitoring_proxmox': {'hostname': 'fixture-pve-api', 'address': 'pve.example.invalid',
                                         'token_id': 'fixture@pve!monitoring', 'token_secret': 'fixture-secret'}}
     def configure(pass_number):
@@ -67,7 +69,8 @@ def client():
             str(Path(__file__).resolve().parents[1] / 'ansible/monitoring-configure.yml'),
             '-e', json.dumps(dict(variables, ansible_httpapi_pass="{{ lookup('ansible.builtin.env', 'FIXTURE_HTTP_PASSWORD') }}"))],
             env=dict(os.environ, FIXTURE_ADMIN_PASSWORD=password, FIXTURE_HTTP_PASSWORD=http_password,
-                     FIXTURE_AGENT_PSK=(root / 'agent.psk').read_text().strip()), capture_output=True, text=True)
+                     FIXTURE_AGENT_PSK=(root / 'agent.psk').read_text().strip(),
+                     FIXTURE_EXPECTED_WRONG_HOST_PSK=(root / 'wrong-expected.psk').read_text().strip()), capture_output=True, text=True)
         (root / f'api-pass-{pass_number}.log').write_text(result.stdout + result.stderr)
         if result.returncode:
             print(result.stdout + result.stderr)
@@ -172,6 +175,7 @@ def main(args):
         'healthcheck': {'test': ['CMD', 'pg_isready', '-U', 'postgres'], 'interval': '2s', 'retries': 60}}
     (root / 'agent.psk').write_text(secrets.token_hex(32) + '\n')
     (root / 'wrong.psk').write_text(secrets.token_hex(32) + '\n')
+    (root / 'wrong-expected.psk').write_text(secrets.token_hex(32) + '\n')
     (root / 'admin-password').write_text(secrets.token_urlsafe(32))
     (root / 'agent.conf').write_text(monitoring.agent_config({
         'hostname': 'fixture-linux', 'server_active': 'zabbix-server:10051',
@@ -218,23 +222,23 @@ def main(args):
                '-v', f'{root}/agent.psk:/etc/zabbix/agent.psk:ro', '--entrypoint', '/usr/sbin/zabbix_agent2',
                agent, '-f', '-c', '/etc/zabbix/zabbix_agent2.conf', stdout=subprocess.DEVNULL)
         wait_for(lambda: (root / 'test-wrong-key').exists(), 'Authenticated agent test did not complete')
-        # Use a different hostname/identity, with the good key registered by API.
-        docker('exec', client_name, 'python3', '-c',
-            "import sys;sys.path.insert(0,'/src/proxmox/applications/tests');from monitoring_fixture import api;from pathlib import Path;"
-            "t=api('user.login',{'username':'Admin','password':Path('/fixture/admin-password').read_text()});"
-            "g=api('hostgroup.get',{'filter':{'name':'HomeLab'}},t)[0]['groupid'];"
-            "tpl=api('template.get',{'filter':{'host':'Linux by Zabbix agent active'}},t)[0]['templateid'];"
-            "api('host.create',{'host':'fixture-wrong','groups':[{'groupid':g}],'templates':[{'templateid':tpl}],"
-            "'tls_connect':2,'tls_accept':2,'tls_psk_identity':'fixture-wrong','tls_psk':Path('/fixture/agent.psk').read_text().strip()},t)")
+        # Both identities were admitted together before positive data arrived,
+        # so the rejection tests a wrong key rather than a new cache identity.
         docker('run', '-d', '--platform', 'linux/amd64', '--name', project + '-wrong',
                '--network', project + '_default', '-v', f'{root}/wrong.conf:/etc/zabbix/zabbix_agent2.conf:ro',
                '-v', f'{root}/wrong.psk:/etc/zabbix/agent.psk:ro', '--entrypoint', '/usr/sbin/zabbix_agent2',
                agent, '-f', '-c', '/etc/zabbix/zabbix_agent2.conf', stdout=subprocess.DEVNULL)
-        time.sleep(15)
-        log = docker('logs', project + '-wrong', capture_output=True, text=True)
-        (root / 'wrong-agent.log').write_text(log.stdout + log.stderr)
+        def rejected_key():
+            log = docker('logs', project + '-wrong', capture_output=True, text=True)
+            text = log.stdout + log.stderr
+            (root / 'wrong-agent.log').write_text(text)
+            return any(word in text.lower() for word in ['alert decrypt error', 'bad record mac', 'binder does not verify'])
+        wait_for(rejected_key, 'The wrong PSK did not produce a TLS decryption rejection', 90)
         (root / 'wrong-key-tested').write_text('complete')
-        wait_for(lambda: (root / 'result.json').exists(), 'Fixture did not finish', 60)
+        wait_for(lambda: (root / 'result.json').exists() or docker('inspect', '-f', '{{.State.Running}}', client_name, capture_output=True, text=True).stdout.strip() == 'false', 'Fixture did not finish', 60)
+        if not (root / 'result.json').exists():
+            docker('logs', client_name)
+            raise RuntimeError('Fixture client rejected the final PSK evidence')
         print((root / 'result.json').read_text())
     finally:
         for name in containers:
