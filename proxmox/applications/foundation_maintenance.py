@@ -50,6 +50,19 @@ def packet(value):
                 'Select the declared resolver change and unchanged immutable image')
         hashes = [value[k] for k in ('plan_sha256','runtime_sha256','compose_sha256',
                                     'state_sha256','foundation_complete_sha256')]
+    elif value.get('schema') == 'homelab-ingress-acme-confirmation-v1':
+        from ingress_acme import FAILURE_FILES
+        require(set(value) == common | {'update','state_sha256','runtime_sha256','guest_hold_sha256','failure_hashes'},
+                'Unexpected resolver confirmation fields')
+        require(isinstance(value['update'],dict) and value['update'].get('schema') == 'homelab-ingress-acme-update-v1',
+                'Confirmation requires the original resolver update packet')
+        original = packet(value['update'])
+        require(original['schema'] == 'homelab-ingress-acme-update-v1'
+                and original['vmid'] == value['vmid'] and original['plan_sha256'] == value['plan_sha256']
+                and isinstance(value['failure_hashes'],dict) and set(value['failure_hashes']) == set(FAILURE_FILES),
+                'Bind only the original failed resolver update')
+        hashes = [value[k] for k in ('plan_sha256','state_sha256','runtime_sha256','guest_hold_sha256')]
+        hashes += list(value['failure_hashes'].values())
     else:
         previous = value.get('schema') == 'homelab-foundation-verify-continuation-v2'
         require(value.get('schema') in ('homelab-foundation-verify-continuation-v1',
@@ -254,7 +267,8 @@ def main():
         sys.path.insert(0, str(args.source.resolve() / 'proxmox/applications'))
         deployment, fc, config = (importlib.import_module(name) for name in ('deploy', 'foundation_cd', 'site_config'))
         guest = 'ingress' if selected['schema'] in ('homelab-ingress-image-update-v1',
-                                                   'homelab-ingress-acme-update-v1') else 'db-tools'
+                                                   'homelab-ingress-acme-update-v1',
+                                                   'homelab-ingress-acme-confirmation-v1') else 'db-tools'
         site = INPUTS / ('foundation-' + guest) / 'site.json'
         cfg = json.loads(fc.regular(site, private=True))
         with tempfile.TemporaryDirectory(prefix='homelab-foundation-maintenance-') as temp:
@@ -264,7 +278,10 @@ def main():
             require(rendered == cfg and directory == site.parent and work == STATE / str(selected['vmid'])
                     and all(fc.regular(directory / name, private=True) == value for name, value in files.items()),
                     'Committed foundation configuration differs from the original private inputs')
-            if selected['schema'] == 'homelab-ingress-acme-update-v1':
+            if selected['schema'] == 'homelab-ingress-acme-confirmation-v1':
+                import ingress_acme
+                result = ingress_acme.confirm(deployment,fc,cfg,site,helper,selected,STATE)
+            elif selected['schema'] == 'homelab-ingress-acme-update-v1':
                 import ingress_acme
                 result = ingress_acme.run(deployment,fc,cfg,site,helper,selected,STATE)
             elif guest == 'ingress':

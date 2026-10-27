@@ -52,8 +52,8 @@ class CommandFailed(RuntimeError):
     """A private subprocess failed; never retain its output in a public message."""
 
 
-def command(argv):
-    result = subprocess.run(argv, capture_output=True, timeout=180, check=False)
+def command(argv, timeout=180):
+    result = subprocess.run(argv, capture_output=True, timeout=timeout, check=False)
     if result.returncode != 0:
         raise CommandFailed('Component command failed; retain the update hold')
     return result.stdout

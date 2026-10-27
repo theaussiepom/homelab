@@ -48,6 +48,15 @@
       loop: [component_acme.py, component_image.py, ingress_acme.py]
       when: not acme_verify_only
 
+    - name: Bind the one reviewed verification of an already applied resolver update
+      ansible.builtin.copy:
+        content: '{{ acme_confirmation | to_json }}'
+        dest: /opt/homelab-app/acme-confirmation.json
+        owner: root
+        group: root
+        mode: '0600'
+      when: acme_confirmation is defined
+
     - name: Bind the reviewed resolver update settings
       ansible.builtin.copy:
         content: '{{ acme_settings | to_json }}'
@@ -55,12 +64,12 @@
         owner: root
         group: root
         mode: '0600'
-      when: not acme_verify_only
+      when: not acme_verify_only and acme_confirmation is not defined
 
     - name: Update or verify only the declared certificate resolver list
       ansible.builtin.command:
-        argv: "{{ ['python3', '/opt/homelab-app/component_acme.py', '--settings', '/opt/homelab-app/acme-settings.json'] + (['--verify-only'] if acme_verify_only else []) }}"
-      changed_when: not acme_verify_only
+        argv: "{{ ['python3', '/opt/homelab-app/component_acme.py', '--settings', '/opt/homelab-app/acme-settings.json'] + (['--verify-only'] if acme_verify_only else []) + (['--confirmation', '/opt/homelab-app/acme-confirmation.json'] if acme_confirmation is defined else []) }}"
+      changed_when: not acme_verify_only and acme_confirmation is not defined
       no_log: true
 
     - name: Verify Docker and routing processes are unchanged

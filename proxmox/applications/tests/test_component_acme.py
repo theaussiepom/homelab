@@ -31,14 +31,19 @@ class ComponentTests(unittest.TestCase):
         self.settings={'vmid':712,'before':['198.18.40.2:53'],'after':['1.1.1.1:53','1.0.0.1:53'],
             'image':self.image,'runtime_sha256':hashlib.sha256(self.original).hexdigest(),
             'compose_sha256':hashlib.sha256(self.compose.read_bytes()).hexdigest()}
-        self.commands=[];self.fail=False
+        self.commands=[];self.fail=False;self.starting=False;self.ready=True
         p=patch.multiple(component,CONFIG=self.config,STATE=root/'state');p.start();self.addCleanup(p.stop)
         p=patch.multiple(shared,COMPOSE=self.compose,IDENTITY=identity,command=self.command);p.start();self.addCleanup(p.stop)
 
-    def command(self,argv):
+    def command(self,argv,**kwargs):
         self.commands.append(argv)
-        if 'up' in argv and self.fail:raise RuntimeError('synthetic failed recreation')
-        if 'ps' in argv:return ('a'*64+'\n').encode()
+        if 'up' in argv:
+            if self.fail:raise RuntimeError('synthetic failed recreation')
+            if self.starting:self.ready=False
+        if argv[0]=='curl':
+            self.ready=True
+            return b'OK'
+        if 'ps' in argv:return ('a'*64+'\n').encode() if self.ready else b''
         if argv[:2]==['docker','inspect']:return json.dumps({'State':{'Running':True},'Config':{'Image':self.image}}).encode()
         return b''
 
@@ -73,10 +78,72 @@ class ComponentTests(unittest.TestCase):
         with self.assertRaises(ValueError):component.run(self.settings)
         self.assertEqual(len([c for c in self.commands if 'up' in c]),1)
 
+    def test_recreated_container_waits_for_existing_health_check_before_runtime_assertion(self):
+        self.starting=True
+        self.assertTrue(component.run(self.settings)['changed'])
+        recreate=next(i for i,c in enumerate(self.commands) if 'up' in c)
+        health=next(i for i,c in enumerate(self.commands) if c[0]=='curl')
+        inspect=next(i for i,c in enumerate(self.commands[recreate+1:],recreate+1) if 'ps' in c)
+        self.assertLess(health,inspect)
+        self.assertIn('--retry-all-errors',self.commands[health])
+        self.assertIn('180',self.commands[health])
+
     def test_runtime_drift_stops_before_container_actions(self):
         self.settings['runtime_sha256']='b'*64
         with self.assertRaises(ValueError):component.run(self.settings)
         self.assertEqual(self.commands,[])
+
+    def confirmation(self):
+        self.fail=True
+        with self.assertRaises(RuntimeError):component.run(self.settings)
+        self.fail=False;self.commands=[]
+        self.operation=next(component.STATE.iterdir())
+        # Synthetic partial application: runtime is already changed, health was not checked.
+        return {'update':self.settings,'revision':'c'*40,
+                'runtime_sha256':hashlib.sha256(self.config.read_bytes()).hexdigest(),
+                'guest_hold_sha256':hashlib.sha256((self.operation/'HOLD.json').read_bytes()).hexdigest()}
+
+    def test_confirmation_only_checks_running_service_and_archives_exact_failed_hold(self):
+        selected=self.confirmation()
+        original={p.name:p.read_bytes() for p in self.operation.iterdir()}
+        runtime=self.config.read_bytes();compose=self.compose.read_bytes()
+        self.assertFalse(component.run(self.settings,confirmation=selected)['changed'])
+        self.assertFalse(any(any(v in c for v in ('up','pull','restart','stop')) for c in self.commands))
+        self.assertEqual(self.config.read_bytes(),runtime);self.assertEqual(self.compose.read_bytes(),compose)
+        for name,data in original.items():
+            self.assertEqual((self.operation/('failed-HOLD.json' if name=='HOLD.json' else name)).read_bytes(),data)
+        self.assertFalse(component.run(self.settings,True)['changed'])
+
+    def test_failed_confirmation_is_one_use_even_after_source_revision_change(self):
+        selected=self.confirmation()
+        with patch.object(component,'ready',side_effect=RuntimeError('synthetic unhealthy service')):
+            with self.assertRaises(RuntimeError):component.run(self.settings,confirmation=selected)
+        self.assertTrue((self.operation/'HOLD.json').is_file())
+        self.assertFalse((self.operation/'complete.json').exists())
+        selected['revision']='d'*40
+        with self.assertRaises(FileExistsError):component.run(self.settings,confirmation=selected)
+        self.assertIn('RuntimeError',(self.operation/'confirmation-failure.json').read_text())
+
+    def test_confirmation_rejects_changed_runtime_before_health_or_claim(self):
+        selected=self.confirmation();selected['runtime_sha256']='f'*64
+        with self.assertRaises(ValueError):component.run(self.settings,confirmation=selected)
+        self.assertEqual(self.commands,[])
+        self.assertFalse((self.operation/'confirmation-claim.json').exists())
+
+    def test_readiness_matches_commissioned_profile(self):
+        profile=json.loads((Path(component.__file__).parent/'foundation-profiles/ingress.site.json').read_text())
+        self.assertEqual(component.HEALTH,profile['app']['health_checks'][0]['argv'])
+
+    def test_guest_completion_write_failure_keeps_the_original_hold_active(self):
+        selected=self.confirmation();save=shared.save
+        def fail_completion(path,data):
+            if path==self.operation/'complete.json':raise OSError('synthetic receipt write failure')
+            return save(path,data)
+        with patch.object(shared,'save',side_effect=fail_completion):
+            with self.assertRaises(OSError):component.run(self.settings,confirmation=selected)
+        self.assertTrue((self.operation/'HOLD.json').is_file())
+        self.assertFalse((self.operation/'failed-HOLD.json').exists())
+        self.assertFalse((self.operation/'complete.json').exists())
 
 
 if __name__=='__main__':unittest.main()
