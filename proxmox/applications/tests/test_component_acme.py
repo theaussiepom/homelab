@@ -62,8 +62,15 @@ class ComponentTests(unittest.TestCase):
         self.assertTrue(list(component.STATE.glob('*/HOLD.json')))
         self.assertEqual(self.config.stat().st_mode & 0o777,0o400)
         self.fail=False
-        with self.assertRaises(FileExistsError):component.run(self.settings)
+        with self.assertRaises(ValueError):component.run(self.settings)
         with self.assertRaises(OSError):component.run(self.settings,True)
+        self.assertEqual(len([c for c in self.commands if 'up' in c]),1)
+
+    def test_source_revision_change_does_not_grant_another_failed_attempt(self):
+        self.fail=True
+        with self.assertRaises(RuntimeError):component.run(self.settings)
+        self.settings['revision']='d'*40
+        with self.assertRaises(ValueError):component.run(self.settings)
         self.assertEqual(len([c for c in self.commands if 'up' in c]),1)
 
     def test_runtime_drift_stops_before_container_actions(self):

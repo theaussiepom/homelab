@@ -44,7 +44,8 @@ def run(settings, verify_only=False):
     require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and stat.S_IMODE(info.st_mode) == 0o700,
             'Expected the private ACME evidence directory')
     encoded = (json.dumps(settings,sort_keys=True,indent=2)+'\n').encode()
-    operation = STATE / hashlib.sha256(encoded).hexdigest()
+    # Code-only revisions cannot create a fresh retry identity on this guest.
+    operation = STATE / hashlib.sha256(json.dumps(settings['after']).encode()).hexdigest()
     if verify_only:
         original = shared.read(operation/'traefik-before.json')
         require(shared.read(operation/'complete.json') == b'{"status":"passed"}\n'
@@ -54,6 +55,8 @@ def run(settings, verify_only=False):
                 'Completed resolver update differs')
         shared.runtime(settings['image'])
         return {'status':'passed','changed':False}
+    require(not any(not (p/'complete.json').is_file() for p in STATE.iterdir()),
+            'An earlier guest resolver update is still held')
     operation.mkdir(mode=0o700)  # An interrupted or failed operation cannot replay.
     original = read_config()
     require(hashlib.sha256(original).hexdigest() == settings['runtime_sha256'], 'Runtime configuration drifted')

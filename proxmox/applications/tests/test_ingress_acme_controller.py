@@ -61,6 +61,13 @@ class ControllerTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):self.run_update()
         self.assertEqual(len([c for c in self.calls if 'apply' in c]),1)
 
+    def test_new_source_revision_cannot_replay_a_failed_correction(self):
+        self.fail=True
+        with self.assertRaises(RuntimeError):self.run_update()
+        self.selected['revision']='d'*40
+        with self.assertRaises(FileNotFoundError):self.run_update()
+        self.assertEqual(len([c for c in self.calls if 'apply' in c]),1)
+
     def test_unexpected_guest_change_stops_before_apply(self):
         self.native['resource_changes'][0]['change']['actions']=['update']
         with self.assertRaises(ValueError):self.run_update()

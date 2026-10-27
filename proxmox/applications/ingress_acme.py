@@ -114,16 +114,20 @@ def run(deployment, fc, cfg, site, source, selected, state_root):
                 for n in fc.HOLDS), 'Existing ingress is not completed or is held')
         require(deployment.sha(work / 'foundation-complete.json') == selected['foundation_complete_sha256'],
                 'Completed ingress receipt changed')
-        operation = work / ('acme-resolvers-' + hashlib.sha256(fc.encoded(selected)).hexdigest()[:16])
+        # A source revision change must never grant a second attempt.
+        operation = work / ('acme-resolvers-' + hashlib.sha256(fc.encoded(selected['after'])).hexdigest()[:16])
         done = operation / 'complete.json'; claim = operation / 'claim.json'
         nas = Path(cfg['paths']['backup_directory']) / str(selected['vmid'])
         if not operation.exists():
+            require(not any(not (p/'complete.json').is_file() for p in work.glob('acme-resolvers-*')),
+                    'An earlier resolver correction is still held')
             require(deployment.sha(work / 'terraform.tfstate') == selected['state_sha256'], 'Original state changed')
             operation.mkdir(mode=0o700)
             fc.write_new(claim, fc.encoded(selected))
             deployment.backup(cfg, work / 'terraform.tfstate', 'before-acme-resolver-update')
             fc.write_new(nas / (operation.name + '-claim.json'), fc.encoded(selected))
         else:
+            fc.private_directory(operation)
             completion = json.loads(fc.regular(done, private=True))  # A failed claim never replays.
             require(completion['packet'] == selected and fc.regular(claim, private=True) == fc.encoded(selected)
                     and deployment.sha(work / 'terraform.tfstate') == completion['state_sha256']
