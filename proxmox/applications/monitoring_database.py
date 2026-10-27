@@ -34,6 +34,15 @@ def save(path, value):
         stream.write(value)
         stream.flush()
         os.fsync(stream.fileno())
+    sync(path.parent)
+
+
+def sync(directory):
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def hba_content(original, address):
@@ -101,6 +110,7 @@ def provision(root, hba, expected, address, password):
         if {key: base64.b64encode(os.getxattr(name, key)).decode() for key in os.listxattr(name)} != attributes:
             raise ValueError('PostgreSQL HBA metadata could not be preserved')
         os.replace(name, hba)
+        sync(hba.parent)
     finally:
         Path(name).unlink(missing_ok=True)
     if sql('SELECT count(*) FROM pg_hba_file_rules WHERE error IS NOT NULL') != '0':
@@ -112,6 +122,7 @@ def provision(root, hba, expected, address, password):
     credential_check = {'salt': salt.hex(), 'scrypt': hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1).hex()}
     save(root / 'READY.json', json.dumps({'owner': owner, 'hba_sha256': digest(updated), 'credential_check': credential_check}).encode())
     (root / 'HOLD.json').unlink()
+    sync(root)
     return {'created': True}
 
 
