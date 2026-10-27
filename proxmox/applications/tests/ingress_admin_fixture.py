@@ -5,6 +5,7 @@ ports, production addresses, sessions, credentials or application data.
 """
 import base64
 import argparse
+from email.parser import BytesParser
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -25,11 +26,15 @@ def serve():
     class Backend(BaseHTTPRequestHandler):
         def do_GET(self):
             if self.path == '/redirect':
+                if self.headers.get('Host') != 'admin.example.invalid':
+                    self.send_error(400); return
                 self.send_response(302)
-                self.send_header('Location', 'https://' + self.headers['Host'] + '/login')
+                self.send_header('Location', 'https://admin.example.invalid/login')
                 self.end_headers()
                 return
             if self.headers.get('Upgrade', '').lower() == 'websocket':
+                if self.headers.get('Origin') != 'https://admin.example.invalid':
+                    self.send_error(403); return
                 key = self.headers['Sec-WebSocket-Key']
                 accept = base64.b64encode(hashlib.sha1(
                     (key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
@@ -37,7 +42,7 @@ def serve():
                 self.send_header('Upgrade', 'websocket')
                 self.send_header('Connection', 'Upgrade')
                 self.send_header('Sec-WebSocket-Accept', accept)
-                self.send_header('X-Fixture-Origin', self.headers.get('Origin', ''))
+                self.send_header('X-Fixture-Origin', 'https://admin.example.invalid')
                 self.end_headers()
                 self.wfile.write(b'\x81\x02ok'); self.wfile.flush()
                 return
@@ -51,6 +56,7 @@ def serve():
 
     server = ThreadingHTTPServer(('127.0.0.1', 9443), Backend)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain('/fixture/backend.pem', '/fixture/backend.key')
     context.set_servername_callback(lambda sock, name, ctx: setattr(sock, 'fixture_sni', name))
     server.socket = context.wrap_socket(server.socket, server_side=True)
@@ -92,8 +98,11 @@ def check():
                 assert chunk, received
                 received += chunk
             head, frame = received.split(b'\r\n\r\n', 1)
-            assert b' 101 ' in head and b'https://admin.example.invalid' in head, head
-            assert b's3pPLMBiTxaQ9kYGzzhZRbK+xOo=' in head, head
+            status_line, header_bytes = head.split(b'\r\n', 1)
+            parsed = BytesParser().parsebytes(header_bytes + b'\r\n\r\n')
+            assert status_line.split()[1] == b'101', status_line
+            assert parsed['X-Fixture-Origin'] == 'https://admin.example.invalid'
+            assert parsed['Sec-WebSocket-Accept'] == 's3pPLMBiTxaQ9kYGzzhZRbK+xOo='
             while len(frame) < 4:
                 chunk = stream.recv(4 - len(frame))
                 assert chunk, frame
