@@ -199,6 +199,7 @@ def configure(work, deployment, apply=''):
                 os.chmod(attempt / 'ansible.log', 0o600)
                 subprocess.run(['ansible-playbook', '-i', str(attempt / 'inventory.json'),
                     str(HERE / 'ansible/configure-deploy.yml'), '-e', '@' + str(attempt / 'variables.json')],
+                    env=dict(os.environ, LC_ALL='C.UTF-8', LANG='C.UTF-8'),
                     stdout=log, stderr=subprocess.STDOUT, check=True, timeout=300)
             finished = remote(work, request, finish=True, attempt=attempt.name)
             if finished.returncode or json.loads(finished.stdout).get('status') != 'ready':
