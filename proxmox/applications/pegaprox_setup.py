@@ -19,6 +19,8 @@ class NoRedirect(HTTPRedirectHandler):
         raise RuntimeError('Unexpected local redirect')
 opener = build_opener(ProxyHandler({}), HTTPSHandler(context=ssl._create_unverified_context()), NoRedirect())
 mode = sys.argv[1]
+def require(condition, message='Local setup verification failed'):
+    if not condition: raise RuntimeError(message)
 def call(path, data=None, token=None):
     headers = {'X-Requested-With': 'XMLHttpRequest', 'Origin': 'https://127.0.0.1:5000'}
     if token: headers['X-Session-ID'] = token
@@ -31,27 +33,27 @@ def call(path, data=None, token=None):
         raw = response.read(1048577)
         if len(raw) > 1048576: raise RuntimeError('Oversized local response')
         return response.code, json.loads(raw)
-assert call('/api/health') == (200, {'status': 'ok', 'version': '1.4.1'})
+require(call('/api/health') == (200, {'status': 'ok', 'version': '1.4.1'}))
 status, state = call('/api/auth/check')
-assert status == 401 and state.get('authenticated') is False
+require(status == 401 and state.get('authenticated') is False)
 if mode == 'bootstrap':
-    assert state.get('initialized') is False, 'Existing account/configuration; no bootstrap replay'
-    assert not state.get('oidc_enabled') and not state.get('ldap_enabled')
+    require(state.get('initialized') is False, 'Existing account/configuration; no bootstrap replay')
+    require(not state.get('oidc_enabled') and (not state.get('ldap_enabled')))
     value = json.load(sys.stdin)
     code, created = call('/api/auth/setup', value)
-    assert code == 200 and created.get('success') is True
+    require(code == 200 and created.get('success') is True)
     code, login = call('/api/auth/login', value)
-    assert code == 200 and login.get('success') is True
+    require(code == 200 and login.get('success') is True)
     token = login['session_id']
     try:
         code, checked = call('/api/auth/check', token=token)
-        assert code == 200 and checked['authenticated'] is True
-        assert checked['user']['username'] == value['username'] and checked['user']['role'] == 'admin'
+        require(code == 200 and checked['authenticated'] is True)
+        require(checked['user']['username'] == value['username'] and checked['user']['role'] == 'admin')
     finally:
-        assert call('/api/auth/logout', {}, token)[0] == 200
-    assert call('/api/auth/check')[1].get('initialized') is True
+        require(call('/api/auth/logout', {}, token)[0] == 200)
+    require(call('/api/auth/check')[1].get('initialized') is True)
 elif mode == 'verify':
-    assert state.get('initialized') is True
+    require(state.get('initialized') is True)
 else: raise RuntimeError('Unknown mode')
 print('PegaProx verification passed')
 '''

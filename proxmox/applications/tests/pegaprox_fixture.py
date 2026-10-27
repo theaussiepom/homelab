@@ -69,6 +69,10 @@ def main():
         # The separate supplied key is used; encrypted data must not begin with SQLite's magic.
         state = "import hashlib,json,pathlib; from pegaprox.core.keystore import load_master_key; k=load_master_key(); assert k.source=='env:PEGAPROX_KEY_FILE'; p=pathlib.Path('/app/config/pegaprox.db'); assert p.is_file() and p.read_bytes()[:16]!=b'SQLite format 3\\x00'; assert not pathlib.Path('/app/config/secret.key').exists(); print(json.dumps({'key_hash':hashlib.sha256(pathlib.Path('/run/secrets/db-key').read_bytes()).hexdigest(),'source':k.source}))"
         before = json.loads(run('exec', name, 'python3', '-c', state))
+        db_write = "import json; from pegaprox.core import dbcrypto; c=dbcrypto.connect('/app/config/pegaprox.db'); c.execute('INSERT OR REPLACE INTO server_settings(key,value) VALUES (?,?)',('fixture.restart.marker',json.dumps('invented-state'))); c.commit(); c.close()"
+        db_read = "import json; from pegaprox.core import dbcrypto; c=dbcrypto.connect('/app/config/pegaprox.db'); row=c.execute('SELECT value FROM server_settings WHERE key=?',('fixture.restart.marker',)).fetchone(); assert row and json.loads(row[0])=='invented-state'; c.close(); print('database-row-passed')"
+        run('exec', name, 'python3', '-c', db_write)
+        assert run('exec', name, 'python3', '-c', db_read) == 'database-row-passed'
         run('exec', name, 'python3', '-c', "from pathlib import Path; Path('/app/config/fixture-marker').write_text('invented-state')")
         run('restart', '--time', '20', name)
         healthy()
@@ -76,6 +80,8 @@ def main():
         outcome['passwordless_cd_verification_after_restart'] = True
         after = json.loads(run('exec', name, 'python3', '-c', state))
         assert before == after
+        assert run('exec', name, 'python3', '-c', db_read) == 'database-row-passed'
+        outcome['encrypted_database_row_persisted'] = True
         run('exec', name, 'python3', '-c', "from pathlib import Path; assert Path('/app/config/fixture-marker').read_text()=='invented-state'")
         outcome.update(nonroot_user=inspect['Config']['User'], read_only_root=True,
                        encrypted_db=True, separate_key=True, restart_persistence=True)
