@@ -1,4 +1,8 @@
 ---
+- name: Prepare frontend reply routing for the multihomed ingress guest
+  ansible.builtin.import_tasks: ingress-routing.yml
+  when: app.kind == 'ingress' and app.frontend_routing is defined and not ansible_check_mode
+
 - name: Enable the isolated guest Docker service
   ansible.builtin.systemd_service:
     name: docker
@@ -116,10 +120,6 @@
       - app.exclusive_writer_confirmed | default(false) | bool
     fail_msg: 'Data is staged. Start requires the selected cutover and exclusive-writer confirmation.'
   when: app.start_services | default(false) | bool and not ansible_check_mode
-
-- name: Prepare frontend reply routing for the multihomed ingress guest
-  ansible.builtin.import_tasks: ingress-routing.yml
-  when: app.kind == 'ingress' and app.frontend_routing is defined and not ansible_check_mode
 
 - name: Start exactly this guest stack
   ansible.builtin.command:

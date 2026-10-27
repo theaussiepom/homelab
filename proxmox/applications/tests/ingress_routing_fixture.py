@@ -118,6 +118,7 @@ print('HTTPS verified')
         wrong = ip('proxy', 'route', 'get', '10.249.25.32', 'from', '10.249.40.33')[0]
         assert wrong.get('gateway') != '10.249.40.1'
         negative = execute('management', 'python3', '/tmp/client.py', check=False)
+        assert negative.returncode != 0, 'The asymmetric baseline must fail before reply routing is installed'
         link = next(link for link in ip('proxy', 'address', 'show') if any(a.get('local') == '10.249.40.33' for a in link.get('addr_info', [])))
         link = next(row for row in ip('proxy', 'link', 'show') if row['ifname'] == link['ifname'])
         assert execute('proxy','cat','/proc/sys/net/ipv4/conf/' + link['ifname'] + '/rp_filter').stdout.strip() == '1'
