@@ -33,11 +33,13 @@ def labels(cfg):
         if name in names or host in hosts:
             raise ValueError('Discovery names and hostnames must be unique within the guest')
         login, kind = route.get('login', 'own'), cfg.get('app', {}).get('kind')
-        if (not isinstance(login, str) or login not in {'own', 'authentik', 'outpost'}
+        if (not isinstance(login, str) or login not in {'own', 'authentik', 'oidc', 'outpost'}
                 or login == 'authentik' and (kind != 'automation' or name != 'node-red')
+                or login == 'oidc' and (kind != 'automation' or name != 'node-red'
+                                       or cfg['app'].get('node_red_authentication') != 'authentik-oidc')
                 or login == 'outpost' and (kind != 'identity' or name != 'node-red-outpost')
                 or name == 'node-red-outpost' and login != 'outpost'
-                or kind == 'automation' and name == 'node-red' and login != 'authentik'):
+                or kind == 'automation' and name == 'node-red' and login not in {'authentik', 'oidc'}):
             raise ValueError('Node-RED requires Authentik; only the identity outpost callback bypasses it')
         if not isinstance(url, str) or any(c.isspace() for c in url) or '\\' in url:
             raise ValueError('Use an explicit private backend HTTP origin')

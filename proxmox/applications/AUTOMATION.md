@@ -2,117 +2,95 @@
 
 [Application guide](README.md) · [HTTPS and sign-in](FOUNDATION.md)
 
-These three services share **one automation LXC**, with a separate Docker
-container for each application. Existing Zigbee and other radio services keep
-their own hosts. Home Assistant keeps its own login. Node-RED uses Authentik.
+These three applications share **one automation LXC**, with a separate Docker
+container for each. Zigbee and other radio services keep their existing hosts.
+Home Assistant keeps its own login. Node-RED keeps its existing Authentik login.
 
-The common OpenTofu/Ansible installer already supports the three containers,
-restored numeric file owners, original custom images and the HA startup helper.
-That is reusable deployment code, not a completed site migration. Do not enable
-the private automation job until its real guest, data and access inputs are ready.
+## What you will see in Actions
 
-## Keep settings in one place
-
-Public HomeLab owns the configuration structure and routing/compiler code. Your
-private deployment repository owns the actual guest ID, addresses, hostnames,
-capture references and source lock. Passwords and application state stay private;
-do not paste them into these examples or Proxmox Notes.
-
-Copy [the routing example](examples/automation.routes.example.json) into your
-private repository. Enter the automation backend address once. The foundation
-site file already supplies the Authentik backend and proxy frontend addresses.
-Preview the required wiring without contacting any service:
-
-```sh
-python3 public-source/proxmox/applications/automation_routes.py \
-  --foundation foundation/site.json \
-  --config automation/routes.json \
-  --output /tmp/automation-routing-preview.json
-```
-
-Choose a new output filename. The result deliberately says `deployable: false`:
-it describes the routing changes; it is not a guest deployment input. It adds no
-access, writes no application files and does not activate the disabled job.
-
-## How login and routing fit together
+The deployment groups four jobs under the guest's name and ID:
 
 ```mermaid
 flowchart LR
-  B[Browser] --> T[Traefik]
-  T --> H[Home Assistant: own login]
-  T --> A[Authentik checks Node-RED login]
-  A --> N[Node-RED]
-  T --> C[Outpost callback goes directly to Authentik]
-  H --> M[MQTT]
-  N --> M
+  G[Guest: OpenTofu and shared preparation] --> M[MQTT: Ansible]
+  M --> H[Home Assistant: Ansible]
+  H --> N[Node-RED: Ansible]
+  A[Authentik and Traefik ready] --> N
 ```
 
-The new route compiler uses the same **Proxmox Notes labels** as the foundation
-services. For automation it supports these typed routes:
+Guest setup creates the LXC, checks its identity, waits for its networks, installs
+Docker and restores its saved data and original custom images. It prepares the
+shared Compose file once, **without starting the applications**.
 
-- `homeassistant`: its backend8123, with its own login.
-- `node-red`: its backend1880, requiring `login: authentik`.
-- `node-red-outpost`: on the identity guest, using `login: outpost`. Only
-  `/outpost.goauthentik.io/` on the Node-RED hostname goes to this callback route.
+Each later job starts and checks only its named application. Node-RED waits for
+HA because the selected flows use it. Independent guest jobs can run at the same
+time when runner capacity permits; changes within this shared guest use one lock.
+An interrupted or failed operation stays held for review. Rerunning Actions does
+not retry it. A later unchanged successful deployment only checks the prepared
+guest and services; it does not restore data or recreate their containers.
 
-Node-RED uses `authentik@file` in the generated middleware list. Its ingress
-configuration needs the optional `foundation.authentik_url`, pointing to the
-selected private Authentik backend on port9000. This generates the middleware;
-it contains no token. The same generated settings must be supplied as the
-automation app's `ingress_foundation`; Notes validation rejects a Node-RED route
-without that dependency. The eventual CD integration must use that single value
-for both the ingress configuration and automation profile.
+This code is preparation until the private site enables its job with reviewed
+inputs. A green source test is not proof that the restored house works.
 
-Callback priority100 outranks application priority10 and
-does not invoke forward-auth again. HA, Authentik and pgAdmin do not get that gate.
+## Keep your settings and data
 
-The routing preview derives the required proxy backend rules, discovery guest
-list, DNS records and certificate-challenge names from the same inputs. These
-are proposed additions to the reviewed CD configuration, not permission to apply
-them. It does not replace existing foundation inputs or bypass their saved-input
-checks. Updating an already deployed foundation needs its normal reviewed update
-path; an unchanged-input verification job cannot install these additions.
+Public HomeLab provides the deployment code and input structure. The private
+site provides one `automation/deployment.json`, plus an independent immutable
+`automation/source.json` source lock. The deployment file contains:
 
-Keep the existing Node-RED provider and its policies. Reconcile its external
-hostname and the embedded outpost's full Authentik URL through the reviewed
-application configuration step. Restoring the database preserves old settings;
-it does not rewrite them to the new network. No extra outpost container, Docker
-socket, new administrator or API token is required by this design. See
-[Authentik's embedded outpost](https://docs.goauthentik.io/add-secure-apps/outposts/embedded/)
-and [Traefik pattern](https://docs.goauthentik.io/add-secure-apps/providers/proxy/server_traefik/).
+- `schema`: `homelab-automation-deployment-v1`.
+- `site`: the existing application installer profile, including one guest, its
+  interfaces, resources, firewall allowances and verified capture reference.
+- `stack`: the three services, image identities, resource limits and saved mounts.
 
-## Review the private login connection
+Use GitHub Secret `AUTOMATION_NODE_RED_API_TOKEN` for the existing Node-RED API
+token. It becomes a private runner input, never a value in Git or Proxmox Notes.
+Node-RED's encryption key, OIDC client secret, flows and palette stay in the
+private saved data. MQTT retains its password file and persistent messages.
 
-Browser connections use HTTPS. The proposed proxy-to-Authentik connection uses
-HTTP on the private backend bridge inside Proxmox. It carries login cookies and
-request headers without transport encryption. An attacker with host access or
-the ability to intercept that backend traffic could read them; private addresses
-alone do not prevent that.
+Before creation, the installer checks the exact saved OpenTofu plan, capture and
+original image archives. It creates only the selected new guest and its firewall.
+It refuses to adopt an existing guest or overwrite a changed input bundle.
 
-The site review must confirm backend isolation and narrowly allowed peers, then
-explicitly accept this transport or select authenticated TLS before enabling
-Node-RED. This source-only proposal records the choice for human review; it does
-not claim that the choice has been approved or change any running service.
+The optional `extra_hosts` service map preserves old Docker database names while
+pointing them at the selected new server. This avoids rewriting passwords or
+sprinkling addresses throughout application configuration.
 
-## What still needs preparing before deployment
+## Keep the existing Node-RED login
 
-1. Complete the automation guest's interfaces, resource budget and allowed
-   traffic. Restrict HA/Node-RED web ports to the proxy and admitted administration;
-   protecting a hostname does not protect a separately exposed backend port.
-2. Supply a coherent HA/Node-RED/MQTT capture and checksum-verified archives of
-   the original custom HA and Node-RED images. Preserve helpers, modules, flows,
-   credentials and MQTT retained/durable state. Do not substitute generic images.
-3. Adapt captured application endpoints to the new databases, broker and proxy.
-   Retain HA's trusted-proxy settings. Resolve any raw InfluxDB-directory and
-   DBus dependencies explicitly; do not silently drop those mounts. Never restore
-   the broken Avahi socket mount.
-4. Wire the proposed Notes, middleware, outpost/provider and DNS changes into the
-   normal CD path. Synthetic Notes/login tests prove the route mechanism, not
-   the restored provider, a browser login or Docker inside the final LXC.
-5. Protect new writes on the NAS and retire the old writers during the selected
-   migration window before the new copy starts. Then verify HA, Node-RED, MQTT,
-   Zigbee and real household automations together.
+For an existing native Authentik OIDC setup, use `node_red_login: oidc` in the
+[routing input](examples/automation.routes.example.json). The application profile
+must declare `node_red_authentication: authentik-oidc`. Traefik then forwards to
+Node-RED's own login, without adding a second proxy authentication layer.
 
-Database restoration remains separate from server CD. HA uses the existing
-MariaDB Recorder configuration; MQTT is the existing broker with authentication,
-not a newly opened anonymous broker. Do not move physical radios as a side effect.
+A stack's optional `node_red_oidc` contains `identity_url`, `node_red_url`,
+`client_id` and `provider_slug`. Both URLs are HTTPS origins. The supplied
+`node-red-settings.js` wrapper loads the restored settings and changes only
+these OIDC endpoints. It preserves the credential secret, access policy,
+API-token checks and modules. The existing Authentik provider must also allow
+the new `/auth/strategy/callback/` URL through its reviewed configuration step.
+
+A proxy-login routing mode remains supported for sites that already use it. It
+requires its declared middleware and embedded-outpost callback. Do not add that
+mode to a site whose existing Node-RED already uses native OIDC.
+
+The routes use the same Proxmox Notes discovery as the foundation guests. A
+routing preview deliberately reports `deployable: false`: it adds no firewall
+allowance, DNS record, discovery permission or application configuration.
+
+## Before switching the house
+
+1. Check the actual guest addresses and the networks needed by existing devices.
+2. Capture HA, Node-RED and MQTT while their original writers are stopped.
+   Preserve owners, permissions, links, private credentials and custom images.
+3. Restore HA's existing MariaDB Recorder database separately from server CD.
+   Creating an empty MariaDB server does not migrate its history.
+4. Review the endpoint, discovery, login and firewall changes together. Resolve
+   local Bluetooth/DBus and the old raw InfluxDB-directory sensor explicitly;
+   never expose the Proxmox host's control sockets as a shortcut.
+5. Protect new application writes on the NAS, then verify MQTT, HA, Node-RED,
+   Zigbee and real household actions together.
+
+Do not copy the old broken Avahi socket mount. Starting the containers is one
+checkpoint; device discovery, restored history and working household controls
+still need their own evidence.

@@ -15,16 +15,35 @@ def validate_archive(path):
         members = archive.getmembers()
         if not members:
             raise ValueError('The capture is empty')
+        links = {PurePosixPath(m.name) for m in members if m.issym()}
         for member in members:
             name = PurePosixPath(member.name)
             if name.is_absolute() or '..' in name.parts or not (member.isdir() or member.isfile() or member.issym() or member.islnk()):
                 raise ValueError('The capture contains a special file or escaping path')
-            if member.issym() or member.islnk():
+            if member.islnk():
                 link = PurePosixPath(member.linkname)
                 if link.is_absolute() or '..' in link.parts:
                     raise ValueError('Review escaping or absolute links separately')
+            if member.issym():
+                link = PurePosixPath(member.linkname)
+                if link.is_absolute():
+                    raise ValueError('Review escaping or absolute links separately')
+                # npm's .bin links normally contain ../package/bin. Resolve
+                # components inside the empty capture root, refusing either an
+                # escape or a symlink traversal before normalising any "..".
+                parts = list(name.parent.parts)
+                for part in link.parts:
+                    if PurePosixPath(*parts) in links:
+                        raise ValueError('A capture link traverses another symlink')
+                    if part == '..':
+                        if not parts:
+                            raise ValueError('A capture link escapes its destination')
+                        parts.pop()
+                    elif part != '.':
+                        parts.append(part)
+                if not parts or PurePosixPath(*parts) in links:
+                    raise ValueError('A capture link aliases the root or another symlink')
         # Do not let a later member traverse a symlink created by an earlier one.
-        links = {PurePosixPath(m.name) for m in members if m.issym()}
         if any(link in PurePosixPath(m.name).parents for m in members for link in links):
             raise ValueError('A capture member traverses a symlink')
 

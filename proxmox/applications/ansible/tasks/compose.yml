@@ -126,6 +126,15 @@
     fail_msg: 'Data is staged. Start requires the selected cutover and exclusive-writer confirmation.'
   when: app.start_services | default(false) | bool and not ansible_check_mode
 
+- name: Install the native Node-RED OIDC wrapper without replacing restored settings
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../node-red-settings.js"
+    dest: /srv/homelab/data/node-red/runtime-settings.js
+    owner: '1000'
+    group: '1000'
+    mode: '0640'
+  when: app.kind == 'automation' and stack.node_red_oidc is defined
+
 - name: Start exactly this guest stack
   ansible.builtin.command:
     argv: [docker, compose, -f, /opt/homelab-app/compose.yml, up, -d, --wait, --wait-timeout, '180', --remove-orphans=false]

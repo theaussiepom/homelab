@@ -18,6 +18,7 @@ export ANSIBLE_LOCAL_TEMP=/tmp/ansible-local
 export ANSIBLE_CONFIG=/src/proxmox/applications/ansible/ansible.cfg
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/site.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/verify.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/automation-service.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/network-startup.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/ingress-network-startup.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-image.yml

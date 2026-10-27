@@ -13,10 +13,14 @@ import site_config
 
 def preview(base, cfg):
     site_config.validate(base)
-    if (not isinstance(cfg, dict) or set(cfg) != {'schema', 'vmid', 'backend_address', 'homeassistant_host', 'node_red_host'}
+    required = {'schema', 'vmid', 'backend_address', 'homeassistant_host', 'node_red_host'}
+    if (not isinstance(cfg, dict) or not required <= set(cfg) or set(cfg) - required - {'node_red_login'}
             or cfg['schema'] != 'homelab-automation-routes-v1' or type(cfg['vmid']) is not int
             or not 100 <= cfg['vmid'] <= 999999999 or cfg['vmid'] in {4914, 4915, 4920}):
         raise ValueError('Use the closed automation routing configuration')
+    native = cfg.get('node_red_login', 'authentik') == 'oidc'
+    if cfg.get('node_red_login', 'authentik') not in {'authentik', 'oidc'}:
+        raise ValueError('Node-RED must use Authentik proxy login or its existing native OIDC login')
     existing = site_config.render(base)
     guest_ids = existing['bootstrap.json']['service_discovery']['guests']
     ids = [base['runner']['vmid'], base['dns']['vmid'], *guest_ids,
@@ -40,25 +44,27 @@ def preview(base, cfg):
     if len(set(hosts)) != 2 or set(hosts) & protected_hosts:
         raise ValueError('Automation routes cannot collide with each other, login endpoints or preserved DNS names')
     routes = [{'name':'homeassistant', 'host':hosts[0], 'url':f'http://{address}:8123'},
-              {'name':'node-red', 'host':hosts[1], 'url':f'http://{address}:1880', 'login':'authentik'}]
+              {'name':'node-red', 'host':hosts[1], 'url':f'http://{address}:1880', 'login':'oidc' if native else 'authentik'}]
     identity = base['guests']['identity']['interfaces']['backend']['address']
     outpost = {'name':'node-red-outpost', 'host':hosts[1], 'url':f'http://{identity}:9000', 'login':'outpost'}
     origin = foundation.private_authentik_origin(f'http://{identity}:9000')
-    ingress_settings = {'authentik_url':origin}
+    ingress_settings = {} if native else {'authentik_url':origin}
     # Validate these exact data contracts through the same compiler as OpenTofu.
-    for kind, ip, rows in [('automation', address, routes), ('identity', identity, [outpost])]:
+    selected_routes = [('automation', address, routes)] + ([] if native else [('identity', identity, [outpost])])
+    for kind, ip, rows in selected_routes:
         discovery.labels({'guest':{'interfaces':[{'ipv4':str(ip) + '/24'}]},
-                          'app':{'kind':kind, 'discovery_routes':rows, 'ingress_foundation':ingress_settings}})
+                          'app':{'kind':kind, 'discovery_routes':rows, 'ingress_foundation':ingress_settings,
+                                 'node_red_authentication':'authentik-oidc' if native else 'proxy'}})
     frontend = base['guests']['ingress']['interfaces']['frontend']['address']
     return {'schema':'homelab-automation-routing-preview-v1', 'deployable':False,
-            'automation_discovery_routes':routes, 'identity_additional_discovery_route':outpost,
+            'automation_discovery_routes':routes, 'identity_additional_discovery_route':None if native else outpost,
             'ingress_foundation_settings':ingress_settings,
             'ingress_additional_rules':[site_config.rule('out', str(port), 'Automation backend only',
                                        'destination', str(address) + '/32') for port in (8123, 1880)],
             'discovery_guest_ids':sorted([*guest_ids, cfg['vmid']]),
             'dns_records':dict.fromkeys(hosts, frontend),
             'acme_exceptions':['_acme-challenge.' + host for host in hosts],
-            'existing_authentik_settings_to_reconcile':{
+            'existing_authentik_settings_to_reconcile':{'node_red_oidc_redirect_uri':'https://' + hosts[1] + '/auth/strategy/callback/'} if native else {
                 'embedded_outpost_authentik_host':'https://' + base['domains']['identity'] + '/',
                 'node_red_provider_external_host':'https://' + hosts[1] + '/'},
             'remaining_inputs':['complete guest/network/resource profile and bootstrap grants',

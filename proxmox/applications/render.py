@@ -120,6 +120,16 @@ def compose(cfg):
                    'environment': {k: literal(v) for k, v in value.get('environment', {}).items()},
                    'volumes': [], 'network_mode': 'host'}
         service['environment']['TZ'] = literal(cfg.get('timezone', 'Etc/UTC'))
+        if 'extra_hosts' in value:
+            hosts = value['extra_hosts']
+            if (kind != 'automation' or not isinstance(hosts, dict) or len(hosts) > 32
+                    or any(not isinstance(host, str) or not re.fullmatch(r'[a-z0-9][a-z0-9_.-]{0,252}', host) for host in hosts)):
+                raise ValueError('Use a finite automation hostname-to-address map')
+            for address in hosts.values():
+                ip = ipaddress.IPv4Address(address)
+                if ip.is_unspecified or ip.is_multicast or ip.is_link_local:
+                    raise ValueError('Automation host aliases require usable literal IPv4 addresses')
+            service['extra_hosts'] = dict(hosts)
         # These paths refer to the restored capture, never to the source production host.
         mounts = {'homeassistant': [('homeassistant/config', '/config')],
                   'node_red': [('node-red/data', '/data'), ('node-red/config', '/config')],
@@ -157,6 +167,26 @@ def compose(cfg):
                 raise ValueError('Mount the captured HA startup directory read-only for the mDNS helper')
         result['services'][name] = service
     services = result['services']
+    if kind == 'automation' and 'node_red_oidc' in cfg:
+        oidc = cfg['node_red_oidc']
+        if (not isinstance(oidc, dict) or set(oidc) != {'identity_url', 'node_red_url', 'client_id', 'provider_slug'}
+                or not isinstance(oidc['client_id'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,256}', oidc['client_id'])
+                or not isinstance(oidc['provider_slug'], str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,62}', oidc['provider_slug'])):
+            raise ValueError('Preserve the selected native Node-RED OIDC client and provider')
+        for name in ('identity_url', 'node_red_url'):
+            parsed = urlsplit(oidc[name])
+            if (parsed.scheme != 'https' or not dns_name(parsed.hostname) or parsed.port is not None
+                    or parsed.username or parsed.password or parsed.path not in ('', '/') or parsed.query or parsed.fragment):
+                raise ValueError('Node-RED OIDC requires literal HTTPS origins')
+        node = services['node_red']
+        if (node.get('command') != ['--settings', '/runtime-settings.js']
+                or f'{root}/node-red/runtime-settings.js:/runtime-settings.js:ro' not in node['volumes']):
+            raise ValueError('Native Node-RED OIDC must use the preserved settings wrapper')
+        node['environment'].update({
+            'NODE_RED_IDENTITY_URL': oidc['identity_url'].rstrip('/'),
+            'NODE_RED_EXTERNAL_URL': oidc['node_red_url'].rstrip('/'),
+            'NODE_RED_OIDC_CLIENT_ID': oidc['client_id'],
+            'NODE_RED_OIDC_PROVIDER': oidc['provider_slug']})
     if kind == 'identity':
         env = foundation.identity_environment(cfg) if 'foundation' in cfg else {'AUTHENTIK_SECRET_KEY': required(cfg, 'authentik_secret_key'),
                'AUTHENTIK_POSTGRESQL__HOST': required(cfg, 'postgresql_host'),

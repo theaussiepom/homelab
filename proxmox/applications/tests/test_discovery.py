@@ -20,6 +20,16 @@ def site(root):
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_native_node_red_authentik_login_does_not_get_a_second_proxy_login(self):
+        cfg = {'app': {'kind': 'automation', 'node_red_authentication': 'authentik-oidc', 'discovery_routes': [
+            {'name': 'homeassistant', 'host': 'ha.example.invalid', 'url': 'http://10.88.30.21:8123'},
+            {'name': 'node-red', 'host': 'flows.example.invalid', 'url': 'http://10.88.30.21:1880', 'login': 'oidc'}]},
+            'guest': {'interfaces': [{'ipv4': '10.88.30.21/24'}]}}
+        labels = deploy.discovery.labels(cfg)
+        self.assertEqual(labels['traefik.http.routers.node-red.middlewares'], 'security-headers@file')
+        cfg['app'].pop('node_red_authentication')
+        with self.assertRaises(ValueError): deploy.discovery.labels(cfg)
+
     def test_automation_notes_require_node_red_auth_and_leave_ha_login_alone(self):
         cfg = {'app': {'kind': 'automation', 'ingress_foundation': {'authentik_url':'http://10.88.30.20:9000'}, 'discovery_routes': [
             {'name':'homeassistant', 'host':'ha.example.invalid', 'url':'http://10.88.30.21:8123'},
