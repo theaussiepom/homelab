@@ -50,6 +50,21 @@ class MusicTests(unittest.TestCase):
         other['services']['mqtt']['image'] = 'ghcr.io/music-assistant/server:latest'
         with self.assertRaises(ValueError): render.compose(other)
 
+    def test_player_listener_must_match_an_assigned_guest_interface(self):
+        from test_deploy import fixture as guest_fixture, deploy
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); cfg = guest_fixture(root)
+            stack = root / 'stack.json'; stack.write_text(json.dumps(fixture()))
+            cfg['app'].update(kind='music-assistant', music_address='198.18.100.20',
+                              stack_config=str(stack))
+            self.assertEqual(deploy.validate(cfg), 6101)
+            cfg['app']['music_address'] = '198.18.100.21'
+            with self.assertRaises(ValueError): deploy.validate(cfg)
+            cfg['app']['music_address'] = '198.18.100.20'
+            cfg['guest']['interfaces'][0]['ipv4'] = '198.18.100.22/24'
+            cfg['app']['address'] = '198.18.100.22'
+            with self.assertRaises(ValueError): deploy.validate(cfg)
+
     def test_mount_privilege_or_extra_storage_needs_separate_admission(self):
         for key, value in [('cap_add', ['SYS_ADMIN']), ('extra_mounts', [
                 {'source': '/srv/homelab/data/media', 'target': '/media'}]),
