@@ -315,7 +315,7 @@ class CDTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             config, path, dest, environment, _ = setup(Path(d))
             cfg = config["site"]
-            # Git tracks non-secret source as0644; only generated runtime inputs/receipts require0600.
+            # Git tracks non-secret source as 0644; only generated runtime inputs/receipts require 0600.
             path.chmod(0o644)
             work = Path(cfg["paths"]["state_root"]) / str(cfg["guest"]["vmid"])
             engine = Mock()

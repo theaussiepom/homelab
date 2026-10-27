@@ -76,7 +76,7 @@ def main():
             'globalSettings__disableUserRegistration': 'true',
             'globalSettings__mail__smtp__host': 'smtp.example.invalid',
         }
-        # Single-quoted dotenv values keep dollars literal on the target Compose2.26.
+        # Single-quoted dotenv values keep dollars literal on the target Compose 2.26.
         env_file = root / 'synthetic.env'
         env_file.write_text(''.join(f"{key}='{value}'\n" for key, value in env.items()))
         env_file.chmod(0o600)
@@ -139,7 +139,7 @@ def main():
                    '--name', seed_name, '--network', 'none', '--read-only',
                    '--cap-drop', 'ALL', '--cpus', '0.5', '--memory', '128m', '--pids-limit', '32',
                    '-v', project + '_data:/data:ro', '--entrypoint', 'python3', args.tools_image, '-c', check)
-            print('Synthetic Lite latest / MariaDB12.3.3 startup and restart passed; no migration acceptance.')
+            print('Synthetic Lite latest / MariaDB 12.3.3 startup and restart passed; no migration acceptance.')
         finally:
             # Only resources with this invocation's random project/name are removed.
             subprocess.run(['docker', 'rm', '-f', client_name, seed_name],

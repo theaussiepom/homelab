@@ -30,9 +30,9 @@ change across upgrades. The adapter refuses an absent or mismatched UID/GID so
 startup cannot silently change restored ownership. Keep the image's default
 entrypoint; do not add a Docker `user` override.
 
-The generated private stack and Compose files are mode0600. Values are passed
+The generated private stack and Compose files are mode 0600. Values are passed
 as an environment mapping with literal dollar escaping, which works with the
-selected Compose2.26 package. No dotenv reparsing is needed. Never print resolved
+selected Compose 2.26 package. No dotenv reparsing is needed. Never print resolved
 Compose, runtime JSON, captures, database dumps, private keys or application logs
 in GitHub jobs or upload them as Actions artifacts.
 
@@ -88,7 +88,7 @@ reviewed reverse-data treatment; restarting the old container can lose writes.
 
 ## Exposure and acceptance
 
-Publish HTTP8080 only on the selected private backend. The bind mounts refuse to
+Publish HTTP 8080 only on the selected private backend. The bind mounts refuse to
 create missing source directories. Existing Traefik terminates HTTPS and uses
 Proxmox Notes discovery. Keep the selected current hostname during the move;
 a domain cutover is a separate plan. Bitwarden authenticates its own clients.
@@ -97,7 +97,7 @@ The existing service-discovery scope and ingress firewall must admit this new
 guest before its job can run; a synthetic test cannot supply that authority.
 
 The bounded health helper sends GET requests only to `/api/alive`, `/api/config`
-and `/identity/.well-known/openid-configuration`. It requires HTTP200, an observed
+and `/identity/.well-known/openid-configuration`. It requires HTTP 200, an observed
 API version and the explicitly retained issuer. Public probes use verified TLS
 and refuse redirects. A native guest probe may explicitly use its private HTTP
 backend with `--backend`. These checks do not establish web assets, client login,

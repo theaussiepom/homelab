@@ -137,7 +137,7 @@ def reader(origin, backend=False):
     parsed = urlsplit(origin)
     if (parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username
             or parsed.password or parsed.path or parsed.query or parsed.fragment
-            or parsed.scheme == 'http' and parsed.hostname != '127.0.0.1' and not backend):
+            or (parsed.scheme == 'http' and parsed.hostname != '127.0.0.1' and not backend)):
         raise ValueError('Use an HTTPS origin, or 127.0.0.1 HTTP for synthetic tests')
     if backend:
         address = ipaddress.IPv4Address(parsed.hostname)
