@@ -176,6 +176,28 @@ class RemoteTests(unittest.TestCase):
                     self.assertTrue((evidence / 'unbound-apply-started.json').exists())
                     self.assertFalse((evidence / 'unbound-apply-completed.json').exists())
 
+    def test_host_edit_during_unbound_is_not_overwritten_by_pihole(self):
+        for phase in ('stage', 'apply'):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as temporary:
+                self.state = Path(temporary) / 'state'
+                self.hosts = ['192.168.200.5 sso.lab.example.org old-alias']
+                self.unbound = UNBOUND_SOURCE
+                self.commands.clear()
+                def drift_stage(*args):
+                    if phase == 'stage': self.hosts.append('10.88.25.9 newly-added-unrelated')
+                    return None
+                def drift_apply(*args):
+                    changed = self.apply_unbound(*args)
+                    if phase == 'apply': self.hosts.append('10.88.25.9 newly-added-unrelated')
+                    return changed
+                with patch.object(cd, 'REMOTE_ROOT', self.state), patch.multiple(cd,
+                        stage_unbound=drift_stage, apply_unbound=drift_apply), self.assertRaisesRegex(ValueError, 'changed'):
+                    cd.remote_run()
+                self.assertIn('10.88.25.9 newly-added-unrelated', self.hosts)
+                self.assertEqual(self.mutations(), [])
+                hold = json.loads((self.state / 'HOLD.json').read_text())
+                self.assertTrue((Path(hold['evidence']) / 'unbound-apply-completed.json').exists())
+
     def test_concurrent_host_edit_is_preserved_and_held_before_any_write(self):
         calls = 0
         original = self.command
