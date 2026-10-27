@@ -96,12 +96,12 @@ the application profile. Its discovery extension adds only the selected guest
 to the existing read-only token; it does not replace that token or change its
 role. Private CD selects that bootstrap source only when `enabled` is true.
 
-For an already migrated HA HTTP configuration, `ha_http.store_sha256` binds the
-original v2.2 HTTP settings file. During offline restoration CD moves the old
-Docker listener to the new guest and trusts only the selected Traefik address.
-It preserves the other HTTP settings and a private original. A pending setting
-change or unknown format stops preparation. Older unmigrated installs use the
-YAML path; a migrated store cannot silently fall through to an ignored YAML edit.
+HA configuration conversion is a separate migration step. CD restores the
+selected, already prepared configuration and starts the chosen image; it does
+not rewrite `configuration.yaml`, the `.storage/http` settings, trusted proxies
+or sensor configuration. Old inputs containing `ha_http` are rejected before
+target actions. Agree how to prepare and verify the new listener and proxy
+settings before enabling deployment; source tests do not settle that decision.
 
 ## Before switching the house
 
@@ -110,6 +110,8 @@ YAML path; a migrated store cannot silently fall through to an ignored YAML edit
    Preserve owners, permissions, links, private credentials and custom images.
 3. Restore HA's existing MariaDB Recorder database separately from server CD.
    Creating an empty MariaDB server does not migrate its history.
+   Agree the separate HA configuration conversion strategy and verify its
+   prepared backup before enabling the deployment.
 4. Review the endpoint, discovery, login and firewall changes together. Resolve
    local Bluetooth/DBus explicitly;
    never expose the Proxmox host's control sockets as a shortcut.
