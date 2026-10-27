@@ -76,6 +76,8 @@ def write(path, value):
 
 
 def validate(cfg):
+    if cfg.get("app", {}).get("kind") == "scrypted":
+        raise InputNeeded("Scrypted is held: decoder/GPU and recording-source admission require a separate reviewed implementation")
     vmid = cfg['guest']['vmid']
     if isinstance(vmid, bool) or not isinstance(vmid, int) or vmid < 100 or vmid in {900, 4914, 4915, 4920}:
         raise ValueError('Select one application guest, never the deployment controller or protected targets')

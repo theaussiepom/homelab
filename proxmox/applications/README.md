@@ -165,6 +165,12 @@ The [example inputs](examples/site.example.json) have invented addresses and
 deliberately unusable package/image selections. Replace them privately using
 the [technical reference](OPERATIONS.md); do not point unchanged examples at a server.
 
+## Scrypted preparation
+
+[Scrypted has a separate preparation guide](SCRYPTED.md). Its decoder/GPU and
+recording-source decisions remain held. The local review helper emits no
+runnable stack; the application installer refuses Scrypted deployment.
+
 ## What is still outstanding?
 
 The three empty database servers have passed native installation and startup.
