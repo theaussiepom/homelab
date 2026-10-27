@@ -8,16 +8,16 @@ import stat
 import subprocess
 
 # This code is sent to Python's argv, while credentials travel only on stdin.
-# Certificate bypass is confined to the generated self-signed loopback endpoint;
-# it is never used for the browser, Proxmox, an IdP or a supplied URL.
+# Trust only the service certificate read from its fixed local configuration.
+# The self-signed certificate has no loopback SAN, so identity is its local trust
+# anchor; no public CA, proxy, redirect or supplied URL participates.
 CONTAINER_CODE = r'''
-import json, ssl, sys
+import json, ssl, sys, time
 from urllib.error import HTTPError
 from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHandler, ProxyHandler
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args):
         raise RuntimeError('Unexpected local redirect')
-opener = build_opener(ProxyHandler({}), HTTPSHandler(context=ssl._create_unverified_context()), NoRedirect())
 mode = sys.argv[1]
 def require(condition, message='Local setup verification failed'):
     if not condition: raise RuntimeError(message)
@@ -27,13 +27,26 @@ def call(path, data=None, token=None):
     if data is not None: headers['Content-Type'] = 'application/json'
     req = Request('https://127.0.0.1:5000' + path, headers=headers,
                   data=None if data is None else json.dumps(data).encode())
-    try: response = opener.open(req, timeout=8)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.load_verify_locations(cafile='/app/config/ssl/cert.pem')
+    opener = build_opener(ProxyHandler({}), HTTPSHandler(context=context), NoRedirect())
+    try: response = opener.open(req, timeout=4 if path == '/api/health' else 8)
     except HTTPError as error: response = error
     with response:
         raw = response.read(1048577)
         if len(raw) > 1048576: raise RuntimeError('Oversized local response')
         return response.code, json.loads(raw)
-require(call('/api/health') == (200, {'status': 'ok', 'version': '1.4.1'}))
+deadline = time.monotonic() + 65
+while True:
+    try:
+        if call('/api/health') == (200, {'status': 'ok', 'version': '1.4.1'}): break
+    except (OSError, ValueError, RuntimeError):
+        pass
+    if time.monotonic() >= deadline:
+        raise RuntimeError('PegaProx did not become ready')
+    time.sleep(2)
 status, state = call('/api/auth/check')
 require(status == 401 and state.get('authenticated') is False)
 if mode == 'bootstrap':

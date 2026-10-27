@@ -44,6 +44,11 @@ class PegaProxCDTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 cd.check_bootstrap_password(value)
 
+    def test_bootstrap_password_limits_utf8_bytes_before_deployment(self):
+        cd.check_bootstrap_password('Aa1' + '\u00e9' * 62)
+        with self.assertRaises(ValueError):
+            cd.check_bootstrap_password('Aa1' + '\u00e9' * 63)
+
     def test_existing_foundation_profile_still_uses_its_original_protocol(self):
         self.assertEqual(shared.HOLD_NAME, 'FOUNDATION-HOLD.json')
         self.assertEqual(shared.COMPLETE_NAME, 'foundation-complete.json')

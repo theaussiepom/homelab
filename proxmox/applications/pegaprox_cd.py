@@ -25,6 +25,7 @@ def runtime_secrets():
 
 def check_bootstrap_password(value):
     shared.require(isinstance(value, str) and 8 <= len(value) <= 128
+                   and len(value.encode('utf-8')) <= 128
                    and not any(c in value for c in '\r\n\x00')
                    and any(c.isupper() for c in value) and any(c.islower() for c in value)
                    and any(c.isdigit() for c in value), 'Missing or invalid initial administrator secret')

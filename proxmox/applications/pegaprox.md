@@ -185,8 +185,12 @@ fixed result, never a password or session token. Ansible removes the temporary
 file in its `always` block. A killed job retains its normal failure hold; any
 unconfirmed remote cleanup must be reviewed before continuation.
 
-The generated self-signed loopback certificate is accepted only by this internal
-probe. Browser, Proxmox and IdP certificate trust remain separate acceptance checks.
+The helper polls health for up to 65 seconds before reading authentication state
+or sending credentials. It verifies TLS using only `/app/config/ssl/cert.pem` as
+its local trust anchor. Hostname matching is omitted because the generated
+self-signed certificate has no loopback SAN; proxies and redirects are refused,
+and the endpoint is fixed at `https://127.0.0.1:5000`. Browser, Proxmox and IdP
+certificate trust remain separate acceptance checks.
 A second bootstrap is refused, even with a different password. Readiness after
 completion needs no administrator password, so deleting that GitHub Secret
 later will not break ordinary CD verification.
