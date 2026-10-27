@@ -154,6 +154,11 @@
       changed_when: false
       no_log: true
 
+    - name: Require guest networking before the deployment runner starts
+      ansible.builtin.import_tasks: ../../common/ansible/network-ready.yml
+      vars:
+        network_ready_unit: homelab-deploy.service
+
     - name: Configure the qualified private runner
       ansible.builtin.import_tasks: runner-common.yml
       vars:

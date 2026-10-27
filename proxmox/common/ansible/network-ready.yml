@@ -1,0 +1,61 @@
+---
+- name: Select only a managed homelab service
+  ansible.builtin.assert:
+    that:
+      - network_ready_unit in ['docker.service', 'mariadb.service', 'postgresql@.service', 'influxdb.service', 'homelab-deploy.service']
+
+- name: Check the installed IPv4 network readiness helper
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/systemd-networkd-wait-online
+  register: network_ready_helper
+
+- name: Require the guest's networkd readiness helper before activating services
+  ansible.builtin.assert:
+    that:
+      - network_ready_helper.stat.isreg | default(false)
+      - network_ready_helper.stat.executable | default(false)
+    fail_msg: 'This guest needs the installed networkd IPv4 readiness helper before services start.'
+  when: network_ready_activate | default(true) | bool
+
+- name: Install the shared guest network readiness gate
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/homelab-network-ready.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Wait for the homelab guest IPv4 networks
+      Wants=network-online.target systemd-networkd.service
+      After=network-online.target systemd-networkd.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/lib/systemd/systemd-networkd-wait-online --ipv4 --timeout=30
+      RemainAfterExit=yes
+  register: network_ready_gate
+
+- name: Prepare the selected service override directory
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ network_ready_unit }}.d"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Require successful guest networking before the selected service starts
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ network_ready_unit }}.d/homelab-network-ready.conf"
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Requires=homelab-network-ready.service
+      After=homelab-network-ready.service
+  register: network_ready_dependency
+
+- name: Reload service definitions before activating the selected service
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: network_ready_activate | default(true) | bool and not ansible_check_mode

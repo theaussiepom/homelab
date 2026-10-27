@@ -1,4 +1,9 @@
 ---
+- name: Require guest networking before Docker and application startup
+  ansible.builtin.import_tasks: ../../../common/ansible/network-ready.yml
+  vars:
+    network_ready_unit: docker.service
+
 - name: Prepare frontend reply routing for the multihomed ingress guest
   ansible.builtin.import_tasks: ingress-routing.yml
   when: app.kind == 'ingress' and app.frontend_routing is defined and not ansible_check_mode

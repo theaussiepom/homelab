@@ -86,6 +86,23 @@ Fresh household backups can wait until the migration window. The isolated test
 needs no private household rows. The empty-server native checks above do not replace the later restore and
 application-connection checks.
 
+## PostgreSQL starts but applications cannot connect after a reboot
+
+PostgreSQL can stay active on localhost if its private address is not ready when
+it starts. A successful local query does not prove the private listener exists.
+All new managed guests now use one shared Ansible network-readiness gate. Docker,
+native database services and the deployment runner depend on it. It waits up to
+30 seconds for the guest's managed IPv4 networks; an unavailable network prevents
+the dependent service starting. It does not require internet connectivity.
+The configured listening addresses, database files and access rules stay intact.
+
+For an already installed guest, `ansible/postgresql-startup.yml` uses that same
+definition. Its private CD caller must select the existing guest and cluster,
+preserve failed evidence, and obtain approval for a service restart. It restarts
+only the selected cluster when the definition changes; it does not install
+packages, restore databases or reboot the guest. A later real reboot remains
+the test of startup ordering.
+
 ## Preserve file owners
 
 The default fixed-account setup retains the selected numeric user/group IDs

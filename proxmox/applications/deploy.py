@@ -49,9 +49,9 @@ def sha(path):
 
 def source_hash():
     result = hashlib.sha256()
-    for path in sorted(SOURCE.rglob('*')):
+    for path in sorted([*SOURCE.rglob('*'), *(SOURCE.parent / 'common').rglob('*')]):
         if path.is_file() and not any(p in {'.terraform', '__pycache__', '.work'} for p in path.parts):
-            result.update(str(path.relative_to(SOURCE)).encode())
+            result.update(str(path.relative_to(SOURCE.parent)).encode())
             result.update(bytes.fromhex(sha(path)))
     return result.hexdigest()
 
