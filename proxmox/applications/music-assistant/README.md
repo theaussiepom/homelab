@@ -102,7 +102,10 @@ image with invented state in disposable, resource-limited Docker using
 a unique Docker `--internal` network with no peers, no published ports and
 no real mounts or credentials. A real virtual interface is needed for discovery
 initialization; loopback-only `--network none` fails multicast membership. The
-internal network has no external route and is removed with the fixture. It
+internal network has no external route and is removed with the fixture. Its
+synthetic discovery setting explicitly selects the sole non-loopback interface
+(`zeroconf_interfaces: all`); the default mode needs a default route. This does
+not change the production discovery setting. It
 records the actual image ID/version and checks local HTTP and stream-listener readiness only. Its result does not qualify
 Proxmox nesting, systemd boot, household routing, cloud providers or speakers.
 Ben performs real provider, library, browser and speaker acceptance after a

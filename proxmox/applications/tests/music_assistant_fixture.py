@@ -17,6 +17,7 @@ def run(image):
     network = name + '-network'
     state = {'server_id': '00000000000000000000000000000001', 'onboard_done': True,
              'providers': {}, 'players': {}, 'core': {
+                 'discovery': {'domain': 'discovery', 'values': {'zeroconf_interfaces': 'all'}},
                  'webserver': {'domain': 'webserver', 'values': {'bind_ip': '127.0.0.1'}},
                  'streams': {'domain': 'streams', 'values': {'bind_ip': '127.0.0.1', 'publish_ip': '127.0.0.1'}}},
              'default_providers_setup': ['fanarttv', 'builtin', 'musicbrainz', 'theaudiodb',
@@ -30,6 +31,7 @@ def run(image):
     try:
         # Discovery needs a multicast-capable interface; network=none has only lo.
         # An internal bridge supplies that interface without external routes or peers.
+        # Its lack of a default route also needs explicit interface discovery above.
         docker('network', 'create', '--internal', network, stdout=subprocess.DEVNULL)
         docker('run', '-d', '--name', name, '--platform', 'linux/amd64', '--pull', 'never',
                '--network', network, '--cpus', '2', '--memory', '1536m', '--pids-limit', '256',
