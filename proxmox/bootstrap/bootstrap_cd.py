@@ -56,7 +56,7 @@ def validate(c):
         for bridge in c['private_bridges']:
             require(isinstance(bridge, dict) and set(bridge) == {'name', 'description'}
                     and isinstance(bridge['name'], str) and re.fullmatch(r'vmbr[1-9][0-9]{0,3}', bridge['name'])
-                    and bridge['name'] not in {'vmbr0', 'vmbr1'} and bridge['name'] not in names
+                    and bridge['name'] not in {'vmbr0', 'vmbr1', c['bridge']} and bridge['name'] not in names
                     and isinstance(bridge['description'], str) and 1 <= len(bridge['description']) <= 200
                     and all(32 <= ord(char) < 127 for char in bridge['description']),
                     'Declare distinct private bridges with printable purpose descriptions')
@@ -222,7 +222,7 @@ def reconcile(api, c, before, evidence, root=None, backup=None):
             # Existing legacy configurations do not acquire a new comment edit.
             if name not in explicit or expected[name].get('comments', '').rstrip('\n') == description:
                 continue
-            api.call(node + '/network/' + name, 'PUT', {'comments': description})
+            api.call(node + '/network/' + name, 'PUT', {'type': 'bridge', 'comments': description})
             expected[name] = dict(expected[name], comments=description)
         else:
             # Omit bridge_ports: the API treats 'none' as a literal device name.
@@ -349,8 +349,9 @@ def resume_discovery(c, api, root, backup, packet):
         original = saved['plan']
         require(inspect(api, c) == after and after['bridge_exists'] and not after['missing']
                 and after['token_metadata'] == original['token_metadata']
-                and {k:v for k,v in after['networks'].items() if k != c['bridge']} ==
-                    {k:v for k,v in original['networks'].items() if k != c['bridge']},
+                and all(name in after['networks'] for name in bridge_definitions(c))
+                and {k:v for k,v in after['networks'].items() if k not in bridge_definitions(c)} ==
+                    {k:v for k,v in original['networks'].items() if k not in bridge_definitions(c)},
                 'Base bootstrap changed or did not finish; continuation refused')
         minted = provider_access.admit_minted_continuation(api, c, original['service_discovery'],
                                                          root, backup, packet['minted_sha256'])

@@ -102,6 +102,7 @@ def render(value, engine, sources, *, phase='additive', client_vmids=None):
             compatible = (config.get('mysqld', 'bind-address', raw=True) == '0.0.0.0'
                           and not config.has_option('mysqld', 'bind_address')
                           and not config.has_option('mysqld', 'skip-networking')
+                          and not config.has_option('mysqld', 'skip_networking')
                           and config.get('mysqld', 'port', fallback=str(networks.PORTS[engine])) == str(networks.PORTS[engine]))
         except configparser.Error:
             compatible = False

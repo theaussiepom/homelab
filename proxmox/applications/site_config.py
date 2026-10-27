@@ -232,6 +232,9 @@ def render(cfg, database_networks=None):
     if database_networks is not None:
         import database_networks as dbnets
         dbnets.validate(database_networks, [n['cidr'] for n in cfg['networks'].values()])
+        site_bridges = {n['bridge'] for n in cfg['networks'].values()}
+        require(not any(net['bridge'] in site_bridges for net in database_networks['networks'].values()),
+                'A database bridge must differ from every site network bridge')
         for engine, net in database_networks['networks'].items():
             require(all(net['server'][key] == cfg['databases'][engine][key] for key in ('vmid', 'hostname')),
                     'The database catalogue must select the existing declared database guests')

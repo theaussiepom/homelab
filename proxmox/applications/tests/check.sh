@@ -21,6 +21,7 @@ ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/verify.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/network-startup.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/network-update.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/postgresql-network.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/ingress-network-startup.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-image.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-acme.yml

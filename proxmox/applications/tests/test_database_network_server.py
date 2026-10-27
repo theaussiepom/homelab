@@ -104,6 +104,7 @@ class DatabaseNetworkServerTests(unittest.TestCase):
     def test_nonstandard_ports_and_disabled_tcp_are_held(self):
         cases = [('mariadb', {'homelab.cnf': '[mysqld]\nbind-address = 0.0.0.0\nport = 3307\n'}),
                  ('mariadb', {'homelab.cnf': '[mysqld]\nbind-address = 0.0.0.0\nskip-networking\n'}),
+                 ('mariadb', {'homelab.cnf': '[mysqld]\nbind-address = 0.0.0.0\nskip_networking\n'}),
                  ('influxdb', {'config.toml': 'http-bind-address = ":8087"\n'})]
         for engine, source in cases:
             with self.subTest(engine=engine), self.assertRaises(ValueError):

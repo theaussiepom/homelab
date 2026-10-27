@@ -1,5 +1,6 @@
 """Database network contracts must produce finite, isolated guest connections."""
 import copy
+import ipaddress
 import json
 from pathlib import Path
 import sys
@@ -83,6 +84,25 @@ class DatabaseNetworksTests(unittest.TestCase):
     def test_database_catalogue_cannot_overlap_existing_site_networks(self):
         value = contract()
         with self.assertRaises(ValueError): networks.validate(value, ['10.88.31.0/24'])
+
+    def test_network_and_member_addresses_require_strings_before_ip_parsing(self):
+        address = ipaddress.IPv4Address('10.88.31.23')
+        for item in (int(address), address.packed, None, True):
+            value = contract(); value['networks']['postgresql']['server']['address'] = item
+            with self.subTest(field='address', value=item), self.assertRaises(ValueError): networks.validate(value)
+        for item in (int(ipaddress.IPv4Address('10.88.31.0')), ('10.88.31.0', 24), None):
+            value = contract(); value['networks']['postgresql']['cidr'] = item
+            with self.subTest(field='cidr', value=item), self.assertRaises(ValueError): networks.validate(value)
+
+    def test_database_bridge_cannot_reuse_a_site_bridge_with_a_different_subnet(self):
+        site = site_config.read(networks.ROOT / 'examples/foundation.site.example.json')
+        value = contract()
+        for engine, net in value['networks'].items():
+            net['server']['vmid'] = site['databases'][engine]['vmid']
+        for name in site['networks']:
+            selected = copy.deepcopy(site)
+            selected['networks'][name]['bridge'] = value['networks']['postgresql']['bridge']
+            with self.subTest(network=name), self.assertRaises(ValueError): site_config.render(selected, value)
 
     def test_foundation_extension_changes_only_bootstrap_not_commissioned_app_profiles(self):
         site = site_config.read(networks.ROOT / 'examples/foundation.site.example.json')

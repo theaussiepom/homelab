@@ -37,6 +37,7 @@ def validate(value, existing_cidrs=()):
         bridge_names.add(net['bridge'])
         require(isinstance(net['description'], str) and 1 <= len(net['description']) <= 200
                 and all(32 <= ord(c) < 127 for c in net['description']), 'Use a short printable bridge purpose')
+        require(isinstance(net['cidr'], str), 'Use an IPv4 CIDR string')
         subnet = ipaddress.IPv4Network(net['cidr'], strict=True)
         require(subnet.prefixlen == 24 and any(subnet.subnet_of(n) for n in RFC1918)
                 and not any(subnet.overlaps(n) for n in subnets)
@@ -57,6 +58,7 @@ def validate(value, existing_cidrs=()):
                     and identities.get(vmid, member['hostname']) == member['hostname'],
                     'A guest identity differs across database networks')
             identities[vmid] = member['hostname']; members.add(vmid)
+            require(isinstance(member['address'], str), 'Use an IPv4 address string')
             address = ipaddress.IPv4Address(member['address'])
             require(address in subnet and address not in (subnet.network_address, subnet.broadcast_address)
                     and address not in addresses, 'Invalid or duplicate database address')

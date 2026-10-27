@@ -57,6 +57,8 @@ class FakeAPI:
                 self.pending = ''
                 return {'data': 'UPID:pve:synthetic'}
             elif method == 'PUT' and '/network/' in path:
+                if values.get('type') != 'bridge':
+                    raise ValueError('Network interface type is required by the Proxmox update schema')
                 row = next(r for r in self.network if r['iface'] == path.rsplit('/', 1)[1])
                 row.update(values)
                 self.pending = 'bridge purpose update'
@@ -148,11 +150,12 @@ class BootstrapCDTests(unittest.TestCase):
         self.run_cd()
         edits = [w for w in self.api.writes if '/network/' in w[0]]
         self.assertEqual(len(edits), 3)
-        self.assertTrue(all(set(w[2]) == {'comments'} for w in edits))
+        self.assertTrue(all(set(w[2]) == {'type', 'comments'} and w[2]['type'] == 'bridge' for w in edits))
         self.assertEqual(self.api.network[:2], before[:2])
 
     def test_unsafe_additional_bridge_refuses_before_any_write(self):
-        for update in [dict(name='vmbr1'), dict(name='vmbr0'), dict(description='bad\ncomment')]:
+        for update in [dict(name='vmbr1'), dict(name='vmbr0'), dict(name=self.c['bridge']),
+                       dict(description='bad\ncomment')]:
             self.add_database_bridges()
             self.c['private_bridges'][0].update(update)
             with self.subTest(update=update), self.assertRaises(ValueError): self.run_cd()

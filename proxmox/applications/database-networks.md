@@ -79,9 +79,24 @@ and SQL-rule changes. It keeps management, storage and other settings intact.
 It rejects resource creation, replacement, deletion, unrelated changes and
 unknown values. A failed planning attempt remains held across new run IDs.
 
-This planner has no apply command. A reviewed native plan and explicit
-server/client activation and verification packet are still needed before an
-actual cutover. A provider's `update` plan alone does not prove lifecycle effects.
+[database_network_apply.py](database_network_apply.py) applies an exact checked
+saved plan once. It uses the same original state and locks, keeps the original
+installation records, and saves separate local/NAS maintenance evidence. Later
+CD runs verify the new network without applying it again or checking the retired
+address. A failure or interrupted attempt remains held for review.
+
+For the existing PostgreSQL server, Authentik and pgAdmin, the
+[coordinator](database_network_cutover.py) checks all three prepared operations
+before pausing either client. It updates the network, PostgreSQL listener and
+client settings together, then verifies the maintained services. It does not
+restore databases, reinstall applications, replace credentials or change web
+addresses. The service owners supply Authentik and pgAdmin's small runtime
+adapters; their source pins remain separate from the original installers.
+
+A reviewed native plan and complete server/client activation packet are still
+needed before an actual cutover. Source availability is not deployment approval.
+A provider's `update` plan alone does not prove lifecycle effects; the packet
+explicitly covers any required guest cycle and the selected PostgreSQL restart.
 After removing an old address, use new-network checks; preserving historical
 installation receipts does not mean continuing to probe the retired address.
 
