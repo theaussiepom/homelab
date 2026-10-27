@@ -1,0 +1,71 @@
+---
+- name: Correct only the existing ingress certificate DNS path
+  hosts: application
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Refuse a Proxmox host or another guest
+      ansible.builtin.stat:
+        path: /etc/pve
+      register: pve_directory
+
+    - name: Confirm the installed ingress guest
+      ansible.builtin.assert:
+        that:
+          - groups['application'] | length == 1
+          - app.kind == 'ingress'
+          - app.vmid | int == acme_settings.vmid | int
+          - app.vmid | int >= 100
+          - app.vmid | int not in [900, 4914, 4915, 4920]
+          - app.hostname == ansible_facts.hostname
+          - app.address in ansible_facts.all_ipv4_addresses
+          - ansible_facts.virtualization_type == 'lxc'
+          - ansible_facts.distribution == 'Debian'
+          - not pve_directory.stat.exists
+
+    - name: Require the established network dependencies
+      ansible.builtin.command:
+        argv: [systemctl, show, '{{ item.0 }}', '--property={{ item.1 }}', --value]
+      loop: "{{ ['docker.service', 'homelab-ingress-routing.service'] | product(['Requires', 'After']) | list }}"
+      changed_when: false
+      register: acme_dependency
+      failed_when: "'homelab-network-ready.service' not in acme_dependency.stdout.split()"
+
+    - name: Record existing Docker and routing processes
+      ansible.builtin.command:
+        argv: [systemctl, show, docker.service, homelab-ingress-routing.service, '--property=MainPID,ActiveEnterTimestampMonotonic,ActiveState']
+      changed_when: false
+      register: acme_services_before
+
+    - name: Install the reviewed guest maintenance helpers
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../{{ item }}'
+        dest: '/opt/homelab-app/{{ item }}'
+        owner: root
+        group: root
+        mode: '0600'
+      loop: [component_acme.py, component_image.py, ingress_acme.py]
+      when: not acme_verify_only
+
+    - name: Bind the reviewed resolver update settings
+      ansible.builtin.copy:
+        content: '{{ acme_settings | to_json }}'
+        dest: /opt/homelab-app/acme-settings.json
+        owner: root
+        group: root
+        mode: '0600'
+      when: not acme_verify_only
+
+    - name: Update or verify only the declared certificate resolver list
+      ansible.builtin.command:
+        argv: "{{ ['python3', '/opt/homelab-app/component_acme.py', '--settings', '/opt/homelab-app/acme-settings.json'] + (['--verify-only'] if acme_verify_only else []) }}"
+      changed_when: not acme_verify_only
+      no_log: true
+
+    - name: Verify Docker and routing processes are unchanged
+      ansible.builtin.command:
+        argv: [systemctl, show, docker.service, homelab-ingress-routing.service, '--property=MainPID,ActiveEnterTimestampMonotonic,ActiveState']
+      changed_when: false
+      register: acme_services_after
+      failed_when: acme_services_after.stdout != acme_services_before.stdout

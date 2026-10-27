@@ -39,15 +39,30 @@ def packet(value):
                     'Use immutable official Traefik images')
         require(value['before'] != value['after'], 'Select a reviewed image change')
         hashes = [value['plan_sha256'], value['compose_sha256'], value['foundation_complete_sha256']]
+    elif value.get('schema') == 'homelab-ingress-acme-update-v1':
+        from ingress_acme import resolvers
+        fields = common | {'before','after','runtime_sha256','compose_sha256','state_sha256',
+                           'foundation_complete_sha256','image'}
+        require(set(value) == fields, 'Unexpected resolver maintenance fields')
+        resolvers(value['before']);resolvers(value['after'])
+        require(value['before'] != value['after'] and isinstance(value['image'],str)
+                and re.fullmatch(r'traefik@sha256:[0-9a-f]{64}',value['image']),
+                'Select the declared resolver change and unchanged immutable image')
+        hashes = [value[k] for k in ('plan_sha256','runtime_sha256','compose_sha256',
+                                    'state_sha256','foundation_complete_sha256')]
     else:
-        require(value.get('schema') == 'homelab-foundation-verify-continuation-v1'
-                and set(value) == common | {'verify_log', 'hashes'}
+        previous = value.get('schema') == 'homelab-foundation-verify-continuation-v2'
+        require(value.get('schema') in ('homelab-foundation-verify-continuation-v1',
+                                       'homelab-foundation-verify-continuation-v2')
+                and set(value) == common | {'verify_log', 'hashes'} | ({'previous_claim_sha256'} if previous else set())
                 and isinstance(value['verify_log'], str) and re.fullmatch(r'[0-9]+-verify\.log', value['verify_log']),
                 'Select only the reviewed verification continuation')
         require(isinstance(value['hashes'], dict) and set(value['hashes']) == {
             'foundation_hold', 'rollout_hold', 'plan', 'plan_file', 'plan_json', 'applied', 'started',
             'prepared', 'site', 'stack', 'trust', 'state', 'verify_log'}, 'Bind the original failed phase')
         hashes = [value['plan_sha256'], *value['hashes'].values()]
+        if previous:
+            hashes.append(value['previous_claim_sha256'])
     require(type(value['vmid']) is int and value['vmid'] >= 100 and value['vmid'] not in {900, 4914, 4915, 4920}
             and isinstance(value['revision'], str) and re.fullmatch('[0-9a-f]{40}', value['revision'])
             and all(isinstance(v, str) and re.fullmatch('[0-9a-f]{64}', v) for v in hashes),
@@ -135,8 +150,10 @@ def continue_verification(deployment, fc, cfg, site, selected, bundles):
     with (work / 'foundation.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         plan = expected(deployment, fc, cfg, site, work, selected)
-        claim = work / 'foundation-verification-claim.json'
-        done = work / 'foundation-verification-complete.json'
+        previous = selected['schema'] == 'homelab-foundation-verify-continuation-v2'
+        prefix = 'foundation-verification' + ('-v2-' + selected['previous_claim_sha256'][:12] if previous else '')
+        claim = work / (prefix + '-claim.json')
+        done = work / (prefix + '-complete.json')
         nas = Path(cfg['paths']['backup_directory']) / str(selected['vmid'])
         if done.exists():
             require(fc.regular(done, private=True) == fc.encoded(selected)
@@ -149,13 +166,29 @@ def continue_verification(deployment, fc, cfg, site, selected, bundles):
             fcntl.flock(lock, fcntl.LOCK_UN)
             return fc.run('db-tools', deployment, bundles)
         directory = site.parent
+        if previous:
+            require(not claim.exists() and not claim.is_symlink(), 'This corrected verification was already claimed')
         paths = {'foundation_hold': work / 'FOUNDATION-HOLD.json', 'rollout_hold': work / 'ROLLOUT-HOLD.json',
             'plan': work / 'plan.json', 'plan_file': work / 'guest.tfplan', 'plan_json': work / 'guest.tfplan.json',
             'applied': work / 'applied.json', 'started': work / 'started.json', 'prepared': directory / 'prepared.json',
             'site': site, 'stack': directory / 'stack.json', 'trust': work / 'ssh-trust.json',
             'state': work / 'terraform.tfstate', 'verify_log': work / selected['verify_log']}
+        if previous:
+            for key in ('foundation_hold','rollout_hold'):
+                paths[key] = work / ('foundation-verification-' + selected['plan_sha256'][:12]) / paths[key].name
+            prior_claim = work / 'foundation-verification-claim.json'
+            marker = work / 'CONTINUATION-HOLD.json'
+            require(deployment.sha(prior_claim) == deployment.sha(marker) == selected['previous_claim_sha256'],
+                    'Previous failed continuation ownership changed')
+            prior = packet(json.loads(fc.regular(prior_claim,private=True)))
+            require(prior['schema'] == 'homelab-foundation-verify-continuation-v1'
+                    and prior['vmid'] == selected['vmid'] and prior['plan_sha256'] == selected['plan_sha256']
+                    and all(prior['hashes'][k] == v for k,v in selected['hashes'].items() if k != 'verify_log')
+                    and deployment.sha(work / prior['verify_log']) == prior['hashes']['verify_log'],
+                    'Previous failed continuation binding differs')
         require(not any((work / name).exists() or (work / name).is_symlink()
-                for name in ('HOLD.json', 'CONTINUATION-HOLD.json', 'foundation-complete.json', 'rollout-complete.json')),
+                for name in ('HOLD.json', 'foundation-complete.json', 'rollout-complete.json',
+                             *(() if previous else ('CONTINUATION-HOLD.json',)))),
                 'Unexpected existing completion or other operation hold')
         for key, path in paths.items():
             require(hashlib.sha256(fc.regular(path, private=True)).hexdigest() == selected['hashes'][key],
@@ -174,15 +207,21 @@ def continue_verification(deployment, fc, cfg, site, selected, bundles):
         fc.write_new(claim, fc.encoded(selected))
         deployment.backup(cfg, work / 'terraform.tfstate', 'before-approved-foundation-verification')
         fc.write_new(nas / claim.name, fc.encoded(selected))
-        archive = work / ('foundation-verification-' + selected['plan_sha256'][:12])
+        archive = work / (prefix if previous else 'foundation-verification-' + selected['plan_sha256'][:12])
         archive.mkdir(mode=0o700)
         deployment.guest_identity.pin(cfg, archive, deployment.application_address(cfg),
                                      lambda path: deployment.api_get(cfg, path), deployment.write)
         marker = work / 'CONTINUATION-HOLD.json'
+        if previous:
+            require(deployment.sha(prior_claim) == deployment.sha(marker) == selected['previous_claim_sha256'],
+                    'Previous continuation changed during admission')
+            prior_claim.rename(archive / prior_claim.name)
+            marker.rename(archive / marker.name)
         fc.write_new(marker, fc.encoded(selected))
-        for key in ('foundation_hold', 'rollout_hold'):
-            require(deployment.sha(paths[key]) == selected['hashes'][key], 'Failed hold changed during admission')
-            paths[key].rename(archive / paths[key].name)
+        if not previous:
+            for key in ('foundation_hold', 'rollout_hold'):
+                require(deployment.sha(paths[key]) == selected['hashes'][key], 'Failed hold changed during admission')
+                paths[key].rename(archive / paths[key].name)
         fc.sync(work); fc.sync(archive)
         # This is the sole target execution: no plan/apply, staging or startup.
         result = deployment.execute('verify', site)
@@ -214,7 +253,8 @@ def main():
         require(not Path('/var/lib/homelab-bootstrap/CONFIGURING').exists(), 'Bootstrap is active')
         sys.path.insert(0, str(args.source.resolve() / 'proxmox/applications'))
         deployment, fc, config = (importlib.import_module(name) for name in ('deploy', 'foundation_cd', 'site_config'))
-        guest = 'ingress' if selected['schema'] == 'homelab-ingress-image-update-v1' else 'db-tools'
+        guest = 'ingress' if selected['schema'] in ('homelab-ingress-image-update-v1',
+                                                   'homelab-ingress-acme-update-v1') else 'db-tools'
         site = INPUTS / ('foundation-' + guest) / 'site.json'
         cfg = json.loads(fc.regular(site, private=True))
         with tempfile.TemporaryDirectory(prefix='homelab-foundation-maintenance-') as temp:
@@ -224,7 +264,10 @@ def main():
             require(rendered == cfg and directory == site.parent and work == STATE / str(selected['vmid'])
                     and all(fc.regular(directory / name, private=True) == value for name, value in files.items()),
                     'Committed foundation configuration differs from the original private inputs')
-            if guest == 'ingress':
+            if selected['schema'] == 'homelab-ingress-acme-update-v1':
+                import ingress_acme
+                result = ingress_acme.run(deployment,fc,cfg,site,helper,selected,STATE)
+            elif guest == 'ingress':
                 result = image_update(deployment, fc, cfg, site, helper, selected)
             else:
                 result = continue_verification(deployment, fc, cfg, site, selected, bundles)
