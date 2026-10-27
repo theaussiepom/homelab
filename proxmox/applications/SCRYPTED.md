@@ -3,14 +3,14 @@
 [Application guide](README.md)
 
 Scrypted needs a verified decoder path before deployment can be implemented.
-This preparation preserves the selected image, numeric user inside the
+This preparation uses an unpinned image tag and preserves the numeric user inside the
 unprivileged guest, plugins, cameras, NVR settings and credentials, and the
 container paths `/server/volume` and `/nvr`.
 
 ## Review the proposed inputs
 
 Copy [the invented example](examples/scrypted.preparation.example.json) into your
-private site repository and select your existing image ID. Using the pinned
+private site repository and select the image tag you want to follow. Using the pinned
 public source, run:
 
 ```sh
@@ -31,6 +31,11 @@ capacity requirements or installed settings. A later implementation must also
 explicitly bound container swap, retain guest headroom, select guest swap/task
 containment and use no automatic restart during qualification.
 
+The private proposal uses `ghcr.io/koush/scrypted:latest` without a digest or
+local-image pin. Following this tag is not an instruction to update a live
+container now. Decoder qualification must cover the image actually selected
+when deployment is later reviewed.
+
 ## Why the decoder decision stays open
 
 Retained incident evidence links repeated unresponsive decoder replacement to
@@ -42,8 +47,9 @@ adding memory/PID limits therefore does not establish a safe decoder path.
 
 Software-only and Intel-only operation are candidates for separately approved
 qualification. Neither is selected here. Establish how every relevant installed
-plugin avoids NVIDIA/Vulkan enumeration on the exact selected image and restored
-plugin versions. Do not invent a configuration switch or upgrade the image to
+plugin avoids NVIDIA/Vulkan enumeration on the image resolved from the tag and restored
+plugin versions. Record the observed image identity as qualification evidence;
+it does not become a deployment pin. Do not invent a configuration switch or upgrade the image to
 obtain a green health check. Driver/kernel changes and passthrough need separate
 review and maintenance authority.
 
@@ -54,8 +60,8 @@ Ansible tasks, saved-plan fingerprint, trusted TLS/SSH identity, NAS state copie
 and failure hold. This local review helper is not a deployment engine. Keep an
 independent private Scrypted source lock without repinning commissioned services.
 
-1. Admit the exact new guest, networks, packages, capture, image archive and
-   metadata. Preserve numeric owners, modes, ACLs, xattrs and original helper
+1. Admit the exact new guest, networks, packages, capture and metadata,
+   and qualify the image resolved from the tag. Preserve numeric owners, modes, ACLs, xattrs and original helper
    behavior. Keep plugin/camera/NVR settings and credentials in the frozen
    private capture; commit only verified references and hashes.
 2. Bind `/nvr` to the exact selected recording source. A source guard must reject

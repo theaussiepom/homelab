@@ -19,12 +19,12 @@ PRESERVE = {
     'numeric_user': '0:0',
     'configuration': ['plugins', 'cameras', 'nvr', 'credentials', 'recording-paths'],
 }
-INPUTS = {'image_archive_sha256', 'frozen_capture_sha256', 'nvr_mount_contract',
+INPUTS = {'image_qualification_reference', 'frozen_capture_sha256', 'nvr_mount_contract',
           'guest_profile', 'trust_reference', 'recovery_reference', 'exclusive_writer_evidence'}
 HOLDS = {
     'decoder_gpu': 'No verified decoder path that avoids automatic NVIDIA/Vulkan enumeration.',
     'nvr_source_guard': 'Exact recording source, absent/wrong-source refusal and path/metadata checks required.',
-    'capture': 'Frozen configuration, exact image archive and recording preservation receipts required.',
+    'capture': 'Frozen configuration, image qualification and recording preservation receipts required.',
     'native_acceptance': 'Existing synthetic LXC evidence is version-specific; target and service acceptance remain open.',
 }
 
@@ -45,8 +45,9 @@ def review(cfg):
     require(cfg['schema'] == SCHEMA and cfg['enabled'] is False, 'Scrypted preparation must stay disabled')
     require(cfg['decoder_decision'] == 'unresolved', 'Decoder selection requires a separately reviewed implementation')
     require(isinstance(cfg['selected_image'], str) and
-            re.fullmatch(r'sha256:[0-9a-f]{64}', cfg['selected_image']) is not None,
-            'Preserve the selected local image ID; a verified archive is still required')
+            not cfg['selected_image'].startswith('sha256:') and
+            re.fullmatch(r'[A-Za-z0-9._:/-]+:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}', cfg['selected_image']) is not None,
+            'Use an image tag without a digest or local image ID')
     require(cfg['preserve'] == PRESERVE, 'Preserve existing user, configuration and container path semantics')
     require(isinstance(cfg['inputs'], dict) and set(cfg['inputs']) == INPUTS,
             'List every unresolved admission input')

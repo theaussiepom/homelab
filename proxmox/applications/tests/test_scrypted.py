@@ -28,6 +28,19 @@ class ScryptedPreparationTests(unittest.TestCase):
         self.assertIn('decoder_gpu', result['holds'])
         self.assertIn('nvr_source_guard', result['holds'])
 
+    def test_image_tags_are_kept_unpinned(self):
+        for image in ['ghcr.io/koush/scrypted:latest', 'example.invalid/scrypted:stable']:
+            cfg = copy.deepcopy(self.cfg)
+            cfg['selected_image'] = image
+            self.assertEqual(scrypted.review(cfg)['selected_image'], image)
+        for image in ['example.invalid/scrypted@sha256:' + '1' * 64,
+                      'sha256:' + '1' * 64, 'example.invalid/scrypted',
+                      'example.invalid/scrypted:latest\n', '']:
+            cfg = copy.deepcopy(self.cfg)
+            cfg['selected_image'] = image
+            with self.subTest(image=image), self.assertRaises(ValueError):
+                scrypted.review(cfg)
+
     def test_booleans_and_claimed_approval_cannot_enable_execution(self):
         for field, value in [('enabled', True), ('enabled', 'false'),
                              ('decoder_decision', 'software'), ('decoder_decision', 'intel'),
@@ -48,8 +61,8 @@ class ScryptedPreparationTests(unittest.TestCase):
             with self.subTest(scope=scope, field=field, value=value), self.assertRaises(ValueError):
                 scrypted.review(cfg)
 
-    def test_mutable_image_and_changed_path_semantics_are_refused(self):
-        for key, value in [('selected_image', 'ghcr.io/koush/scrypted:latest'),
+    def test_pinned_image_and_changed_path_semantics_are_refused(self):
+        for key, value in [('selected_image', 'sha256:' + '1' * 64),
                            ('unknown_runtime_option', {'devices': ['/dev/dri']})]:
             cfg = copy.deepcopy(self.cfg)
             cfg[key] = value

@@ -1,7 +1,7 @@
 {
   "schema": "homelab-scrypted-preparation-v1",
   "enabled": false,
-  "selected_image": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "selected_image": "example.invalid/scrypted:latest",
   "decoder_decision": "unresolved",
   "preserve": {
     "server_volume_target": "/server/volume",
@@ -31,7 +31,7 @@
     }
   },
   "inputs": {
-    "image_archive_sha256": null,
+    "image_qualification_reference": null,
     "frozen_capture_sha256": null,
     "nvr_mount_contract": null,
     "guest_profile": null,
