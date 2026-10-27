@@ -474,6 +474,14 @@ claim. Success preserves the original failure and archives its matching markers;
 subsequent ordinary CD runs only verify the completed setup. This is a separately
 approved recovery step, not an automatic retry or a general repair mode.
 
+A file error after provider verification is recorded as `completion-held`, with
+the completed native result kept separately. A partial marker move is rolled
+back where possible. Do not run the provider again. Administrative completion
+needs a separate review: compare the local/NAS result receipts, inspect the
+recorded marker state, restore any single archived marker to its matching hold,
+then archive the owned pair. Keep all receipts and the consumed claim. This
+manual step changes only bookkeeping; there is no automatic recovery mode.
+
 ## When something goes wrong
 
 | What you see | What to do |

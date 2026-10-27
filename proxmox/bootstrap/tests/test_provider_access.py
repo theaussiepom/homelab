@@ -172,6 +172,33 @@ class DiscoveryTests(unittest.TestCase):
         packet = {'attempt':'cd-1', 'plan_sha256':'0'*64, 'minted_sha256':'0'*64}
         with self.assertRaisesRegex(ValueError, 'hold'): self.continue_cd(packet)
         self.assertEqual(self.api.writes, [])
+        for missing in ('BOOTSTRAP-CD-HOLD.json', 'CONFIGURING'):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+                self.root = Path(directory)/'state'; self.root.mkdir()
+                self.nas = Path(directory)/'nas'; self.nas.mkdir()
+                self.api = ProviderAPI(); packet = self.failed_mint_packet()
+                (self.root/missing).unlink()
+                writes = copy.deepcopy(self.api.writes)
+                with self.assertRaisesRegex(ValueError, 'hold'): self.continue_cd(packet)
+                self.assertEqual(self.api.writes, writes)
+
+    def test_marker_archive_error_restores_both_holds_and_records_completed_native_phase(self):
+        packet = self.failed_mint_packet()
+        rename = Path.rename
+        def second_marker_fails(path, destination):
+            if path.name == 'CONFIGURING': raise OSError('synthetic marker archive failure')
+            return rename(path, destination)
+        with patch.object(Path, 'rename', second_marker_fails), self.assertRaisesRegex(OSError, 'marker archive'):
+            self.continue_cd(packet)
+        self.assertTrue((self.root/'BOOTSTRAP-CD-HOLD.json').exists())
+        self.assertTrue((self.root/'CONFIGURING').exists())
+        failure = json.loads((self.root/packet['attempt']/'continuation-failure.json').read_text())
+        self.assertEqual(failure['status'], 'completion-held')
+        self.assertEqual(failure['native_outcome'], 'completed')
+        self.assertEqual(failure['phase'], 'marker-archival')
+        writes = copy.deepcopy(self.api.writes)
+        with self.assertRaisesRegex(ValueError, 'already consumed'): self.continue_cd(packet)
+        self.assertEqual(self.api.writes, writes)
 
     def test_failed_continuation_is_consumed_and_cannot_be_replayed(self):
         packet = self.failed_mint_packet()

@@ -249,6 +249,30 @@ def check_backup(c, backup):
             'The declared NAS backup must be an actual mounted filesystem')
 
 
+def archive_markers(hold, marker, evidence):
+    """Archive the owned marker pair; roll back a partial move without API calls."""
+    pairs = [(path, evidence / (path.name + '.original')) for path in (hold, marker)]
+    originals = {}
+    for path, archived in pairs:
+        require(not archived.exists() and not archived.is_symlink(), 'Failed marker archive already exists')
+        originals[path] = provider_access.read_private(path)
+    moved = []
+    try:
+        for path, archived in pairs:
+            path.rename(archived)
+            moved.append((path, archived))
+    except Exception:
+        for path, archived in reversed(moved):
+            try:
+                require(not path.exists() and not path.is_symlink()
+                        and provider_access.read_private(archived) == originals[path],
+                        'Marker changed during archival rollback')
+                archived.rename(path)
+            except Exception:
+                pass  # Completion-held evidence records any mixed state; never replay the provider.
+        raise
+
+
 def resume_discovery(c, api, root, backup, packet):
     """One reviewed continuation of a preserved mint response; no credential rotation."""
     require(isinstance(packet, dict) and set(packet) == {'attempt', 'plan_sha256', 'minted_sha256'}
@@ -274,7 +298,7 @@ def resume_discovery(c, api, root, backup, packet):
     # Consume the exact approved operation before any admission check can fail.
     # Even a missing NAS mount or transient read failure cannot enable replay.
     provider_access.save_new(evidence / 'continuation-started.json', packet)
-    nas_admitted = False
+    nas_admitted, native_completed, phase = False, False, 'admission'
     try:
         check_backup(c, backup)
         provider_access.private_directory(destination)
@@ -292,10 +316,12 @@ def resume_discovery(c, api, root, backup, packet):
                 'Base bootstrap changed or did not finish; continuation refused')
         minted = provider_access.admit_minted_continuation(api, c, original['service_discovery'],
                                                          root, backup, packet['minted_sha256'])
+        phase = 'discovery'
         result = {'status':'passed', 'plan_sha256':packet['plan_sha256'], 'bridge_created':False,
                   'new_acl_rows':0, 'token_lifetime_changed':False, 'guest_lifecycle_changed':False,
                   'trigger_commit':os.environ.get('GITHUB_SHA'), 'resumed_attempt':packet['attempt'],
                   'service_discovery':provider_access.finish_minted(api, c, original['service_discovery'], root, backup, minted)}
+        native_completed, phase = True, 'result-custody'
         result['service_discovery'].update(created=False, resumed=True)
         for folder in (evidence, destination):
             provider_access.save_new(folder / 'continuation-result.json', result)
@@ -304,13 +330,15 @@ def resume_discovery(c, api, root, backup, packet):
                 'Continuation result NAS readback differs')
         require(json.loads(provider_access.read_private(hold)) == expected
                 and json.loads(provider_access.read_private(marker)) == expected, 'Failed marker ownership changed')
-        for path in (hold, marker):
-            archived = evidence / (path.name + '.original')
-            require(not archived.exists(), 'Failed marker archive already exists')
-            path.rename(archived)
+        phase = 'marker-archival'
+        archive_markers(hold, marker, evidence)
         return result
     except Exception as exc:
-        failure = {'status':'held', 'error':str(exc), 'automatic_retry':False}
+        failure = {'status':'completion-held' if native_completed else 'held', 'error':str(exc),
+                   'automatic_retry':False, 'phase':phase,
+                   'native_outcome':'completed' if native_completed else 'unconfirmed',
+                   'markers':{path.name:{'present':path.exists(),
+                       'archived':(evidence/(path.name+'.original')).exists()} for path in (hold, marker)}}
         save(evidence / 'continuation-failure.json', failure)
         if nas_admitted:
             try:
