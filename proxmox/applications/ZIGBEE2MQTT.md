@@ -77,10 +77,15 @@ failed-attempt hold behavior.
 
 The offline suite checks rendering, preserved-state refusal, exact device
 selection, ordinary guests without devices, mock OpenTofu plans and Ansible
-syntax. It uses invented data and never opens a coordinator. The real Proxmox
-API permission, host-to-LXC device path/ownership, Docker access and household
-radio operation **still need the approved native test**. No physical USB success
+syntax. It uses invented data and never opens a coordinator. Upstream Proxmox restricts configuring LXC `devN` passthrough to `root@pam`;
+ordinary guest-scoped ACLs alone do not admit this operation. Check the installed
+PVE version and agree a narrow host-side provisioning path before connecting
+this to a restricted runner. Do not put a host root credential on that runner.
+The host-to-LXC device path/ownership, Docker access and household radio
+operation **still need the approved native test**. No physical USB success
 is claimed from Docker CI.
 
 The implementation follows the official [Zigbee2MQTT Docker guidance](https://www.zigbee2mqtt.io/guide/installation/02_docker.html)
 and the pinned [Proxmox provider's container device interface](https://github.com/bpg/terraform-provider-proxmox/blob/v0.117.0/docs/resources/virtual_environment_container.md).
+
+The USB permission restriction is visible in the official [Proxmox container source](https://github.com/proxmox/pve-container/blob/master/src/PVE/LXC.pm), in `check_ct_modify_config_perm`. Source inspection is not installed-host verification.
