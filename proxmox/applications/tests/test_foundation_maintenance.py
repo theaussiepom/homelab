@@ -173,4 +173,50 @@ class ImageMaintenanceTests(unittest.TestCase):
         self.assertFalse(list(self.work.glob('image-update-*-claim.json')))
 
 
+class FailedContinuationTests(unittest.TestCase):
+    """A second approval binds the failed continuation, never a standing retry."""
+    def setUp(self):
+        ContinuationTests.setUp(self)
+        self.deployment.execute.side_effect=RuntimeError('first approved verification failed')
+        with self.assertRaises(RuntimeError):self.run_continuation()
+        self.prior=self.selected.copy()
+        self.previous_hash=fc.digest((self.work/'CONTINUATION-HOLD.json').read_bytes())
+        self.selected={**self.selected,'schema':'homelab-foundation-verify-continuation-v2',
+                       'revision':'d'*40,'previous_claim_sha256':self.previous_hash}
+        self.deployment.execute.reset_mock(side_effect=True)
+        self.deployment.execute.return_value={'step':'verify','vmid':702,'status':'passed'}
+
+    run_continuation = ContinuationTests.run_continuation
+
+    # Only these distinct tests apply after an already consumed continuation.
+    def test_success_archives_previous_claim_and_retains_original_failed_evidence(self):
+        self.assertEqual(self.run_continuation()['status'],'passed')
+        self.deployment.execute.assert_called_once_with('verify',self.site)
+        old=self.work/('foundation-verification-'+self.plan['plan_sha256'][:12])
+        archive=self.work/('foundation-verification-v2-'+self.previous_hash[:12])
+        self.assertEqual(fc.digest((archive/'CONTINUATION-HOLD.json').read_bytes()),self.previous_hash)
+        self.assertEqual(fc.digest((archive/'foundation-verification-claim.json').read_bytes()),self.previous_hash)
+        for name in ('FOUNDATION-HOLD.json','ROLLOUT-HOLD.json'):
+            self.assertEqual((old/name).read_bytes(),self.original[self.work/name])
+
+    def test_failed_second_verification_cannot_replay(self):
+        self.deployment.execute.side_effect=RuntimeError('second verification failed')
+        with self.assertRaises(RuntimeError):self.run_continuation()
+        with self.assertRaises(ValueError):self.run_continuation()
+        self.deployment.execute.assert_called_once()
+
+    def test_changed_prior_claim_stops_before_verification(self):
+        (self.work/'foundation-verification-claim.json').write_bytes(b'changed')
+        with self.assertRaises(ValueError):self.run_continuation()
+        self.deployment.execute.assert_not_called()
+
+    def test_new_failed_log_is_bound_without_changing_the_original_failed_log(self):
+        self.selected['hashes']=dict(self.selected['hashes'])
+        self.selected['verify_log']='456-verify.log'
+        fc.write_new(self.work/'456-verify.log',b'new independently reviewed failure')
+        self.selected['hashes']['verify_log']=fc.digest((self.work/'456-verify.log').read_bytes())
+        self.assertEqual(self.run_continuation()['status'],'passed')
+        self.assertEqual((self.work/'123-verify.log').read_bytes(),self.original[self.work/'123-verify.log'])
+
+
 if __name__=='__main__':unittest.main()

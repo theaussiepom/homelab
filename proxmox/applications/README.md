@@ -17,8 +17,10 @@ Their first creation stopped on a startup compatibility warning; the existing
 empty guests were corrected and finished through an explicitly reviewed
 continuation. A fresh, uninterrupted Deploy from that corrected baseline has
 not been retested. Database contents, later applications and household acceptance
-remain separate work. The [next foundation stage](FOUNDATION.md) is prepared in source;
-Traefik, Authentik and pgAdmin have not yet been deployed to their native guests.
+remain separate work. The [foundation stage](FOUNDATION.md) has also reached native
+Traefik and Authentik service checks and pgAdmin's local login page. Routed HTTPS
+and browser sign-in are still outstanding; installed services alone do not prove
+that this stage works.
 
 ## What are we bringing across?
 
@@ -130,6 +132,27 @@ for inspection rather than automatically reinstalled.
 Active state stays outside the checkout, with NAS copies before and after each
 phase. A failed change or interrupted Deploy leaves a **HOLD** and private logs
 for review; rerunning a job does not automatically retry or clean up that target.
+
+If an installed Traefik guest needs a certificate-DNS correction, use the reviewed
+CD maintenance path. Its private packet names the old and new resolvers and binds
+the existing guest, configuration and state. OpenTofu previews only the matching
+DNS firewall additions; Ansible changes only that resolver list and recreates the
+Traefik container once. It keeps the image, tokens, certificates and other settings.
+Guest networking and Docker itself are not restarted. The existing health check
+allows normal startup time before checking the running container. A failed attempt
+stays held. If the change applied but its startup check failed, a separately
+reviewed confirmation can check that same running container without applying the
+firewall change or recreating it again. It preserves the failed logs and settings;
+only a successful check archives its matching hold. The next CD step must still
+show a no-change plan. A failed confirmation cannot retry on the next push.
+An interrupted confirmation also stays held for separate review, even if the
+guest check succeeded before CD lost control; a later push does not reconstruct
+missing completion records automatically.
+The standard continuation hold stays active until both local and NAS completion
+records are saved, so other deployment entry points also stop if that final save
+fails.
+After the dependency is fixed, a separately approved verification continuation can
+check the existing pgAdmin guest without reinstalling it or restoring its data.
 
 ## Where do settings live?
 
