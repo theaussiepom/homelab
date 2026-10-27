@@ -85,9 +85,10 @@ def validate(cfg):
     if app.get('kind') == 'zigbee2mqtt':
         stack = json.loads(Path(app['stack_config']).read_text())
         radio = zigbee2mqtt.validate(stack.get('zigbee'))
+        backend = [nic for nic in cfg['guest']['interfaces'] if nic.get('role') == 'backend']
         if (stack.get('kind') != 'zigbee2mqtt' or not isinstance(device, dict) or
                 device != {'path': radio['serial_device']} or
-                radio['bind_address'] not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]):
+                len(backend) != 1 or radio['bind_address'] != backend[0]['ipv4'].split('/')[0]):
             raise ValueError('Zigbee must bind the same exact USB device and guest backend address')
     elif device is not None:
         raise ValueError('Serial passthrough belongs only to the selected Zigbee guest')

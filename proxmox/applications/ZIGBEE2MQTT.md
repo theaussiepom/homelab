@@ -73,6 +73,16 @@ data to `/app/data`. It adds no privileged mode, broad device rules or host
 control sockets. The existing application guide explains the saved-plan and
 failed-attempt hold behavior.
 
+Declare exactly one guest interface with `role: backend`; `zigbee.bind_address`
+must equal its static IPv4 address. The management address is not an alternative
+listener. This annotation selects the listener without changing firewall rules.
+The preserved identity requires a 16-byte network key, PAN ID from 1 to 65534
+and an 8-byte extended PAN ID. A quoted `!secret.yaml network_key` reference is
+also retained, as supported by [Zigbee2MQTT](https://www.zigbee2mqtt.io/guide/configuration/zigbee-network.html#specifying-network-key-in-a-different-file).
+Its referenced file and contents still need separate capture review; the checker
+does not resolve it or claim that the three required hashes bind that extra file.
+Other arbitrary identity strings and `GENERATE` are refused.
+
 ## What testing proves
 
 The offline suite checks rendering, preserved-state refusal, exact device

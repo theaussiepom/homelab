@@ -10,7 +10,7 @@ variable "guest" {
     serial_device  = optional(object({ path = string })),
     interfaces = list(object({
       bridge  = string, vlan = optional(number), mac = string, ipv4 = string,
-      gateway = optional(string), ipv6 = optional(string)
+      gateway = optional(string), ipv6 = optional(string), role = optional(string)
     })),
     volumes = map(object({ path = string, size_gib = number })),
     rules = list(object({

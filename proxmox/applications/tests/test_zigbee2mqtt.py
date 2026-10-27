@@ -46,6 +46,7 @@ class ZigbeeTests(unittest.TestCase):
                 stack=fixture(); stack['zigbee']['bind_address']=cfg['app']['address']
                 stack_path=root/'stack.json'; stack_path.write_text(json.dumps(stack))
                 cfg['guest']['serial_device']={'path':DEVICE}
+                cfg['guest']['interfaces'][0]['role']='backend'
                 cfg['app'].update(kind='zigbee2mqtt',stack_config=str(stack_path))
                 site.write_text(json.dumps(cfg))
                 receipt=json.loads((work/'plan.json').read_text())
@@ -82,12 +83,59 @@ class ZigbeeTests(unittest.TestCase):
             path=root/'stack.json'; path.write_text(json.dumps(stack))
             cfg['app'].update(kind='zigbee2mqtt', stack_config=str(path))
             cfg['guest']['serial_device']={'path':DEVICE}
+            cfg['guest']['interfaces'][0]['role']='backend'
             self.assertEqual(deploy.validate(cfg),6101)
             for wrong in ({'path':DEVICE+'-other'}, None):
                 bad=copy.deepcopy(cfg); bad['guest']['serial_device']=wrong
                 with self.assertRaises(ValueError): deploy.validate(bad)
             cfg['app']['kind']='dns'
             with self.assertRaises(ValueError): deploy.validate(cfg)
+
+    def test_radio_listener_requires_one_explicit_backend_interface(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); cfg=site_fixture(root); stack=fixture()
+            cfg['guest']['interfaces'][0]['role']='management'
+            backend={'role':'backend', 'ipv4':'198.18.30.22/24', 'mac':'02:00:00:00:61:02'}
+            cfg['guest']['interfaces'].append(backend)
+            cfg['guest']['serial_device']={'path':DEVICE}
+            path=root/'stack.json'; path.write_text(json.dumps(stack))
+            cfg['app'].update(kind='zigbee2mqtt', stack_config=str(path))
+            self.assertEqual(deploy.validate(cfg),6101)
+            for mode in ('management-listener','missing-role','duplicate-role'):
+                bad=copy.deepcopy(cfg)
+                if mode=='management-listener':
+                    stack['zigbee']['bind_address']=cfg['app']['address']
+                elif mode=='missing-role':
+                    bad['guest']['interfaces'][1].pop('role')
+                else:
+                    bad['guest']['interfaces'][0]['role']='backend'
+                path.write_text(json.dumps(stack))
+                with self.subTest(mode=mode), self.assertRaises(ValueError): deploy.validate(bad)
+                stack['zigbee']['bind_address']='198.18.30.22'
+
+    def test_preserved_network_identity_rejects_malformed_values(self):
+        import yaml
+        import zigbee2mqtt
+        for key, invalid in (
+                ('network_key', [[], [1]*15, [1]*17, [True]*16, [1.5]*16, [-1]*16,
+                                 [256]*16, {}, 'not-a-key', '!secret.yaml', '!secret.yaml ']),
+                ('pan_id', [True, 0, -1, 65535, 1.5, [], {}, '1234', '!secret.yaml pan_id']),
+                ('ext_pan_id', [[], [1]*7, [1]*9, [True]*8, [1.5]*8, [-1]*8,
+                                [256]*8, {}, 1234, '!secret.yaml ext_pan_id'])):
+            for selected in invalid:
+                value=yaml.safe_load(state()['configuration.yaml'])
+                value['advanced'][key]=selected
+                with self.subTest(key=key,selected=selected), self.assertRaises(ValueError):
+                    zigbee2mqtt.check_configuration(yaml.safe_dump(value),fixture()['zigbee'])
+
+    def test_preserved_network_identity_accepts_boundaries_and_key_reference(self):
+        import yaml
+        import zigbee2mqtt
+        for key in ([0]*16, [255]*16, '!secret.yaml network_key', '!secret network_key'):
+            for pan_id in (1,65534):
+                value=yaml.safe_load(state()['configuration.yaml'])
+                value['advanced'].update(network_key=key,pan_id=pan_id,ext_pan_id=[0,255]*4)
+                zigbee2mqtt.check_configuration(yaml.safe_dump(value),fixture()['zigbee'])
 
     def test_archive_and_restored_state_are_checked_without_modification(self):
         import zigbee2mqtt

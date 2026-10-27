@@ -15,6 +15,12 @@ FILES = {'configuration.yaml', 'database.db', 'coordinator_backup.json'}
 MAX_FILE_BYTES = 32 * 1024 * 1024
 
 
+def byte_array(value, length):
+    """Accept an exact byte sequence, excluding YAML booleans and floats."""
+    return isinstance(value, list) and len(value) == length and all(
+        type(item) is int and 0 <= item <= 255 for item in value)
+
+
 def validate(cfg):
     """Bind one USB serial device, an MQTT identity and the prepared state."""
     required = {'serial_device', 'bind_address', 'frontend_port', 'adapter',
@@ -68,12 +74,16 @@ def check_configuration(data, cfg):
         if (frontend.get('enabled') is not True or frontend.get('port') != cfg['frontend_port'] or
                 frontend.get('host', '0.0.0.0') != '0.0.0.0'):
             raise ValueError
-        # Literal or !file string references are preserved, never resolved here.
-        # Custom YAML constructors are deliberately unsupported by safe_load.
-        for key in ('network_key', 'pan_id', 'ext_pan_id'):
-            selected = value['advanced'][key]
-            if selected is None or selected == '' or str(selected).upper() == 'GENERATE':
-                raise ValueError
+        identity = value['advanced']
+        network_key = identity['network_key']
+        # Zigbee2MQTT supports quoted file references for network_key only.
+        # Their contents must be reviewed separately; never resolve them here.
+        key_reference = isinstance(network_key, str) and re.fullmatch(r'!\S+ [^\s]+', network_key)
+        if not byte_array(network_key, 16) and not key_reference:
+            raise ValueError
+        pan_id = identity['pan_id']
+        if type(pan_id) is not int or not 1 <= pan_id <= 65534 or not byte_array(identity['ext_pan_id'], 8):
+            raise ValueError
     except (yaml.YAMLError, KeyError, TypeError, AttributeError, ValueError):
         raise ValueError('Prepare and review the preserved Zigbee settings outside CD; no conversion or new network is allowed') from None
 
