@@ -1,6 +1,7 @@
 """Offline administration routes must preserve the commissioned document."""
 import copy
 import json
+import stat
 from pathlib import Path
 import subprocess
 import sys
@@ -80,6 +81,12 @@ class AdminRoutes(unittest.TestCase):
         cfg = settings(); cfg['routes'][1]['host'] = cfg['routes'][0]['host']
         with self.assertRaises(ValueError): ingress_admin.merge({}, cfg)
 
+    def test_static_or_malformed_documents_are_not_exported_as_proposals(self):
+        for base in ({'providers': {'plugin': {'token': 'synthetic-only'}}},
+                     {'http': {'routers': {'broken': []}}}):
+            with self.subTest(base=base), self.assertRaises(ValueError):
+                ingress_admin.merge(base, settings())
+
     def test_cli_writes_new_offline_artifacts_and_refuses_overwrite(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -90,6 +97,7 @@ class AdminRoutes(unittest.TestCase):
             subprocess.run(cmd, check=True, capture_output=True)
             result = json.loads((root/'proposal.json').read_text())
             self.assertFalse(result['deployable'])
+            self.assertEqual(stat.S_IMODE((root/'proposal.json').stat().st_mode), 0o600)
             self.assertEqual(len(result['before_sha256']), 64)
             self.assertEqual(len(result['after_sha256']), 64)
             self.assertNotEqual(subprocess.run(cmd, capture_output=True).returncode, 0)

@@ -9,6 +9,7 @@ import copy
 import hashlib
 import ipaddress
 import json
+import os
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
@@ -82,12 +83,15 @@ def merge(base, settings):
     file-provider document cannot establish another provider's current routes.
     """
     validate(settings)
-    require(isinstance(base, dict), 'Supply the current shared JSON document')
+    require(isinstance(base, dict) and set(base) <= {'http', 'tls', 'tcp', 'udp'},
+            'Supply only the current dynamic shared JSON document')
     result = copy.deepcopy(base)
     http = result.setdefault('http', {})
     require(isinstance(http, dict), 'Invalid shared HTTP configuration')
     for key in ('routers', 'services', 'middlewares', 'serversTransports'):
         require(isinstance(http.setdefault(key, {}), dict), 'Invalid shared HTTP namespace')
+        require(all(isinstance(entry, dict) for entry in http[key].values()),
+                'Invalid shared HTTP entry')
     require('admin-clients' not in http['middlewares'], 'Existing admin middleware requires review')
     http['middlewares']['admin-clients'] = {'ipAllowList': {'sourceRange': settings['client_networks'][:]}}
     # No ipStrategy or forwarded-header trust: use the directly connected client.
@@ -121,7 +125,8 @@ def main():
     proposal = {'schema': 'homelab-ingress-admin-offline-proposal-v1', 'deployable': False,
                 'before_sha256': hashlib.sha256(raw).hexdigest(),
                 'after_sha256': hashlib.sha256(encoded).hexdigest(), 'shared': after}
-    with args.output.open('x') as stream:
+    fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'w') as stream:
         stream.write(json.dumps(proposal, indent=2) + '\n')
 
 

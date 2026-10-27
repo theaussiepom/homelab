@@ -46,6 +46,7 @@ python3 proxmox/applications/ingress_admin.py \
 
 The new output contains the proposed document, before/after SHA-256 and
 `deployable: false`. It never overwrites its inputs or an existing output.
+Output permissions are owner-only. Static/provider documents are refused.
 Existing TLS settings, middlewares and routes are preserved. Names or Host
 rules that collide in this document stop preparation. Separately inspect
 discovery-provider Host rules and aliases: the offline document cannot see them.
@@ -87,6 +88,11 @@ selects SNI and trusted roots while keeping verification enabled. The fixture
 tests backend trust rejection, Host/path preservation, redirects, a real
 WebSocket 101 and a frame, and denial of spoofed forwarded client addresses.
 It does not test real Proxmox noVNC, an authenticated shell, DSM sessions or MFA.
+Proxmox's [node-console API source](https://github.com/proxmox/pve-manager/blob/master/PVE/API2/Nodes.pm)
+defines `vncwebsocket` with a valid console ticket and `Sys.Console` permission.
+Browser-console acceptance therefore needs native authentication and a real
+console test; discovery-token success is insufficient. No direct VNC port range
+or SPICE exposure is proposed by this HTTPS routing preparation.
 
 ## Entry criteria for an executable maintenance packet
 
