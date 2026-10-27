@@ -109,6 +109,76 @@ class RenderTests(unittest.TestCase):
         self.assertNotIn('ports', result['services']['redis'])
         self.assertNotIn('ports', result['services']['worker'])
 
+    def test_identity_waits_for_redis_health_before_starting_authentik(self):
+        """A running Redis container alone does not mean it accepts requests."""
+        services = render.compose(fixture('identity'))['services']
+        for name in ('server', 'worker'):
+            self.assertEqual(services[name]['depends_on'],
+                             {'redis': {'condition': 'service_healthy'}})
+            self.assertEqual(services[name]['command'], name)
+            # Keep the installed image's mode-aware `ak healthcheck`.
+            self.assertNotIn('healthcheck', services[name])
+        self.assertEqual(services['redis']['healthcheck']['test'],
+                         ['CMD-SHELL', 'redis-cli ping | grep -qx PONG'])
+
+    def test_identity_requires_the_same_pinned_server_and_worker_image(self):
+        """A version mismatch must fail before either mode can touch the database."""
+        cfg = fixture('identity')
+        cfg['services']['worker']['image'] = 'example.invalid/service@sha256:' + '2' * 64
+        with self.assertRaisesRegex(ValueError, 'same pinned image'):
+            render.compose(cfg)
+
+    def test_identity_preserves_private_settings_mounts_and_process_users(self):
+        """Restoring providers also requires the original key, SMTP and file access."""
+        cfg = fixture('identity')
+        cfg['authentik_secret_key'] = 'synthetic-$original-key'
+        cfg['postgresql_password'] = 'synthetic-$database-password'
+        settings = {'AUTHENTIK_EMAIL__HOST': 'smtp.example.invalid',
+                    'AUTHENTIK_EMAIL__PORT': '587', 'AUTHENTIK_EMAIL__USE_TLS': 'true',
+                    'AUTHENTIK_EMAIL__USE_SSL': 'false',
+                    'AUTHENTIK_EMAIL__FROM': 'auth@example.invalid',
+                    'AUTHENTIK_EMAIL__PASSWORD': 'synthetic-$smtp-password',
+                    'AUTHENTIK_HOST': 'https://auth.example.invalid'}
+        for name in ('server', 'worker'):
+            cfg['services'][name]['environment'] = dict(settings)
+            cfg['services'][name]['user'] = '1000:1000'
+        services = render.compose(cfg)['services']
+        for name in ('server', 'worker'):
+            env = services[name]['environment']
+            self.assertEqual(env['AUTHENTIK_SECRET_KEY'], 'synthetic-$$original-key')
+            self.assertEqual(env['AUTHENTIK_POSTGRESQL__PASSWORD'], 'synthetic-$$database-password')
+            for key, value in settings.items():
+                self.assertEqual(env[key], value.replace('$', '$$'))
+            self.assertEqual(services[name]['user'], '1000:1000')
+            self.assertIn('/srv/homelab/data/authentik/media:/media', services[name]['volumes'])
+            self.assertIn('/srv/homelab/data/authentik/templates:/templates', services[name]['volumes'])
+        self.assertIn('/srv/homelab/data/authentik/certs:/certs', services['worker']['volumes'])
+        self.assertNotIn('/srv/homelab/data/authentik/certs:/certs', services['server']['volumes'])
+        self.assertIn('/srv/homelab/data/redis:/data', services['redis']['volumes'])
+
+    def test_identity_preserves_the_captured_redis_command(self):
+        """An RDB capture must not silently switch to a different persistence mode."""
+        cfg = fixture('identity')
+        cfg['services']['redis']['command'] = ['redis-server', '--save', '60', '1', '--loglevel', 'warning']
+        cfg['services']['redis']['user'] = '999:999'
+        redis = render.compose(cfg)['services']['redis']
+        self.assertEqual(redis['command'], cfg['services']['redis']['command'])
+        self.assertEqual(redis['user'], '999:999')
+        cfg['services']['redis']['command'] = {'invalid': 'argv'}
+        with self.assertRaises(ValueError):
+            render.compose(cfg)
+
+    def test_empty_redis_command_is_rejected_but_image_default_is_preserved(self):
+        for command in ('', [], '   ', ['']):
+            cfg = fixture('identity'); cfg['services']['redis']['command'] = command
+            with self.subTest(command=command), self.assertRaisesRegex(ValueError, 'Redis command'):
+                render.compose(cfg)
+        cfg = fixture('identity'); cfg['services']['redis']['command'] = None
+        self.assertIsNone(render.compose(cfg)['services']['redis']['command'])
+        cfg['services']['redis'].pop('command')
+        self.assertEqual(render.compose(cfg)['services']['redis']['command'],
+                         ['redis-server', '--appendonly', 'yes'])
+
     def test_only_node_red_gets_authentik_forward_auth(self):
         """HA uses its own login; Node-RED requires Authentik, including its outpost route."""
         result = render.ingress(fixture('ingress'))

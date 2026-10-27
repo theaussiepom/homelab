@@ -1,0 +1,111 @@
+{
+  "site": {
+    "$ref": "derived.site"
+  },
+  "paths": {
+    "$ref": "derived.paths"
+  },
+  "ssh_public_keys": {
+    "$ref": "ssh_public_keys"
+  },
+  "guest": {
+    "vmid": {
+      "$ref": "guests.identity.vmid"
+    },
+    "hostname": {
+      "$ref": "guests.identity.hostname"
+    },
+    "cpu": 2,
+    "memory_mib": 2048,
+    "root_gib": 8,
+    "storage_id": {
+      "$ref": "storage.id"
+    },
+    "template_file_id": {
+      "$ref": "storage.template"
+    },
+    "started": true,
+    "start_on_boot": true,
+    "boot_order": 40,
+    "nesting": true,
+    "keyctl": false,
+    "dns_servers": {
+      "$ref": "derived.dns_servers"
+    },
+    "interfaces": {
+      "$ref": "derived.interfaces.identity"
+    },
+    "volumes": {
+      "data": {
+        "path": "/srv/homelab",
+        "size_gib": 4
+      }
+    },
+    "rules": {
+      "$ref": "derived.rules.identity"
+    }
+  },
+  "app": {
+    "kind": "identity",
+    "new_target": true,
+    "vmid": {
+      "$ref": "guests.identity.vmid"
+    },
+    "hostname": {
+      "$ref": "guests.identity.hostname"
+    },
+    "memory_mib": 2048,
+    "address": {
+      "$ref": "guests.identity.interfaces.management.address"
+    },
+    "mac": {
+      "$ref": "guests.identity.interfaces.management.mac"
+    },
+    "packages": [
+      "docker.io=26.1.5+dfsg1-9+deb13u1",
+      "docker-cli=26.1.5+dfsg1-9+deb13u1",
+      "docker-compose=2.26.1-4",
+      "curl=8.14.1-2+deb13u7"
+    ],
+    "stack_config": "/var/lib/homelab-inputs/foundation-identity/stack.json",
+    "capture": {
+      "path": "/srv/homelab-backups/foundation-captures/identity-${guests.identity.capture_sha256}.tar",
+      "sha256": {
+        "$ref": "guests.identity.capture_sha256"
+      },
+      "coherent": true
+    },
+    "exclusive_writer_confirmed": true,
+    "health_checks": [
+      {
+        "name": "Authentik application ready on its backend",
+        "argv": [
+          "curl",
+          "--retry",
+          "30",
+          "--retry-delay",
+          "2",
+          "--retry-all-errors",
+          "--retry-max-time",
+          "180",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "--max-time",
+          "15",
+          "http://${guests.identity.interfaces.backend.address}:9000/-/health/ready/"
+        ],
+        "expect": ""
+      }
+    ],
+    "discovery_routes": [
+      {
+        "name": "authentik",
+        "host": {
+          "$ref": "domains.identity"
+        },
+        "url": "http://${guests.identity.interfaces.backend.address}:9000"
+      }
+    ]
+  }
+}

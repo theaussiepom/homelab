@@ -1,0 +1,72 @@
+---
+- name: Install the frontend reply-routing helper in this ingress guest
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../ingress_routing.py"
+    dest: /opt/homelab-app/ingress-routing.py
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install the selected frontend routing settings
+  ansible.builtin.copy:
+    content: "{{ app.frontend_routing | to_json }}"
+    dest: /opt/homelab-app/frontend-routing.json
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Configure reply routing before Docker on future boots
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/homelab-ingress-routing.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Frontend reply routing for the homelab ingress guest
+      Wants=network-online.target
+      After=network-online.target
+      Before=docker.service
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/bin/python3 /opt/homelab-app/ingress-routing.py --config /opt/homelab-app/frontend-routing.json --apply
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Prepare the ingress-only Docker startup dependency
+  ansible.builtin.file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Require successful routing before the ingress Docker service starts
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/docker.service.d/homelab-ingress-routing.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Requires=homelab-ingress-routing.service
+      After=homelab-ingress-routing.service
+
+- name: Enable the routing policy for this ingress guest
+  ansible.builtin.systemd_service:
+    name: homelab-ingress-routing
+    daemon_reload: true
+    enabled: true
+
+- name: Apply the selected routing before starting the ingress stack
+  ansible.builtin.systemd_service:
+    name: homelab-ingress-routing
+    state: started
+  when: app.start_services | default(false) | bool
+
+- name: Read back the routing before starting the ingress stack
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/ingress-routing.py, --config, /opt/homelab-app/frontend-routing.json]
+  changed_when: false
+  when: app.start_services | default(false) | bool

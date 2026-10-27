@@ -16,6 +16,12 @@
         that: app.health_checks | default([]) | length > 0
         fail_msg: 'Define real DNS, database, MQTT or HTTP probes before calling this guest verified.'
 
+    - name: Verify frontend reply routing without changing it
+      ansible.builtin.command:
+        argv: [python3, /opt/homelab-app/ingress-routing.py, --config, /opt/homelab-app/frontend-routing.json]
+      changed_when: false
+      when: app.kind == 'ingress' and app.frontend_routing is defined
+
     - name: Run private service-specific read-only probes
       ansible.builtin.command:
         argv: "{{ item.argv }}"

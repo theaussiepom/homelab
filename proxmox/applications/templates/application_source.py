@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import re
 
-GUESTS = ('dns', 'mariadb', 'postgresql', 'influxdb', 'identity', 'ingress', 'automation')
+GUESTS = ('dns', 'mariadb', 'postgresql', 'influxdb', 'identity', 'ingress', 'automation', 'db-tools')
 STEPS = ('plan', 'deploy', 'apply', 'stage', 'start', 'verify')
 
 

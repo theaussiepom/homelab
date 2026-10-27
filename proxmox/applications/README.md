@@ -1,7 +1,7 @@
 # After bootstrap: bring home automation across one guest at a time
 
 [Proxmox guide](../README.md) · [Bootstrap](../bootstrap/README.md) ·
-[Databases](DATABASES.md) · [PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
+[Databases](DATABASES.md) · [HTTPS and sign-in](FOUNDATION.md) · [pgAdmin](PGADMIN.md) · [PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
 
 The deployment guest receives GitHub jobs. These scripts are the next step:
 **OpenTofu creates one application guest; Ansible installs its applications and
@@ -17,7 +17,8 @@ Their first creation stopped on a startup compatibility warning; the existing
 empty guests were corrected and finished through an explicitly reviewed
 continuation. A fresh, uninterrupted Deploy from that corrected baseline has
 not been retested. Database contents, later applications and household acceptance
-remain separate work.
+remain separate work. The [next foundation stage](FOUNDATION.md) is prepared in source;
+Traefik, Authentik and pgAdmin have not yet been deployed to their native guests.
 
 ## What are we bringing across?
 
@@ -25,9 +26,11 @@ remain separate work.
 flowchart TD
   A[Deployment guest + NAS state recovery copies] --> B[DNS and required network paths]
   B --> C[Native MariaDB, PostgreSQL and InfluxDB]
+  B --> E[Traefik HTTPS routes]
   C --> D[Authentik + its Redis dependency]
-  D --> E[Traefik HTTPS routes]
-  E --> F[One automation LXC: Home Assistant + Node-RED + MQTT]
+  E --> D
+  D --> P[pgAdmin with Authentik sign-in]
+  P --> F[One automation LXC: Home Assistant + Node-RED + MQTT]
   F --> G[Check existing Zigbee and real household automations]
 ```
 
@@ -36,12 +39,14 @@ flowchart TD
 | 0 | Keep the runner's state recoverable on the NAS | Recovery copy written/read back; one active state owner |
 | 1 | DNS, using Pi-hole and Unbound | Lookups work from the next guest; router still provides DHCP |
 | 2 | Required native databases | Matching versions, restored users/grants/data and a real client query |
-| 3 | Authentik, including Redis for the installed version | Login and the restored Node-RED provider/outpost work |
-| 4 | Traefik HTTPS access | Valid certificate, HA's own login, Node-RED's Authentik login |
+| 3 | Traefik HTTPS access | Verified Proxmox discovery and valid certificates for selected routes |
+| 4 | Authentik with Redis, then pgAdmin | Restored identity, native OAuth login and saved pgAdmin profile; Node-RED outpost follows with automation |
 | 5 | The shared automation guest | HA, Node-RED and MQTT work together with restored settings |
 | 6 | The working house | Existing radios, devices, automations and household access work |
 
-This is a dependency list, not one job that creates everything. PegaProx, PBS
+The private Actions graph can chain these jobs after one reviewed merge. Each job
+still owns one guest. See the [foundation guide](FOUNDATION.md) for the next three
+services and its bounded first-creation policy. PegaProx, PBS
 and optional recovery projects are not HA prerequisites. Existing radio
 services and physical hosts stay in place.
 

@@ -1,0 +1,22 @@
+{
+  "kind": "db-tools",
+  "guest_memory_mib": 1024,
+  "pgadmin_bind_address": "198.18.30.32",
+  "services": {
+    "pgadmin": {
+      "image": "example.invalid/service@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "memory_mib": 256,
+      "cpus": 1,
+      "pids_limit": 128,
+      "environment": {
+        "PGADMIN_DEFAULT_EMAIL": "admin@example.invalid",
+        "PGADMIN_DEFAULT_PASSWORD": "synthetic-only-$bootstrap",
+        "PGADMIN_CONFIG_AUTHENTICATION_SOURCES": "['oauth2']",
+        "PGADMIN_CONFIG_OAUTH2_CONFIG": "[{'OAUTH2_NAME': 'authentik', 'OAUTH2_DISPLAY_NAME': 'Existing SSO', 'OAUTH2_CLIENT_ID': 'synthetic-client', 'OAUTH2_CLIENT_SECRET': 'synthetic-$client-secret', 'OAUTH2_SERVER_METADATA_URL': 'https://auth.example.invalid/application/o/pgadmin/.well-known/openid-configuration', 'OAUTH2_SCOPE': 'openid email profile'}]",
+        "PGADMIN_CONFIG_PROXY_X_HOST_COUNT": "1",
+        "PGADMIN_CONFIG_PROXY_X_PROTO_COUNT": "1"
+      },
+      "extra_mounts": []
+    }
+  }
+}

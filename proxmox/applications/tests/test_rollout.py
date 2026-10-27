@@ -1,5 +1,6 @@
 """One approved CD run completes every phase or stops without replay."""
 import io
+import copy
 import json
 from pathlib import Path
 import subprocess
@@ -9,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from test_deploy import deploy, fixture
+from test_plan import fixture as plan_fixture
 
 
 class RolloutTests(unittest.TestCase):
@@ -25,8 +27,15 @@ class RolloutTests(unittest.TestCase):
         site = root / 'site.json'; site.write_text(json.dumps(cfg))
         work = root / 'state' / '6101'; work.mkdir(parents=True)
         plan = work / 'guest.tfplan'; plan.write_bytes(b'synthetic-reviewed-plan')
+        value = plan_fixture()
+        for row in value['resource_changes']:
+            key = 'vm_id' if row['type'] == 'proxmox_virtual_environment_container' else 'container_id'
+            row['change']['after'].update({key: cfg['guest']['vmid'], 'node_name': cfg['site']['node']})
+        deploy.write(work / 'guest.tfplan.json', value)
         deploy.write(work / 'plan.json', {'site_sha256': deploy.sha(site),
             'source_sha256': deploy.source_hash(), 'plan_sha256': deploy.sha(plan),
+            'plan_json_sha256': deploy.sha(work / 'guest.tfplan.json'),
+            'vmid': cfg['guest']['vmid'], 'creates_guest': True,
             'input_hashes': deploy.input_hashes(cfg)})
         return cfg, site, work, deploy.sha(plan)
 
@@ -81,6 +90,62 @@ class RolloutTests(unittest.TestCase):
                     deploy.execute('deploy', site, plan)
                 runner.assert_not_called()
                 self.assertFalse((work / 'ROLLOUT-HOLD.json').exists())
+
+    def existing_plan(self, work, action):
+        value = json.loads((work / 'guest.tfplan.json').read_text())
+        for row in value['resource_changes']:
+            row['change']['actions'] = [action]
+            row['change']['before'] = copy.deepcopy(row['change']['after'])
+        deploy.write(work / 'guest.tfplan.json', value)
+        receipt = json.loads((work / 'plan.json').read_text())
+        receipt['plan_json_sha256'] = deploy.sha(work / 'guest.tfplan.json')
+        deploy.write(work / 'plan.json', receipt)
+        return receipt
+
+    def test_application_deploy_rejects_actual_updates_even_if_receipt_claims_creation(self):
+        for action in ('update', 'no-op'):
+            with self.subTest(action=action), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp); _, site, work, plan = self.prepare(root)
+                # The creation boolean alone is insufficient: the digest-bound
+                # JSON must independently describe three fresh resources.
+                self.existing_plan(work, action)
+                with patch.object(deploy, '_execute_step', return_value={'status': 'passed'}) as runner, \
+                        patch.object(deploy.guest_identity, 'pin', return_value={'fingerprint': 'synthetic'}), \
+                        self.assertRaises(ValueError):
+                    deploy.execute('deploy', site, plan)
+                runner.assert_not_called()
+                self.assertFalse((work / 'ROLLOUT-HOLD.json').exists())
+
+    def test_deploy_refuses_mismatched_json_digest_or_receipt_guest_before_apply(self):
+        for problem in ('changed-json', 'missing-json-digest', 'wrong-guest'):
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp); _, site, work, plan = self.prepare(root)
+                receipt = json.loads((work / 'plan.json').read_text())
+                if problem == 'changed-json':
+                    value = json.loads((work / 'guest.tfplan.json').read_text())
+                    value['resource_changes'][0]['change']['actions'] = ['update']
+                    deploy.write(work / 'guest.tfplan.json', value)
+                elif problem == 'missing-json-digest': receipt.pop('plan_json_sha256')
+                else: receipt['vmid'] = 6102
+                deploy.write(work / 'plan.json', receipt)
+                with patch.object(deploy, '_execute_step', return_value={'status': 'passed'}) as runner, \
+                        patch.object(deploy.guest_identity, 'pin', return_value={'fingerprint': 'synthetic'}), \
+                        self.assertRaises(ValueError):
+                    deploy.execute('deploy', site, plan)
+                runner.assert_not_called()
+                self.assertFalse((work / 'ROLLOUT-HOLD.json').exists())
+
+    def test_reviewed_individual_update_and_completed_verify_keep_their_existing_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); _, site, work, plan = self.prepare(root)
+            (root / 'api').write_text('synthetic-token')
+            self.existing_plan(work, 'update')
+            with patch.object(deploy, 'backup'), patch.object(deploy, 'quiet') as command, \
+                    patch.object(deploy, 'guest_trust'), patch.object(deploy, 'check_merge_create_plan') as strict:
+                self.assertEqual(deploy.execute('apply', site, plan)['status'], 'passed')
+                self.assertIn('apply', command.call_args.args[0])
+                self.assertEqual(deploy.execute('verify', site)['status'], 'passed')
+                strict.assert_not_called()
 
     def test_one_call_runs_apply_identity_stage_start_verify_in_order(self):
         with tempfile.TemporaryDirectory() as tmp:

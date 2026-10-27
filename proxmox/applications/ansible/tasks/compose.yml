@@ -1,4 +1,8 @@
 ---
+- name: Prepare frontend reply routing for the multihomed ingress guest
+  ansible.builtin.import_tasks: ingress-routing.yml
+  when: app.kind == 'ingress' and app.frontend_routing is defined and not ansible_check_mode
+
 - name: Enable the isolated guest Docker service
   ansible.builtin.systemd_service:
     name: docker
@@ -36,11 +40,37 @@
   no_log: true
   when: not ansible_check_mode
 
+- name: Read the generated foundation runtime file list
+  ansible.builtin.set_fact:
+    foundation_runtime_files: "{{ lookup('ansible.builtin.file', app.render_dir + '/runtime-files.json') | from_json }}"
+  no_log: true
+  when: stack.foundation is defined and not ansible_check_mode
+
+- name: Prepare the private foundation runtime directory
+  ansible.builtin.file:
+    path: /opt/homelab-app/runtime
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  when: stack.foundation is defined and not ansible_check_mode
+
+- name: Install only the selected service-readable foundation files
+  ansible.builtin.copy:
+    src: "{{ app.render_dir }}/{{ item.path }}"
+    dest: "/opt/homelab-app/runtime/{{ item.path }}"
+    owner: "{{ item.uid }}"
+    group: "{{ item.gid }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ foundation_runtime_files | default([]) }}"
+  no_log: true
+  when: stack.foundation is defined and not ansible_check_mode
+
 - name: Prepare the directory for generated ingress routes
   ansible.builtin.file:
     path: /srv/homelab/data/traefik/dynamic
     state: directory
-  when: app.kind == 'ingress' and not ansible_check_mode
+  when: app.kind == 'ingress' and stack.foundation is not defined and not ansible_check_mode
 
 - name: Install only the new ingress routes into the restored Traefik file directory
   ansible.builtin.copy:
@@ -50,7 +80,7 @@
     group: root
     mode: '0600'
     backup: true
-  when: app.kind == 'ingress' and not ansible_check_mode
+  when: app.kind == 'ingress' and stack.foundation is not defined and not ansible_check_mode
   no_log: true
 
 - name: Load preserved custom images by verified archive

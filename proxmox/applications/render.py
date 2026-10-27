@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
 """Render one application guest from private inputs; never print its credentials."""
 import argparse
+import ast
 import json
 import ipaddress
+import importlib.util
 import math
 import os
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
+_foundation_spec = importlib.util.spec_from_file_location('homelab_foundation', Path(__file__).with_name('foundation.py'))
+foundation = importlib.util.module_from_spec(_foundation_spec)
+_foundation_spec.loader.exec_module(foundation)
+
+foundation_files = foundation.files
+foundation_source_files = foundation.source_files
 
 KINDS = {'automation': {'homeassistant', 'node_red', 'mqtt'},
          'identity': {'server', 'worker', 'redis'},
-         'dns': {'pihole', 'unbound'}, 'ingress': {'traefik'}}
+         'dns': {'pihole', 'unbound'}, 'ingress': {'traefik'},
+         'db-tools': {'pgadmin'}}
 
 
 def positive(value, name, minimum=1):
@@ -45,14 +54,40 @@ def preserved(value, field):
     raise ValueError(f'Use a string, string argv or null for {field}; user requires a string')
 
 
+def pgadmin_environment(value):
+    """Check the retained native OAuth2 contract without evaluating config code."""
+    env = value.get('environment', {})
+    try:
+        sources = ast.literal_eval(env.get('PGADMIN_CONFIG_AUTHENTICATION_SOURCES', ''))
+        providers = ast.literal_eval(env.get('PGADMIN_CONFIG_OAUTH2_CONFIG', ''))
+    except (ValueError, SyntaxError, TypeError):
+        raise ValueError('Supply the existing pgAdmin OAuth2 settings as Python literals') from None
+    if sources != ['oauth2'] or not isinstance(providers, list) or not providers or any(
+            not isinstance(p, dict) or not all(isinstance(p.get(k), str) and p[k]
+                for k in ('OAUTH2_NAME', 'OAUTH2_CLIENT_ID', 'OAUTH2_CLIENT_SECRET')) for p in providers):
+        raise ValueError('Preserve OAuth2-only authentication and the existing provider/client credentials')
+    if 'PGADMIN_CONFIG_SERVER_MODE' in env and env['PGADMIN_CONFIG_SERVER_MODE'] not in ('True', True):
+        raise ValueError('pgAdmin requires server mode for OAuth2-only login')
+    if any(p.get('OAUTH2_SSL_CERT_VERIFICATION', True) is not True for p in providers):
+        raise ValueError('pgAdmin OAuth2 certificate verification must remain enabled')
+    if env.get('PGADMIN_LISTEN_ADDRESS', '0.0.0.0') != '0.0.0.0':
+        raise ValueError('pgAdmin container listener must accept the published bridge port')
+    if (value.get('extra_mounts') or any(k in env for k in
+            ('PGADMIN_ENABLE_TLS', 'PGADMIN_CUSTOM_CONFIG_DISTRO_FILE'))
+            or str(env.get('PGADMIN_LISTEN_PORT', '80')) != '80'):
+        raise ValueError('pgAdmin uses its retained environment, data mount and HTTP port 80')
+
+
 def compose(cfg):
     """Keep placement fixed; site-specific images, restored data and routes are inputs."""
     kind = cfg.get('kind')
     if kind not in KINDS:
-        raise ValueError('Choose dns, identity, ingress or automation; databases are native')
+        raise ValueError('Choose dns, identity, ingress, automation or db-tools; databases are native')
     inputs = cfg.get('services', {})
     if set(inputs) != KINDS[kind]:
         raise ValueError('Supply exactly the services for this guest')
+    if kind == 'identity' and inputs['server'].get('image') != inputs['worker'].get('image'):
+        raise ValueError('Authentik server and worker require the same pinned image')
     root = cfg.get('data_root', '/srv/homelab/data')
     if root != '/srv/homelab/data':
         raise ValueError('Restored application data belongs under /srv/homelab/data')
@@ -60,6 +95,9 @@ def compose(cfg):
     total = sum(positive(s.get('memory_mib'), 'memory_mib') for s in inputs.values())
     if total + 256 > budget:
         raise ValueError('Leave at least 256 MiB for the guest OS outside container limits')
+    foundation.validate(cfg)
+    if kind == 'db-tools' and 'foundation' not in cfg:
+        pgadmin_environment(inputs['pgadmin'])
     result = {'name': f'homelab-{kind}', 'services': {}}
     for name, value in inputs.items():
         image = value.get('image', '')
@@ -90,7 +128,8 @@ def compose(cfg):
                   'worker': [('authentik/media', '/media'), ('authentik/templates', '/templates'), ('authentik/certs', '/certs')],
                   'redis': [('redis', '/data')], 'pihole': [('pihole', '/etc/pihole')],
                   'unbound': [('unbound', '/opt/unbound/etc/unbound')],
-                  'traefik': [('traefik', '/etc/traefik')]}[name]
+                  'traefik': [('traefik', '/etc/traefik')],
+                  'pgadmin': [('pgadmin', '/var/lib/pgadmin')]}[name]
         service['volumes'] = [f'{root}/{src}:{target}' for src, target in mounts]
         for mount in value.get('extra_mounts', []):
             src, target = mount.get('source', ''), mount.get('target', '')
@@ -104,6 +143,8 @@ def compose(cfg):
             for key in ('command', 'entrypoint', 'user'):
                 if key in value:
                     service[key] = preserved(value[key], key)
+        if kind == 'identity' and 'user' in value:
+            service['user'] = preserved(value['user'], 'user')
         capabilities = value.get('cap_add', [])
         if capabilities:
             if name != 'homeassistant' or capabilities != ['NET_ADMIN']:
@@ -117,7 +158,7 @@ def compose(cfg):
         result['services'][name] = service
     services = result['services']
     if kind == 'identity':
-        env = {'AUTHENTIK_SECRET_KEY': required(cfg, 'authentik_secret_key'),
+        env = foundation.identity_environment(cfg) if 'foundation' in cfg else {'AUTHENTIK_SECRET_KEY': required(cfg, 'authentik_secret_key'),
                'AUTHENTIK_POSTGRESQL__HOST': required(cfg, 'postgresql_host'),
                'AUTHENTIK_POSTGRESQL__USER': required(cfg, 'postgresql_user'),
                'AUTHENTIK_POSTGRESQL__PASSWORD': required(cfg, 'postgresql_password'),
@@ -127,9 +168,17 @@ def compose(cfg):
             del services[name]['network_mode']
             services[name]['command'] = name
             services[name]['environment'].update({k: literal(v) for k, v in env.items()})
-            services[name]['depends_on'] = ['redis']
+            services[name]['depends_on'] = {'redis': {'condition': 'service_healthy'}}
         del services['redis']['network_mode']
-        services['redis']['command'] = ['redis-server', '--appendonly', 'yes']
+        services['redis']['command'] = preserved(
+            inputs['redis'].get('command', ['redis-server', '--appendonly', 'yes']), 'command')
+        command = services['redis']['command']
+        if (command == [] or isinstance(command, str) and not command.strip()
+                or isinstance(command, list) and not command[0].strip()):
+            raise ValueError('Redis command must not replace the image startup with an empty command')
+        services['redis']['healthcheck'] = {
+            'test': ['CMD-SHELL', 'redis-cli ping | grep -qx PONG'],
+            'start_period': '20s', 'interval': '30s', 'retries': 5, 'timeout': '3s'}
         services['server']['ports'] = ['9000:9000', '9443:9443']
     if kind == 'dns':
         services['pihole']['environment'].update({'FTLCONF_dhcp_active': 'false',
@@ -138,26 +187,91 @@ def compose(cfg):
         services['unbound']['ports'] = ['127.0.0.1:5335:53/tcp', '127.0.0.1:5335:53/udp']
     if kind == 'ingress':
         services['traefik']['command'] = ['--configFile=/etc/traefik/traefik.yml']
-    return result
+    if kind == 'db-tools':
+        address = ipaddress.IPv4Address(required(cfg, 'pgadmin_bind_address'))
+        if address.is_unspecified or address.is_loopback or address.is_multicast or address.is_link_local:
+            raise ValueError('Publish pgAdmin only on the selected backend IPv4 address')
+        del services['pgadmin']['network_mode']
+        services['pgadmin']['ports'] = [f'{address}:80:80']
+        # A missing capture must fail, rather than initializing a fresh profile.
+        services['pgadmin']['volumes'] = [{'type': 'bind', 'source': f'{root}/pgadmin',
+            'target': '/var/lib/pgadmin', 'bind': {'create_host_path': False}}]
+    return foundation.configure_compose(cfg, result)
+
+
+def dns_name(host):
+    return (isinstance(host, str) and len(host) <= 253 and
+            all(re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', label)
+                for label in host.split('.')))
+
+
+def route_hosts(cfg, name):
+    """Keep old single-host inputs while admitting explicit hostname aliases."""
+    single, multiple = f'{name}_host', f'{name}_hosts'
+    if single in cfg and multiple in cfg:
+        raise ValueError('Supply either a single route host or a host list')
+    hosts = cfg[multiple] if multiple in cfg else [required(cfg, single)]
+    if not isinstance(hosts, list) or not hosts or any(not dns_name(host) for host in hosts):
+        raise ValueError('Use literal DNS names for routes')
+    if len(set(hosts)) != len(hosts):
+        raise ValueError('Route hostnames must be unique')
+    return hosts
+
+
+def backend_url(cfg, name):
+    url = required(cfg, f'{name}_url')
+    if any(c.isspace() for c in url) or '\\' in url:
+        raise ValueError('Use credential-free backend HTTP origins')
+    parsed = urlsplit(url)
+    if (parsed.scheme not in ('http', 'https') or not parsed.hostname or
+            parsed.username is not None or parsed.password is not None or
+            parsed.path not in ('', '/') or parsed.query or parsed.fragment or
+            (parsed.port is not None and not 1 <= parsed.port <= 65535)):
+        raise ValueError('Use credential-free backend HTTP origins')
+    try:
+        ipaddress.ip_address(parsed.hostname)
+    except ValueError:
+        if not dns_name(parsed.hostname):
+            raise ValueError('Use a literal backend address or DNS name') from None
+    return url
 
 
 def ingress(cfg):
-    """A file provider reaches other guests without a Docker socket or HA SSO."""
+    """Reach guest backends; only Node-RED delegates login to forward-auth."""
     if cfg.get('kind') != 'ingress':
         raise ValueError('Ingress settings belong to the ingress guest')
-    routers, services = {}, {}
-    for name in ('homeassistant', 'node_red', 'identity'):
-        host, url = required(cfg, f'{name}_host'), required(cfg, f'{name}_url')
-        if not re.fullmatch(r'[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?', host):
-            raise ValueError('Use literal DNS names for routes')
-        parsed = urlsplit(url)
-        if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError('Use credential-free backend HTTP URLs')
-        routers[name] = {'rule': f'Host(`{host}`)', 'entryPoints': ['websecure'], 'tls': {}, 'service': name}
+    entrypoint = cfg.get('ingress_entrypoint', 'websecure')
+    resolver = cfg.get('ingress_cert_resolver')
+    for value in [entrypoint] + ([resolver] if 'ingress_cert_resolver' in cfg else []):
+        if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]+', value):
+            raise ValueError('Use literal entrypoint and certificate resolver names')
+    tls = {'certResolver': resolver} if resolver else {}
+    names = ['homeassistant', 'node_red', 'identity']
+    if any(key in cfg for key in ('pgadmin_host', 'pgadmin_hosts', 'pgadmin_url', 'pgadmin_middlewares')):
+        names.append('pgadmin')
+    routers, services, claimed = {}, {}, set()
+    for name in names:
+        hosts, url = route_hosts(cfg, name), backend_url(cfg, name)
+        if claimed.intersection(hosts):
+            raise ValueError('Different applications cannot share a route hostname')
+        claimed.update(hosts)
+        rule = ' || '.join(f'Host(`{host}`)' for host in hosts)
+        if len(hosts) > 1:
+            rule = f'({rule})'
+        routers[name] = {'rule': rule, 'priority': 10, 'entryPoints': [entrypoint],
+                         'tls': dict(tls), 'service': name}
         services[name] = {'loadBalancer': {'servers': [{'url': url}], 'passHostHeader': True}}
+    if 'pgadmin' in names:
+        middlewares = cfg.get('pgadmin_middlewares', [])
+        if (not isinstance(middlewares, list) or any(
+                not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]+(?:@file)?', value) or
+                value in ('authentik', 'authentik@file') for value in middlewares)):
+            raise ValueError('pgAdmin uses native OAuth2; supply only its restored file middlewares')
+        if middlewares:
+            routers['pgadmin']['middlewares'] = list(middlewares)
     routers['node_red']['middlewares'] = ['authentik']
-    routers['outpost'] = {'rule': f"Host(`{cfg['node_red_host']}`) && PathPrefix(`/outpost.goauthentik.io/`)",
-                          'priority': 100, 'entryPoints': ['websecure'], 'tls': {}, 'service': 'identity'}
+    routers['outpost'] = {'rule': routers['node_red']['rule'] + ' && PathPrefix(`/outpost.goauthentik.io/`)',
+                          'priority': 100, 'entryPoints': [entrypoint], 'tls': dict(tls), 'service': 'identity'}
     middleware = {'authentik': {'forwardAuth': {
         'address': cfg['identity_url'].rstrip('/') + '/outpost.goauthentik.io/auth/traefik',
         'trustForwardHeader': False,
@@ -172,14 +286,30 @@ def main():
     args = parser.parse_args()
     cfg = json.loads(args.config.read_text())
     documents = {'compose.yml': compose(cfg)}
-    if cfg['kind'] == 'ingress':
+    if cfg['kind'] == 'ingress' and 'foundation' not in cfg:
         documents['routes.yml'] = ingress(cfg)
     args.output.mkdir(mode=0o700, parents=True, exist_ok=True)
     for name, document in documents.items():
         path = args.output / name
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        os.fchmod(fd, 0o600)
         with os.fdopen(fd, 'w') as stream:
             json.dump(document, stream, indent=2)
+            stream.write('\n')
+    if 'foundation' in cfg:
+        manifest = []
+        for artifact in foundation_files(cfg):
+            path = args.output / artifact['path']
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, 'w') as stream:
+                stream.write(artifact['content'])
+            manifest.append({key: artifact[key] for key in ('path', 'uid', 'gid', 'mode')})
+        path = args.output / 'runtime-files.json'
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, 'w') as stream:
+            json.dump(manifest, stream)
             stream.write('\n')
 
 

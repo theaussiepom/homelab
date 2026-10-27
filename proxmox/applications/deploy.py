@@ -19,6 +19,11 @@ from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHand
 from plan import check_plan
 from restore import sync_directory, validate_archive
 import guest_identity
+import discovery
+import foundation
+import ingress_routing
+
+check_merge_create_plan = discovery.check_merge_create_plan
 
 SOURCE = Path(__file__).resolve().parent
 DATABASE_KINDS = {'mariadb', 'postgresql', 'influxdb'}
@@ -66,6 +71,14 @@ def validate(cfg):
     if isinstance(vmid, bool) or not isinstance(vmid, int) or vmid < 100 or vmid in {900, 4914, 4915, 4920}:
         raise ValueError('Select one application guest, never the deployment controller or protected targets')
     app = cfg['app']
+    discovery.labels(cfg)
+    if 'frontend_routing' in app:
+        if app.get('kind') != 'ingress':
+            raise ValueError('Frontend source routing belongs only to ingress')
+        address, _, _, mac = ingress_routing.validate(app['frontend_routing'])
+        if not any(nic['ipv4'] == app['frontend_routing']['address'] and nic['mac'].lower() == mac
+                   for nic in cfg['guest']['interfaces']):
+            raise ValueError('Frontend routing must bind the exact selected guest interface')
     if app['vmid'] != vmid or app['hostname'] != cfg['guest']['hostname'] or app['memory_mib'] != cfg['guest']['memory_mib']:
         raise ValueError('OpenTofu and Ansible must select the same guest and resource budget')
     if not any(nic['ipv4'].split('/')[0] == app['address'] and nic['mac'].lower() == app['mac'].lower() for nic in cfg['guest']['interfaces']):
@@ -87,6 +100,19 @@ def validate(cfg):
         address = stack.get('services', {}).get('homeassistant', {}).get('environment', {}).get('HOMELAB_HA_IPV4')
         if address and address not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
             raise ValueError('HA discovery must select an address assigned to this guest')
+    if 'stack_config' in app:
+        stack = json.loads(Path(app['stack_config']).read_text())
+        selected = foundation.validate(stack)
+        if selected and app.get('kind') == 'ingress' and len(cfg['guest']['interfaces']) > 1:
+            if 'frontend_routing' not in app or ingress_routing.validate(app['frontend_routing'])[0] != selected['bind_address']:
+                raise ValueError('Multihomed ingress needs routing for its exact frontend listener')
+        if selected and app.get('kind') in {'identity', 'ingress'}:
+            if selected['bind_address'] not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
+                raise ValueError('Foundation listeners must select an address assigned to this guest')
+    if app.get('kind') == 'db-tools':
+        stack = json.loads(Path(app['stack_config']).read_text())
+        if stack.get('pgadmin_bind_address') not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
+            raise ValueError('pgAdmin must select a backend address assigned to this guest')
     for key in ('state_root', 'backup_mount', 'backup_directory', 'api_token', 'ca_file', 'private_key', 'known_hosts'):
         if not Path(cfg['paths'][key]).is_absolute():
             raise ValueError(f'{key} must be an absolute private runner path')
@@ -105,6 +131,8 @@ def input_hashes(cfg):
     app = cfg['app']
     if 'stack_config' in app:
         paths.append(app['stack_config'])
+        stack = json.loads(Path(app['stack_config']).read_text())
+        paths.extend(foundation.source_files(stack))
     paths.extend(item['key_path'] for item in app.get('repositories', []))
     paths.extend(item['source'] for item in app.get('database', {}).get('config_files', []))
     return {path: sha(path) for path in sorted(set(paths))}
@@ -223,16 +251,20 @@ def _execute_step(action, cfg_path, approved_plan=None):
         if action == 'plan':
             shutil.copytree(SOURCE / 'tofu', work / 'tofu', dirs_exist_ok=True,
                             ignore=shutil.ignore_patterns('.terraform', '*.tfstate*', '*.tfplan'))
-            write(work / 'tofu' / 'site.auto.tfvars.json', {k: cfg[k] for k in ('site', 'guest', 'ssh_public_keys')})
+            variables = {k: cfg[k] for k in ('site', 'guest', 'ssh_public_keys')}
+            variables['guest'] = dict(cfg['guest'], routing_labels=discovery.labels(cfg))
+            write(work / 'tofu' / 'site.auto.tfvars.json', variables)
             quiet(tofu + ['init', '-input=false', '-lockfile=readonly', '-backend-config=path=' + str(state)], environment, logfile)
             quiet(tofu + ['plan', '-input=false', '-lock-timeout=30s', '-out=' + str(work / 'guest.tfplan')], environment, logfile)
             output = subprocess.check_output(tofu + ['show', '-json', str(work / 'guest.tfplan')], env=environment)
             plan_value = json.loads(output)
             check_plan(plan_value, cfg['site']['node'], vmid)
+            write(work / 'guest.tfplan.json', plan_value)
             creates_guest = any(row['address'] == 'module.guest.proxmox_virtual_environment_container.guest'
                                 and row['change']['actions'] == ['create'] and row['change'].get('before') is None
                                 for row in plan_value['resource_changes'])
-            receipt = {'plan_sha256': sha(work / 'guest.tfplan'), 'site_sha256': sha(cfg_path),
+            receipt = {'plan_sha256': sha(work / 'guest.tfplan'),
+                       'plan_json_sha256': sha(work / 'guest.tfplan.json'), 'site_sha256': sha(cfg_path),
                        'source_sha256': source_hash(), 'input_hashes': input_hashes(cfg), 'vmid': vmid,
                        'creates_guest': creates_guest}
             write(work / 'plan.json', receipt)
@@ -317,10 +349,21 @@ def execute(action, cfg_path, approved_plan=None):
                 or plan['site_sha256'] != sha(cfg_path) or plan['source_sha256'] != source_hash()
                 or plan.get('input_hashes') != input_hashes(cfg)):
             raise InputNeeded('Deploy needs the exact reviewed plan, source and private inputs')
-        if cfg['app'].get('kind') in DATABASE_KINDS:
-            if plan.get('creates_guest') is not True:
-                raise InputNeeded('Empty database Deploy requires a plan creating a fresh guest, never an existing database target')
-        else:
+        if (plan.get('creates_guest') is not True or type(plan.get('vmid')) is not int
+                or plan['vmid'] != vmid):
+            raise InputNeeded('Deploy requires a saved plan creating this fresh guest; use reviewed steps for an existing installation')
+        json_plan = work / 'guest.tfplan.json'
+        if (not isinstance(plan.get('plan_json_sha256'), str) or not json_plan.is_file()
+                or json_plan.is_symlink() or sha(json_plan) != plan['plan_json_sha256']):
+            raise InputNeeded('Deploy needs its matching saved JSON plan; prepare and review a new plan')
+        # This entry point is also exposed by the public CLI/workflow template,
+        # so its first-install guard cannot depend on the private CD adapter.
+        # Individual reviewed apply/start paths retain ordinary convergence.
+        try:
+            check_merge_create_plan(json.loads(json_plan.read_text()), cfg['site']['node'], vmid)
+        except ValueError:
+            raise InputNeeded('Deploy needs three fresh creates for the selected guest and node; use reviewed steps for an existing installation') from None
+        if cfg['app'].get('kind') not in DATABASE_KINDS:
             if cfg['app'].get('exclusive_writer_confirmed') is not True:
                 raise InputNeeded('Confirm the selected service migration and retire its old writers before deploy')
             capture = cfg['app']['capture']

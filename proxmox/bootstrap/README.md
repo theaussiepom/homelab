@@ -448,6 +448,12 @@ the plan, a hold and a maintenance marker on the runner, with receipts on NAS;
 review the outcome before a separately approved correction. Other deployment
 jobs must check that maintenance marker before proceeding.
 
+If Traefik will discover routes from Proxmox Notes, include its
+[separate read-only discovery access](SERVICE-DISCOVERY.md) in this reviewed
+configuration. That optional addition creates one provider token and one exact
+guest-to-host API firewall allowance. Traefik never receives the bootstrap
+administrator token.
+
 ## When something goes wrong
 
 | What you see | What to do |
