@@ -56,12 +56,13 @@ def prepare_inputs(config, destination=INPUTS, environment=None, runtime_file=No
         cfg, stack, original
     )
     migration.validate_admission(cfg, stack)
-    render.compose(stack)
+    compose_sha256 = files.digest(files.encoded(render.compose(stack)))
     deploy.validate(cfg, stack)
     payload = {"site.json": files.encoded(cfg), "stack.json": files.encoded(stack)}
     manifest = {
         "schema": value["schema"],
         "files": {key: files.digest(data) for key, data in payload.items()},
+        "compose_sha256": compose_sha256,
     }
     files.private_directory(destination.parent)
     if destination.exists() or destination.is_symlink():
@@ -81,6 +82,17 @@ def prepare_inputs(config, destination=INPUTS, environment=None, runtime_file=No
         for key, data in payload.items():
             files.write_new(destination / key, data)
         files.write_new(destination / "prepared.json", files.encoded(manifest))
+    files.require(
+        files.digest(
+            files.encoded(
+                render.compose(
+                    migration.read_json(destination / "stack.json", private=True)
+                )
+            )
+        )
+        == compose_sha256,
+        "Persisted stack render differs from the admitted preflight output",
+    )
     return cfg, destination / "site.json"
 
 
@@ -131,6 +143,8 @@ def run(
             "vmid": vmid,
         }
         complete = work / "bitwarden-complete.json"
+        query = work / "rendered" / "bitwarden-database-query.json"
+        query_recovery = Path(cfg["paths"]["backup_directory"]) / str(vmid) / query.name
         recovery = (
             Path(cfg["paths"]["backup_directory"])
             / str(vmid)
@@ -145,7 +159,11 @@ def run(
                 and receipt["state_sha256"]
                 == deployment.sha(work / "terraform.tfstate")
                 and receipt["rollout_sha256"]
-                == deployment.sha(work / "rollout-complete.json"),
+                == deployment.sha(work / "rollout-complete.json")
+                and receipt["database_query_sha256"]
+                == files.digest(files.regular(query, private=True))
+                and files.regular(query_recovery, private=True)
+                == files.regular(query, private=True),
                 "Completed Bitwarden state or receipt drifted; no redeployment",
             )
             phase = "verify"
@@ -187,13 +205,34 @@ def run(
             and (phase == "plan" or result.get("status") == "passed"),
             "The shared installer did not complete this exact Bitwarden phase",
         )
+        if phase != "plan":
+            raw_query = files.regular(query, private=True)
+            files.require(
+                json.loads(raw_query)
+                == migration.database_query_record(
+                    cfg, migration.read_json(destination / "stack.json", private=True)
+                ),
+                "The retained account query from this guest did not produce matching evidence",
+            )
+            if phase == "verify":
+                files.require(
+                    files.regular(query_recovery, private=True) == raw_query
+                    and receipt["database_query_sha256"] == files.digest(raw_query),
+                    "Verified database query proof drifted from the completed installation",
+                )
         if phase == "deploy":
+            files.write_new(query_recovery, raw_query)
+            files.require(
+                files.regular(query_recovery, private=True) == raw_query,
+                "NAS database query proof readback differs",
+            )
             receipt = {
                 "status": "passed",
                 "binding": binding,
                 "plan_sha256": approved,
                 "state_sha256": deployment.sha(work / "terraform.tfstate"),
                 "rollout_sha256": deployment.sha(work / "rollout-complete.json"),
+                "database_query_sha256": files.digest(raw_query),
             }
             files.write_new(complete, files.encoded(receipt))
             files.write_new(recovery, files.encoded(receipt))

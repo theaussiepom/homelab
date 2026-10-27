@@ -1,6 +1,6 @@
 """Bitwarden migration inputs: preserved identity and separately reviewed native receipts."""
 
-import hashlib, json, re
+import hashlib, ipaddress, json, re
 from pathlib import Path
 from urllib.parse import urlsplit
 import foundation_cd as files
@@ -120,6 +120,10 @@ def validate_admission(cfg, stack, runtime=True, ready=True):
     settings = stack["bitwarden"]
     app = cfg["app"]
     selected = app.get("bitwarden", {})
+    require(
+        "mariadb-client-core=1:11.8.6-0+deb13u1" in app.get("packages", []),
+        "Install the reviewed MariaDB client for the retained-account pre-start query",
+    )
     require(
         settings["schema"] == "homelab-bitwarden-migration-v1"
         and isinstance(selected, dict)
@@ -258,10 +262,11 @@ def validate_admission(cfg, stack, runtime=True, ready=True):
         receipt = read_json(Path(row["path"]), private=True)
         if key == "restore_receipt":
             expected = {
-                "schema": "homelab-bitwarden-db-restore-v1",
+                "schema": "homelab-bitwarden-db-restore-v2",
                 "database_guest": selected["database_guest"],
                 "database_server": settings["database_server"],
                 "database_name": settings["database_name"],
+                "database_client_address": database_client_address(cfg, stack),
                 "source_backup_sha256": selected["source_backup_sha256"],
                 "capture_sha256": app["capture"]["sha256"],
                 "source_environment_sha256": selected["source_environment_sha256"],
@@ -270,7 +275,7 @@ def validate_admission(cfg, stack, runtime=True, ready=True):
                 "checks": {
                     "schema_coverage": "passed",
                     "data_validation": "passed",
-                    "retained_user_query": "passed",
+                    "retained_account_definition": "passed",
                 },
             }
         else:
@@ -291,3 +296,34 @@ def validate_admission(cfg, stack, runtime=True, ready=True):
             receipt == expected,
             "The reviewed native database or access/route prerequisite does not match this migration",
         )
+
+
+def database_client_address(cfg, stack):
+    server = ipaddress.ip_address(stack["bitwarden"]["database_server"])
+    matches = [
+        ipaddress.ip_interface(n["ipv4"])
+        for n in cfg["guest"]["interfaces"]
+        if server in ipaddress.ip_interface(n["ipv4"]).network
+    ]
+    require(
+        len(matches) == 1,
+        "Select exactly one guest interface on the native database subnet",
+    )
+    return str(matches[0].ip)
+
+
+def database_query_record(cfg, stack):
+    """Bind the guest's successful selected-schema query without recording credentials or data."""
+    selected = cfg["app"]["bitwarden"]
+    settings = stack["bitwarden"]
+    return {
+        "schema": "homelab-bitwarden-db-query-v1",
+        "state": "passed",
+        "vmid": cfg["guest"]["vmid"],
+        "database_server": settings["database_server"],
+        "database_name": settings["database_name"],
+        "source_backup_sha256": selected["source_backup_sha256"],
+        "source_environment_sha256": selected["source_environment_sha256"],
+        "source_image_id": settings["source_image_id"],
+        "method": "retained account selected-schema LIMIT 0 query",
+    }

@@ -3,7 +3,7 @@
 import copy, hashlib, json, os
 from pathlib import Path
 import sys, tempfile, unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import bitwarden_cd, bitwarden_migration, deploy, render
@@ -40,6 +40,7 @@ def setup(root):
     cfg["app"]["address"] = "10.88.100.20"
     cfg["app"].update(
         kind="bitwarden",
+        packages=["mariadb-client-core=1:11.8.6-0+deb13u1"],
         stack_config=str(destination / "stack.json"),
         exclusive_writer_confirmed=True,
         capture={
@@ -93,7 +94,7 @@ def setup(root):
             "bind_address": "10.88.100.20",
             "source_image_id": "sha256:" + "a" * 64,
             "source_database_server": "old-db",
-            "database_server": "10.88.30.24",
+            "database_server": "10.88.100.24",
             "database_provider": "mysql",
             "database_name": "bitwarden_vault",
             "data_uid": 1000,
@@ -111,19 +112,20 @@ def setup(root):
         },
     }
     restore = {
-        "schema": "homelab-bitwarden-db-restore-v1",
+        "schema": "homelab-bitwarden-db-restore-v2",
         "database_guest": 206,
-        "database_server": "10.88.30.24",
+        "database_server": "10.88.100.24",
         "database_name": "bitwarden_vault",
         "source_backup_sha256": "b" * 64,
         "capture_sha256": "c" * 64,
         "source_environment_sha256": envhash,
         "source_image_id": "sha256:" + "a" * 64,
+        "database_client_address": "10.88.100.20",
         "writer_fenced": True,
         "checks": {
             "schema_coverage": "passed",
             "data_validation": "passed",
-            "retained_user_query": "passed",
+            "retained_account_definition": "passed",
         },
     }
     prerequisites = {
@@ -167,6 +169,68 @@ def setup(root):
 
 
 class CDTests(unittest.TestCase):
+    def test_persisted_stack_render_must_match_the_preflight_before_native_work(self):
+        with tempfile.TemporaryDirectory() as d:
+            _, path, dest, environment, _ = setup(Path(d))
+            with patch.object(
+                bitwarden_cd.render,
+                "compose",
+                side_effect=[{"synthetic": 1}, {"synthetic": 2}],
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "Persisted stack render differs"
+                ):
+                    bitwarden_cd.prepare_inputs(path, dest, environment)
+            self.assertTrue((dest / "prepared.json").exists())
+
+    def test_restore_account_definition_must_bind_the_actual_database_client_interface(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as d:
+            config, path, dest, environment, _ = setup(Path(d))
+            cfg = config["site"]
+            row = cfg["app"]["bitwarden"]["restore_receipt"]
+            record = json.loads(Path(row["path"]).read_text())
+            record["database_client_address"] = "10.88.100.99"
+            raw = bitwarden_migration.encoded(record)
+            private(Path(row["path"]), raw)
+            private(bitwarden_migration.nas_receipt(cfg, "restore_receipt"), raw)
+            row["sha256"] = hashlib.sha256(raw).hexdigest()
+            path.write_bytes(bitwarden_migration.encoded(config))
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                bitwarden_cd.prepare_inputs(path, dest, environment)
+            self.assertFalse(dest.exists())
+
+    def test_database_query_proof_is_required_even_when_shared_installer_reports_success(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as d:
+            config, path, dest, environment, _ = setup(Path(d))
+            config["approved_plan_sha256"] = "d" * 64
+            path.write_bytes(bitwarden_migration.encoded(config))
+            engine = Mock()
+            engine.validate = deploy.validate
+            engine.source_hash.return_value = "f" * 64
+            engine.input_hashes = deploy.input_hashes
+            engine.execute.return_value = {
+                "vmid": config["site"]["guest"]["vmid"],
+                "status": "passed",
+            }
+            engine.sha = deploy.sha
+            work = Path(config["site"]["paths"]["state_root"]) / str(
+                config["site"]["guest"]["vmid"]
+            )
+            private(work / "terraform.tfstate", b"synthetic state")
+            private(work / "rollout-complete.json", b"synthetic rollout")
+            (
+                Path(config["site"]["paths"]["backup_directory"])
+                / str(config["site"]["guest"]["vmid"])
+            ).mkdir(parents=True, mode=0o700)
+            with self.assertRaises((ValueError, FileNotFoundError)):
+                bitwarden_cd.run("deploy", path, dest, environment, engine)
+            self.assertFalse((work / "bitwarden-complete.json").exists())
+            self.assertTrue((work / "BITWARDEN-CD-HOLD.json").exists())
+
     def test_disabled_packet_cannot_create_inputs_or_read_secrets(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
@@ -194,7 +258,7 @@ class CDTests(unittest.TestCase):
             cfg, site = bitwarden_cd.prepare_inputs(path, dest, environment)
             stack = json.loads((dest / "stack.json").read_text())
             actual = stack["services"]["bitwarden"]["environment"]
-            self.assertEqual(actual, dict(source, BW_DB_SERVER="10.88.30.24"))
+            self.assertEqual(actual, dict(source, BW_DB_SERVER="10.88.100.24"))
             document = render.compose(stack)
             self.assertEqual(
                 document["services"]["bitwarden"]["environment"]["BW_DB_PASSWORD"],
@@ -373,6 +437,14 @@ class CDTests(unittest.TestCase):
                     self.assertEqual(approved, selected)
                     private(work / "terraform.tfstate", b"synthetic private state")
                     private(work / "rollout-complete.json", b'{"status":"passed"}')
+                    private(
+                        work / "rendered" / "bitwarden-database-query.json",
+                        bitwarden_migration.encoded(
+                            bitwarden_migration.database_query_record(
+                                cfg, config["stack"]
+                            )
+                        ),
+                    )
                     (
                         Path(cfg["paths"]["backup_directory"])
                         / str(cfg["guest"]["vmid"])

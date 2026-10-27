@@ -62,7 +62,7 @@ Before enabling native preflight, review these inputs together:
 | Final database checkpoint | Writer-fenced consistent selected-schema dump, verified hashes/table coverage and isolated restore proof; no unrelated schemas or server data directory |
 | Complete file capture | All of `/etc/bitwarden` and `/var/log/bitwarden`, including attachments/Send, keys, certificates and licenses; hashes and numeric ownership, modes, ACLs and xattrs |
 | Private environment | Exact retained source values and reviewed database endpoint delta; no secret rotation |
-| Native restore receipt | Reviewed restore on the shared MariaDB, schema/data validation and a query through the retained application account; exact capture, environment, image and backup bindings |
+| Native restore receipt | Reviewed restore on the shared MariaDB, schema/data validation and retained account definition (v2); exact capture, environment, image and backup bindings |
 | Access/route receipt | Bootstrap grant, discovery scope, ingress backend allowance and reviewed DNS/TLS plan for this exact guest/backend/public origin |
 
 A live backup checkpoint is not the final coherent cutover capture. Fence the
@@ -72,6 +72,15 @@ The DB restore is a separate authorized operation; ordinary CD never executes it
 The adapter reads exact private restore/access receipts and identical NAS copies,
 with their hashes bound into the saved plan. It does not manufacture their checks.
 The receipt formats are closed contracts in `bitwarden_migration.py`.
+
+The source-restricted account cannot be tested from an absent guest. The v2
+restore receipt therefore attests the account definition before creation.
+After creation, staging uses the reviewed Debian MariaDB client to run a bounded
+read-only `LIMIT 0` query against the restored Cipher table from the actual guest
+with its retained account. No vault rows are returned. Failure stops the rollout
+before Bitwarden starts. A successful private query proof is bound into the
+completion receipt and mirrored to NAS; verification repeats the actual query.
+Never broaden the account host restriction to the runner to bypass this gate.
 
 After the inputs and prerequisites are reviewed, the adapter calls the common
 installer. First select `plan` with no old approval. Review its exact new-guest
