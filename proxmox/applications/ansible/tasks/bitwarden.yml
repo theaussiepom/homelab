@@ -1,0 +1,23 @@
+---
+- name: Fetch only the selected preserved official Bitwarden image
+  ansible.builtin.command:
+    argv: [docker, image, pull, "{{ stack.services.bitwarden.image }}"]
+  changed_when: false
+  no_log: true
+  when: "('@sha256:' in stack.services.bitwarden.image or stack.services.bitwarden.image == 'ghcr.io/bitwarden/lite:latest') and not ansible_check_mode"
+
+- name: Check the actual Bitwarden image content before any application start
+  ansible.builtin.command:
+    argv: [docker, image, inspect, "{{ stack.services.bitwarden.image }}", --format, "{{ '{{' }}.Id{{ '}}' }}"]
+  register: bitwarden_image
+  changed_when: false
+  failed_when: bitwarden_image.stdout | trim != stack.bitwarden.source_image_id
+  when: not ansible_check_mode
+
+- name: Install the bounded unauthenticated Bitwarden health helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../bitwarden.py"
+    dest: /opt/homelab-app/bitwarden.py
+    owner: root
+    group: root
+    mode: '0700'

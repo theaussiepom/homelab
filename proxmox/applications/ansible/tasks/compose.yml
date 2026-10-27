@@ -102,6 +102,10 @@
   no_log: true
   when: not ansible_check_mode
 
+- name: Preserve Bitwarden image identity and install its health helper
+  ansible.builtin.include_tasks: bitwarden.yml
+  when: app.kind == 'bitwarden'
+
 - name: Prepare the directory for the selected HA helper
   ansible.builtin.file:
     path: /srv/homelab/data/ha-startup
@@ -128,7 +132,7 @@
 
 - name: Start exactly this guest stack
   ansible.builtin.command:
-    argv: [docker, compose, -f, /opt/homelab-app/compose.yml, up, -d, --wait, --wait-timeout, '180', --remove-orphans=false]
+    argv: "{{ ['docker', 'compose', '-f', '/opt/homelab-app/compose.yml', 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--pull', 'never'] if app.kind == 'bitwarden' else []) }}"
   register: compose_start
   changed_when: "'Started' in compose_start.stderr or 'Created' in compose_start.stderr or 'Recreated' in compose_start.stderr"
   no_log: true

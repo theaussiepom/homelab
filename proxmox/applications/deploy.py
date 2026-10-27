@@ -22,6 +22,7 @@ import guest_identity
 import discovery
 import foundation
 import ingress_routing
+import bitwarden_migration
 
 check_merge_create_plan = discovery.check_merge_create_plan
 
@@ -75,8 +76,8 @@ def write(path, value):
     sync_directory(path.parent)
 
 
-def validate(cfg):
-    if cfg.get('app', {}).get('kind') == 'bitwarden':
+def validate(cfg, stack_override=None):
+    if cfg.get('app', {}).get('kind') == 'bitwarden' and 'bitwarden' not in cfg['app']:
         raise InputNeeded('Bitwarden is preparation only; review restore, private inputs and native admission first')
     vmid = cfg['guest']['vmid']
     if isinstance(vmid, bool) or not isinstance(vmid, int) or vmid < 100 or vmid in {900, 4914, 4915, 4920}:
@@ -112,7 +113,9 @@ def validate(cfg):
         if address and address not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
             raise ValueError('HA discovery must select an address assigned to this guest')
     if 'stack_config' in app:
-        stack = json.loads(Path(app['stack_config']).read_text())
+        stack = stack_override if stack_override is not None else json.loads(Path(app['stack_config']).read_text())
+        if app.get('kind') == 'bitwarden':
+            bitwarden_migration.validate_admission(cfg, stack)
         selected = foundation.validate(stack)
         if selected and app.get('kind') == 'ingress' and len(cfg['guest']['interfaces']) > 1:
             if 'frontend_routing' not in app or ingress_routing.validate(app['frontend_routing'])[0] != selected['bind_address']:
@@ -144,6 +147,9 @@ def input_hashes(cfg):
         paths.append(app['stack_config'])
         stack = json.loads(Path(app['stack_config']).read_text())
         paths.extend(foundation.source_files(stack))
+        if app.get('kind') == 'bitwarden':
+            for key in ('restore_receipt', 'prerequisites_receipt'):
+                paths.extend((app['bitwarden'][key]['path'], str(bitwarden_migration.nas_receipt(cfg, key))))
     paths.extend(item['key_path'] for item in app.get('repositories', []))
     paths.extend(item['source'] for item in app.get('database', {}).get('config_files', []))
     return {path: sha(path) for path in sorted(set(paths))}

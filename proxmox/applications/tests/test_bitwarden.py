@@ -86,6 +86,23 @@ class BitwardenTests(unittest.TestCase):
         with self.assertRaisesRegex(deploy.InputNeeded, 'preparation'):
             deploy.validate({'app': {'kind': 'bitwarden'}})
 
+    def test_native_example_stays_disabled_until_real_migration_inputs_exist(self):
+        import bitwarden_configuration
+        packet = json.loads((Path(__file__).resolve().parents[1] /
+                            'examples/bitwarden.deployment.example.json').read_text())
+        result = bitwarden_configuration.inspect(packet)
+        self.assertFalse(result['enabled'])
+        self.assertFalse(result['ready_for_native_preflight'])
+        self.assertIn('old_writer_fence', result['missing_inputs'])
+        packet['enabled'] = True
+        with self.assertRaises(ValueError): bitwarden_configuration.inspect(packet)
+
+    def test_backend_health_requires_explicit_private_literal(self):
+        self.assertTrue(callable(bitwarden.reader('http://10.88.30.35:8080', backend=True)))
+        for origin in ('http://8.8.8.8:8080', 'http://vault.example.invalid', 'http://0.0.0.0'):
+            with self.subTest(origin=origin), self.assertRaises(ValueError):
+                bitwarden.reader(origin, backend=True)
+
     def test_reader_refuses_redirects_and_nonlocal_plaintext(self):
         for origin in ('http://vault.example.invalid', 'https://user:password@example.invalid',
                        'https://example.invalid/path', 'https://example.invalid?secret=x'):

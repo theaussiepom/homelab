@@ -1,0 +1,217 @@
+{
+  "schema": "homelab-bitwarden-deployment-v1",
+  "enabled": false,
+  "site": {
+    "site": {
+      "node": "practice-pve",
+      "api_endpoint": "https://pve.example.invalid:8006/"
+    },
+    "paths": {
+      "api_token": "/var/lib/homelab-inputs/pve-token",
+      "backup_directory": "/srv/homelab-backups/applications",
+      "backup_mount": "/srv/homelab-backups",
+      "backup_source": "nas.example.invalid:/backups",
+      "ca_file": "/usr/local/share/ca-certificates/homelab-pve.crt",
+      "known_hosts": "/var/lib/homelab-inputs/known_hosts",
+      "private_key": "/home/homelab-runner/.ssh/applications",
+      "state_root": "/var/lib/homelab-applications"
+    },
+    "ssh_public_keys": [
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHN5bnRoZXRpYy1wdWJsaWMta2V5LWV4YW1wbGU example"
+    ],
+    "guest": {
+      "vmid": 6107,
+      "hostname": "practice-bitwarden",
+      "cpu": 1,
+      "memory_mib": 2048,
+      "root_gib": 8,
+      "storage_id": "local-zfs",
+      "template_file_id": "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst",
+      "started": true,
+      "start_on_boot": true,
+      "boot_order": 40,
+      "nesting": true,
+      "keyctl": false,
+      "dns_servers": [
+        "10.88.40.2",
+        "10.88.40.3"
+      ],
+      "interfaces": [
+        {
+          "bridge": "vmbr0",
+          "vlan": 25,
+          "mac": "02:88:00:00:61:07",
+          "ipv4": "10.88.25.35/24",
+          "ipv6": "manual",
+          "gateway": "10.88.25.1"
+        },
+        {
+          "bridge": "vmbr30",
+          "vlan": null,
+          "mac": "02:88:00:30:61:07",
+          "ipv4": "10.88.30.35/24",
+          "ipv6": "manual"
+        }
+      ],
+      "volumes": {
+        "data": {
+          "path": "/srv/homelab/data",
+          "size_gib": 4
+        }
+      },
+      "rules": [
+        {
+          "direction": "in",
+          "proto": "tcp",
+          "port": "22",
+          "source": "10.88.25.11/32",
+          "comment": "Deployment runner SSH only"
+        },
+        {
+          "direction": "in",
+          "proto": "tcp",
+          "port": "8080",
+          "source": "10.88.30.33/32",
+          "destination": "10.88.30.35/32",
+          "comment": "Existing Traefik backend only"
+        },
+        {
+          "direction": "out",
+          "proto": "tcp",
+          "port": "3306",
+          "destination": "10.88.30.24/32",
+          "comment": "Shared native MariaDB only"
+        },
+        {
+          "direction": "out",
+          "proto": "udp",
+          "port": "53",
+          "destination": "10.88.40.2/32",
+          "comment": "Existing internal DNS"
+        },
+        {
+          "direction": "out",
+          "proto": "tcp",
+          "port": "53",
+          "destination": "10.88.40.2/32",
+          "comment": "Existing internal DNS"
+        },
+        {
+          "direction": "out",
+          "proto": "udp",
+          "port": "53",
+          "destination": "10.88.40.3/32",
+          "comment": "Existing internal DNS"
+        },
+        {
+          "direction": "out",
+          "proto": "tcp",
+          "port": "53",
+          "destination": "10.88.40.3/32",
+          "comment": "Existing internal DNS"
+        },
+        {
+          "direction": "out",
+          "proto": "tcp",
+          "port": "80,443",
+          "destination": "0.0.0.0/0",
+          "comment": "Signed package downloads"
+        },
+        {
+          "direction": "out",
+          "proto": "tcp",
+          "port": "587",
+          "destination": "0.0.0.0/0",
+          "comment": "Retained SMTP relay STARTTLS"
+        }
+      ]
+    },
+    "app": {
+      "kind": "bitwarden",
+      "new_target": true,
+      "vmid": 6107,
+      "hostname": "practice-bitwarden",
+      "memory_mib": 2048,
+      "address": "10.88.25.35",
+      "mac": "02:88:00:00:61:07",
+      "packages": [
+        "docker.io=26.1.5+dfsg1-9+deb13u1",
+        "docker-cli=26.1.5+dfsg1-9+deb13u1",
+        "docker-compose=2.26.1-4",
+        "curl=8.14.1-2+deb13u7"
+      ],
+      "stack_config": "/var/lib/homelab-inputs/bitwarden/stack.json",
+      "capture": {
+        "path": "/var/lib/homelab-inputs/bitwarden-capture.tar",
+        "sha256": null,
+        "coherent": false
+      },
+      "exclusive_writer_confirmed": false,
+      "bitwarden": {
+        "schema": "homelab-bitwarden-admission-v1",
+        "public_origin": "https://vault.example.invalid",
+        "issuer": "http://localhost",
+        "source_environment_sha256": null,
+        "source_backup_sha256": null,
+        "database_guest": 206,
+        "restore_receipt": {
+          "path": "/var/lib/homelab-inputs/bitwarden-database-restore.json",
+          "sha256": null
+        },
+        "prerequisites_receipt": {
+          "path": "/var/lib/homelab-inputs/bitwarden-prerequisites.json",
+          "sha256": null
+        }
+      },
+      "discovery_routes": [
+        {
+          "name": "bitwarden",
+          "host": "vault.example.invalid",
+          "url": "http://10.88.30.35:8080"
+        }
+      ],
+      "health_checks": [
+        {
+          "name": "Bitwarden alive/config/identity",
+          "argv": [
+            "python3",
+            "/opt/homelab-app/bitwarden.py",
+            "--origin",
+            "http://10.88.30.35:8080",
+            "--issuer",
+            "http://localhost",
+            "--backend"
+          ],
+          "expect": "\"status\": \"passed\""
+        }
+      ]
+    }
+  },
+  "stack": {
+    "kind": "bitwarden",
+    "guest_memory_mib": 2048,
+    "timezone": "Australia/Brisbane",
+    "bitwarden": {
+      "schema": "homelab-bitwarden-migration-v1",
+      "bind_address": "10.88.30.35",
+      "source_image_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_database_server": "old-mariadb.example.invalid",
+      "database_server": "10.88.30.24",
+      "database_provider": "mysql",
+      "database_name": "bitwarden_vault",
+      "data_uid": 1000,
+      "data_gid": 1000
+    },
+    "services": {
+      "bitwarden": {
+        "image": "ghcr.io/bitwarden/lite:latest",
+        "memory_mib": 1536,
+        "cpus": 1,
+        "pids_limit": 256,
+        "restart": "no",
+        "environment": {}
+      }
+    }
+  },
+  "approved_plan_sha256": null
+}

@@ -1,126 +1,115 @@
-# Prepare an existing Bitwarden Lite installation
+# Move an existing Bitwarden Lite installation
 
 [Application guide](README.md)
 
-This prepares the **official Bitwarden Lite** application for a later migration.
-It renders a reviewable Compose preview and checks three unauthenticated health
-responses. Deployment is deliberately disabled. The generic installer refuses
-the Bitwarden kind before reading host or credential inputs.
+Use the existing application OpenTofu module, saved-plan approval, Ansible
+capture restore, NAS recovery copies, SSH trust and failure holds. Bitwarden's
+adapter supplies private inputs to that installer; it never restores MariaDB.
+The database runs separately on the existing shared native MariaDB service.
 
-The selected image policy is `ghcr.io/bitwarden/lite:latest`, with no application
-version or digest pin. A later approved deployment will pull the current tag;
-record the resolved image and reported API version as evidence. This can include
-an application upgrade and database schema changes, so the later restore/start
-review must cover that compatibility. Preserve the existing vault and installation
-identity throughout. Bitwarden Lite supports an external MariaDB database through its
-`mysql` provider; reuse the matching commissioned native database service.
-See the vendor's [Lite guide](https://bitwarden.com/help/install-and-deploy-lite/)
-and [database options](https://bitwarden.com/help/database-options/).
+## Latest image and preserved installation
 
-## Preview the application
+Use `ghcr.io/bitwarden/lite:latest` without a version or digest pin. Update the
+existing installation first, check web vault and client sync, and record its
+resolved image ID. The move must use that checked image: Ansible pulls the
+selected reference and checks its actual image ID before startup. Compose then
+uses the checked local image without another pull. If `latest` has advanced
+since the source was verified, stop and review it rather than combining another
+upgrade with the move. The image ID records the migration evidence; the image
+reference remains `latest`.
 
-Copy [the synthetic example](examples/bitwarden.stack.example.json) into your
-private site repository. Keep the official `latest` reference and select a
-proposed backend address. Other applications retain their existing image policies.
+Preserve the effective `BW_*`, `globalSettings*`, `adminSettings*`, PUID/PGID and
+any existing TZ values. The private JSON binding `BITWARDEN_RUNTIME_JSON` must
+match the reviewed source-environment hash. Only `BW_DB_SERVER` changes to the
+reviewed private native MariaDB endpoint. Preserve installation ID/key, schema,
+database credentials, certificate password, optional integration keys, SMTP,
+feature switches, internal URLs and the current public hostname.
+
+Set PUID/PGID explicitly to the source data's numeric owner. Image defaults can
+change across upgrades. The adapter refuses an absent or mismatched UID/GID so
+startup cannot silently change restored ownership. Keep the image's default
+entrypoint; do not add a Docker `user` override.
+
+The generated private stack and Compose files are mode0600. Values are passed
+as an environment mapping with literal dollar escaping, which works with the
+selected Compose2.26 package. No dotenv reparsing is needed. Never print resolved
+Compose, runtime JSON, captures, database dumps, private keys or application logs
+in GitHub jobs or upload them as Actions artifacts.
+
+## Concrete packet and admission
+
+Copy [the disabled synthetic packet](examples/bitwarden.deployment.example.json)
+to private source. The packet has the complete common-installer site and stack,
+an `enabled` flag and an exact `approved_plan_sha256`. An ordinary source check
+can inspect missing inputs without credentials or native access:
 
 ```sh
-python3 public-source/proxmox/applications/render.py \
-  --config bitwarden/stack.json --output /tmp/bitwarden-preview
+python3 public-source/proxmox/applications/bitwarden_configuration.py \
+  --config bitwarden/deployment.json
 ```
 
-The preview does not read environment files, contact a server or create a guest.
-It reuses the existing renderer's CPU/memory/PID limits and log caps. It publishes
-HTTP8080 only on the selected private guest address. Traefik will terminate HTTPS
-and discover the future backend from the existing Proxmox Notes mechanism.
-Bitwarden keeps its own authentication; review API and notification/WebSocket
-paths without adding an Authentik login gate in front of native clients.
-
-The two bind mounts refuse to create missing source directories. The selected image
-keeps its own default entrypoint and process identity. The existing root HTTP
-readiness probe is retained with response output suppressed. Do not add
-PUID/PGID, a `user`, alternate image or new security/runtime defaults during this
-move without separately proving compatibility with the retained filesystem.
-
-The only credential binding in Compose is the file path
-`/opt/homelab-app/runtime/bitwarden.env`. Its future installation must be private
-and mode0600. This PR does not install it. Preserve the effective existing
-`BW_*`, `globalSettings*` and `adminSettings*` settings, including installation
-ID/key, database credentials, certificate password, optional integration keys,
-SMTP sender and credentials, feature switches and internal service URLs. Review
-only the required target database endpoint change. Never print resolved Compose
-or upload that file, logs, private keys or captures to source/Actions artifacts.
-Validate dotenv quoting with the target Compose version so `$`, quotes and
-backslashes survive exactly. Do not depend on newer `env_file.format: raw`:
-the current application package proposal uses Compose2.26.
-
-## Restore inputs to review together
-
-Before any future start, obtain one coherent, privately retained recovery set:
+Before enabling native preflight, review these inputs together:
 
 | Input | Required evidence |
 | --- | --- |
-| Existing `bitwarden_vault` MariaDB database | Reviewed consistent logical dump, schema/table coverage, version, charset/collation, users/grants and checksums; synthetic restore rehearsal first |
-| Entire `/etc/bitwarden` tree | Attachments and Send blobs, data-protection keys, identity certificates, licenses and other existing files; file hashes and numeric UID/GID/modes/ACLs/xattrs |
-| `/var/log/bitwarden` | Retained privately with metadata; logs may contain personal data |
-| Effective runtime configuration | Existing installation/license identity, secrets, SMTP and non-secret settings; safe private custody and an exact before/after comparison |
-| Selected image and tools | Pull official Lite latest and record its resolved digest/API version as evidence; review restore/schema compatibility and architecture, retain selected Docker/Compose package locks |
-| New target and recovery destination | Unused VMID/MAC/addresses, NAS protection, empty target paths, approved disk/resource limits and available space |
+| New separate guest | Unused VMID/MAC/addresses, exact resource/disks, existing trusted API/SSH credentials and NAS recovery destination |
+| Final database checkpoint | Writer-fenced consistent selected-schema dump, verified hashes/table coverage and isolated restore proof; no unrelated schemas or server data directory |
+| Complete file capture | All of `/etc/bitwarden` and `/var/log/bitwarden`, including attachments/Send, keys, certificates and licenses; hashes and numeric ownership, modes, ACLs and xattrs |
+| Private environment | Exact retained source values and reviewed database endpoint delta; no secret rotation |
+| Native restore receipt | Reviewed restore on the shared MariaDB, schema/data validation and a query through the retained application account; exact capture, environment, image and backup bindings |
+| Access/route receipt | Bootstrap grant, discovery scope, ingress backend allowance and reviewed DNS/TLS plan for this exact guest/backend/public origin |
 
-A recent archive's presence is not proof of consistency or restore usability.
-Never replace the server database with a personal vault export: that would not
-preserve the full organization, user, settings and installation state.
+A live backup checkpoint is not the final coherent cutover capture. Fence the
+old writer for the final database/filesystem recovery set, restore and new
+application start. An application start can migrate the schema or write state.
+The DB restore is a separate authorized operation; ordinary CD never executes it.
+The adapter reads exact private restore/access receipts and identical NAS copies,
+with their hashes bound into the saved plan. It does not manufacture their checks.
+The receipt formats are closed contracts in `bitwarden_migration.py`.
 
-Database restore is a **separate explicitly reviewed migration operation** to
-the selected schema and retained user/grants on the shared native MariaDB
-server. It must not drop other schemas or replace MariaDB's entire data directory.
-Keep the old writer fenced during the final coherent capture, restore and
-cutover. An application startup can write schema or runtime state, so it needs
-its own approval after restoration and recovery checks. Repeated ordinary CD
-must never replay a restore.
-
-## Proposed CD admission
-
-Use the existing application OpenTofu module, Ansible roles, saved-plan digest,
-NAS state recovery, captured SSH host key and failure-hold patterns. Add a
-service-specific input/secret adapter only after the inputs above are reviewed;
-do not create a parallel deployment controller. That adapter still needs to
-bind the runtime environment and capture fingerprints into the retained plan
-and receipt, install the env file without logging it, refuse a missing restore
-receipt and require the explicit exclusive-writer/start decision.
-
-The future job would depend on the commissioned MariaDB and Traefik services.
-Its private proposal stays disabled, outside the existing deployment graph.
-Enabling it requires a separate source review and live approval. Commissioned
-DNS, database, foundation and automation source pins remain independent.
-
-Failures must retain evidence and stop. No automatic import/adoption, overwrite,
-failed native-operation replay, credential rotation or weakened TLS/SSH checks.
-If the target accepts writes, switching back requires a reviewed reverse-data
-plan; simply restarting the old container would risk losing those writes.
-
-## Health and acceptance
-
-The source helper sends only GET requests to `/api/alive`, `/api/config`, and
-`/identity/.well-known/openid-configuration`. It requires HTTP200, a non-empty
-reported API version and the explicitly selected existing issuer. The version
-is observed, not pinned. TLS verification stays
-enabled and redirects are refused. It does not unlock, list or sync a vault,
-send mail, or authenticate a client.
+After the inputs and prerequisites are reviewed, the adapter calls the common
+installer. First select `plan` with no old approval. Review its exact new-guest
+saved plan, then supply that fingerprint for `deploy`:
 
 ```sh
-python3 public-source/proxmox/applications/bitwarden.py \
-  --origin https://vault.example.invalid \
-  --issuer EXISTING_DISCOVERY_ISSUER
+python3 public-source/proxmox/applications/bitwarden_cd.py \
+  --phase plan --config bitwarden/deployment.json
+# After reviewing and admitting that saved plan in the private packet:
+python3 public-source/proxmox/applications/bitwarden_cd.py \
+  --phase deploy --config bitwarden/deployment.json
 ```
 
-An existing localhost issuer must be recorded and reviewed separately; silently
-fixing it would change authentication behavior. A health pass does not prove
-client login/sync, notification delivery, attachments, organization membership,
-settings, licensing, SMTP delivery, physical reboot or Proxmox readiness.
-Those remain later supervised acceptance tasks with separate authorization.
+The adapter refuses incomplete/different existing runtime inputs, old saved
+state, adoption and failure holds. A failed or interrupted operation retains its
+hold and evidence; it must not be automatically replayed. Completed deployment
+receipts are mirrored to NAS. Subsequent runs verify that exact installation
+rather than restoring/recreating it. A rollback after target writes requires
+reviewed reverse-data treatment; restarting the old container can lose writes.
 
-The Docker fixture starts official Lite latest and the matching MariaDB12.3.3 image,
-on an internal network with disposable volumes, no published ports and synthetic
-credentials. It checks initial health, a synthetic attachment across restart and
-health after restart. It uses no personal vault data and proves no native
-database restoration or live cutover.
+## Exposure and acceptance
+
+Publish HTTP8080 only on the selected private backend. The bind mounts refuse to
+create missing source directories. Existing Traefik terminates HTTPS and uses
+Proxmox Notes discovery. Keep the selected current hostname during the move;
+a domain cutover is a separate plan. Bitwarden authenticates its own clients.
+Review API and notification/WebSocket routing without adding an Authentik gate.
+The existing service-discovery scope and ingress firewall must admit this new
+guest before its job can run; a synthetic test cannot supply that authority.
+
+The bounded health helper sends GET requests only to `/api/alive`, `/api/config`
+and `/identity/.well-known/openid-configuration`. It requires HTTP200, an observed
+API version and the explicitly retained issuer. Public probes use verified TLS
+and refuse redirects. A native guest probe may explicitly use its private HTTP
+backend with `--backend`. These checks do not establish web assets, client login,
+sync, notifications, attachments, organizations, licensing or SMTP delivery.
+Verify the web vault through the real hostname and obtain client acceptance.
+Record an existing localhost issuer; do not silently change authentication.
+
+The older [latest preview example](examples/bitwarden.stack.example.json) remains
+a source-only rendering contract. It references a future private env file and
+cannot enter the native installer without the complete migration admission.
+The Docker fixture uses synthetic data only; its health/restart/attachment-file
+checks prove neither a real vault restore nor a Proxmox cutover.
+
+See Bitwarden's [Lite guide](https://bitwarden.com/help/install-and-deploy-lite/)
+and [database options](https://bitwarden.com/help/database-options/).
