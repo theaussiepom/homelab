@@ -18,8 +18,11 @@ The shared maintenance caller must bind the exact private
 `homelab-database-networks-v1` contract. It derives `after` through
 `database_networks.endpoint(contract, 'postgresql')`. Do not add a separate
 Authentik address catalogue or rewrite the installed foundation bundle.
-`before` binds the existing commissioned connection. Both Authentik modes must
-match it; absent port means the installed default PostgreSQL port, 5432.
+`before` binds the existing commissioned connection, including a hostname if
+that was the installed setting. Both Authentik modes must match it; absent port
+means the installed default PostgreSQL port, 5432. `after` must be a literal
+private IPv4 endpoint from the network contract. The firewall adapter requires
+the exact old private IPv4 endpoint rather than resolving an old hostname.
 
 The candidate changes only `AUTHENTIK_POSTGRESQL__HOST` and
 `AUTHENTIK_POSTGRESQL__PORT` in both `server` and `worker`. It preserves every

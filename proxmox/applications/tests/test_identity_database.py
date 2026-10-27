@@ -54,6 +54,18 @@ class IdentityDatabaseTests(unittest.TestCase):
         self.assertEqual(result['services']['redis'], original['services']['redis'])
         self.assertEqual(result['services']['server']['ports'], ['10.88.30.20:9000:9000'])
 
+    def test_original_hostname_is_bound_without_relaxing_the_new_network_endpoint(self):
+        for host in ('postgres', 'postgres.example.invalid'):
+            original = fixture(); before = dict(BEFORE, address=host)
+            for mode in ('server', 'worker'):
+                original['services'][mode]['environment']['AUTHENTIK_POSTGRESQL__HOST'] = host
+            updated = json.loads(identity.candidate(json.dumps(original).encode(), before, AFTER))
+            self.assertEqual(updated['services']['worker']['environment']['AUTHENTIK_POSTGRESQL__HOST'],
+                             AFTER['address'])
+        for host in ('', 'postgres\ninvalid', 'postgres\rinvalid', 'postgres\x00invalid', 'postgres invalid', None):
+            with self.subTest(host=host), self.assertRaises(ValueError):
+                identity.candidate(json.dumps(fixture()).encode(), dict(BEFORE, address=host), AFTER)
+
     def test_explicit_original_port_is_bound_before_changing_it(self):
         original = fixture()
         before = dict(BEFORE, port=5544)

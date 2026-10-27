@@ -20,17 +20,21 @@ def require(value, message):
         raise ValueError(message)
 
 
-def endpoint(value):
+def endpoint(value, private=True):
     require(isinstance(value, dict) and set(value) == {'address', 'port'},
             'Bind only the selected PostgreSQL endpoint')
-    try:
-        address = ipaddress.IPv4Address(value['address'])
-    except (ValueError, TypeError):
-        raise ValueError('Select a literal private PostgreSQL IPv4 address') from None
-    require(isinstance(value['address'], str) and address.is_private
-            and not (address.is_loopback or address.is_link_local or address.is_unspecified
-                     or address.is_multicast or address.is_reserved),
-            'Select a literal private PostgreSQL IPv4 address')
+    require(isinstance(value['address'], str) and value['address']
+            and all(c.isprintable() and not c.isspace() for c in value['address']),
+            'Bind a non-empty PostgreSQL host without control characters or whitespace')
+    if private:
+        try:
+            address = ipaddress.IPv4Address(value['address'])
+        except (ValueError, TypeError):
+            raise ValueError('Select a literal private PostgreSQL IPv4 address') from None
+        require(address.is_private
+                and not (address.is_loopback or address.is_link_local or address.is_unspecified
+                         or address.is_multicast or address.is_reserved),
+                'Select a literal private PostgreSQL IPv4 address')
     require(type(value['port']) is int and 1 <= value['port'] <= 65535,
             'Select the PostgreSQL numeric port')
     return value
@@ -44,7 +48,8 @@ def candidate(original, before, after):
     network contract, not an independently maintained Authentik address.
     A partial or repeated mutation holds for the common caller to investigate.
     """
-    endpoint(before); endpoint(after)
+    endpoint(before, private=False)
+    endpoint(after)
     require(before != after, 'Select a reviewed PostgreSQL endpoint change')
     try:
         value = json.loads(original)
