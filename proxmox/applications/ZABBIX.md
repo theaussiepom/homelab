@@ -89,7 +89,9 @@ The Proxmox user is `homelab-zabbix@pve`, with a privilege-separated `monitoring
 token. Its dedicated role contains only `Sys.Audit`, `VM.Audit` and
 `Datastore.Audit`, propagated from `/` as required by the cluster template.
 This reads the cluster; it cannot start/stop guests or change configuration.
-Bootstrap stores the once-returned secret in protected local and NAS receipts.
+Bootstrap stores the validated credential once in each protected local/NAS
+location. An unexpected mint response is retained only as failed-attempt evidence
+under the existing hold; successful setup has no redundant raw response file.
 Publishing that credential into private GitHub secrets and the operator's vault
 is a separately reviewed handover; the script never prints it or rotates it.
 

@@ -109,10 +109,16 @@ def initialize(api, c, root, backup):
     api.call('/access/roles', 'POST', {'roleid': ROLE, 'privs': ','.join(sorted(PRIVILEGES))})
     minted = api.call('/access/users/' + USER + '/token/' + TOKEN, 'POST',
                       {'privsep': 1, 'expire': 0, 'comment': 'HomeLab Zabbix API audit only'})['data']
-    for directory in (local, remote):
-        save_new(directory / 'minted-response.json', minted)
-    require(minted.get('full-tokenid') == IDENTITY and re.fullmatch(r'[A-Za-z0-9-]+', minted.get('value', '')),
-            'Mint response differs; retain the private response without replay')
+    try:
+        require(isinstance(minted, dict) and minted.get('full-tokenid') == IDENTITY
+                and re.fullmatch(r'[A-Za-z0-9-]+', minted.get('value', '')),
+                'Mint response differs; retain the private response without replay')
+    except Exception:
+        # Preserve a once-returned unexpected response under the existing hold.
+        # Successful setup retains only token.json, avoiding a redundant secret.
+        for directory in (local, remote):
+            save_new(directory / 'minted-response.json', minted)
+        raise
     saved = {'identity': IDENTITY, 'token': IDENTITY + '=' + minted['value']}
     for directory in (local, remote):
         save_new(directory / 'token.json', saved)

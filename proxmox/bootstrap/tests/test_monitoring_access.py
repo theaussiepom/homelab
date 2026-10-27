@@ -10,6 +10,29 @@ import monitoring_access as access
 
 
 class MonitoringAccessTests(unittest.TestCase):
+    def test_success_retains_only_the_validated_credential_and_invalid_mint_keeps_evidence(self):
+        config = {'schema': 'homelab-zabbix-access-v1', 'endpoint': 'https://10.88.25.10:8006/',
+                  'node': 'practice-pve', 'address': '10.88.30.50', 'backup_source': 'nas.invalid:/fixture'}
+        before = {'users': [], 'roles': [], 'tokens': [], 'acl': [], 'rules': [], 'options': {}}
+        for valid in (True, False):
+            with self.subTest(valid=valid), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp); state = root / 'state'; nas = root / 'nas'
+                state.mkdir(mode=0o700); nas.mkdir(mode=0o700)
+                api = Mock()
+                def call(path, method='GET', values=None):
+                    return {'data': {'full-tokenid': access.IDENTITY if valid else 'unexpected@pve!identity',
+                                     'value': 'synthetic-fixture-key'}} if '/token/' in path else {'data': None}
+                api.call.side_effect = call
+                with patch.object(access, 'check_backup'), patch.object(access, 'inspect', return_value=before), patch.object(access, 'verify', return_value={'options': {}}):
+                    if valid:
+                        access.initialize(api, config, state, nas)
+                    else:
+                        with self.assertRaises(ValueError): access.initialize(api, config, state, nas)
+                for directory in (state, nas):
+                    self.assertEqual((directory / 'monitoring-access/minted-response.json').exists(), not valid)
+                    self.assertEqual((directory / 'monitoring-access/token.json').exists(), valid)
+                    self.assertEqual((directory / 'monitoring-access/HOLD.json').exists(), not valid)
+
     def test_unreviewed_peer_firewall_changes_remain_drift_holds(self):
         config = {'schema': 'homelab-zabbix-access-v1', 'endpoint': 'https://10.88.25.10:8006/',
                   'node': 'practice-pve', 'address': '10.88.30.50', 'backup_source': 'nas.invalid:/fixture'}
