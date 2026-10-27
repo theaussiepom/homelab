@@ -42,7 +42,7 @@ def packet(value):
     else:
         require(value.get('schema') == 'homelab-foundation-verify-continuation-v1'
                 and set(value) == common | {'verify_log', 'hashes'}
-                and isinstance(value['verify_log'], str) and re.fullmatch(r'[0-9]+-verify.log', value['verify_log']),
+                and isinstance(value['verify_log'], str) and re.fullmatch(r'[0-9]+-verify\.log', value['verify_log']),
                 'Select only the reviewed verification continuation')
         require(isinstance(value['hashes'], dict) and set(value['hashes']) == {
             'foundation_hold', 'rollout_hold', 'plan', 'plan_file', 'plan_json', 'applied', 'started',
@@ -209,7 +209,7 @@ def main():
     try:
         selected = packet(json.loads(args.packet.read_text()))
         helper = Path(__file__).resolve().parent
-        require(subprocess.check_output(['git', '-C', str(helper), 'rev-parse', 'HEAD'], text=True).strip()
+        require(subprocess.check_output(['git', '-C', str(helper), 'rev-parse', 'HEAD'], text=True, timeout=10).strip()
                 == selected['revision'], 'Use the exact reviewed maintenance source')
         require(not Path('/var/lib/homelab-bootstrap/CONFIGURING').exists(), 'Bootstrap is active')
         sys.path.insert(0, str(args.source.resolve() / 'proxmox/applications'))

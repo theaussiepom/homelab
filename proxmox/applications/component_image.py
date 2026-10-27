@@ -48,9 +48,14 @@ def sync(path):
         os.close(fd)
 
 
+class CommandFailed(RuntimeError):
+    """A private subprocess failed; never retain its output in a public message."""
+
+
 def command(argv):
     result = subprocess.run(argv, capture_output=True, timeout=180, check=False)
-    require(result.returncode == 0, 'Component command failed; retain the update hold')
+    if result.returncode != 0:
+        raise CommandFailed('Component command failed; retain the update hold')
     return result.stdout
 
 
@@ -106,30 +111,41 @@ def run(vmid, before, after, compose_sha256, verify_only=False):
     operation.mkdir(mode=0o700)
     with (operation / 'operation.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        original = read(COMPOSE)
-        require(hashlib.sha256(original).hexdigest() == compose_sha256, 'Installed Compose configuration drifted')
-        updated = candidate(original, before, after)
-        runtime(before)
-        save(operation / 'compose-before.json', original)
-        save(operation / 'HOLD.json', b'{"automatic_retry":false}\n')
-        staging = COMPOSE.with_name('.image-update-' + after[-12:] + '.json')
-        save(staging, updated)
-        command(['docker', 'compose', '-f', str(staging), 'config', '--quiet'])
-        command(['docker', 'pull', after])
-        # Preserve the mounted file inode and metadata; refuse concurrent edits.
-        with os.fdopen(os.open(COMPOSE, os.O_RDWR | os.O_NOFOLLOW), 'r+b') as stream:
-            info = os.fstat(stream.fileno())
-            require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1
-                    and stat.S_IMODE(info.st_mode) == 0o600 and stream.read() == original,
-                    'Compose changed before the approved image update')
-            stream.seek(0); stream.write(updated); stream.truncate(); stream.flush(); os.fsync(stream.fileno())
-        command(['docker', 'compose', '-f', str(COMPOSE), 'up', '-d', '--no-deps', '--pull', 'never', 'traefik'])
-        require(read(COMPOSE) == updated, 'Updated Compose readback differs')
-        runtime(after)
-        save(operation / 'complete.json', b'{"status":"passed"}\n')
-        (operation / 'HOLD.json').unlink(); sync(operation)
-        staging.unlink(); sync(COMPOSE.parent)
-        return {'status': 'passed', 'changed': True}
+        try:
+            original = read(COMPOSE)
+            require(hashlib.sha256(original).hexdigest() == compose_sha256, 'Installed Compose configuration drifted')
+            updated = candidate(original, before, after)
+            runtime(before)
+            save(operation / 'compose-before.json', original)
+            save(operation / 'HOLD.json', b'{"automatic_retry":false}\n')
+            staging = COMPOSE.with_name('.image-update-' + after[-12:] + '.json')
+            save(staging, updated)
+            command(['docker', 'compose', '-f', str(staging), 'config', '--quiet'])
+            command(['docker', 'pull', after])
+            # Preserve the mounted file inode and metadata; refuse concurrent edits.
+            with os.fdopen(os.open(COMPOSE, os.O_RDWR | os.O_NOFOLLOW), 'r+b') as stream:
+                info = os.fstat(stream.fileno())
+                require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1
+                        and stat.S_IMODE(info.st_mode) == 0o600 and stream.read() == original,
+                        'Compose changed before the approved image update')
+                stream.seek(0); stream.write(updated); stream.truncate(); stream.flush(); os.fsync(stream.fileno())
+            command(['docker', 'compose', '-f', str(COMPOSE), 'up', '-d', '--no-deps', '--pull', 'never', 'traefik'])
+            require(read(COMPOSE) == updated, 'Updated Compose readback differs')
+            runtime(after)
+            save(operation / 'complete.json', b'{"status":"passed"}\n')
+            (operation / 'HOLD.json').unlink(); sync(operation)
+            staging.unlink(); sync(COMPOSE.parent)
+            return {'status': 'passed', 'changed': True}
+        except Exception as error:
+            # Only our exact, controlled ValueError messages are safe to retain.
+            # Parser and subprocess exceptions may carry private input or output.
+            reason = str(error) if type(error) is ValueError else None
+            try:
+                save(operation / 'FAILURE.json', (json.dumps({'error': type(error).__name__, 'reason': reason}) + '\n').encode())
+            except OSError:
+                pass  # Preserve the original failure even if evidence storage fails.
+            raise
+
 
 
 if __name__ == '__main__':

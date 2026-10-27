@@ -115,6 +115,11 @@ class ContinuationTests(unittest.TestCase):
         self.deployment.execute.assert_not_called()
         self.assertTrue((self.work/'ROLLOUT-HOLD.json').exists())
 
+    def test_log_name_is_literal_and_cannot_select_a_subdirectory(self):
+        for name in ('1-verify/log','1-verifyXlog','../1-verify.log','1-verify.log/extra'):
+            with self.subTest(name=name),self.assertRaises(ValueError):
+                maintenance.packet({**self.selected,'verify_log':name})
+
 
 class ImageMaintenanceTests(unittest.TestCase):
     # Reuse only the input/receipt fixture, not its continuation tests.

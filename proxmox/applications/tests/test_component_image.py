@@ -101,6 +101,19 @@ class UpdateTests(unittest.TestCase):
         with self.assertRaises(ValueError): image.run(712, OLD, '../../foreign', self.hash)
         self.assertFalse((self.root / 'state').exists())
 
+    def test_private_failure_records_the_controlled_guard_reason(self):
+        with self.assertRaises(ValueError): image.run(712, OLD, NEW, 'c'*64)
+        record=json.loads(next((self.root/'state').glob('*/FAILURE.json')).read_bytes())
+        self.assertEqual(record,{'error':'ValueError','reason':'Installed Compose configuration drifted'})
+
+    def test_parser_failure_never_records_private_configuration_text(self):
+        value=b'{"private-value":"must-not-appear" broken'
+        self.compose.write_bytes(value)
+        with self.assertRaises(json.JSONDecodeError): image.run(712,OLD,NEW,hashlib.sha256(value).hexdigest())
+        raw=next((self.root/'state').glob('*/FAILURE.json')).read_bytes()
+        self.assertEqual(json.loads(raw),{'error':'JSONDecodeError','reason':None})
+        self.assertNotIn(b'must-not-appear',raw)
+
 
 if __name__ == '__main__':
     unittest.main()
