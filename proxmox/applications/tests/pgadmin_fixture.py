@@ -118,9 +118,23 @@ def docker(*args, **kwargs):
 
 def preserved_profile(container):
     result = docker('exec', container, '/venv/bin/python3', '-c',
-        'import json,sqlite3; c=sqlite3.connect("/var/lib/pgadmin/pgadmin4.db"); '
-        'print(json.dumps({"users":c.execute("SELECT id,email FROM user ORDER BY id").fetchall(),'
-        '"servers":c.execute("SELECT id,name,host,username FROM server ORDER BY id").fetchall()}))',
+        '''import hashlib,json,sqlite3
+c=sqlite3.connect("file:/var/lib/pgadmin/pgadmin4.db?mode=ro",uri=True)
+servers=c.execute("SELECT id,name,host,username,port,user_id FROM server ORDER BY id").fetchall()
+assert len(servers)==1
+protected=[]
+for name, in c.execute("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name"):
+    quoted='"'+name.replace('"','""')+'"'
+    columns=[r[1] for r in c.execute('PRAGMA table_info('+quoted+')')]
+    rows=[list(r) for r in c.execute('SELECT * FROM '+quoted)]
+    if name=='server':
+        for row in rows:
+            if row[columns.index('id')]==servers[0][0]:
+                row[columns.index('host')]=None
+                row[columns.index('port')]=None
+    protected.append((name,columns,sorted(rows,key=repr)))
+print(json.dumps({'users':c.execute('SELECT id,email FROM user ORDER BY id').fetchall(),
+    'servers':servers,'protected_sha256':hashlib.sha256(repr(protected).encode()).hexdigest()}))''',
         capture_output=True, text=True)
     return json.loads(result.stdout)
 
@@ -184,6 +198,21 @@ def main():
             docker('stop', '--time', '20', baseline, stdout=subprocess.DEVNULL)
             docker('rm', baseline, stdout=subprocess.DEVNULL)
             names.remove(baseline)
+            # Exercise the adapter only on this disposable, stopped profile.
+            # The real shared controller must own guest admission and quiescence.
+            selector = {'server_id': before['servers'][0][0], 'user_id': before['servers'][0][5]}
+            docker('run', '--rm', '--platform', 'linux/amd64', '--network', 'none',
+                   '--cap-drop', 'ALL', '--cap-add', 'NET_BIND_SERVICE',
+                   '--security-opt', 'no-new-privileges', '--entrypoint', '/venv/bin/python3',
+                   '-e', 'PYTHONDONTWRITEBYTECODE=1', '-v', f'{volume}:/var/lib/pgadmin',
+                   '-v', f'{Path(__file__).resolve().parents[1] / "pgadmin_endpoint.py"}:/pgadmin_endpoint.py:ro',
+                   IMAGE, '-c',
+                   'import sqlite3,sys;sys.path.insert(0,"/");import pgadmin_endpoint as p;'
+                   'c=sqlite3.connect("file:/var/lib/pgadmin/pgadmin4.db?mode=rw",uri=True);'
+                   f's=p.plan(c,{selector!r},{{"host":"127.0.0.1","port":5432}},'
+                   '{"address":"198.18.31.23","port":5432});assert p.apply(c,s);c.close()',
+                   stdout=subprocess.DEVNULL)
+            before['servers'][0][2] = '198.18.31.23'
             migrated = 'homelab-pgadmin-migrated-' + uuid.uuid4().hex[:10]
             names.append(migrated)
             docker(*common, '--name', migrated, *app,
@@ -193,7 +222,8 @@ def main():
                    IMAGE, stdout=subprocess.DEVNULL)
             docker('exec', backend, 'python3', '/fixture.py', 'check')
             assert preserved_profile(migrated) == before, 'Generated configuration changed saved users or servers'
-            print('Saved user and server identities remain unchanged after configuration migration.')
+            print('Exact saved-server host updated; all other SQLite profile values and user/server '
+                  'identities remain unchanged through the endpoint and configuration migration.')
         except Exception:
             for name in names:
                 subprocess.run(['docker', 'logs', '--tail', '60', name], check=False, timeout=20)
