@@ -4,6 +4,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import deploy
 import foundation_cd as files
@@ -65,6 +66,15 @@ def prerequisites(cfg, packet_path):
                   'Supply the exact reviewed automation prerequisite packet')
     import automation_maintenance
     packet=json.loads(files.regular(packet_path));automation_maintenance.validate(packet)
+    # Discovery already requires each origin to select an interface on this
+    # guest. Its exact addresses and ports must also match this prerequisite.
+    deploy.discovery.labels(cfg)
+    routes=cfg['app'].get('discovery_routes',[])
+    required={(urlsplit(row['url']).hostname,urlsplit(row['url']).port or 80) for row in routes}
+    admitted={(row['destination'].removesuffix('/32'),int(port))
+              for row in packet['ingress']['additions'] for port in row['port'].split(',')}
+    files.require(required and admitted == required,
+                  'Ingress prerequisite must match this automation guest backend and service ports')
     for phase in ('ingress','identity'):
         row=packet[phase];work=Path(cfg['paths']['state_root'])/str(row['vmid'])
         receipt=work/'automation-200-prerequisite/complete.json'

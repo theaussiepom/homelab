@@ -130,18 +130,18 @@
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../node-red-settings.js"
     dest: /srv/homelab/data/node-red/runtime-settings.js
-    owner: '1000'
-    group: '1000'
-    mode: '0640'
+    owner: root
+    group: root
+    mode: '0644'
   when: app.kind == 'automation' and stack.node_red_oidc is defined
 
 - name: Adapt the Node-RED image health check to its current guest loopback listener
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../node-red-healthcheck.js"
     dest: /srv/homelab/data/node-red/healthcheck.js
-    owner: '1000'
-    group: '1000'
-    mode: '0640'
+    owner: root
+    group: root
+    mode: '0644'
     backup: true
   when: app.kind == 'automation'
 

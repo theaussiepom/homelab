@@ -23,6 +23,14 @@ def prepared(root):
 
 
 class AutomationJobTests(unittest.TestCase):
+    def test_standalone_service_cli_cannot_pass_an_unfinished_guest_preparation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _,site,work,_,_=self.prepare_guest(Path(tmp))
+            (work/'AUTOMATION-CD-HOLD.json').write_text('interrupted outer preparation')
+            with patch.object(deploy,'_automation_service_step') as native,self.assertRaisesRegex(deploy.InputNeeded,'held'):
+                deploy.automation_service(site,'mqtt')
+            native.assert_not_called()
+
     def prepare_guest(self, root):
         cfg, site, work, plan = prepared(root)
         def step(action, *args):

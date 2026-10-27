@@ -20,6 +20,13 @@ def compile_config(foundation, automation):
     cfg, stack = automation['site'], automation['stack']
     vmid = deploy.validate(cfg, stack)
     render.compose(stack)
+    if 'frontend_routing' in cfg['app']:
+        frontend=foundation['networks']['frontend']
+        policy=cfg['app']['frontend_routing']
+        site_config.require(policy['gateway'] == frontend['gateway'] and any(
+            nic['ipv4'] == policy['address'] and nic['bridge'] == frontend['bridge']
+            and nic.get('vlan') == frontend.get('vlan') for nic in cfg['guest']['interfaces']),
+            'Automation reply routing must use the reviewed foundation frontend network and gateway')
     site_config.require(cfg['site'] == base['bindings.json']['site']
                         and cfg['paths'] == dict(site_config.PATHS, backup_source=foundation['runner']['backup_source'])
                         and cfg['ssh_public_keys'] == foundation['ssh_public_keys']

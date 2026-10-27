@@ -24,6 +24,16 @@ def packet():
 
 
 class AutomationConfigurationTests(unittest.TestCase):
+    def test_frontend_reply_gateway_cannot_drift_from_the_single_site_network(self):
+        foundation,value=packet();network=foundation['networks']['frontend']
+        nic=dict(bridge=network['bridge'],vlan=network['vlan'],ipv4='10.88.40.21/24',mac='02:88:00:c8:28:01')
+        value['site']['guest']['interfaces'].append(nic)
+        value['site']['app']['frontend_routing']={'address':nic['ipv4'],'mac':nic['mac'],'gateway':network['gateway']}
+        configuration.compile_config(foundation,value)
+        value['site']['app']['frontend_routing']['gateway']='10.88.40.254'
+        with self.assertRaisesRegex(ValueError,'reviewed foundation frontend'):
+            configuration.compile_config(foundation,value)
+
     def test_untagged_backend_remains_a_bridge_only_bootstrap_grant(self):
         foundation, value=packet()
         value['site']['guest']['interfaces'].append(dict(bridge='vmbr30',vlan=None,ipv4='10.88.30.21/24',mac='02:88:00:c8:1e:01'))

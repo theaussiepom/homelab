@@ -17,6 +17,10 @@ class AutomationCDTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             cfg, work, site, packet, _, nas = maintenance_setup(root)
+            cfg['app'].update(kind='automation',node_red_authentication='authentik-oidc',discovery_routes=[
+                {'name':'homeassistant','host':'hass.example.org','url':'http://10.88.30.21:8123','login':'own'},
+                {'name':'node-red','host':'nr.example.org','url':'http://10.88.30.21:1880','login':'oidc'}])
+            cfg['guest']['interfaces'].append({'ipv4':'10.88.30.21/24','mac':'02:88:00:c8:1e:01'})
             selected = root / 'maintenance.json'
             selected.write_text(json.dumps(packet))
             cfg['app']['prerequisite_packet_sha256'] = deploy.sha(selected)
@@ -34,6 +38,13 @@ class AutomationCDTests(unittest.TestCase):
                 foundation_cd.write_new(operation / 'complete.json', foundation_cd.encoded(receipt))
                 foundation_cd.write_new(target / 'automation-200-complete.json', foundation_cd.encoded(receipt))
             automation_cd.prerequisites(cfg, selected)
+            wrong=json.loads(selected.read_text())
+            wrong['ingress']['additions'][0]['destination']='10.88.30.99/32'
+            changed=root/'other-packet.json';changed.write_text(json.dumps(wrong))
+            cfg['app']['prerequisite_packet_sha256']=deploy.sha(changed)
+            with self.assertRaisesRegex(ValueError,'this automation guest backend'):
+                automation_cd.prerequisites(cfg,changed)
+            cfg['app']['prerequisite_packet_sha256']=deploy.sha(selected)
             with self.assertRaisesRegex(ValueError, 'exact reviewed'):
                 automation_cd.prerequisites(cfg, None)
             (work / 'CONTINUATION-HOLD.json').write_text('held')
