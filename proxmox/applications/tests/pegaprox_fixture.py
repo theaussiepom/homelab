@@ -20,7 +20,7 @@ def main():
     volumes = [name + '-' + suffix for suffix in ('config', 'logs', 'key')]
     cfg = json.loads((Path(__file__).resolve().parents[1] / 'examples/pegaprox.preparation.example.json').read_text())
     preview = pegaprox.compose_preview(cfg)['services']['pegaprox']
-    bounded = ['--platform', 'linux/amd64', '--network', 'none', '--read-only',
+    bounded = ['--pull=never', '--platform', 'linux/amd64', '--network', 'none', '--read-only',
                '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
                '--cpus', str(preview['cpus']), '--memory', preview['mem_limit'],
                '--pids-limit', str(preview['pids_limit']), '--tmpfs', preview['tmpfs'][0]]

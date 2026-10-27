@@ -157,7 +157,9 @@ Do not run the output against a real host. The two false flags are enforced
 preparation markers; setting them true does not enable deployment.
 `tests/test_pegaprox.py` checks listener, image, resource and refusal boundaries.
 `tests/pegaprox_fixture.py` exercises the actual image with invented data,
-disposable volumes, no network and no published ports. It checks local health,
+disposable volumes, no network and no published ports. Fetch the pinned image
+explicitly before running it; the fixture uses `--pull=never` and refuses an
+uncached image instead of allowing Docker to fetch it implicitly. It checks local health,
 encrypted database/key separation and restart persistence. It does not log in
 to Proxmox or establish LXC, firewall, browser, native TLS or restore readiness.
 
