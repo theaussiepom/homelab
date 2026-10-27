@@ -34,13 +34,18 @@ repair or replay it automatically.
 
 ## Requirements for the shared maintenance packet
 
-`identity_database.rules_candidate(original_guest_rules, before, after_rule)`
+`identity_database.rules_candidate(original_guest_rules, legacy_sql_endpoint,
+after_rule)`
 replaces the sole exact legacy Authentik PostgreSQL egress rule with
 `database_networks.rules(contract, 'postgresql', vmid)[0]`. It retains HTTP and
 all non-SQL rules in their original order. Duplicate, changed, unbounded or
 additional TCP rules allowing SQL are held for review; no fallback SQL allowance
 is retained. The new rule has one client `/32`, one server `/32` and the selected
-PostgreSQL port.
+PostgreSQL port. Bind `legacy_sql_endpoint` separately from the installed Compose
+`before`: its `address` is the exact admitted old private IPv4 from the server
+NIC/firewall evidence, and its numeric `port` is the installed SQL port. Validate
+that literal IPv4 binding without resolving or guessing from a Compose hostname.
+`before['address']` remains the original Compose setting and may be a hostname.
 
 The common database-network mechanism owns the packet schema and source pin.
 This service helper does not define a second packet or execution engine.
@@ -53,17 +58,23 @@ The common packet needs to bind:
 - The before/after Compose hashes and the existing PostgreSQL endpoint.
 - The persistent startup requirement, read-only acceptance probes and failure
   custody. A completed update must verify on later runs without recreating it.
+- A durable authorization record retained through the existing reviewed CD
+  path, bound to the exact contract, selected clients, saved-plan hashes,
+  candidate rule order and endpoint data. Activation stays blocked if that
+  record is absent or any binding differs. This source-only work grants no
+  activation authority and adds no separate approval workflow.
 
 The shared contract helpers still derive the endpoint, interface and exact SQL
 rule. For maintenance, use
 `database_network_maintenance.candidate_guest(original_guest, contract,
 'postgresql', phase='cutover', client_vmids=selected_clients,
-legacy_server_address=before['address'])` as the authoritative guest candidate.
+legacy_server_address=legacy_sql_endpoint['address'])` as the authoritative guest candidate.
 It keeps the existing management/backend NICs and appends the untagged database
 NIC without a gateway. Select only the Authentik and pgAdmin clients for this coordinated PostgreSQL
 cutover, not every future client in the catalogue.
 
-Run `rules_candidate()` against the original guest rules as a service preflight.
+Run `rules_candidate()` against the original guest rules with the separately
+bound `legacy_sql_endpoint` as a service preflight.
 Require its sole new SQL rule and unchanged non-SQL rule order to match the
 common candidate. Keep the common candidate's exact rule order for
 `check_plan()`: the common planner appends the replacement SQL rule, whereas the
