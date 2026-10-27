@@ -51,6 +51,19 @@ def fixture(directory, kind):
 
 
 class FoundationTests(unittest.TestCase):
+    def test_optional_node_red_middleware_uses_the_selected_private_identity_backend(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cfg = fixture(directory, 'ingress')
+            cfg['foundation']['authentik_url'] = 'http://10.88.30.20:9000'
+            shared = json.loads(next(a['content'] for a in render.foundation_files(cfg) if a['path'] == 'shared.yml'))
+            auth = shared['http']['middlewares']['authentik']['forwardAuth']
+            self.assertEqual(auth['address'], 'http://10.88.30.20:9000/outpost.goauthentik.io/auth/traefik')
+            self.assertFalse(auth['trustForwardHeader'])
+            for url in ('http://8.8.8.8:9000', 'http://127.0.0.1:9000',
+                        'http://user:password@10.88.30.20:9000', 'http://10.88.30.20:9000/private'):
+                cfg['foundation']['authentik_url'] = url
+                with self.subTest(url=url), self.assertRaises(ValueError): render.foundation_files(cfg)
+
     def test_identity_references_files_and_binds_only_the_selected_backend(self):
         with tempfile.TemporaryDirectory() as directory:
             cfg = fixture(directory, 'identity'); before = copy.deepcopy(cfg)

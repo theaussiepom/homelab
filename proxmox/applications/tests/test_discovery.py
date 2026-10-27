@@ -20,6 +20,45 @@ def site(root):
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_automation_notes_require_node_red_auth_and_leave_ha_login_alone(self):
+        cfg = {'app': {'kind': 'automation', 'discovery_routes': [
+            {'name':'homeassistant', 'host':'ha.example.invalid', 'url':'http://10.88.30.21:8123'},
+            {'name':'node-red', 'host':'flows.example.invalid', 'url':'http://10.88.30.21:1880', 'login':'authentik'}]},
+            'guest': {'interfaces':[{'ipv4':'10.88.30.21/24'}]}}
+        labels = deploy.discovery.labels(cfg)
+        self.assertEqual(labels['traefik.http.routers.node-red.middlewares'], 'security-headers@file,authentik@file')
+        self.assertEqual(labels['traefik.http.routers.homeassistant.middlewares'], 'security-headers@file')
+        self.assertEqual(labels['traefik.http.routers.node-red.priority'], '10')
+        for login in (None, 'own', 'arbitrary@file', [], True):
+            bad = copy.deepcopy(cfg)
+            if login is None: bad['app']['discovery_routes'][1].pop('login')
+            else: bad['app']['discovery_routes'][1]['login'] = login
+            with self.subTest(login=login), self.assertRaises(ValueError): deploy.discovery.labels(bad)
+        cfg['app']['discovery_routes'][0]['login'] = 'authentik'
+        with self.assertRaises(ValueError): deploy.discovery.labels(cfg)
+        cfg['app']['discovery_routes'][0].pop('login')
+        cfg['app']['discovery_routes'][1]['name'] = 'unclassified-editor'
+        cfg['app']['discovery_routes'][1]['login'] = 'own'
+        with self.assertRaises(ValueError): deploy.discovery.labels(cfg)
+
+    def test_outpost_notes_are_only_the_fixed_callback_on_the_identity_guest(self):
+        cfg = {'app': {'kind':'identity', 'discovery_routes': [
+            {'name':'node-red-outpost', 'host':'flows.example.invalid',
+             'url':'http://10.88.30.20:9000', 'login':'outpost'}]},
+            'guest': {'interfaces':[{'ipv4':'10.88.30.20/24'}]}}
+        labels = deploy.discovery.labels(cfg)
+        self.assertEqual(labels['traefik.http.routers.node-red-outpost.rule'],
+                         'Host(`flows.example.invalid`) && PathPrefix(`/outpost.goauthentik.io/`)')
+        self.assertEqual(labels['traefik.http.routers.node-red-outpost.priority'], '100')
+        self.assertEqual(labels['traefik.http.routers.node-red-outpost.middlewares'], 'security-headers@file')
+        for url in ('http://10.88.30.20:1880', 'http://10.88.30.20'):
+            bad = copy.deepcopy(cfg); bad['app']['discovery_routes'][0]['url'] = url
+            with self.subTest(url=url), self.assertRaises(ValueError): deploy.discovery.labels(bad)
+        bad = copy.deepcopy(cfg); bad['app']['discovery_routes'][0].pop('login')
+        with self.assertRaises(ValueError): deploy.discovery.labels(bad)
+        cfg['app']['kind'] = 'automation'
+        with self.assertRaises(ValueError): deploy.discovery.labels(cfg)
+
     def test_labels_expose_only_the_selected_guest_backend_and_standard_tls(self):
         with tempfile.TemporaryDirectory() as root:
             cfg = site(root); before = copy.deepcopy(cfg)

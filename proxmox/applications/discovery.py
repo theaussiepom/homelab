@@ -19,8 +19,9 @@ def labels(cfg):
     names, hosts, result = set(), set(), {}
     addresses = {nic['ipv4'].split('/')[0] for nic in cfg.get('guest', {}).get('interfaces', [])}
     for route in routes:
-        if not isinstance(route, dict) or set(route) != {'name', 'host', 'url'}:
-            raise ValueError('Use only name, host and url in a discovery route')
+        if (not isinstance(route, dict) or not {'name', 'host', 'url'} <= set(route)
+                or set(route) - {'name', 'host', 'url', 'login'}):
+            raise ValueError('Use only name, host and url plus the optional typed login in a discovery route')
         name, host, url = route['name'], route['host'], route['url']
         if not isinstance(name, str) or not re.fullmatch(r'[a-z][a-z0-9-]{0,62}', name):
             raise ValueError('Use a literal discovery service name')
@@ -30,6 +31,13 @@ def labels(cfg):
             raise ValueError('Use a literal fully qualified route hostname')
         if name in names or host in hosts:
             raise ValueError('Discovery names and hostnames must be unique within the guest')
+        login, kind = route.get('login', 'own'), cfg.get('app', {}).get('kind')
+        if (not isinstance(login, str) or login not in {'own', 'authentik', 'outpost'}
+                or login == 'authentik' and (kind != 'automation' or name != 'node-red')
+                or login == 'outpost' and (kind != 'identity' or name != 'node-red-outpost')
+                or name == 'node-red-outpost' and login != 'outpost'
+                or kind == 'automation' and name == 'node-red' and login != 'authentik'):
+            raise ValueError('Node-RED requires Authentik; only the identity outpost callback bypasses it')
         if not isinstance(url, str) or any(c.isspace() for c in url) or '\\' in url:
             raise ValueError('Use an explicit private backend HTTP origin')
         parsed = urlsplit(url)
@@ -44,13 +52,22 @@ def labels(cfg):
                 or not any(ip in network for network in PRIVATE_BACKENDS)
                 or str(ip) not in addresses):
             raise ValueError('The private backend HTTP origin must select an interface on this guest')
+        if login == 'outpost' and port != 9000:
+            raise ValueError('The embedded outpost callback must use the identity backend on port9000')
         names.add(name); hosts.add(host)
         router, service = f'traefik.http.routers.{name}', f'traefik.http.services.{name}'
-        result.update({'traefik.enable': 'true', f'{router}.rule': f'Host(`{host}`)',
+        host_rule = f'Host(`{host}`)'
+        if login == 'outpost':
+            host_rule += ' && PathPrefix(`/outpost.goauthentik.io/`)'
+        middleware = 'security-headers@file' + (',authentik@file' if login == 'authentik' else '')
+        result.update({'traefik.enable': 'true', f'{router}.rule': host_rule,
+                       f'{router}.priority': '100' if login == 'outpost' else '10',
                        f'{router}.service': name, f'{router}.entrypoints': 'websecure',
                        f'{router}.tls': 'true', f'{router}.tls.certresolver': 'letsencrypt',
-                       f'{router}.middlewares': 'security-headers@file',
+                       f'{router}.middlewares': middleware,
                        f'{service}.loadbalancer.server.url': url.rstrip('/')})
+    if cfg.get('app', {}).get('kind') == 'automation' and routes and names != {'homeassistant', 'node-red'}:
+        raise ValueError('Automation discovery must select HA and the authenticated Node-RED route')
     return result
 
 

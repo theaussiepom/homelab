@@ -272,10 +272,7 @@ def ingress(cfg):
     routers['node_red']['middlewares'] = ['authentik']
     routers['outpost'] = {'rule': routers['node_red']['rule'] + ' && PathPrefix(`/outpost.goauthentik.io/`)',
                           'priority': 100, 'entryPoints': [entrypoint], 'tls': dict(tls), 'service': 'identity'}
-    middleware = {'authentik': {'forwardAuth': {
-        'address': cfg['identity_url'].rstrip('/') + '/outpost.goauthentik.io/auth/traefik',
-        'trustForwardHeader': False,
-        'authResponseHeaders': ['X-authentik-username', 'X-authentik-groups', 'X-authentik-email', 'X-authentik-name', 'X-authentik-uid']}}}
+    middleware = {'authentik': foundation.authentik_middleware(cfg['identity_url'])}
     return {'http': {'routers': routers, 'services': services, 'middlewares': middleware}}
 
 

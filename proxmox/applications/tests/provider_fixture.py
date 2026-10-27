@@ -28,7 +28,8 @@ PLUGIN_TREE_SHA256 = 'b1154d92f81ef7c1b85b2f572735839b82c352f4e1fc5da8d398301e63
 PLUGIN_ARCHIVE_SHA256 = '9e3b91e0ba79fc27dd2587e8b92db725a424a9c21cb17cfcf07b1ef6e354efd7'
 TOKEN = 'PVEAPIToken=fixture@pve!discovery=synthetic-not-a-secret'
 SERVICES = {211: ('authentik', 'sso.example.invalid', 9000),
-            202: ('pgadmin', 'pgadmin.example.invalid', 8080)}
+            202: ('pgadmin', 'pgadmin.example.invalid', 8080),
+            200: ('node-red', 'flows.example.invalid', 1880)}
 
 
 def source_digest(root):
@@ -67,18 +68,9 @@ def verify_archive(path):
 
 
 def notes(name, host, port):
-    # v0.7.0 splits colon-containing lines before considering equals syntax.
-    # Colon form is therefore essential for explicit http:// backend URLs.
-    return '\n'.join([
-        'Synthetic service, discovered exclusively from Proxmox Notes.',
-        'traefik.enable: true',
-        f'traefik.http.routers.{name}.rule: Host(`{host}`)',
-        f'traefik.http.routers.{name}.entrypoints: https',
-        f'traefik.http.routers.{name}.tls: true',
-        f'traefik.http.routers.{name}.service: {name}',
-        f'traefik.http.routers.{name}.middlewares: fixture-policy@file',
-        f'traefik.http.services.{name}.loadbalancer.server.url: http://127.0.0.1:{port}',
-    ])
+    # Notes are compiled by production discovery.labels on the controller. Only
+    # the transport addresses and ACME are adapted to this offline namespace.
+    return json.loads(Path('/fixture/notes.json').read_text())[name]
 
 
 def serve():
@@ -87,6 +79,22 @@ def serve():
 
     class Backend(BaseHTTPRequestHandler):
         def do_GET(self):
+            if self.server.server_port == 9000 and self.path == '/outpost.goauthentik.io/auth/traefik':
+                if (self.headers.get('X-Forwarded-Host') != 'flows.example.invalid'
+                        or self.headers.get('X-Forwarded-Proto') != 'https'):
+                    self.send_error(400, 'Expected the real proxy hostname and scheme')
+                    return
+                if self.headers.get('Cookie') == 'fixture_session=unavailable':
+                    self.send_error(503, 'Synthetic identity outage')
+                    return
+                if self.headers.get('Cookie') == 'fixture_session=ok':
+                    self.send_response(200)
+                    self.send_header('X-authentik-username', 'fixture-user')
+                else:
+                    self.send_response(302)
+                    self.send_header('Location', 'https://sso.example.invalid/login?host=flows.example.invalid')
+                self.end_headers()
+                return
             self.send_response(200)
             self.end_headers()
             self.wfile.write(json.dumps({'backend': self.server.server_port,
@@ -146,7 +154,7 @@ def serve():
         def log_message(self, *args):
             pass
 
-    for port in (9000, 8080):
+    for port in (9000, 8080, 1880, 8123):
         server = ThreadingHTTPServer(('127.0.0.1', port), Backend)
         threading.Thread(target=server.serve_forever, daemon=True).start()
     api = ThreadingHTTPServer(('127.0.0.1', 8006), PVE)
@@ -194,11 +202,11 @@ def serve():
     threading.Event().wait()
 
 
-def request(host, path):
+def request(host, path, headers=None):
     context = ssl.create_default_context(cafile='/fixture/ca.pem')
     conn = http.client.HTTPSConnection('127.0.0.1', 8443, timeout=3, context=context)
     try:
-        conn.request('GET', path, headers={'Host': host})
+        conn.request('GET', path, headers={'Host': host, **(headers or {})})
         response = conn.getresponse()
         return response.status, dict(response.getheaders()), response.read()
     finally:
@@ -228,6 +236,8 @@ def check():
             raise RuntimeError('Synthetic provider startup exceeded 45 seconds')
         time.sleep(0.5)
     for name, host, port in SERVICES.values():
+        if name == 'node-red':
+            continue
         paths = ['/']
         if name == 'authentik':
             paths += ['/application/o/pgadmin4/.well-known/openid-configuration',
@@ -242,6 +252,17 @@ def check():
             assert headers.get('X-Fixture-Policy') == 'notes-discovery'
             assert headers.get('Strict-Transport-Security') == 'max-age=31536000'
             assert 'Location' not in headers, 'Self-authentication routes must not redirect in a loop'
+    # These pass through the real Notes provider and file middleware together.
+    status, headers, _ = request('flows.example.invalid', '/', {'X-Forwarded-Host':'spoof.invalid'})
+    assert status == 302 and headers.get('Location') == 'https://sso.example.invalid/login?host=flows.example.invalid'
+    status, _, body = request('flows.example.invalid', '/editor',
+                             {'Cookie':'fixture_session=ok', 'X-authentik-username':'spoofed-user'})
+    assert status == 200 and json.loads(body)['backend'] == 1880 and json.loads(body)['user'] == 'fixture-user'
+    assert request('flows.example.invalid', '/editor', {'Cookie':'fixture_session=unavailable'})[0] == 503
+    for host, path, port in [('ha.example.invalid','/auth/authorize',8123),
+                             ('flows.example.invalid','/outpost.goauthentik.io/callback?code=fixture',9000)]:
+        status, _, body = request(host, path)
+        assert status == 200 and json.loads(body)['backend'] == port and json.loads(body)['user'] is None
     for host in ('unrouted.example.invalid', 'stopped.example.invalid', 'disabled.example.invalid'):
         assert request(host, '/')[0] == 404, host
     calls = api_calls()
@@ -251,8 +272,8 @@ def check():
         assert f'/api2/json/nodes/fixture/lxc/{vmid}/config' in paths
         assert f'/api2/json/nodes/fixture/qemu/{vmid}/agent/network-get-interfaces' in paths
     assert '/api2/json/nodes/fixture/lxc/213/config' not in paths
-    print('Provider fixture passed: pinned plugin discovers two LXC Notes routes; '
-          'explicit backends, HTTPS trust, shared headers and OAuth paths verified. '
+    print('Provider fixture passed: pinned plugin discovers three synthetic guests; '
+          'HA native login, Node-RED forward-auth/callback, explicit backends, HTTPS trust and OAuth paths verified. '
           'Native PVE and real login remain unverified.')
 
 
@@ -305,15 +326,35 @@ def main():
     with tempfile.TemporaryDirectory(prefix='homelab-provider-fixture-') as tmp:
         root = Path(tmp)
         certificate_files(root)
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from discovery import labels
+        from foundation import authentik_middleware
+        notes_data = {}
+        for name, host, port in SERVICES.values():
+            routes = [{'name':name,'host':host,'url':f'http://10.88.30.21:{port}'}]
+            kind = 'identity' if name == 'authentik' else 'db-tools'
+            if name == 'authentik':
+                routes.append({'name':'node-red-outpost','host':'flows.example.invalid',
+                               'url':'http://10.88.30.21:9000','login':'outpost'})
+            elif name == 'node-red':
+                kind = 'automation'; routes[0]['login'] = 'authentik'
+                routes.append({'name':'homeassistant','host':'ha.example.invalid','url':'http://10.88.30.21:8123'})
+            compiled = labels({'guest':{'interfaces':[{'ipv4':'10.88.30.21/24'}]},
+                               'app':{'kind':kind,'discovery_routes':routes}})
+            # No ACME endpoint, credentials or real private destination in a fixture.
+            compiled = {key:value.replace('10.88.30.21','127.0.0.1') for key,value in compiled.items()
+                        if not key.endswith('.tls.certresolver')}
+            notes_data[name] = '\n'.join(f'{key}: {value}' for key,value in sorted(compiled.items()))
+        (root / 'notes.json').write_text(json.dumps(notes_data))
         if args.plugin_archive:
             (root / 'plugin.zip').write_bytes(args.plugin_archive.read_bytes())
-        dynamic = {'http': {'middlewares': {'fixture-policy': {'headers': {
+        dynamic = {'http': {'middlewares': {'security-headers': {'headers': {
             'customResponseHeaders': {'X-Fixture-Policy': 'notes-discovery'},
-            'stsSeconds': 31536000}}}},
+            'stsSeconds': 31536000}}, 'authentik':authentik_middleware('http://127.0.0.1:9000')}},
             'tls': {'stores': {'default': {'defaultCertificate': {
                 'certFile': '/fixture/server.pem', 'keyFile': '/fixture/server.key'}}}}}
         (root / 'dynamic.json').write_text(json.dumps(dynamic))
-        static = {'entryPoints': {'https': {'address': ':8443'}},
+        static = {'entryPoints': {'websecure': {'address': ':8443'}},
                   'global': {'checkNewVersion': False, 'sendAnonymousUsage': False},
                   'experimental': {'localPlugins': {'proxmox': {'moduleName': MODULE}}},
                   'providers': {'file': {'filename': '/fixture/dynamic.json'}, 'plugin': {
@@ -388,7 +429,7 @@ def main():
                         print('Pinned production downloader rejected the wrong ZIP hash before any PVE API read.')
                     docker('rm', '-f', proxy_name, stdout=subprocess.DEVNULL)
                     names.remove(proxy_name)
-                print('Pinned production downloader accepted only the verified catalog ZIP and routed both services.')
+                print('Pinned production downloader accepted only the verified catalog ZIP and routed the synthetic guests.')
         except Exception:
             for name in names:
                 subprocess.run(['docker', 'logs', '--tail', '60', name], check=False, timeout=20)
