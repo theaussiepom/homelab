@@ -57,7 +57,11 @@ def start():
     class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         daemon_threads = True
     Path('/mock-docker').mkdir(exist_ok=True)
+    # The exact fixture Agent2 image runs as UID 1997/GID 1995.
+    os.chown('/mock-docker', 0, 1995)
+    os.chmod('/mock-docker', 0o750)
     server = Server('/mock-docker/docker.sock', Handler)
-    os.chmod('/mock-docker/docker.sock', 0o666) # synthetic socket only, never the host daemon
+    os.chown('/mock-docker/docker.sock', 0, 1995)
+    os.chmod('/mock-docker/docker.sock', 0o660)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server

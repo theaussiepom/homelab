@@ -40,22 +40,12 @@
       loop: "{{ monitoring_hosts }}"
       no_log: true
 
-    - name: Select reusable workload profiles for each admitted host
-      ansible.builtin.command:
-        argv: [python3, "{{ playbook_dir }}/../monitoring_profiles.py", --host-profile]
-        stdin: "{{ {'profiles': item.profiles | default(['linux']), 'settings': item.profile_settings | default({})} | to_json }}"
-      delegate_to: localhost
-      vars:
-        ansible_connection: local
-      changed_when: false
-      loop: "{{ monitoring_bound_hosts }}"
-      register: monitoring_host_profiles
-      no_log: true
-
-    - name: Bind the server-side template selection to the guest profile
+    - name: Bind selected workload templates and private macros in memory
       ansible.builtin.set_fact:
-        monitoring_resolved_hosts: "{{ monitoring_resolved_hosts | default([]) + [item.item | combine(item.stdout | from_json)] }}"
-      loop: "{{ monitoring_host_profiles.results }}"
+        monitoring_resolved_hosts: "{{ monitoring_resolved_hosts + [item | combine(resolved_profile)] }}"
+      vars:
+        resolved_profile: "{{ {'profiles': item.profiles | default(['linux']), 'settings': item.profile_settings | default({})} | homelab_monitoring_host_profile }}"
+      loop: "{{ monitoring_bound_hosts }}"
       no_log: true
 
     - name: Require a finite host list and distinct PSK identities and keys

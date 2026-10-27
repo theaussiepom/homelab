@@ -6,14 +6,9 @@
   loop: "{{ zabbix_agent.workloads | dict2items }}"
   when: item.key in ['postgresql', 'mysql']
 
-- name: Render only the selected built-in plugin configuration
-  ansible.builtin.command:
-    argv: [python3, "{{ playbook_dir }}/../monitoring_profiles.py", --plugin-config]
-    stdin: "{{ zabbix_agent.workloads | to_json }}"
-  delegate_to: localhost
-  become: false
-  changed_when: false
-  register: agent_plugins
+- name: Render only the selected built-in plugin configuration in memory
+  ansible.builtin.set_fact:
+    agent_plugin_configuration: "{{ zabbix_agent.workloads | homelab_monitoring_plugins }}"
   no_log: true
 
 - name: Inspect the retained plugin configuration
@@ -35,7 +30,7 @@
 
 - name: Refuse implicit plugin or database credential replacement
   ansible.builtin.assert:
-    that: not old_agent_plugins.stat.exists or (old_agent_plugin_content.content | b64decode) == agent_plugins.stdout ~ '\n'
+    that: not old_agent_plugins.stat.exists or (old_agent_plugin_content.content | b64decode) == agent_plugin_configuration
     fail_msg: 'Existing plugin state needs an explicitly reviewed maintenance operation.'
   no_log: true
 

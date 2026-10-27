@@ -106,20 +106,9 @@ def host_profile(value):
 
 
 if __name__ == '__main__':
+    # Credential-bearing renderers are library functions used by no_log filters.
+    # The public CLI exposes only this nonsecret catalog.
     parser = argparse.ArgumentParser(description=__doc__)
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument('--plugin-config', action='store_true')
-    mode.add_argument('--catalog', action='store_true')
-    mode.add_argument('--host-profile', action='store_true')
-    args = parser.parse_args()
-    try:
-        # This mode is called only by a no_log Ansible task; its result contains
-        # the guest-local DB credential and must never be printed by a CD wrapper.
-        if args.catalog:
-            print(json.dumps({name: {'file': value[0], 'template': value[1]} for name, value in PROFILES.items()}))
-        elif args.host_profile:
-            print(json.dumps(host_profile(json.load(sys.stdin))))
-        else:
-            print(plugin_config(json.load(sys.stdin)), end='')
-    except Exception:
-        raise SystemExit('Monitoring plugin inputs differ from the reviewed profile.') from None
+    parser.add_argument('--catalog', action='store_true', required=True)
+    parser.parse_args()
+    print(json.dumps({name: {'file': value[0], 'template': value[1]} for name, value in PROFILES.items()}))

@@ -16,6 +16,7 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import monitoring
 import monitoring_profiles
+from foundation_cd import write_new
 
 MARIA = 'mariadb:12.3.3@sha256:71541e69e0a1fbec2fa57d6b3b30d751c7847ca77ce66f5af4ffff48060c37c8'
 
@@ -74,7 +75,7 @@ def main(args):
     with tempfile.TemporaryDirectory(prefix=prefix) as tmp:
         root = Path(tmp); root.chmod(0o755)
         password = 'synthetic-database-monitor-password-1234'
-        (root / 'monitor-password').write_text(password)
+        write_new(root / 'monitor-password', password.encode())
         def wait(condition):
             until = time.monotonic()+150
             while not condition():

@@ -174,7 +174,8 @@ zabbix_agent:
 For MariaDB select `mysql`, use port 3306, and omit the PostgreSQL archive. Endpoint
 IP must belong to this guest or be 127.0.0.1. Controller password files must be
 owner-only mode 0600, containing a 32–128-character URL-safe password. The renderer
-runs only in `no_log` tasks; its plugin output contains the password. Guest plugin
+is an in-memory Ansible filter used only in `no_log` tasks; the CLI exposes only
+the nonsecret profile catalog. Guest plugin
 config is root:zabbix 0640. Server macros reference named session `homelab` with empty
 user/password overrides, so database credentials stay off the Zabbix server.
 

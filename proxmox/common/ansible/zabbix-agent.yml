@@ -192,7 +192,7 @@
 
 - name: Install the reviewed plugin configuration with guest-local DB credentials
   ansible.builtin.copy:
-    content: "{{ agent_plugins.stdout }}\n"
+    content: "{{ agent_plugin_configuration }}"
     dest: /etc/zabbix/homelab-monitoring.conf
     owner: root
     group: zabbix
