@@ -92,6 +92,19 @@ def read_live(cfg,api_get):
     return api_get(cfg,path+'/config'),api_get(cfg,path+'/status/current')
 
 
+def verify_firewall(cfg,api_get):
+    """Refuse radio work when configured firewall rules cannot be enforced."""
+    cluster=api_get(cfg,'/cluster/firewall/options')
+    if cluster.get('enable') not in (1,True):
+        raise ValueError('Proxmox cluster firewall must be enabled through its separately reviewed infrastructure change')
+    if stage(cfg)=='attached':
+        path='/nodes/'+quote(cfg['site']['node'],safe='')+'/lxc/'+str(cfg['guest']['vmid'])+'/firewall/options'
+        guest=api_get(cfg,path)
+        if (guest.get('enable') not in (1,True) or guest.get('policy_in')!='DROP' or
+                guest.get('policy_out')!='DROP'):
+            raise ValueError('Require enabled guest firewall and DROP input/output policies before radio configuration or startup')
+
+
 def verify_live(cfg,api_get):
     """Hold device/ownership drift; this does not open or qualify the USB radio."""
     config,status=read_live(cfg,api_get)

@@ -173,3 +173,27 @@ The USB permission restriction is visible in the official [Proxmox container sou
 Zigbee has no direct SQL or InfluxDB dependency. This flow preserves its existing
 vmbr30 MQTT/application path and requires no database-network change or bridge
 31/32/33 interface.
+
+## Firewall admission before radio work
+
+The radio runner reads `/cluster/firewall/options` before each plan, apply,
+stage, start or verify. An unset/disabled cluster firewall or unreadable API
+response stops the step before OpenTofu or Ansible. In the attached stage it
+also requires the selected guest firewall to be enabled with DROP input and
+output policies. These checks do not enable a firewall or change permissions.
+An active firewall daemon, per-NIC flag or saved rule declaration alone is not
+proof that cluster-level enforcement is enabled. Native acceptance must still
+verify the selected engine and effective packet path.
+
+The private packet must include the runner's read permission for the cluster
+options endpoint. Proxmox requires `Sys.Audit` at `/`; prepare the minimum
+non-propagating read grant for separate common-infrastructure review. Do not
+add a root credential, silently broaden a token or enable the host firewall
+from an application job. Existing guest-scoped access alone may return 403.
+
+Select both ends of the application traffic in private source: radio egress
+to one MQTT broker /32 and port, and that broker guest's matching ingress from
+the radio backend /32. Select frontend API clients and any existing ingress
+proxy separately on the retained frontend port. Do not assume that adding the
+radio's outbound rule also admits it at the broker. Preserve the MQTT topic
+and authentication; no database bridge or new physical network is required.

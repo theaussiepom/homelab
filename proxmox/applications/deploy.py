@@ -266,6 +266,7 @@ def _execute_step(action, cfg_path, approved_plan=None):
         state = work / 'terraform.tfstate'
         radio = cfg['app'].get('kind') == 'zigbee2mqtt'
         if radio:
+            zigbee_usb.verify_firewall(cfg, api_get)
             if zigbee_usb.stage(cfg) == 'attached':
                 zigbee_usb.require_prepared(cfg, work)
                 zigbee_usb.verify_live(cfg, api_get)

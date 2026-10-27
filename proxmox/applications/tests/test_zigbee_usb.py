@@ -65,6 +65,24 @@ class UsbLifecycleTests(unittest.TestCase):
             with patch.object(usb,'read_live',return_value=(live,{'status':'stopped'})),self.assertRaises(ValueError):
                 usb.verify_live(cfg,lambda *_:None)
 
+    def test_firewall_preflight_requires_cluster_and_attached_guest_enforcement(self):
+        import zigbee_usb as usb
+        cfg=self.cfg()
+        for value in ({}, {'enable':0}, {'enable':'1'}):
+            with self.subTest(cluster=value),self.assertRaises(ValueError):
+                usb.verify_firewall(cfg,lambda *_:value)
+        seen=[]
+        usb.verify_firewall(cfg,lambda _,path:seen.append(path) or {'enable':1})
+        self.assertEqual(seen,['/cluster/firewall/options'])
+        cfg['app']['usb_stage']='attached'
+        good={'enable':1,'policy_in':'DROP','policy_out':'DROP'}
+        for value in (good,dict(good,enable=0),dict(good,policy_in='ACCEPT'),dict(good,policy_out='ACCEPT'),{}):
+            def api(_,path):return {'enable':1} if path=='/cluster/firewall/options' else value
+            with self.subTest(guest=value):
+                if value==good:usb.verify_firewall(cfg,api)
+                else:
+                    with self.assertRaises(ValueError):usb.verify_firewall(cfg,api)
+
     def test_runner_state_lineage_cannot_be_replaced_between_stages(self):
         import zigbee_usb as usb
         cfg=self.cfg()
@@ -201,16 +219,23 @@ class UsbRunnerTests(unittest.TestCase):
             with patch.object(deploy,'backup'),patch.object(deploy,'quiet',side_effect=quiet), \
                     patch.object(deploy.subprocess,'check_output',side_effect=lambda *_,**__:json.dumps(value).encode()), \
                     patch.object(deploy,'api_get') as api:
+                api.return_value={'enable':0}
+                with self.assertRaises(ValueError):deploy.execute('plan',site)
+                self.assertFalse((work/'tofu').exists())
+                api.return_value={'enable':1}
                 first=deploy.execute('plan',site)
                 variables=json.loads((work/'tofu/site.auto.tfvars.json').read_text())
                 self.assertIsNone(variables['guest']['serial_device']);self.assertFalse(variables['guest']['started'])
-                deploy.execute('apply',site,first['plan_sha256']);api.assert_not_called()
+                deploy.execute('apply',site,first['plan_sha256'])
+                self.assertTrue(all(call.args[1]=='/cluster/firewall/options' for call in api.call_args_list))
                 with self.assertRaises(ValueError):deploy.execute('stage',site)
                 with self.assertRaises(deploy.InputNeeded):deploy.execute('deploy',site,first['plan_sha256'])
                 cfg['app']['usb_stage']='attached';site.write_text(json.dumps(cfg))
                 live={'hostname':cfg['guest']['hostname'],'unprivileged':1,'protection':1,
                       'dev0':'path='+DEVICE+',uid=0,gid=20,mode=0660,deny-write=0'}
-                api.side_effect=lambda _cfg,url: {'status':'stopped'} if url.endswith('/status/current') else live
+                api.side_effect=lambda _cfg,url: ({'enable':1} if url=='/cluster/firewall/options' else
+                    {'enable':1,'policy_in':'DROP','policy_out':'DROP'} if url.endswith('/firewall/options') else
+                    {'status':'stopped'} if url.endswith('/status/current') else live)
                 for row in value['resource_changes']:
                     row['change']['actions']=['update'];row['change']['before']=copy.deepcopy(row['change']['after'])
                     if row['address']==zigbee_usb.RESOURCE:
