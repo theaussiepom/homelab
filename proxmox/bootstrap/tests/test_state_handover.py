@@ -27,6 +27,37 @@ class StateHandoverTests(unittest.TestCase):
             'version': 4, 'lineage': 'synthetic-lineage', 'serial': 2, 'resources': []}))
         return work
 
+    def test_runner_install_uses_linux_locale_despite_mac_session_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); work = self.workspace(root)
+            (work / 'tofu/site.auto.tfvars.json').write_text(json.dumps({
+                'site': {'node': 'fixture-pve', 'api_endpoint': 'https://192.0.2.10:8006/'},
+                'deploy': {'vmid': 900, 'ipv4': '192.0.2.90/24'}}))
+            (work / 'settings.json').write_text(json.dumps({'repository': 'fixture/private', 'runner_name': 'fixture-runner'}))
+            (work / 'inventory.json').write_text(json.dumps({'all': {'hosts': {'deploy': {}}}}))
+            keys = root / 'keys'; keys.mkdir()
+            for name in ('bootstrap-key', 'known_hosts', 'pve-ca.pem'): (keys / name).write_text('synthetic only')
+            installs = []
+            def invoke(arguments, **kwargs):
+                if arguments[0] == 'ssh':
+                    return subprocess.CompletedProcess(arguments, 0, 'ssh-ed25519 AAAAsynthetic\n192.0.2.90\n', '')
+                self.assertEqual(arguments[0], 'ansible-playbook')
+                installs.append(kwargs['env'])
+                return subprocess.CompletedProcess(arguments, 0)
+            with patch.dict(os.environ, {'PROXMOX_VE_API_TOKEN': 'synthetic-token',
+                    'LC_ALL': 'unsupported-fixture', 'LANG': 'unsupported-fixture',
+                    'LC_CTYPE': 'UTF-8', 'FIXTURE_PRESERVED': 'present'}, clear=True), \
+                    patch.object(native, 'run_locked'), patch.object(runner, 'allow_host_api'), \
+                    patch.object(runner, 'Path', side_effect=lambda value: keys if value == '/keys' else Path(value)), \
+                    patch.object(runner.subprocess, 'run', side_effect=invoke):
+                runner.install(work)
+                self.assertEqual(os.environ['LC_ALL'], 'unsupported-fixture')
+            self.assertEqual(len(installs), 1)
+            self.assertEqual(installs[0]['LC_ALL'], 'C.UTF-8')
+            self.assertEqual(installs[0]['LANG'], 'C.UTF-8')
+            self.assertEqual(installs[0]['FIXTURE_PRESERVED'], 'present')
+            self.assertTrue((work / 'runner-result.json').is_file())
+
     def test_handover_copies_exact_state_and_freezes_workstation(self):
         """Verify handover copies exact state and freezes workstation."""
         with tempfile.TemporaryDirectory() as tmp:
