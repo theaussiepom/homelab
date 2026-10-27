@@ -96,11 +96,6 @@ the application profile. Its discovery extension adds only the selected guest
 to the existing read-only token; it does not replace that token or change its
 role. Private CD selects that bootstrap source only when `enabled` is true.
 
-An optional `ha_legacy_sensor` input removes the obsolete raw InfluxDB directory
-size sensor and its directory allowlist entry from the restored HA files. It
-requires their original hashes and retains private originals. It does not mount
-the database server's files inside HA or replace the sensor with a false value.
-
 For an already migrated HA HTTP configuration, `ha_http.store_sha256` binds the
 original v2.2 HTTP settings file. During offline restoration CD moves the old
 Docker listener to the new guest and trusts only the selected Traefik address.
@@ -116,7 +111,7 @@ YAML path; a migrated store cannot silently fall through to an ignored YAML edit
 3. Restore HA's existing MariaDB Recorder database separately from server CD.
    Creating an empty MariaDB server does not migrate its history.
 4. Review the endpoint, discovery, login and firewall changes together. Resolve
-   local Bluetooth/DBus and any obsolete local-directory sensors explicitly;
+   local Bluetooth/DBus explicitly;
    never expose the Proxmox host's control sockets as a shortcut.
 5. At cutover, protect new application writes on the NAS, then verify MQTT, HA, Node-RED,
    Zigbee and real household actions together.

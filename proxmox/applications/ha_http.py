@@ -91,33 +91,10 @@ def configure(path, backup, expected, proxy):
     return rewrite(path,backup,expected,transform)
 
 
-def legacy_sensor(root, backup, home_sha, command_sha):
-    """Remove only the obsolete raw Influx directory sensor; never fake its size."""
-    def allowlist(value):
-        line=b'  - /influxdb_data\n'
-        if value.count(line) != 1:
-            raise ValueError('The selected legacy directory allowlist differs')
-        return value.replace(line,b'',1)
-    def command(value):
-        blocks=re.split(rb'(?m)(?=^- [a-z_]+:)',value)
-        selected=[i for i,block in enumerate(blocks) if re.search(
-            rb'(?m)^\s+unique_id:\s*command_line_influxdb_size\s*$',block)]
-        if len(selected) != 1 or b'du -shm /influxdb_data | cut -f1' not in blocks[selected[0]]:
-            raise ValueError('The selected legacy directory sensor differs')
-        index=selected[0]
-        blocks[index]=b''
-        return b''.join(blocks)
-    first=rewrite(root/'homeassistant.yaml',backup/'homeassistant.before-legacy.yaml',home_sha,allowlist)
-    second=rewrite(root/'command_line.yaml',backup/'command-line.before-legacy.yaml',command_sha,command)
-    return first or second
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--expected-sha256', required=True)
     parser.add_argument('--proxy', required=True)
-    parser.add_argument('--legacy-home-sha256')
-    parser.add_argument('--legacy-command-sha256')
     parser.add_argument('--http-store-sha256')
     args = parser.parse_args()
     try:
@@ -131,11 +108,6 @@ if __name__ == '__main__':
         else:
             changed = configure(Path('/srv/homelab/data/homeassistant/config/configuration.yaml'),
                 Path('/opt/homelab-app/configuration.before-proxy.yaml'), args.expected_sha256, args.proxy)
-        if args.legacy_home_sha256 or args.legacy_command_sha256:
-            if not args.legacy_home_sha256 or not args.legacy_command_sha256:
-                raise ValueError('Supply both original legacy configuration hashes')
-            changed=legacy_sensor(Path('/srv/homelab/data/homeassistant/config'),Path('/opt/homelab-app'),
-                                  args.legacy_home_sha256,args.legacy_command_sha256) or changed
         print(json.dumps({'changed': changed}))
     except (OSError, ValueError):
         raise SystemExit('HA proxy configuration held; inspect the retained private original') from None
