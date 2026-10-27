@@ -226,6 +226,17 @@ class CDTests(unittest.TestCase):
                     config["site"], config["stack"], source
                 )
 
+    def test_invalid_container_budget_stops_before_private_inputs_or_native_work(self):
+        with tempfile.TemporaryDirectory() as d:
+            config, path, dest, environment, _ = setup(Path(d))
+            config["stack"]["services"]["bitwarden"]["memory_mib"] = config["site"][
+                "guest"
+            ]["memory_mib"]
+            path.write_bytes(bitwarden_migration.encoded(config))
+            with self.assertRaisesRegex(ValueError, "256 MiB"):
+                bitwarden_cd.prepare_inputs(path, dest, environment)
+            self.assertFalse(dest.exists())
+
     def test_restore_or_prerequisite_drift_stops_before_any_deployment(self):
         for key in ("restore_receipt", "prerequisites_receipt"):
             with self.subTest(key=key), tempfile.TemporaryDirectory() as d:

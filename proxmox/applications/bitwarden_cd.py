@@ -3,6 +3,7 @@
 import argparse, fcntl, json, os, re
 from pathlib import Path
 import deploy
+import render
 import foundation_cd as files
 import bitwarden_migration as migration
 
@@ -49,6 +50,7 @@ def prepare_inputs(config, destination=INPUTS, environment=None):
         cfg, stack, original
     )
     migration.validate_admission(cfg, stack)
+    render.compose(stack)
     deploy.validate(cfg, stack)
     payload = {"site.json": files.encoded(cfg), "stack.json": files.encoded(stack)}
     manifest = {
