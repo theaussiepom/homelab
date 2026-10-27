@@ -25,7 +25,8 @@
       [Unit]
       Description=Frontend reply routing for the homelab ingress guest
       Wants=network-online.target
-      After=network-online.target
+      Requires=homelab-network-ready.service
+      After=network-online.target homelab-network-ready.service
       Before=docker.service
       [Service]
       Type=oneshot

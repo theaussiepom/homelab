@@ -27,6 +27,24 @@ def fixture(root):
 
 
 class DeployTests(unittest.TestCase):
+    def test_network_gate_waits_for_backend_even_when_management_exists(self):
+        cfg={'guest':{'interfaces':[{'ipv4':'dhcp'},{'ipv4':'10.88.30.23/24'},{'ipv4':'manual'}]}}
+        self.assertEqual(deploy.required_network_interfaces(cfg),['eth0','eth1'])
+        cfg['guest']['interfaces']=[{'ipv4':'manual'}]
+        with self.assertRaises(ValueError): deploy.required_network_interfaces(cfg)
+
+    def test_saved_plan_binds_shared_guest_startup_behaviour(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'applications'; source.mkdir()
+            common = root / 'common'; common.mkdir()
+            (source / 'deploy.py').write_text('synthetic application caller')
+            gate = common / 'network-ready.yml'; gate.write_text('original network dependency')
+            with patch.object(deploy, 'SOURCE', source):
+                original = deploy.source_hash()
+                gate.write_text('different network dependency')
+                self.assertNotEqual(deploy.source_hash(), original)
+
     def test_package_account_exception_is_explicit_and_only_for_new_empty_mariadb(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = fixture(Path(tmp))

@@ -14,12 +14,14 @@
           - ansible_distribution == 'Debian'
           - ansible_virtualization_type == 'lxc'
           - ansible_default_ipv4.macaddress | lower == deployment_mac | lower
+      tags: [always]
 
     - name: Read the existing runner registration
       ansible.builtin.slurp:
         src: /opt/homelab-runner/.runner
       register: deployment_registration
       no_log: true
+      tags: [always]
 
     - name: Keep the existing runner bound to its intended private repository
       ansible.builtin.assert:
@@ -27,6 +29,14 @@
           - (deployment_registration.content | b64decode(encoding='utf-8-sig') | from_json).gitHubUrl == 'https://github.com/' + deployment_repository
           - (deployment_registration.content | b64decode(encoding='utf-8-sig') | from_json).agentName == deployment_runner
       no_log: true
+      tags: [always]
+
+    - name: Install the shared network dependency without restarting this runner
+      ansible.builtin.import_tasks: ../../common/ansible/network-ready.yml
+      vars:
+        network_ready_unit: homelab-deploy.service
+        network_ready_interfaces: [eth0]
+      tags: [network-readiness]
 
     - name: Read the NAS filesystem from inside the unprivileged guest
       ansible.builtin.command:
