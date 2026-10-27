@@ -271,6 +271,14 @@ class ReadOnlyPlannerTests(unittest.TestCase):
             self.assertTrue((old / 'HOLD.json').is_file())
             self.assertFalse(self.evidence.exists())
 
+    def test_interrupted_request_without_exception_marker_blocks_a_new_plan(self):
+        interrupted = self.work / 'database-network-plan-interrupted'; interrupted.mkdir(mode=0o700)
+        maintenance.write_new(interrupted / 'request.json', b'{}')
+        with patch.object(maintenance, 'tofu') as tofu, self.assertRaisesRegex(ValueError, 'planning hold'):
+            self.invoke()
+        tofu.assert_not_called()
+        self.assertFalse(self.evidence.exists())
+
     def assert_drift_is_held(self, target):
         def changed(command, environment, log, output=None):
             self.fake_tofu(command, environment, log, output)

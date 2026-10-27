@@ -236,12 +236,15 @@ def write_new(path, value):
         stream.write(value); stream.flush(); os.fsync(stream.fileno())
 
 
-def no_holds(work):
+def no_holds(work, current_plan=None):
+    incomplete = any(path != current_plan and (path / 'request.json').exists()
+                     and not (path / 'review-packet.json').exists()
+                     for path in work.glob('database-network-plan-*'))
     require(not BOOTSTRAP_HOLD.exists() and not BOOTSTRAP_HOLD.is_symlink()
             and not BOOTSTRAP_HOLD.with_name('BOOTSTRAP-CD-HOLD.json').exists()
             and not BOOTSTRAP_HOLD.with_name('BOOTSTRAP-CD-HOLD.json').is_symlink()
             and not any(work.glob('*HOLD.json'))
-            and not any(work.glob('database-network-plan-*/HOLD.json')),
+            and not any(work.glob('database-network-plan-*/HOLD.json')) and not incomplete,
             'An existing bootstrap/deployment or failed planning hold blocks maintenance planning')
 
 
@@ -340,7 +343,7 @@ def plan(deployment, installed_config_path, catalogue_path, evidence, engine, *,
             saved = regular(evidence / 'guest.tfplan'); shown = regular(evidence / 'guest.tfplan.json')
             checked = check_plan(json.loads(shown), cfg, catalogue, engine, phase=phase,
                                  client_vmids=client_vmids, legacy_server_address=legacy_server_address)
-            no_holds(work)
+            no_holds(work, current_plan=evidence)
             require(bindings(deployment, cfg, site, work)[0] == original and regular(catalogue_path, private=False) == catalogue_raw,
                     'State, original inputs or catalogue drifted during planning')
             result = {**request, 'status': checked['status'], 'plan_sha256': digest(saved),
