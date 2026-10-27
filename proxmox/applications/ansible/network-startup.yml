@@ -1,0 +1,71 @@
+---
+- name: Reconcile network startup on one installed application guest
+  hosts: application
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Check that this is not a Proxmox host
+      ansible.builtin.stat:
+        path: /etc/pve
+      register: pve_directory
+
+    - name: Require the selected existing application guest
+      ansible.builtin.assert:
+        that:
+          - groups['application'] | length == 1
+          - app.kind in ['dns', 'ingress', 'mariadb', 'postgresql', 'influxdb']
+          - app.vmid | int >= 100
+          - app.vmid | int not in [900, 4914, 4915, 4920]
+          - app.hostname == ansible_facts.hostname
+          - app.address in ansible_facts.all_ipv4_addresses
+          - app.mac | lower in (ansible_facts.interfaces | map('extract', ansible_facts) | selectattr('macaddress', 'defined') | map(attribute='macaddress') | map('lower') | list)
+          - ansible_facts.virtualization_type == 'lxc'
+          - ansible_facts.distribution == 'Debian'
+          - not pve_directory.stat.exists
+          - network_startup_restart | default(false) | type_debug == 'bool'
+          - not network_startup_restart | default(false) or (app.kind == 'postgresql' and postgresql_cluster_unit == 'postgresql@16-main.service')
+        fail_msg: 'Select one existing Debian application LXC; only the reviewed PostgreSQL correction may restart a service.'
+
+    - name: Select only this application's service dependency
+      ansible.builtin.set_fact:
+        selected_network_unit: "{{ {'dns':'docker.service', 'ingress':'docker.service', 'mariadb':'mariadb.service', 'postgresql':'postgresql@.service', 'influxdb':'influxdb.service'}[app.kind] }}"
+
+    - name: Record the healthy service process before changing its startup dependency
+      ansible.builtin.command:
+        argv: [systemctl, show, "{{ selected_network_unit }}", '--property=MainPID,ActiveEnterTimestampMonotonic', --value]
+      register: network_service_before
+      changed_when: false
+      when: not network_startup_restart | default(false)
+
+    - name: Inspect existing network startup definitions before the approved correction
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/systemd/system/homelab-network-ready.service
+        - "/etc/systemd/system/{{ selected_network_unit }}.d/homelab-network-ready.conf"
+      register: previous_network_startup
+
+    - name: Preserve any pre-existing network startup definition for review
+      ansible.builtin.assert:
+        that: not item.stat.exists
+      loop: "{{ previous_network_startup.results }}"
+
+    - name: Install the same network startup definition used for new guests
+      ansible.builtin.import_tasks: ../../common/ansible/network-ready.yml
+      vars:
+        network_ready_unit: "{{ selected_network_unit }}"
+
+    - name: Restart only the selected PostgreSQL cluster after the definition changes
+      ansible.builtin.systemd_service:
+        name: "{{ postgresql_cluster_unit }}"
+        state: restarted
+      when: network_startup_restart | default(false) and (network_ready_gate.changed or network_ready_dependency.changed) and not ansible_check_mode
+
+    - name: Read back the healthy service process without restarting it
+      ansible.builtin.command:
+        argv: [systemctl, show, "{{ selected_network_unit }}", '--property=MainPID,ActiveEnterTimestampMonotonic', --value]
+      register: network_service_after
+      changed_when: false
+      failed_when: network_service_after.stdout != network_service_before.stdout
+      when: not network_startup_restart | default(false)

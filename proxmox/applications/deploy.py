@@ -56,6 +56,15 @@ def source_hash():
     return result.hexdigest()
 
 
+def required_network_interfaces(cfg):
+    """Use the same ordered ethN names as the OpenTofu guest module."""
+    interfaces = cfg['guest']['interfaces']
+    result = ['eth' + str(i) for i, nic in enumerate(interfaces) if nic['ipv4'] != 'manual']
+    if not result or len(interfaces) > 16:
+        raise ValueError('Select the guest interfaces that require IPv4 before service startup')
+    return result
+
+
 def write(path, value):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'w') as stream:
@@ -303,7 +312,8 @@ def _execute_step(action, cfg_path, approved_plan=None):
                 write(work / 'applied.json', receipt)
             else:
                 app = dict(cfg['app'], start_services=(action == 'start'), render_dir=str(work / 'rendered'))
-                write(work / 'variables.json', {'app': app})
+                write(work / 'variables.json', {'app': app,
+                      'network_ready_interfaces': required_network_interfaces(cfg)})
                 write(work / 'inventory.json', {'application': {'hosts': {app['hostname']: {'ansible_host': app['address'], 'ansible_user': 'root'}}}})
                 environment.update({'ANSIBLE_CONFIG': str(SOURCE / 'ansible' / 'ansible.cfg'),
                                     'ANSIBLE_HOST_KEY_CHECKING': 'True',

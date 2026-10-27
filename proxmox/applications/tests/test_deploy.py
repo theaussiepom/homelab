@@ -27,6 +27,12 @@ def fixture(root):
 
 
 class DeployTests(unittest.TestCase):
+    def test_network_gate_waits_for_backend_even_when_management_exists(self):
+        cfg={'guest':{'interfaces':[{'ipv4':'dhcp'},{'ipv4':'10.88.30.23/24'},{'ipv4':'manual'}]}}
+        self.assertEqual(deploy.required_network_interfaces(cfg),['eth0','eth1'])
+        cfg['guest']['interfaces']=[{'ipv4':'manual'}]
+        with self.assertRaises(ValueError): deploy.required_network_interfaces(cfg)
+
     def test_saved_plan_binds_shared_guest_startup_behaviour(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
