@@ -31,6 +31,16 @@ def setup(root):
 
 
 class MaintenanceTests(unittest.TestCase):
+    def test_saved_plan_changed_during_json_review_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan=Path(tmp)/'saved.tfplan';plan.write_bytes(b'original plan')
+            def output(*args,**kwargs):
+                plan.write_bytes(b'changed after JSON was read')
+                return b'{"resource_changes":[]}'
+            with patch.object(maintenance.subprocess,'check_output',side_effect=output):
+                with self.assertRaisesRegex(ValueError,'changed during review'):
+                    maintenance.reviewed_plan(deploy,['tofu'],{},plan)
+
     def test_success_then_repeat_only_verifies_and_keeps_original_claim(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg,work,site,packet,deployment,nas=setup(Path(tmp))

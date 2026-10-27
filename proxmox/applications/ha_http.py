@@ -99,7 +99,7 @@ def legacy_sensor(root, backup, home_sha, command_sha):
             raise ValueError('The selected legacy directory allowlist differs')
         return value.replace(line,b'',1)
     def command(value):
-        blocks=re.split(rb'(?m)(?=^- sensor:)',value)
+        blocks=re.split(rb'(?m)(?=^- [a-z_]+:)',value)
         selected=[i for i,block in enumerate(blocks) if re.search(
             rb'(?m)^\s+unique_id:\s*command_line_influxdb_size\s*$',block)]
         if len(selected) != 1 or b'du -shm /influxdb_data | cut -f1' not in blocks[selected[0]]:

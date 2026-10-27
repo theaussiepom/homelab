@@ -46,6 +46,8 @@ def compile_config(foundation, automation):
         import foundation_dns
         address=cfg['app'].get('frontend_routing',{}).get('address',cfg['app']['address']).split('/')[0]
         dns['extra_records']={cfg['app']['mqtt_hostname']:address}
+        site_config.require('mqtt_previous_address' in cfg['app'],'Declare the reviewed previous MQTT DNS binding')
+        dns['extra_records_before']={cfg['app']['mqtt_hostname']:cfg['app']['mqtt_previous_address']}
         foundation_dns.configure(dns)
     return {'bootstrap.json': boot, 'dns-settings.json': dns}
 

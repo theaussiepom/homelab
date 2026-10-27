@@ -6,6 +6,7 @@ RESOURCES = {
     'module.guest.proxmox_virtual_environment_firewall_options.guest':'container_id',
     'module.guest.proxmox_virtual_environment_firewall_rules.guest':'container_id'}
 RULES = list(RESOURCES)[-1]
+PRIVATE = tuple(ipaddress.IPv4Network(n) for n in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16'))
 
 
 def require(value):
@@ -20,7 +21,7 @@ def provider_rules(rows):
                 and re.fullmatch(r'[0-9]+(?:,[0-9]+){0,15}',row['port'])
                 and all(1 <= int(v) <= 65535 for v in row['port'].split(',')))
         destination=ipaddress.IPv4Network(row['destination'])
-        require(destination.prefixlen == 32 and destination.is_private
+        require(destination.prefixlen == 32 and any(destination.subnet_of(network) for network in PRIVATE)
                 and not destination.network_address.is_loopback and not destination.network_address.is_link_local
                 and not destination.network_address.is_unspecified and not destination.network_address.is_multicast)
         result.append(dict(type='out',action='ACCEPT',proto=row['proto'],dport=row['port'],dest=row['destination'],comment=row['comment']))

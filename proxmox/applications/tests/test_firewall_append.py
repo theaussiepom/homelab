@@ -38,6 +38,7 @@ class FirewallAppend(unittest.TestCase):
         for change in (guest_change,delete,unknown,old_change,wider,privilege):
             value=fixture();change(value)
             with self.subTest(change=change),self.assertRaises(ValueError):policy.check_plan(value,'pve',212,[ADDITION])
-        for destination in ('0.0.0.0/0','10.88.30.0/24','127.0.0.1/32','1.1.1.1/32'):
+        for destination in ('0.0.0.0/0','10.88.30.0/24','127.0.0.1/32','1.1.1.1/32',
+                            '255.255.255.255/32','240.0.0.1/32','192.0.2.1/32','198.18.0.1/32'):
             with self.subTest(destination=destination),self.assertRaises(ValueError):
                 policy.provider_rules([dict(ADDITION,destination=destination)])

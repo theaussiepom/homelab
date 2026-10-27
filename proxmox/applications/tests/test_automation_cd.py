@@ -53,11 +53,22 @@ class AutomationCDTests(unittest.TestCase):
         destination = inputs / 'automation'
         cfg = fixture(root)
         cfg['app'].update(kind='automation', stack_config=str(destination / 'stack.json'))
+        cfg['app']['prerequisite_packet_sha256']='a'*64
         stack = json.loads((ROOT / 'examples/automation.stack.example.json').read_text())
         config = root / 'deployment.json'
         config.write_text(json.dumps({'schema': 'homelab-automation-deployment-v1', 'enabled': True,
                                      'discovery_previous_guests': [202, 211, 212], 'site': cfg, 'stack': stack}))
         return config, destination, cfg
+
+    def test_enabled_packet_without_prerequisite_digest_stops_before_input_or_guest_writes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config,destination,cfg=self.setup(Path(tmp))
+            value=json.loads(config.read_text());value['site']['app'].pop('prerequisite_packet_sha256')
+            config.write_text(json.dumps(value))
+            with self.assertRaisesRegex(ValueError,'prerequisite digest'):
+                automation_cd.prepare_inputs(config,destination,{'NODE_RED_API_TOKEN':'synthetic-token'})
+            self.assertFalse(destination.exists())
+            with self.assertRaises(ValueError):automation_cd.prerequisites(value['site'],None)
 
     def test_secret_is_bound_privately_and_cannot_be_changed_on_the_next_job(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -85,7 +96,7 @@ class AutomationCDTests(unittest.TestCase):
             self.assertFalse(destination.exists())
 
     def test_failed_plan_is_held_and_cannot_be_started_again(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, patch.object(automation_cd,'prerequisites'):
             root = Path(tmp); config, destination, cfg = self.setup(root)
             runner = Mock(wraps=deploy)
             runner.execute.side_effect = ValueError('synthetic plan failure')
@@ -98,7 +109,7 @@ class AutomationCDTests(unittest.TestCase):
             self.assertEqual(runner.execute.call_count, 1)
 
     def test_completed_guest_uses_bound_preparation_and_never_plans_or_applies_again(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, patch.object(automation_cd,'prerequisites'):
             root = Path(tmp); config, destination, cfg = self.setup(root)
             work = root / 'state/6101'; work.mkdir(parents=True)
             (work / 'prepare-complete.json').write_text('synthetic verified receipt')
@@ -109,7 +120,7 @@ class AutomationCDTests(unittest.TestCase):
             runner.execute.assert_not_called()
 
     def test_original_image_missing_stops_before_the_plan_or_hold(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, patch.object(automation_cd,'prerequisites'):
             root = Path(tmp); config, destination, cfg = self.setup(root)
             value = json.loads(config.read_text())
             value['stack']['services']['homeassistant'].update(image='sha256:' + '1'*64,

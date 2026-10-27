@@ -35,9 +35,10 @@ class AutomationConfigurationTests(unittest.TestCase):
     def test_broker_record_uses_the_selected_frontend_address_and_preserves_foundation_dns(self):
         foundation, value = packet()
         value['site']['app']['mqtt_hostname'] = 'broker.mqtt'
+        value['site']['app']['mqtt_previous_address'] = None
         original = configuration.site_config.render(foundation)['dns-settings.json']
         dns = configuration.compile_config(foundation, value)['dns-settings.json']
-        self.assertEqual({k:v for k,v in dns.items() if k != 'extra_records'}, original)
+        self.assertEqual({k:v for k,v in dns.items() if k not in {'extra_records','extra_records_before'}}, original)
         self.assertEqual(dns['extra_records'], {'broker.mqtt':'10.88.25.21'})
 
     def test_disabled_preview_derives_only_the_same_guest_and_vlan_grants(self):

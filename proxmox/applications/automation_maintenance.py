@@ -82,6 +82,13 @@ def ansible(deployment,fc,cfg,evidence,phase,row,verify):
         '--extra-vars','@'+str(evidence/'variables.json')],env,evidence/'ansible.log')
 
 
+def reviewed_plan(deployment,command,env,plan):
+    checked=deployment.sha(plan)
+    value=json.loads(subprocess.check_output(command+['show','-json',str(plan)],env=env,timeout=60))
+    require(deployment.sha(plan) == checked,'Saved prerequisite plan changed during review')
+    return value,checked
+
+
 def ingress(deployment,fc,cfg,row,work,evidence,completed):
     tofu=evidence/'tofu';shutil.copytree(deployment.SOURCE/'tofu',tofu,ignore=shutil.ignore_patterns('.terraform','*.tfstate*','*.tfplan'))
     variables={k:copy.deepcopy(cfg[k]) for k in ('site','guest','ssh_public_keys')}
@@ -93,10 +100,9 @@ def ingress(deployment,fc,cfg,row,work,evidence,completed):
     command=['tofu','-chdir='+str(tofu)];plan=evidence/'firewall.tfplan';log=evidence/'tofu.log'
     deployment.quiet(command+['init','-input=false','-lockfile=readonly','-backend-config=path='+str(work/'terraform.tfstate')],env,log)
     deployment.quiet(command+['plan','-input=false','-lock-timeout=30s','-out='+str(plan)],env,log)
-    value=json.loads(subprocess.check_output(command+['show','-json',str(plan)],env=env,timeout=60))
+    value,checked=reviewed_plan(deployment,command,env,plan)
     fc.write_new(evidence/'firewall.tfplan.json',fc.encoded(value))
     firewall_append.check_plan(value,cfg['site']['node'],row['vmid'],row['additions'],completed)
-    checked=deployment.sha(plan)
     fc.write_new(evidence/'reviewed-plan.json',fc.encoded({'plan_sha256':checked,'scope':'Exact automation backend firewall append only'}))
     if not completed:
         require(deployment.sha(plan) == checked,'Saved prerequisite plan changed')

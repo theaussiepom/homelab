@@ -20,6 +20,10 @@ def prepare_inputs(config, destination=INPUTS, environment=None):
                   and value['schema'] == 'homelab-automation-deployment-v1' and value['enabled'] is True,
                   'Use the closed automation deployment configuration')
     cfg, stack = value['site'], value['stack']
+    expected = cfg['app'].get('prerequisite_packet_sha256')
+    files.require(isinstance(expected,str) and len(expected) == 64
+                  and all(c in '0123456789abcdef' for c in expected),
+                  'Enabled automation requires the exact reviewed prerequisite digest')
     files.require(cfg['app']['kind'] == stack['kind'] == 'automation'
                   and cfg['app']['stack_config'] == str(destination / 'stack.json')
                   and set(stack['services']) == set(SERVICES),
@@ -56,9 +60,8 @@ def prepare_inputs(config, destination=INPUTS, environment=None):
 def prerequisites(cfg, packet_path):
     """The actual guest cannot be created or started by skipping its CD prerequisites."""
     expected=cfg['app'].get('prerequisite_packet_sha256')
-    if expected is None:
-        return
-    files.require(packet_path is not None and deploy.sha(packet_path) == expected,
+    files.require(isinstance(expected,str) and len(expected) == 64 and packet_path is not None
+                  and deploy.sha(packet_path) == expected,
                   'Supply the exact reviewed automation prerequisite packet')
     import automation_maintenance
     packet=json.loads(files.regular(packet_path));automation_maintenance.validate(packet)
