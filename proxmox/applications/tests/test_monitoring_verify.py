@@ -11,6 +11,15 @@ import monitoring_verify as verification
 
 
 class InitialCollectionTests(unittest.TestCase):
+    def test_resource_inventory_rejects_malformed_samples_with_fixed_safe_reason(self):
+        for raw in ('private-synthetic-data', 'null', '{}', '{"data":null}', '{"data":{}}',
+                    '{"data":[null]}', '{"data":["private-synthetic-data"]}', '{"data":[{"vmid":[]}]}'):
+            with self.subTest(raw=raw), self.assertRaisesRegex(verification.AcceptanceFailure,
+                                                               '^The Proxmox API sample is malformed$'):
+                verification.resource_inventory(raw)
+        self.assertEqual(verification.resource_inventory('{"data":[{"type":"node"},{"vmid":213}]}'),
+                         ({None, 213}, True))
+
     def test_cli_reports_fixed_acceptance_reasons_without_private_exception_details(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'config.json'

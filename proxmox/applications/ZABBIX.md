@@ -122,6 +122,8 @@ system. Approval of the design is not approval of a native rollout.
 The exact native packet needs:
 
 - Fresh Proxmox version, API/CA identity, unused VMID/addresses/MACs and resource budget.
+  Verify the native certificate's hostname and trusted CA chain, then require an
+  authenticated native API sample; synthetic TLS checks do not establish these facts.
 - Trusted host keys and machine IDs for the host and commissioned guests; no dormant guest creation.
 - Explicit host SSH/service authority for bootstrap CD and each selected guest.
 - A current PostgreSQL backup verification and the exact existing HBA digest.
@@ -131,6 +133,9 @@ The exact native packet needs:
 - A Traefik discovery route and DNS record, admitted after the factory password is replaced.
 - New random database/admin credentials, a separate API token and individual agent PSKs,
   bound privately in GitHub and the operator's vault.
+  Review each independently generated PSK's provenance and controller-file protection
+  (owner-only mode 0600 or stricter). Synthetic wrong-key tests prove rejection, not
+  native key provenance or storage protection.
 - The saved new-guest plan and SHA256; its application input files, CA and secrets
   are bound by digest. Recheck package availability before the native window.
 

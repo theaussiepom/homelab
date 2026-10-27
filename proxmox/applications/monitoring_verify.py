@@ -17,6 +17,19 @@ class FreshnessPending(AcceptanceFailure):
     pass
 
 
+def resource_inventory(raw):
+    try:
+        document = json.loads(raw)
+        if not isinstance(document, dict) or not isinstance(document.get('data'), list):
+            raise ValueError
+        resources = document['data']
+        if not all(isinstance(row, dict) for row in resources):
+            raise ValueError
+        return {row.get('vmid') for row in resources}, any(row.get('type') == 'node' for row in resources)
+    except (TypeError, ValueError):
+        raise AcceptanceFailure('The Proxmox API sample is malformed') from None
+
+
 def _verify_once(c):
     url = urlsplit(c['url'])
     if url.scheme != 'https' or not url.hostname or url.username or url.password or url.path not in ('', '/') or url.query or url.fragment:
@@ -66,10 +79,10 @@ def _verify_once(c):
         else:
             if by_key['proxmox.api.available']['lastvalue'] != '200':
                 raise AcceptanceFailure('The Proxmox API returned an unsuccessful status')
-            resources = json.loads(by_key['proxmox.cluster.resources']['lastvalue'])['data']
-            if not set(c['commissioned_vmids']) <= {row.get('vmid') for row in resources}:
+            vmids, has_node = resource_inventory(by_key['proxmox.cluster.resources']['lastvalue'])
+            if not set(c['commissioned_vmids']) <= vmids:
                 raise AcceptanceFailure('Commissioned guests are missing from the Proxmox API sample')
-            if not any(row.get('type') == 'node' for row in resources):
+            if not has_node:
                 raise AcceptanceFailure('No Proxmox node values arrived')
         if pending:
             raise FreshnessPending('Waiting for fresh agent and Proxmox samples')
