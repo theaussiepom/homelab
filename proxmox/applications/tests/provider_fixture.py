@@ -340,7 +340,8 @@ def main():
                 kind = 'automation'; routes[0]['login'] = 'authentik'
                 routes.append({'name':'homeassistant','host':'ha.example.invalid','url':'http://10.88.30.21:8123'})
             compiled = labels({'guest':{'interfaces':[{'ipv4':'10.88.30.21/24'}]},
-                               'app':{'kind':kind,'discovery_routes':routes}})
+                               'app':{'kind':kind,'discovery_routes':routes,
+                                      'ingress_foundation':{'authentik_url':'http://10.88.30.21:9000'}}})
             # No ACME endpoint, credentials or real private destination in a fixture.
             compiled = {key:value.replace('10.88.30.21','127.0.0.1') for key,value in compiled.items()
                         if not key.endswith('.tls.certresolver')}

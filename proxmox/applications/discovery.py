@@ -4,6 +4,7 @@ import re
 from urllib.parse import urlsplit
 
 from plan import check_plan, RESOURCES
+import foundation
 
 PRIVATE_BACKENDS = tuple(ipaddress.IPv4Network(value) for value in
                          ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
@@ -59,6 +60,11 @@ def labels(cfg):
         host_rule = f'Host(`{host}`)'
         if login == 'outpost':
             host_rule += ' && PathPrefix(`/outpost.goauthentik.io/`)'
+        if login == 'authentik':
+            ingress = cfg.get('app', {}).get('ingress_foundation')
+            if not isinstance(ingress, dict) or not ingress.get('authentik_url'):
+                raise ValueError('Node-RED needs the selected ingress Authentik middleware settings')
+            foundation.private_authentik_origin(ingress['authentik_url'])
         middleware = 'security-headers@file' + (',authentik@file' if login == 'authentik' else '')
         result.update({'traefik.enable': 'true', f'{router}.rule': host_rule,
                        f'{router}.priority': '100' if login == 'outpost' else '10',

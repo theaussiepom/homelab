@@ -21,7 +21,7 @@ def site(root):
 
 class DiscoveryTests(unittest.TestCase):
     def test_automation_notes_require_node_red_auth_and_leave_ha_login_alone(self):
-        cfg = {'app': {'kind': 'automation', 'discovery_routes': [
+        cfg = {'app': {'kind': 'automation', 'ingress_foundation': {'authentik_url':'http://10.88.30.20:9000'}, 'discovery_routes': [
             {'name':'homeassistant', 'host':'ha.example.invalid', 'url':'http://10.88.30.21:8123'},
             {'name':'node-red', 'host':'flows.example.invalid', 'url':'http://10.88.30.21:1880', 'login':'authentik'}]},
             'guest': {'interfaces':[{'ipv4':'10.88.30.21/24'}]}}
@@ -40,6 +40,19 @@ class DiscoveryTests(unittest.TestCase):
         cfg['app']['discovery_routes'][1]['name'] = 'unclassified-editor'
         cfg['app']['discovery_routes'][1]['login'] = 'own'
         with self.assertRaises(ValueError): deploy.discovery.labels(cfg)
+
+    def test_node_red_requires_the_declared_ingress_authentik_middleware(self):
+        cfg = {'app': {'kind': 'automation', 'discovery_routes': [
+            {'name':'homeassistant', 'host':'ha.example.invalid', 'url':'http://10.88.30.21:8123'},
+            {'name':'node-red', 'host':'flows.example.invalid', 'url':'http://10.88.30.21:1880', 'login':'authentik'}]},
+            'guest': {'interfaces':[{'ipv4':'10.88.30.21/24'}]}}
+        for settings in (None, {}, {'authentik_url':''}, {'authentik_url':'http://8.8.8.8:9000'}):
+            bad = copy.deepcopy(cfg)
+            if settings is not None: bad['app']['ingress_foundation'] = settings
+            with self.subTest(settings=settings), self.assertRaisesRegex(ValueError, 'Authenti'):
+                deploy.discovery.labels(bad)
+        cfg['app']['ingress_foundation'] = {'authentik_url':'http://10.88.30.20:9000'}
+        self.assertIn('authentik@file', deploy.discovery.labels(cfg)['traefik.http.routers.node-red.middlewares'])
 
     def test_outpost_notes_are_only_the_fixed_callback_on_the_identity_guest(self):
         cfg = {'app': {'kind':'identity', 'discovery_routes': [

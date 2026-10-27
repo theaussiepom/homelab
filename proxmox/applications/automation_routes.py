@@ -43,15 +43,16 @@ def preview(base, cfg):
               {'name':'node-red', 'host':hosts[1], 'url':f'http://{address}:1880', 'login':'authentik'}]
     identity = base['guests']['identity']['interfaces']['backend']['address']
     outpost = {'name':'node-red-outpost', 'host':hosts[1], 'url':f'http://{identity}:9000', 'login':'outpost'}
+    origin = foundation.private_authentik_origin(f'http://{identity}:9000')
+    ingress_settings = {'authentik_url':origin}
     # Validate these exact data contracts through the same compiler as OpenTofu.
     for kind, ip, rows in [('automation', address, routes), ('identity', identity, [outpost])]:
         discovery.labels({'guest':{'interfaces':[{'ipv4':str(ip) + '/24'}]},
-                          'app':{'kind':kind, 'discovery_routes':rows}})
-    origin = foundation.private_authentik_origin(f'http://{identity}:9000')
+                          'app':{'kind':kind, 'discovery_routes':rows, 'ingress_foundation':ingress_settings}})
     frontend = base['guests']['ingress']['interfaces']['frontend']['address']
     return {'schema':'homelab-automation-routing-preview-v1', 'deployable':False,
             'automation_discovery_routes':routes, 'identity_additional_discovery_route':outpost,
-            'ingress_foundation_settings':{'authentik_url':origin},
+            'ingress_foundation_settings':ingress_settings,
             'ingress_additional_rules':[site_config.rule('out', str(port), 'Automation backend only',
                                        'destination', str(address) + '/32') for port in (8123, 1880)],
             'discovery_guest_ids':sorted([*guest_ids, cfg['vmid']]),

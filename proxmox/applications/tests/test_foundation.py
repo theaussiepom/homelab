@@ -64,6 +64,14 @@ class FoundationTests(unittest.TestCase):
                 cfg['foundation']['authentik_url'] = url
                 with self.subTest(url=url), self.assertRaises(ValueError): render.foundation_files(cfg)
 
+    def test_authentik_origin_rejects_empty_query_and_fragment_delimiters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for suffix in ('?', '#', '/?', '/#'):
+                cfg = fixture(directory, 'ingress')
+                cfg['foundation']['authentik_url'] = 'http://10.88.30.20:9000' + suffix
+                with self.subTest(suffix=suffix), self.assertRaises(ValueError):
+                    render.foundation_files(cfg)
+
     def test_identity_references_files_and_binds_only_the_selected_backend(self):
         with tempfile.TemporaryDirectory() as directory:
             cfg = fixture(directory, 'identity'); before = copy.deepcopy(cfg)

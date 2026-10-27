@@ -58,7 +58,12 @@ services. For automation it supports these typed routes:
 Node-RED uses `authentik@file` in the generated middleware list. Its ingress
 configuration needs the optional `foundation.authentik_url`, pointing to the
 selected private Authentik backend on port9000. This generates the middleware;
-it contains no token. Callback priority100 outranks application priority10 and
+it contains no token. The same generated settings must be supplied as the
+automation app's `ingress_foundation`; Notes validation rejects a Node-RED route
+without that dependency. The eventual CD integration must use that single value
+for both the ingress configuration and automation profile.
+
+Callback priority100 outranks application priority10 and
 does not invoke forward-auth again. HA, Authentik and pgAdmin do not get that gate.
 
 The routing preview derives the required proxy backend rules, discovery guest
@@ -75,6 +80,19 @@ it does not rewrite them to the new network. No extra outpost container, Docker
 socket, new administrator or API token is required by this design. See
 [Authentik's embedded outpost](https://docs.goauthentik.io/add-secure-apps/outposts/embedded/)
 and [Traefik pattern](https://docs.goauthentik.io/add-secure-apps/providers/proxy/server_traefik/).
+
+## Review the private login connection
+
+Browser connections use HTTPS. The proposed proxy-to-Authentik connection uses
+HTTP on the private backend bridge inside Proxmox. It carries login cookies and
+request headers without transport encryption. An attacker with host access or
+the ability to intercept that backend traffic could read them; private addresses
+alone do not prevent that.
+
+The site review must confirm backend isolation and narrowly allowed peers, then
+explicitly accept this transport or select authenticated TLS before enabling
+Node-RED. This source-only proposal records the choice for human review; it does
+not claim that the choice has been approved or change any running service.
 
 ## What still needs preparing before deployment
 

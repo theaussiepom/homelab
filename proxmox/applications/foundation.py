@@ -152,7 +152,7 @@ def private_authentik_origin(value):
     except (ValueError, TypeError):
         valid = False
     if (not valid or parsed.scheme != 'http' or parsed.username is not None or parsed.password is not None
-            or parsed.path not in ('', '/') or parsed.query or parsed.fragment
+            or parsed.path not in ('', '/') or '?' in value or '#' in value
             or any(char.isspace() for char in value) or '\\' in value):
         raise ValueError('Select the private Authentik backend HTTP origin on port9000')
     return value.rstrip('/')
