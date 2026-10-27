@@ -36,7 +36,8 @@ def save(path, value):
 def validate(c):
     fields = {'schema', 'endpoint', 'node', 'deploy', 'bridge', 'applications',
               'existing_grants', 'backup_source'}
-    require(set(c) in (fields, fields | {'service_discovery'}), 'Use the closed bootstrap CD configuration')
+    require(fields <= set(c) and not set(c) - fields - {'service_discovery', 'service_discovery_extension', 'application_networks'},
+            'Use the closed bootstrap CD configuration')
     require(c['schema'] == 'homelab-bootstrap-cd-v1', 'Unsupported bootstrap CD schema')
     endpoint = urlsplit(c['endpoint'])
     require(endpoint.scheme == 'https' and endpoint.hostname and endpoint.port == 8006
@@ -67,6 +68,19 @@ def validate(c):
     require(isinstance(c['backup_source'], str) and ':' in c['backup_source'], 'Declare the existing NAS backup source')
     if 'service_discovery' in c:
         provider_access.validate(c)
+    if 'service_discovery_extension' in c:
+        require('service_discovery' in c, 'A discovery extension requires its existing provider identity')
+        provider_access.validate_extension(c)
+    networks = c.get('application_networks', [])
+    require(isinstance(networks, list) and len(networks) <= 32, 'Declare a finite application network list')
+    for row in networks:
+        require(isinstance(row, dict) and set(row) == {'vmid', 'bridge', 'vlan'}
+                and type(row['vmid']) is int and row['vmid'] in {app['vmid'] for app in c['applications']}
+                and re.fullmatch(r'vmbr[0-9]{1,4}', row['bridge'])
+                and type(row['vlan']) is int and 1 <= row['vlan'] <= 4094,
+                'Network access must select a declared application and existing VLAN bridge')
+    require(len({(r['vmid'],r['bridge'],r['vlan']) for r in networks}) == len(networks),
+            'Duplicate application network access')
 
 
 def rows(items):
@@ -76,7 +90,9 @@ def rows(items):
 def desired(c):
     return rows(c['existing_grants']) | {('/vms/' + str(a['vmid']), 'PVEVMAdmin', 0)
                                       for a in c['applications']} | {
-        ('/sdn/zones/localnetwork/' + c['bridge'], 'PVESDNUser', 0)}
+        ('/sdn/zones/localnetwork/' + c['bridge'], 'PVESDNUser', 0)} | {
+        (path, 'PVESDNUser', 0) for row in c.get('application_networks', []) for path in
+        ('/sdn/zones/localnetwork/' + row['bridge'], '/sdn/zones/localnetwork/' + row['bridge'] + '/' + str(row['vlan']))}
 
 
 def network_state(data):
@@ -175,6 +191,11 @@ def inspect(api, c):
     network = api.call(node + '/network')
     require(not network.get('changes'), 'Unrelated pending host-network changes need review')
     interfaces = network['data']
+    for row in c.get('application_networks', []):
+        selected = [nic for nic in interfaces if nic['iface'] == row['bridge']]
+        require(len(selected) == 1 and selected[0].get('type') == 'bridge'
+                and selected[0].get('active') == 1 and selected[0].get('bridge_vlan_aware') == 1,
+                'Declared application VLAN bridge must already be active and VLAN-aware; no host-network correction')
     bridge = [r for r in interfaces if r['iface'] == c['bridge']]
     require(len(bridge) <= 1, 'Duplicate bridge identity')
     if bridge:
@@ -189,7 +210,8 @@ def reconcile(api, c, before, evidence, root=None, backup=None):
     require(inspect(api, c) == base_before, 'Host changed after the saved plan')
     if 'service_discovery' in c:
         require(root is not None and backup is not None, 'Service discovery needs its private state and NAS backup')
-        require(provider_access.inspect(api, c, root, backup) == before['service_discovery'],
+        discovery_config = provider_access.inspection_config(c, root, backup)
+        require(provider_access.inspect(api, discovery_config, root, backup) == before['service_discovery'],
                 'Service discovery changed after the saved plan')
     node = '/nodes/' + c['node']
     if not before['bridge_exists']:
@@ -236,8 +258,12 @@ def reconcile(api, c, before, evidence, root=None, backup=None):
             'new_acl_rows': len(before['missing']), 'token_lifetime_changed': False,
             'guest_lifecycle_changed': False, 'trigger_commit': os.environ.get('GITHUB_SHA')}
     if 'service_discovery' in c:
-        result['service_discovery'] = provider_access.reconcile(
-            api, c, before['service_discovery'], root, backup)
+        if provider_access.inspection_config(c, root, backup) != c:
+            result['service_discovery'] = provider_access.extend(
+                api, c, before['service_discovery'], root, backup)
+        else:
+            result['service_discovery'] = provider_access.reconcile(
+                api, c, before['service_discovery'], root, backup)
     return result
 
 
@@ -364,7 +390,8 @@ def run(c, api, root=Path('/var/lib/homelab-bootstrap'), backup=Path('/srv/homel
     evidence.mkdir(mode=0o700)
     before = inspect(api, c)
     if 'service_discovery' in c:
-        before['service_discovery'] = provider_access.inspect(api, c, root, backup)
+        before['service_discovery'] = provider_access.inspect(
+            api, provider_access.inspection_config(c, root, backup), root, backup)
     payload = {'configuration': c, 'plan': before}
     save(evidence / 'plan.json', payload)
     destination = backup / evidence.name

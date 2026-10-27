@@ -41,6 +41,12 @@
       loop: "{{ network_ready_interfaces }}"
       changed_when: false
 
+    - name: Verify the prepared frontend reply route before starting a service
+      ansible.builtin.command:
+        argv: [python3, /opt/homelab-app/ingress-routing.py, --config, /opt/homelab-app/frontend-routing.json]
+      changed_when: false
+      when: app.frontend_routing is defined
+
     - name: Start only the selected service with no dependent or unrelated changes
       ansible.builtin.command:
         argv: [docker, compose, -f, /opt/homelab-app/compose.yml, up, -d, --no-deps, --wait, --wait-timeout, '180', "{{ automation_service }}"]

@@ -19,7 +19,7 @@ class IngressRoutingTests(unittest.TestCase):
                             if task.get('ansible.builtin.systemd_service', {}).get('name') == 'docker')
         self.assertLess(routing_index, docker_index)
         self.assertEqual(tasks[routing_index]['when'],
-                         "app.kind == 'ingress' and app.frontend_routing is defined and not ansible_check_mode")
+                         "app.kind in ['ingress', 'automation'] and app.frontend_routing is defined and not ansible_check_mode")
 
     def setUp(self):
         self.settings={'address':'10.88.40.33/24','gateway':'10.88.40.1','mac':'02:00:00:00:40:33'}

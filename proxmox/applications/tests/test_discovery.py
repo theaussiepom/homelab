@@ -20,6 +20,15 @@ def site(root):
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_legacy_hostname_alias_retains_the_same_backend_and_login(self):
+        cfg = site(Path('/synthetic'))
+        cfg['app']['discovery_routes'][0]['aliases'] = ['sso.legacy.invalid']
+        labels = deploy.discovery.labels(cfg)
+        self.assertEqual(labels['traefik.http.routers.identity.rule'],
+                         '(Host(`sso.example.invalid`) || Host(`sso.legacy.invalid`))')
+        cfg['app']['discovery_routes'][0]['aliases'].append('sso.example.invalid')
+        with self.assertRaisesRegex(ValueError, 'unique'): deploy.discovery.labels(cfg)
+
     def test_native_node_red_authentik_login_does_not_get_a_second_proxy_login(self):
         cfg = {'app': {'kind': 'automation', 'node_red_authentication': 'authentik-oidc', 'discovery_routes': [
             {'name': 'homeassistant', 'host': 'ha.example.invalid', 'url': 'http://10.88.30.21:8123'},

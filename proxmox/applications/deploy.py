@@ -76,19 +76,33 @@ def write(path, value):
     sync_directory(path.parent)
 
 
-def validate(cfg):
+def validate(cfg, stack=None):
     vmid = cfg['guest']['vmid']
     if isinstance(vmid, bool) or not isinstance(vmid, int) or vmid < 100 or vmid in {900, 4914, 4915, 4920}:
         raise ValueError('Select one application guest, never the deployment controller or protected targets')
     app = cfg['app']
+    if 'stack_config' in app and stack is None:
+        stack = json.loads(Path(app['stack_config']).read_text())
     discovery.labels(cfg)
     if 'frontend_routing' in app:
-        if app.get('kind') != 'ingress':
-            raise ValueError('Frontend source routing belongs only to ingress')
+        if app.get('kind') not in {'ingress', 'automation'}:
+            raise ValueError('Frontend source routing requires a selected multihomed application')
         address, _, _, mac = ingress_routing.validate(app['frontend_routing'])
         if not any(nic['ipv4'] == app['frontend_routing']['address'] and nic['mac'].lower() == mac
                    for nic in cfg['guest']['interfaces']):
             raise ValueError('Frontend routing must bind the exact selected guest interface')
+    if 'ha_http' in app:
+        selected = app['ha_http']
+        if (app.get('kind') != 'automation' or not isinstance(selected, dict)
+                or set(selected) != {'source_sha256', 'trusted_proxy'}
+                or not isinstance(selected['source_sha256'], str)
+                or len(selected['source_sha256']) != 64
+                or any(c not in '0123456789abcdef' for c in selected['source_sha256'])):
+            raise ValueError('Select the original HA configuration hash and one trusted proxy')
+        proxy = ipaddress.IPv4Address(selected['trusted_proxy'])
+        if (not proxy.is_private or proxy.is_loopback or proxy.is_unspecified
+                or proxy.is_link_local or proxy.is_multicast):
+            raise ValueError('HA requires the selected private proxy address')
     if app['vmid'] != vmid or app['hostname'] != cfg['guest']['hostname'] or app['memory_mib'] != cfg['guest']['memory_mib']:
         raise ValueError('OpenTofu and Ansible must select the same guest and resource budget')
     if not any(nic['ipv4'].split('/')[0] == app['address'] and nic['mac'].lower() == app['mac'].lower() for nic in cfg['guest']['interfaces']):
@@ -106,12 +120,10 @@ def validate(cfg):
                                   or database.get('group') != 'mysql' or 'uid' in database or 'gid' in database):
             raise InputNeeded('Package account mode is only for a new empty MariaDB mysql account; remove fixed uid/gid inputs')
     if app.get('kind') == 'automation' and 'stack_config' in app:
-        stack = json.loads(Path(app['stack_config']).read_text())
         address = stack.get('services', {}).get('homeassistant', {}).get('environment', {}).get('HOMELAB_HA_IPV4')
         if address and address not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
             raise ValueError('HA discovery must select an address assigned to this guest')
     if 'stack_config' in app:
-        stack = json.loads(Path(app['stack_config']).read_text())
         selected = foundation.validate(stack)
         if selected and app.get('kind') == 'ingress' and len(cfg['guest']['interfaces']) > 1:
             if 'frontend_routing' not in app or ingress_routing.validate(app['frontend_routing'])[0] != selected['bind_address']:
@@ -120,7 +132,6 @@ def validate(cfg):
             if selected['bind_address'] not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
                 raise ValueError('Foundation listeners must select an address assigned to this guest')
     if app.get('kind') == 'db-tools':
-        stack = json.loads(Path(app['stack_config']).read_text())
         if stack.get('pgadmin_bind_address') not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
             raise ValueError('pgAdmin must select a backend address assigned to this guest')
     for key in ('state_root', 'backup_mount', 'backup_directory', 'api_token', 'ca_file', 'private_key', 'known_hosts'):
@@ -213,6 +224,15 @@ def quiet(command, environment, log, cwd=None):
     with log.open('ab') as output:
         os.chmod(log, 0o600)
         subprocess.run(command, env=environment, cwd=cwd, stdout=output, stderr=output, check=True)
+
+
+def ansible_environment(cfg, environment=None):
+    """Keep every application path on the same exact pinned SSH trust options."""
+    environment = os.environ.copy() if environment is None else environment
+    environment.update({'ANSIBLE_CONFIG': str(SOURCE / 'ansible' / 'ansible.cfg'),
+                        'ANSIBLE_HOST_KEY_CHECKING': 'True',
+                        'ANSIBLE_SSH_ARGS': '-F /dev/null -o StrictHostKeyChecking=yes -o BatchMode=yes -o ControlMaster=no -o GlobalKnownHostsFile=/dev/null -o VerifyHostKeyDNS=no -o UpdateHostKeys=no -o IdentitiesOnly=yes -o UserKnownHostsFile=' + shlex.quote(cfg['paths']['known_hosts'])})
+    return environment
 
 
 def backup(cfg, state, label):
@@ -316,9 +336,7 @@ def _execute_step(action, cfg_path, approved_plan=None):
                 write(work / 'variables.json', {'app': app,
                       'network_ready_interfaces': required_network_interfaces(cfg)})
                 write(work / 'inventory.json', {'application': {'hosts': {app['hostname']: {'ansible_host': app['address'], 'ansible_user': 'root'}}}})
-                environment.update({'ANSIBLE_CONFIG': str(SOURCE / 'ansible' / 'ansible.cfg'),
-                                    'ANSIBLE_HOST_KEY_CHECKING': 'True',
-                                    'ANSIBLE_SSH_ARGS': '-F /dev/null -o StrictHostKeyChecking=yes -o BatchMode=yes -o ControlMaster=no -o GlobalKnownHostsFile=/dev/null -o VerifyHostKeyDNS=no -o UpdateHostKeys=no -o IdentitiesOnly=yes -o UserKnownHostsFile=' + shlex.quote(cfg['paths']['known_hosts'])})
+                ansible_environment(cfg, environment)
                 playbook = 'verify.yml' if action == 'verify' else 'site.yml'
                 quiet(['ansible-playbook', '-i', str(work / 'inventory.json'),
                        '--private-key', cfg['paths']['private_key'], str(SOURCE / 'ansible' / playbook),
@@ -453,11 +471,8 @@ def _automation_service_step(cfg, work, service, start):
                      'network_ready_interfaces': required_network_interfaces(cfg)})
     write(inventory, {'application': {'hosts': {app['hostname']: {
         'ansible_host': app['address'], 'ansible_user': 'root'}}}})
-    environment = os.environ.copy()
-    environment.update({'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8',
-                        'ANSIBLE_CONFIG': str(SOURCE / 'ansible' / 'ansible.cfg'),
-                        'ANSIBLE_HOST_KEY_CHECKING': 'True',
-                        'ANSIBLE_SSH_ARGS': '-F /dev/null -o StrictHostKeyChecking=yes -o BatchMode=yes -o ControlMaster=no -o GlobalKnownHostsFile=/dev/null -o VerifyHostKeyDNS=no -o UpdateHostKeys=no -o IdentitiesOnly=yes -o UserKnownHostsFile=' + shlex.quote(cfg['paths']['known_hosts'])})
+    environment = ansible_environment(cfg)
+    environment.update({'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8'})
     quiet(['ansible-playbook', '-i', str(inventory), '--private-key', cfg['paths']['private_key'],
            str(SOURCE / 'ansible' / 'automation-service.yml'), '--extra-vars', '@' + str(variables)],
           environment, work / f'{time.time_ns()}-{service}.log')

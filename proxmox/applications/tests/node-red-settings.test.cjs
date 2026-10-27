@@ -7,7 +7,7 @@ const test = require("node:test");
 const code = fs.readFileSync(path.join(__dirname, "../node-red-settings.js"), "utf8");
 function load(overrides = {}, original = undefined) {
     const secret = "synthetic-original-secret";
-    const settings = original || {credentialSecret: "synthetic-encryption-key", adminAuth: {
+    const settings = original || {uiHost: "172.20.0.8", credentialSecret: "synthetic-encryption-key", adminAuth: {
         type: "strategy", strategy: {name: "openidconnect", options: {clientSecret: secret, proxy: true}},
         tokens: () => "retained-token-check", users: () => "retained-user-policy"
     }};
@@ -19,11 +19,12 @@ function load(overrides = {}, original = undefined) {
         NODE_RED_OIDC_CLIENT_ID: "original-client", ...overrides}}});
     return module.exports;
 }
-test("moves only OIDC origins and preserves private credentials and access policy", () => {
+test("moves OIDC origins and the old Docker listener, preserving credentials and access policy", () => {
     const settings = load();
     const options = settings.adminAuth.strategy.options;
     assert.equal(options.clientSecret, "synthetic-original-secret");
     assert.equal(settings.credentialSecret, "synthetic-encryption-key");
+    assert.equal(settings.uiHost, "0.0.0.0");
     assert.equal(settings.adminAuth.tokens(), "retained-token-check");
     assert.equal(settings.adminAuth.users(), "retained-user-policy");
     assert.equal(options.issuer, "https://sso.example.invalid/application/o/nodered/");

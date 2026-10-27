@@ -42,7 +42,7 @@ flowchart TD
 | 1 | DNS, using Pi-hole and Unbound | Lookups work from the next guest; router still provides DHCP |
 | 2 | Required native databases | Matching versions, restored users/grants/data and a real client query |
 | 3 | Traefik HTTPS access | Verified Proxmox discovery and valid certificates for selected routes |
-| 4 | Authentik with Redis, then pgAdmin | Restored identity, native OAuth login and saved pgAdmin profile; Node-RED outpost follows with automation |
+| 4 | Authentik with Redis, then pgAdmin | Restored identity, native OAuth login and saved pgAdmin profile; automation retains its existing native Node-RED OIDC login |
 | 5 | The shared automation guest | HA, Node-RED and MQTT work together with restored settings |
 | 6 | The working house | Existing radios, devices, automations and household access work |
 

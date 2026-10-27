@@ -17,7 +17,8 @@ class AutomationCDTests(unittest.TestCase):
         cfg['app'].update(kind='automation', stack_config=str(destination / 'stack.json'))
         stack = json.loads((ROOT / 'examples/automation.stack.example.json').read_text())
         config = root / 'deployment.json'
-        config.write_text(json.dumps({'schema': 'homelab-automation-deployment-v1', 'site': cfg, 'stack': stack}))
+        config.write_text(json.dumps({'schema': 'homelab-automation-deployment-v1', 'enabled': True,
+                                     'discovery_previous_guests': [202, 211, 212], 'site': cfg, 'stack': stack}))
         return config, destination, cfg
 
     def test_secret_is_bound_privately_and_cannot_be_changed_on_the_next_job(self):

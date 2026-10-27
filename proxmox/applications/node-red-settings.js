@@ -1,7 +1,7 @@
 "use strict";
 
 // Keep the existing palette, credential key, API-token checks, user policy and
-// flows. Only the selected native OIDC endpoints move with the site hostname.
+// flows. OIDC origins and the old Docker-only listener move with the guest.
 const settings = require("/config/settings.js");
 const auth = settings.adminAuth;
 if (!auth || auth.type !== "strategy" || !auth.strategy ||
@@ -38,4 +38,7 @@ Object.assign(auth.strategy.options, {
     clientID: client,
     callbackURL: `${external}/auth/strategy/callback/`
 });
+// The retained configuration binds the former Docker bridge address. The new
+// guest firewall restricts access; loopback also remains available for probes.
+settings.uiHost = "0.0.0.0";
 module.exports = settings;

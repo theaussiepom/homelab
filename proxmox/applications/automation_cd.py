@@ -16,8 +16,8 @@ HOLDS = ('HOLD.json', 'ROLLOUT-HOLD.json', 'CONTINUATION-HOLD.json', 'AUTOMATION
 def prepare_inputs(config, destination=INPUTS, environment=None):
     """Actual settings stay private; the one runtime token comes from GitHub Secrets."""
     value = json.loads(files.regular(config))
-    files.require(isinstance(value, dict) and set(value) == {'schema', 'site', 'stack'}
-                  and value['schema'] == 'homelab-automation-deployment-v1',
+    files.require(isinstance(value, dict) and set(value) == {'schema', 'enabled', 'site', 'stack', 'discovery_previous_guests'}
+                  and value['schema'] == 'homelab-automation-deployment-v1' and value['enabled'] is True,
                   'Use the closed automation deployment configuration')
     cfg, stack = value['site'], value['stack']
     files.require(cfg['app']['kind'] == stack['kind'] == 'automation'
@@ -107,5 +107,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     try:
         print(json.dumps(run(args.phase, args.config)))
+    except deploy.InputNeeded as error:
+        raise SystemExit(str(error)) from None
     except (OSError, ValueError, KeyError, deploy.subprocess.CalledProcessError) as error:
         raise SystemExit(f'Automation deployment held ({type(error).__name__}); inspect private phase receipts') from None

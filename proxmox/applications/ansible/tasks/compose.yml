@@ -4,9 +4,9 @@
   vars:
     network_ready_unit: docker.service
 
-- name: Prepare frontend reply routing for the multihomed ingress guest
+- name: Prepare frontend reply routing for the selected multihomed guest
   ansible.builtin.import_tasks: ingress-routing.yml
-  when: app.kind == 'ingress' and app.frontend_routing is defined and not ansible_check_mode
+  when: app.kind in ['ingress', 'automation'] and app.frontend_routing is defined and not ansible_check_mode
 
 - name: Enable the isolated guest Docker service
   ansible.builtin.systemd_service:
@@ -134,6 +134,42 @@
     group: '1000'
     mode: '0640'
   when: app.kind == 'automation' and stack.node_red_oidc is defined
+
+- name: Adapt the Node-RED image health check to its current guest loopback listener
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../node-red-healthcheck.js"
+    dest: /srv/homelab/data/node-red/healthcheck.js
+    owner: '1000'
+    group: '1000'
+    mode: '0640'
+    backup: true
+  when: app.kind == 'automation'
+
+- name: Install the bounded automation service probes
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../automation-health.py"
+    dest: /opt/homelab-app/automation-health.py
+    owner: root
+    group: root
+    mode: '0700'
+  when: app.kind == 'automation'
+
+- name: Install the metadata-preserving HA proxy configurator
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../ha_http.py"
+    dest: /opt/homelab-app/ha_http.py
+    owner: root
+    group: root
+    mode: '0700'
+  when: app.kind == 'automation' and app.ha_http is defined
+
+- name: Configure the selected HA proxy before first application startup
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/ha_http.py, --expected-sha256, "{{ app.ha_http.source_sha256 }}", --proxy, "{{ app.ha_http.trusted_proxy }}"]
+  register: ha_proxy_configuration
+  changed_when: (ha_proxy_configuration.stdout | from_json).changed
+  when: app.kind == 'automation' and app.ha_http is defined and not ansible_check_mode
+  no_log: true
 
 - name: Start exactly this guest stack
   ansible.builtin.command:

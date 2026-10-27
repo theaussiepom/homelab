@@ -39,6 +39,8 @@ site provides one `automation/deployment.json`, plus an independent immutable
 `automation/source.json` source lock. The deployment file contains:
 
 - `schema`: `homelab-automation-deployment-v1`.
+- `enabled`: an explicit boolean. Keep it false while preparing and reviewing.
+- `discovery_previous_guests`: the exact existing Proxmox discovery scope.
 - `site`: the existing application installer profile, including one guest, its
   interfaces, resources, firewall allowances and verified capture reference.
 - `stack`: the three services, image identities, resource limits and saved mounts.
@@ -65,8 +67,9 @@ Node-RED's own login, without adding a second proxy authentication layer.
 
 A stack's optional `node_red_oidc` contains `identity_url`, `node_red_url`,
 `client_id` and `provider_slug`. Both URLs are HTTPS origins. The supplied
-`node-red-settings.js` wrapper loads the restored settings and changes only
-these OIDC endpoints. It preserves the credential secret, access policy,
+`node-red-settings.js` wrapper loads the restored settings, moves these OIDC
+endpoints and replaces the former Docker-only listener with the guest listener.
+The guest firewall restricts access. It preserves the credential secret, access policy,
 API-token checks and modules. The existing Authentik provider must also allow
 the new `/auth/strategy/callback/` URL through its reviewed configuration step.
 
@@ -77,6 +80,16 @@ mode to a site whose existing Node-RED already uses native OIDC.
 The routes use the same Proxmox Notes discovery as the foundation guests. A
 routing preview deliberately reports `deployable: false`: it adds no firewall
 allowance, DNS record, discovery permission or application configuration.
+
+For a guest with both a frontend and a Home interface, use the existing
+`frontend_routing` settings to keep replies on the interface that received the
+connection. The same routing helper used for Traefik runs before Docker. Each
+application job checks the prepared route before starting its service.
+
+`automation_configuration.py` derives the new bootstrap guest/VLAN grants from
+the application profile. Its discovery extension adds only the selected guest
+to the existing read-only token; it does not replace that token or change its
+role. Private CD selects that bootstrap source only when `enabled` is true.
 
 ## Before switching the house
 

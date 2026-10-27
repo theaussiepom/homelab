@@ -38,7 +38,7 @@ jobs:
       - name: Build pinned source tools
         run: docker build --platform linux/amd64 -t homelab-app-test -f proxmox/bootstrap/docker/Dockerfile proxmox/bootstrap/docker
       - name: Check preserved Node-RED native login settings
-        run: node --test proxmox/applications/tests/node-red-settings.test.cjs
+        run: node --test proxmox/applications/tests/node-red-*.test.cjs
       - name: Test without network, host devices or deployment credentials
         run: |
           docker run --rm --platform linux/amd64 --network none --cpus 2 --memory 2g \

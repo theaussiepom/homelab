@@ -4,6 +4,7 @@ Only bootstrap CD calls the write methods. The retained provider credential is
 never part of a plan, result, exception message or ordinary evidence artifact.
 """
 import ipaddress
+import copy
 import hashlib
 import json
 import os
@@ -75,6 +76,75 @@ def allowance(c):
 def owner(c):
     return {'schema': SCHEMA, 'node': c['node'], 'endpoint': c['endpoint'],
             'configuration': c['service_discovery'], 'identity': identity(c)[1], 'role': identity(c)[2]}
+
+
+def validate_extension(c):
+    """An explicit packet may add guest reads, preserving every other capability."""
+    packet = c['service_discovery_extension']
+    require(isinstance(packet, dict) and set(packet) == {'previous_guests'},
+            'Use only the exact previous discovery guest list for an extension')
+    previous = packet['previous_guests']
+    require(isinstance(previous, list) and previous and all(type(v) is int for v in previous)
+            and len(previous) == len(set(previous)) and previous == sorted(previous)
+            and c['service_discovery']['guests'] == sorted(c['service_discovery']['guests'])
+            and set(previous) < set(c['service_discovery']['guests'])
+            and c['service_discovery']['vmid'] in previous,
+            'A reviewed discovery extension may only append declared guest reads')
+
+
+def inspection_config(c, root, backup):
+    """Read the original exact scope until the separately declared extension commits."""
+    if 'service_discovery_extension' not in c:
+        return c
+    validate_extension(c)
+    local, remote = root / 'service-discovery', backup / 'service-discovery'
+    raw = read_private(local / 'owner.json')
+    require(raw == read_private(remote / 'owner.json'), 'Discovery owner and NAS copy differ')
+    if json.loads(raw) == owner(c):
+        return c
+    previous = copy.deepcopy(c)
+    previous['service_discovery']['guests'] = c['service_discovery_extension']['previous_guests']
+    require(json.loads(raw) == owner(previous),
+            'The exact previous discovery scope differs; no adoption or permission rewrite')
+    return previous
+
+
+def extend(api, c, before, root, backup):
+    """Add only reviewed read ACLs; no token, role, firewall or lifecycle changes."""
+    previous = inspection_config(c, root, backup)
+    require(previous != c and before['exists']
+            and inspect(api, previous, root, backup) == before,
+            'The retained discovery scope changed after the saved extension plan')
+    secret = retained(previous, root, backup)
+    old_rows, new_rows = acl_rows(previous), acl_rows(c)
+    require(old_rows < new_rows, 'Only additive read-only discovery extensions are supported')
+    local, remote = root / 'service-discovery', backup / 'service-discovery'
+    original = read_private(local / 'owner.json')
+    archive = 'owner-' + hashlib.sha256(original).hexdigest() + '.previous.json'
+    # Parent bootstrap CD has already persisted its one-use mutation hold.
+    # Keep both old records before the first grant, including partial failures.
+    for directory in (local, remote):
+        require(not (directory / archive).exists(), 'A prior extension needs review; no replay')
+    for directory in (local, remote):
+        save_new(directory / archive, json.loads(original))
+    for path, role, propagate in sorted(new_rows - old_rows):
+        api.call('/access/acl', 'PUT', {'path': path, 'roles': role,
+                                      'tokens': identity(c)[1], 'propagate': propagate})
+    verify_secret(api, c, secret)
+    for directory in (local, remote):
+        require(read_private(directory / 'owner.json') == original, 'Discovery owner changed during its extension')
+        pending = directory / 'owner.extension.pending'
+        save_new(pending, owner(c))
+        os.replace(pending, directory / 'owner.json')
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    inspect(api, c, root, backup)
+    return {'status': 'ready', 'created': False, 'extended': True,
+            'new_acl_rows': len(new_rows - old_rows), 'token_id': identity(c)[1],
+            'firewall_rule_created': False, 'secret_rotated': False}
 
 
 def private_directory(path, create=False):

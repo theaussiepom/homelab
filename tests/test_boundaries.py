@@ -37,7 +37,7 @@ def test_public_checks_share_one_entry_and_independent_jobs_have_no_dependencies
     # PRs supersede older PR checks; every main push still gets its own safety scan.
     assert workflow['concurrency']=={'group':'validation-${{ github.event.pull_request.number || github.run_id }}',
                                     'cancel-in-progress':"${{ github.event_name == 'pull_request' }}"}
-    assert {p.name for p in (core.ROOT/'.github/workflows').glob('*.yml')}=={'ci.yml'}
+    assert {p.name for p in (core.ROOT/'.github/workflows').iterdir() if p.suffix in {'.yml','.yaml'}}=={'ci.yml'}
     jobs=workflow['jobs']
     assert set(jobs)=={'changes','applications','iso-unit','validate','source-safety','dependency-review','analyze','build-and-boot'}
     for name in ('applications','iso-unit','validate','source-safety'):
