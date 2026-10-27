@@ -11,7 +11,7 @@ INPUTS = Path("/var/lib/homelab-inputs/bitwarden")
 HOLDS = (*files.HOLDS, "BITWARDEN-CD-HOLD.json")
 
 
-def prepare_inputs(config, destination=INPUTS, environment=None):
+def prepare_inputs(config, destination=INPUTS, environment=None, runtime_file=None):
     value = migration.read_json(config)
     files.require(
         isinstance(value, dict)
@@ -29,6 +29,12 @@ def prepare_inputs(config, destination=INPUTS, environment=None):
     migration.validate_admission(cfg, stack, runtime=False)
     environment = os.environ if environment is None else environment
     secret = environment.get("BITWARDEN_RUNTIME_JSON")
+    if runtime_file is not None:
+        files.require(
+            not secret,
+            "Select one private runtime binding, never two competing sources",
+        )
+        secret = files.regular(Path(runtime_file), private=True).decode()
     files.require(
         isinstance(secret, str) and 0 < len(secret.encode()) <= 1024 * 1024,
         "Supply the retained private runtime JSON binding",
@@ -78,7 +84,14 @@ def prepare_inputs(config, destination=INPUTS, environment=None):
     return cfg, destination / "site.json"
 
 
-def run(phase, config, destination=INPUTS, environment=None, deployment=deploy):
+def run(
+    phase,
+    config,
+    destination=INPUTS,
+    environment=None,
+    deployment=deploy,
+    runtime_file=None,
+):
     files.require(
         phase in ("plan", "deploy", "verify"), "Select a bounded Bitwarden phase"
     )
@@ -93,7 +106,7 @@ def run(phase, config, destination=INPUTS, environment=None, deployment=deploy):
         and (phase != "plan" or approved is None),
         "Deploy needs the exact reviewed saved-plan fingerprint; plan cannot carry an old approval",
     )
-    cfg, site = prepare_inputs(config, destination, environment)
+    cfg, site = prepare_inputs(config, destination, environment, runtime_file)
     vmid = deployment.validate(cfg)
     work = Path(cfg["paths"]["state_root"]) / str(vmid)
     work.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -203,9 +216,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--phase", choices=("plan", "deploy", "verify"), required=True)
     parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--runtime-file", type=Path)
     args = parser.parse_args()
     try:
-        print(json.dumps(run(args.phase, args.config)))
+        print(json.dumps(run(args.phase, args.config, runtime_file=args.runtime_file)))
     except Exception:
         raise SystemExit(
             "Bitwarden CD held; inspect retained private inputs, saved plan and receipts"

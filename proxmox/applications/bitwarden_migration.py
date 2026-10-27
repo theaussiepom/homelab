@@ -227,6 +227,20 @@ def validate_admission(cfg, stack, runtime=True, ready=True):
     )
     if not runtime:
         return missing
+    network = app.get("network_contract")
+    if network is not None:
+        require(
+            isinstance(network, dict)
+            and set(network) == {"path", "sha256", "source_revision"}
+            and Path(network["path"]).is_absolute()
+            and re.fullmatch("[0-9a-f]{64}", network["sha256"])
+            and re.fullmatch("[0-9a-f]{40}", network["source_revision"]),
+            "Bind the selected shared network contract and immutable helper source",
+        )
+        require(
+            checksum(files.regular(Path(network["path"]))) == network["sha256"],
+            "Shared network contract drifted before the selected native step",
+        )
     target = stack["services"]["bitwarden"].get("environment", {})
     source = dict(target, BW_DB_SERVER=settings["source_database_server"])
     require(

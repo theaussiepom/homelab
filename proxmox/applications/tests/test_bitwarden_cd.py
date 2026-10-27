@@ -226,6 +226,32 @@ class CDTests(unittest.TestCase):
                     config["site"], config["stack"], source
                 )
 
+    def test_private_runtime_file_and_shared_contract_are_bound_without_new_cloud_secrets(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as d:
+            config, path, dest, environment, source = setup(Path(d))
+            root = Path(d)
+            runtime = root / "runtime.json"
+            private(runtime, bitwarden_migration.encoded(source))
+            contract = root / "network.json"
+            private(contract, b'{"synthetic":"network"}\n')
+            config["site"]["app"]["network_contract"] = {
+                "path": str(contract),
+                "sha256": deploy.sha(contract),
+                "source_revision": "e" * 40,
+            }
+            path.write_bytes(bitwarden_migration.encoded(config))
+            cfg, _ = bitwarden_cd.prepare_inputs(path, dest, {}, runtime_file=runtime)
+            self.assertIn(str(contract), deploy.input_hashes(cfg))
+            with self.assertRaisesRegex(ValueError, "one private runtime"):
+                bitwarden_cd.prepare_inputs(
+                    path, dest, environment, runtime_file=runtime
+                )
+            contract.write_bytes(b'{"synthetic":"drift"}\n')
+            with self.assertRaisesRegex(ValueError, "contract drifted"):
+                bitwarden_cd.prepare_inputs(path, dest, {}, runtime_file=runtime)
+
     def test_invalid_container_budget_stops_before_private_inputs_or_native_work(self):
         with tempfile.TemporaryDirectory() as d:
             config, path, dest, environment, _ = setup(Path(d))

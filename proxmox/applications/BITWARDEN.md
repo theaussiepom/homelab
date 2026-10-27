@@ -19,8 +19,11 @@ upgrade with the move. The image ID records the migration evidence; the image
 reference remains `latest`.
 
 Preserve the effective `BW_*`, `globalSettings*`, `adminSettings*`, PUID/PGID and
-any existing TZ values. The private JSON binding `BITWARDEN_RUNTIME_JSON` must
-match the reviewed source-environment hash. Only `BW_DB_SERVER` changes to the
+any existing TZ values. The private runtime JSON file supplied with `--runtime-file` must match the
+reviewed source-environment hash. The environment binding
+`BITWARDEN_RUNTIME_JSON` is also supported, but only one input source may be
+selected. The private workflow uses the existing recovery file and creates no
+new GitHub runtime Secret. Only `BW_DB_SERVER` changes to the
 reviewed private native MariaDB endpoint. Preserve installation ID/key, schema,
 database credentials, certificate password, optional integration keys, SMTP,
 feature switches, internal URLs and the current public hostname.
@@ -30,7 +33,10 @@ change across upgrades. The adapter refuses an absent or mismatched UID/GID so
 startup cannot silently change restored ownership. Keep the image's default
 entrypoint; do not add a Docker `user` override.
 
-The generated private stack and Compose files are mode 0600. Values are passed
+The generated private stack and Compose files are mode 0600. The source runtime
+file must also be owned by the runner and mode 0600. A selected shared network
+contract is fingerprinted in the expanded site input and the common saved-plan
+input set; every phase refuses raw contract drift. Values are passed
 as an environment mapping with literal dollar escaping, which works with the
 selected Compose 2.26 package. No dotenv reparsing is needed. Never print resolved
 Compose, runtime JSON, captures, database dumps, private keys or application logs

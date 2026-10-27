@@ -148,6 +148,8 @@ def input_hashes(cfg):
         stack = json.loads(Path(app['stack_config']).read_text())
         paths.extend(foundation.source_files(stack))
         if app.get('kind') == 'bitwarden':
+            if 'network_contract' in app:
+                paths.append(app['network_contract']['path'])
             for key in ('restore_receipt', 'prerequisites_receipt'):
                 paths.extend((app['bitwarden'][key]['path'], str(bitwarden_migration.nas_receipt(cfg, key))))
     paths.extend(item['key_path'] for item in app.get('repositories', []))
