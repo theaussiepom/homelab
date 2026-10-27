@@ -20,3 +20,4 @@ ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/verify.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/network-startup.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/ingress-network-startup.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-image.yml

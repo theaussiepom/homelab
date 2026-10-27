@@ -183,6 +183,28 @@ A completed repeat verifies the existing guest and unchanged inputs; it does
 not reinstall, restore or restart the application. A failed or interrupted
 rollout keeps its receipts and hold. A later job cannot silently retry it.
 
+### Fixing an installed service
+
+Use a reviewed pull request and let its merge run CD. Do not repair a running
+guest by hand and leave the repository behind.
+
+For example, the Traefik 3.7.1 image used an ACME DNS check that Unbound correctly
+refused. The pinned 3.7.16 image includes the corrected recursive query. An
+image-only CD update replaces just the Traefik container, retaining its routes,
+keys, certificate store and application data. It does not relax DNS access or
+certificate verification, restart Docker, or restore the original capture.
+
+Maintenance has its own reviewed packet and source pin; the original guest
+installation inputs and evidence stay intact. A successful image update is
+checked on later runs without replacing the container again. An interrupted or
+failed update stops for review.
+
+If a new application's final check failed because of that dependency, an
+explicitly approved continuation can run only its original verification. It
+preserves the failed logs and holds, checks the original installed guest and
+input fingerprints, then records completion only if those checks pass. It
+never repeats guest creation, application installation or a data restore.
+
 The new foundation and bootstrap jobs share one immutable foundation source lock.
 Do not change the source pin or saved input files of already commissioned
 DNS/database guests just to deploy these services.

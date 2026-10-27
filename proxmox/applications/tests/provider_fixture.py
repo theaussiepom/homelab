@@ -21,7 +21,7 @@ import time
 import uuid
 import zipfile
 
-IMAGE = 'traefik@sha256:6b9cbca6fac42ab0075f5437d8dc1685cfd188626d8d515839ea94f8b6271c42'
+IMAGE = 'traefik@sha256:1336e85aaed293bd63d005086e0dd013b04078b26aaeb1c18b26a2f928af7e65'
 MODULE = 'github.com/NX211/traefik-proxmox-provider'
 PLUGIN_COMMIT = 'e35cce5af139328b8e424836a0b32638ed777016'
 PLUGIN_TREE_SHA256 = 'b1154d92f81ef7c1b85b2f572735839b82c352f4e1fc5da8d398301e63bfc247'
@@ -312,11 +312,11 @@ def main():
             'stsSeconds': 31536000}}}},
             'tls': {'stores': {'default': {'defaultCertificate': {
                 'certFile': '/fixture/server.pem', 'keyFile': '/fixture/server.key'}}}}}
-        (root / 'dynamic.json').write_text(json.dumps(dynamic))
+        (root / 'dynamic.yml').write_text(json.dumps(dynamic))
         static = {'entryPoints': {'https': {'address': ':8443'}},
                   'global': {'checkNewVersion': False, 'sendAnonymousUsage': False},
                   'experimental': {'localPlugins': {'proxmox': {'moduleName': MODULE}}},
-                  'providers': {'file': {'filename': '/fixture/dynamic.json'}, 'plugin': {
+                  'providers': {'file': {'filename': '/fixture/dynamic.yml'}, 'plugin': {
                       'proxmox': {'pollInterval': '5s', 'apiEndpoint': 'https://127.0.0.1:8006',
                                   'apiTokenId': 'fixture@pve!discovery',
                                   'apiToken': 'synthetic-not-a-secret',
