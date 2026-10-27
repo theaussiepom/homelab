@@ -95,7 +95,7 @@ def client():
     wait_for(lambda: (root / 'wrong-key-tested').exists(), 'Wrong-key test was not run', 90)
     assert 'unknown PSK identity' not in (root / 'wrong-agent.log').read_text()
     wrong_log = (root / 'wrong-agent.log').read_text().lower()
-    assert any(word in wrong_log for word in ['handshake', 'decrypt', 'tls', 'ssl']), wrong_log
+    assert any(word in wrong_log for word in ['alert decrypt error', 'bad record mac', 'binder does not verify']), wrong_log
     # A separate incorrect-key hostname is admitted with a known key; it must
     # never receive data when the agent presents a different key.
     bad_hostid = api('host.get', {'filter': {'host': ['fixture-wrong']}, 'output': ['hostid']}, token)[0]['hostid']
