@@ -54,18 +54,66 @@ The common packet needs to bind:
 - The persistent startup requirement, read-only acceptance probes and failure
   custody. A completed update must verify on later runs without recreating it.
 
-Derive the guest overlay with
-`database_networks.attach(original_guest, contract, ['postgresql'])`, then set
-its `rules` to `rules_candidate(original_guest['rules'], before,
-database_networks.rules(contract, 'postgresql', vmid)[0])`. Use the shared
-`interface`/`rules` output rather than repeating NIC or rule literals. The new
-NIC is untagged, has no gateway and is appended after the existing management
-and application backend NICs. Preserve their order, addresses, MACs, gateway,
-HTTP ingress and storage. Replace only the exact legacy SQL allowance, retaining
-all non-SQL rules. The old PostgreSQL network must not remain as a fallback;
-there is no period of dual PostgreSQL access and no unrelated firewall cleanup.
-The application backend interface remains for HTTP/OAuth, even though database
-traffic leaves it.
+The shared contract helpers still derive the endpoint, interface and exact SQL
+rule. For maintenance, use
+`database_network_maintenance.candidate_guest(original_guest, contract,
+'postgresql', phase='cutover', client_vmids=selected_clients,
+legacy_server_address=before['address'])` as the authoritative guest candidate.
+It keeps the existing management/backend NICs and appends the untagged database
+NIC without a gateway. Select only the Authentik and pgAdmin clients for this coordinated PostgreSQL
+cutover, not every future client in the catalogue.
+
+Run `rules_candidate()` against the original guest rules as a service preflight.
+Require its sole new SQL rule and unchanged non-SQL rule order to match the
+common candidate. Keep the common candidate's exact rule order for
+`check_plan()`: the common planner appends the replacement SQL rule, whereas the
+service helper replaces it at the old position. Do not substitute that different
+list ordering into the saved plan. A mismatch in membership or non-SQL rules is
+a hold. In particular, keep the service guard for additional broad SQL egress;
+an exact native resource-change check is not a substitute for that guard.
+
+Preserve management/default routing, HTTP ingress and storage. The old SQL
+allowance is removed with no period of dual PostgreSQL access or unrelated
+firewall cleanup. The backend interface remains for HTTP/OAuth, even though
+database traffic leaves it.
+
+## Available common source and the activation gap
+
+The common checkpoint exposes `database_network_maintenance.plan()` and
+`check_plan()`. Planning uses the original installed module, authoritative
+state/backend and workflow/deployment locks. It binds the contract and original
+installation evidence in a separate maintenance directory and holds failed or
+interrupted attempts. `plan()` contacts the pinned Proxmox API; it has not been
+called by this source work. The planner returns `apply_supported=false` and
+`lifecycle_effects_verified=false`, and has no apply entry point.
+
+The common `ansible/network-update.yml` startup playbook accepts the original
+`app` identity, `network_ready_interfaces` and exact current
+`network_ready_gate_sha256` / `network_ready_dependency_sha256`. Derive the
+interface names from all IPv4 NIC positions in the common candidate. Authentik
+uses the fixed `docker.service` dependency. Both existing startup files must
+match their admitted hashes and metadata. The playbook requires active IPv4
+interfaces, updates the shared gate/dependency and checks Docker's PID and
+activation timestamps stay unchanged. It does not recreate Authentik containers.
+
+The remaining coordinated activation packet must supply:
+
+- Real saved plans for all three commissioned guests, their exact hashes and
+  provider lifecycle effects, including whether the new client NIC is usable
+  without an unapproved guest restart. Keep original state, inputs and receipts.
+- Exact current startup-file hashes, runtime Compose/image/secret-reference
+  bindings, existing source/profile/installation receipts and current holds.
+- A reviewed common apply/activation path for those exact plans, PostgreSQL's
+  listener/HBA cutover and both Authentik modes, with failure custody and no
+  implicit retry or fallback SQL access. No such executor is added here.
+- New-network verification and the current verification-profile binding after
+  retiring the old database address; historic installation receipts must not
+  cause later CD to probe the retired SQL endpoint.
+- pgAdmin's exact saved-server/user selector and profile/runtime bindings from
+  its service owner, plus separate OAuth and authenticated database checks.
+
+The committed prepared selection is source preparation. Neither a green plan
+nor the startup playbook fills these activation gaps or admits a native target.
 
 ## Ordering and target evidence
 
@@ -95,5 +143,6 @@ other application clients. The selected order is:
    not prove the database path. Keep Node-RED forward-auth acceptance distinct.
 
 No live read, restart, native plan, apply or migration is performed by this
-source helper. The exact common maintenance API/pin and its admitted native
-evidence are integration prerequisites; source tests do not establish them.
+source helper. The common planning/startup APIs are known; the finite native
+plan/lifecycle, binding and activation gaps above remain. Source tests do not
+establish native readiness.
