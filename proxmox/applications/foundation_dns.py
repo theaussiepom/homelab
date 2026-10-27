@@ -363,6 +363,8 @@ def remote_run():
         private_write(evidence / 'unbound-apply-completed.json', {'changed': unbound_changed})
         changed = after != before
         if changed:
+            # Unbound staging/reload can take time; recheck before replacing the FTL array.
+            require(get_hosts() == before, 'DNS hosts changed before FTL write; preserve the hold')
             private_write(evidence / 'pihole-apply-started.json', {'remote_closure': 'unconfirmed'})
             command(COMPOSE_ARGV + ['exec', '-T', 'pihole', 'pihole-FTL', '--config', 'dns.hosts',
                                     json.dumps(after, separators=(',', ':'))])
