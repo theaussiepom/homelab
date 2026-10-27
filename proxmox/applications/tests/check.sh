@@ -6,6 +6,8 @@ python3 -m unittest discover -s /src/proxmox/applications/tests -v
 python3 /src/proxmox/applications/tests/restore_fixture.py
 python3 /src/proxmox/applications/tests/database_account_fixture.py
 python3 /src/proxmox/applications/tests/database_server_fixture.py
+python3 /src/proxmox/applications/tests/runner_network_guard_fixture.py
+python3 /src/proxmox/applications/tests/ingress_network_guard_fixture.py
 cp -R /src/proxmox/applications/tofu /tmp/app-tofu
 cd /tmp/app-tofu
 tofu fmt -check -recursive
@@ -16,3 +18,6 @@ export ANSIBLE_LOCAL_TEMP=/tmp/ansible-local
 export ANSIBLE_CONFIG=/src/proxmox/applications/ansible/ansible.cfg
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/site.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/verify.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/network-startup.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/ingress-network-startup.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-image.yml

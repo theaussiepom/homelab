@@ -3,6 +3,7 @@
 This checks Ansible staging and data preservation, not systemd/LXC startup.
 """
 import json
+import configparser
 import os
 from pathlib import Path
 import subprocess
@@ -34,7 +35,7 @@ with tempfile.TemporaryDirectory() as tmp:
         destination = Path('/etc') / directory / 'homelab-cd-fixture.conf'
         require(not destination.exists(), 'Use a fresh fixture container')
         destination.parent.mkdir(mode=0o700, exist_ok=True)
-        settings = {'app': {'kind': kind, 'start_services': False, 'database': {
+        settings = {'network_ready_interfaces':['eth0','eth1'], 'app': {'kind': kind, 'start_services': False, 'database': {
             'user': 'root', 'group': 'root', 'version_pattern': 'synthetic-native-1',
             'version_command': ['python3', '-c', 'print("synthetic-native-1")'],
             'config_files': [{'source': str(config), 'destination': str(destination)}]}}}
@@ -46,6 +47,15 @@ with tempfile.TemporaryDirectory() as tmp:
                 require('changed=0' in result.stdout, 'Repeated server staging must make no changes')
         require(destination.read_bytes() == config.read_bytes(), 'Server configuration differs')
         require(destination.stat().st_mode & 0o777 == 0o600, 'Server configuration must stay private')
+        gate=configparser.ConfigParser(interpolation=None)
+        gate.read('/etc/systemd/system/homelab-network-ready.service')
+        require('network-online.target' not in gate['Unit']['After'].split(),
+                'The bounded interface wait must not start after a separate network-online wait')
+        require(gate['Service']['RemainAfterExit']=='yes', 'Readiness gate must retain successful startup state')
+        require(gate['Service']['ExecStart'].split()==[
+            '/usr/lib/systemd/systemd-networkd-wait-online','--ipv4','--timeout=30',
+            '--interface=eth0:routable','--interface=eth1:routable'],
+            'Management readiness cannot substitute for the required backend interface')
         require(data.read_bytes() == b'existing rows must survive database CD\n'
                 and (data.stat().st_ino, data.stat().st_mtime_ns) == (before.st_ino, before.st_mtime_ns),
                 'Server staging changed existing data')

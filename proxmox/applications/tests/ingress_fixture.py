@@ -17,7 +17,7 @@ import threading
 import time
 import uuid
 
-IMAGE = 'traefik@sha256:6b9cbca6fac42ab0075f5437d8dc1685cfd188626d8d515839ea94f8b6271c42'
+IMAGE = 'traefik@sha256:1336e85aaed293bd63d005086e0dd013b04078b26aaeb1c18b26a2f928af7e65'
 
 
 def serve():
@@ -124,7 +124,7 @@ def main():
     names = []
     with tempfile.TemporaryDirectory(prefix='homelab-ingress-fixture-') as tmp:
         root = Path(tmp)
-        (root / 'routes.json').write_text(json.dumps(routes))
+        (root / 'routes.yml').write_text(json.dumps(routes))
         try:
             for side in ('backends', 'proxy'):
                 name = 'homelab-ingress-fixture-' + side + '-' + uuid.uuid4().hex[:10]
@@ -142,7 +142,7 @@ def main():
                 else:
                     docker(*common, '--network', 'container:' + names[0],
                            '-v', f'{root}:/fixture:ro', IMAGE,
-                           '--entrypoints.https.address=:8443', '--providers.file.filename=/fixture/routes.json',
+                           '--entrypoints.https.address=:8443', '--providers.file.filename=/fixture/routes.yml',
                            '--global.checknewversion=false', '--global.sendanonymoususage=false',
                            stdout=subprocess.DEVNULL)
             docker('exec', names[0], 'python3', '/fixture.py', 'check')

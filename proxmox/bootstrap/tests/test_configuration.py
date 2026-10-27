@@ -1,6 +1,7 @@
 """Configuration reruns must never copy stale workstation state or replay failures."""
 import json
 import hashlib
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -66,6 +67,19 @@ class ConfigurationTests(unittest.TestCase):
             with self.assertRaisesRegex(Refused, 'inputs changed'):
                 configuration.configure(self.work, self.deployment, 'a' * 64)
             remote.assert_not_called()
+
+    def test_mac_locale_cannot_prevent_ansible_from_starting(self):
+        with patch.dict(os.environ, {'LC_ALL': 'unsupported-fixture', 'LANG': 'unsupported-fixture',
+                                    'LC_CTYPE': 'UTF-8', 'FIXTURE_PRESERVED': 'present'}), \
+                patch.object(configuration, 'remote', side_effect=self.remote), \
+                patch.object(configuration.subprocess, 'run') as ansible:
+            plan = configuration.configure(self.work, self.deployment)
+            configuration.configure(self.work, self.deployment, plan['plan_sha256'])
+            environment = ansible.call_args.kwargs['env']
+            self.assertEqual(environment['LC_ALL'], 'C.UTF-8')
+            self.assertEqual(environment['LANG'], 'C.UTF-8')
+            self.assertEqual(environment['FIXTURE_PRESERVED'], 'present')
+            self.assertEqual(os.environ['LC_ALL'], 'unsupported-fixture')
 
     def test_interrupted_apply_leaves_hold_and_never_automatically_retries(self, unprotect=False):
         value = read(self.deployment); value['temporarily_unprotect_deploy'] = unprotect; write(self.deployment, value)
