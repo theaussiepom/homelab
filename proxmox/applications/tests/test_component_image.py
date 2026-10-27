@@ -114,6 +114,17 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(json.loads(raw),{'error':'JSONDecodeError','reason':None})
         self.assertNotIn(b'must-not-appear',raw)
 
+    def test_command_failure_never_records_private_output(self):
+        def failing(argv):
+            if 'pull' in argv:
+                raise image.CommandFailed('private-output-must-not-appear')
+            return self.command(argv)
+        with patch.object(image,'command',failing):
+            with self.assertRaises(image.CommandFailed):image.run(712,OLD,NEW,self.hash)
+        raw=next((self.root/'state').glob('*/FAILURE.json')).read_bytes()
+        self.assertEqual(json.loads(raw),{'error':'CommandFailed','reason':None})
+        self.assertNotIn(b'private-output-must-not-appear',raw)
+
 
 if __name__ == '__main__':
     unittest.main()
