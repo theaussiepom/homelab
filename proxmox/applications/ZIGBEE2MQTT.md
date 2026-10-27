@@ -126,10 +126,16 @@ approval must be true before even using that command. The writer confirmation
 must be true before attachment. These are inputs to a separately reviewed
 migration packet, never inferred from synthetic tests or set by this preparation.
 
-The command requires `--revision FULL_REVIEWED_COMMIT`. It verifies that this is
+The command requires `--revision FULL_REVIEWED_COMMIT` and
+`--signer-fingerprint SHA256:APPROVED_SSH_SIGNER`. The native action packet must
+approve that fingerprint independently of the selected commit and workstation
+Git trust settings; do not discover the approved value from the commit being
+checked. The command compares the signature fingerprint with this explicit pin.
+It also verifies that this is
 the checkout's HEAD, that Git accepts its signature using the operator's existing
 trusted signers, and that both executed source files match that commit byte for
-byte. A branch name, unsigned commit or modified helper is refused before SSH.
+byte. A branch name, unsigned commit, different signer or modified helper is
+refused before SSH. The operator plan binds the approved fingerprint too.
 Review the selected SSH key's authority for this root action in the native
 packet. The pinned SSH host key authenticates the target; the reported hostname
 is only an additional node consistency check.
@@ -163,3 +169,7 @@ The implementation follows the official [Zigbee2MQTT Docker guidance](https://ww
 and the pinned [Proxmox provider's container device interface](https://github.com/bpg/terraform-provider-proxmox/blob/v0.117.0/docs/resources/virtual_environment_container.md).
 
 The USB permission restriction is visible in the official [Proxmox container source](https://github.com/proxmox/pve-container/blob/master/src/PVE/LXC.pm), in `check_ct_modify_config_perm`. Source inspection is not installed-host verification.
+
+Zigbee has no direct SQL or InfluxDB dependency. This flow preserves its existing
+vmbr30 MQTT/application path and requires no database-network change or bridge
+31/32/33 interface.

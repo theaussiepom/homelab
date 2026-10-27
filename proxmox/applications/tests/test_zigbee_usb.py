@@ -124,40 +124,46 @@ class UsbOperatorTests(unittest.TestCase):
             state=root/'tofu/terraform.tfstate';state.write_text('synthetic state must remain on its owner')
             reply=type('Result',(),{'returncode':0,'stderr':'','stdout':json.dumps({'request':request,'plan_sha256':'1'*64})})
             with patch.object(operator,'authenticated_revision',return_value='1'*40),patch.object(operator.subprocess,'run',return_value=reply) as run:
-                operator.execute(root,request,key,hosts,revision='1'*40)
+                operator.execute(root,request,key,hosts,revision='1'*40,signer_fingerprint='SHA256:'+'A'*43)
                 args=run.call_args.args[0]
                 self.assertIn('root@pve.example.invalid',args)
                 self.assertIn('StrictHostKeyChecking=yes',args)
                 self.assertNotIn(state.read_text(),' '.join(args))
                 self.assertEqual(state.read_text(),'synthetic state must remain on its owner')
+            with patch.object(operator,'authenticated_revision',return_value='1'*40),patch.object(operator.subprocess,'run') as run,self.assertRaises(ValueError):
+                operator.execute(root,request,key,hosts,'1'*64,revision='1'*40,signer_fingerprint='SHA256:'+'B'*43)
+            run.assert_not_called()
             with patch.object(operator,'authenticated_revision',return_value='1'*40),patch.object(operator.subprocess,'run',side_effect=subprocess.TimeoutExpired('ssh',120)),self.assertRaises(subprocess.TimeoutExpired):
-                operator.execute(root,request,key,hosts,'1'*64,revision='1'*40)
+                operator.execute(root,request,key,hosts,'1'*64,revision='1'*40,signer_fingerprint='SHA256:'+'A'*43)
             self.assertTrue((root/'zigbee-usb-HOLD-6101.json').exists())
             with patch.object(operator,'authenticated_revision',return_value='1'*40),patch.object(operator.subprocess,'run') as run,self.assertRaises(ValueError):
-                operator.execute(root,request,key,hosts,'1'*64,revision='1'*40)
+                operator.execute(root,request,key,hosts,'1'*64,revision='1'*40,signer_fingerprint='SHA256:'+'A'*43)
             run.assert_not_called()
 
     def test_operator_authenticates_the_reviewed_commit_and_exact_executed_files(self):
         import subprocess
         import zigbee_usb_operator as operator
-        revision='1'*40;repo=operator.HERE.parents[1]
-        for mode in ('trusted','wrong-head','unsigned','untrusted','dirty'):
+        revision='1'*40;repo=operator.HERE.parents[1];signer='SHA256:'+'A'*43
+        for mode in ('trusted','wrong-head','unsigned','untrusted','wrong-signer','dirty'):
             def git(args,**kwargs):
                 if args[1:]==['rev-parse','--show-toplevel']:return str(repo)+'\n'
                 if args[1:]==['rev-parse','HEAD']:return ('2'*40 if mode=='wrong-head' else revision)+'\n'
                 if args[1]=='verify-commit':
                     if mode=='unsigned':raise subprocess.CalledProcessError(1,args)
                     return b''
-                if args[1]=='log':return 'U\n' if mode=='untrusted' else 'G\n'
+                if args[1]=='log':
+                    if '--format=%GF' in args:return ('SHA256:'+'B'*43 if mode=='wrong-signer' else signer)+'\n'
+                    return 'U\n' if mode=='untrusted' else 'G\n'
                 if args[1]=='show':
                     relative=args[2].split(':',1)[1]
                     return b'modified code' if mode=='dirty' else (repo/relative).read_bytes()
                 raise AssertionError(args)
             with self.subTest(mode=mode),patch.object(operator.subprocess,'check_output',side_effect=git):
-                if mode=='trusted':self.assertEqual(operator.authenticated_revision(revision),revision)
+                if mode=='trusted':self.assertEqual(operator.authenticated_revision(revision,signer),revision)
                 else:
-                    with self.assertRaises((ValueError,subprocess.CalledProcessError)):operator.authenticated_revision(revision)
-        with self.assertRaises(ValueError):operator.authenticated_revision('main')
+                    with self.assertRaises((ValueError,subprocess.CalledProcessError)):operator.authenticated_revision(revision,signer)
+        with self.assertRaises(ValueError):operator.authenticated_revision('main',signer)
+        with self.assertRaises(ValueError):operator.authenticated_revision(revision,'')
 
 
 class UsbRunnerTests(unittest.TestCase):

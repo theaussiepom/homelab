@@ -20,10 +20,12 @@ import zigbee_usb
 HERE=Path(__file__).resolve().parent
 
 
-def authenticated_revision(revision):
+def authenticated_revision(revision,signer_fingerprint):
     """Require the explicitly reviewed signed commit and its exact source bytes."""
     if not re.fullmatch(r'[0-9a-f]{40}',revision):
         raise ValueError('Select the full reviewed, signed source revision')
+    if not re.fullmatch(r'SHA256:[A-Za-z0-9+/]{43}',signer_fingerprint):
+        raise ValueError('Supply the SSH signer fingerprint independently approved in the native action packet')
     def git(*args,text=False):
         return subprocess.check_output(['git',*args],cwd=HERE,stderr=subprocess.PIPE,timeout=15,text=text)
     root=Path(git('rev-parse','--show-toplevel',text=True).strip()).resolve()
@@ -33,6 +35,8 @@ def authenticated_revision(revision):
     git('verify-commit',revision)
     if git('log','-1','--format=%G?',revision,text=True).strip()!='G':
         raise ValueError('The reviewed source must have a good signature from an existing trusted signer')
+    if git('log','-1','--format=%GF',revision,text=True).strip()!=signer_fingerprint:
+        raise ValueError('The signed source does not match the independently approved signer fingerprint')
     if Path(zigbee_usb.__file__).resolve()!=HERE/'zigbee_usb.py':
         raise ValueError('The loaded USB helper must come from this signed checkout')
     for path in (Path(__file__).resolve(),HERE/'zigbee_usb.py'):
@@ -50,10 +54,10 @@ def write(path,value,exclusive=False):
         json.dump(value,stream,indent=2);stream.write('\n');stream.flush();os.fsync(stream.fileno())
 
 
-def execute(work,request,key,known_hosts,approved='',revision=''):
+def execute(work,request,key,known_hosts,approved='',revision='',signer_fingerprint=''):
     """Use pinned bootstrap authority, a reviewed live hash and one attempt hold."""
     zigbee_usb.validate_request(request)
-    reviewed=authenticated_revision(revision)
+    reviewed=authenticated_revision(revision,signer_fingerprint)
     if approved and not re.fullmatch(r'[0-9a-f]{64}',approved):
         raise ValueError('Select the exact reviewed USB plan SHA256')
     for path in (work,key,known_hosts):
@@ -66,7 +70,7 @@ def execute(work,request,key,known_hosts,approved='',revision=''):
         raise ValueError('The radio must use the node and management endpoint already pinned by bootstrap')
     source=(HERE/'zigbee_usb.py').read_text()
     source_hash=hashlib.sha256(source.encode()+Path(__file__).read_bytes()).hexdigest()
-    binding={'request':request,'revision':reviewed,'source_sha256':source_hash,
+    binding={'request':request,'revision':reviewed,'signer_fingerprint':signer_fingerprint,'source_sha256':source_hash,
              'known_hosts_sha256':hashlib.sha256(known_hosts.read_bytes()).hexdigest(),
              'bootstrap_site_sha256':hashlib.sha256(authority.read_bytes()).hexdigest()}
     saved=work/f'zigbee-usb-plan-{request["vmid"]}.json'
@@ -121,10 +125,11 @@ def main():
     parser.add_argument('--ssh-key',required=True,type=Path)
     parser.add_argument('--known-hosts',required=True,type=Path)
     parser.add_argument('--revision',required=True,help='Full reviewed commit, verified with existing trusted Git signers')
+    parser.add_argument('--signer-fingerprint',required=True,help='SSH SHA256 signer fingerprint independently approved in the native action packet')
     parser.add_argument('--apply',default='',help='Exact SHA256 from the reviewed operator plan')
     args=parser.parse_args()
     try:
-        result=execute(args.bootstrap,json.loads(args.request.read_text()),args.ssh_key,args.known_hosts,args.apply,args.revision)
+        result=execute(args.bootstrap,json.loads(args.request.read_text()),args.ssh_key,args.known_hosts,args.apply,args.revision,args.signer_fingerprint)
         print(json.dumps({'status':result.get('status','planned'),'plan_sha256':result.get('plan_sha256'),
                           'native_radio_qualified':False,'runner_refresh_required':bool(args.apply)}))
     except (OSError,ValueError,KeyError,subprocess.SubprocessError):
