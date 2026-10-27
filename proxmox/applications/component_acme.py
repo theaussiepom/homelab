@@ -82,8 +82,8 @@ def run(settings, verify_only=False, confirmation=None):
                     'Guest configuration or hold changed during confirmation')
             require(not (operation/'failed-HOLD.json').exists() and not (operation/'failed-HOLD.json').is_symlink(),
                     'Preserve existing archived failure evidence')
-            (operation/'HOLD.json').rename(operation/'failed-HOLD.json');shared.sync(operation)
             shared.save(operation/'complete.json',b'{"status":"passed"}\n')
+            (operation/'HOLD.json').rename(operation/'failed-HOLD.json');shared.sync(operation)
             return {'status':'passed','changed':False}
         except Exception as error:
             shared.save(operation/'confirmation-failure.json',(json.dumps({

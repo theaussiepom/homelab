@@ -82,5 +82,19 @@ class ConfirmationTests(unittest.TestCase):
                       {**self.confirmation,'update':{**self.selected,'vmid':703}}):
             with self.subTest(value=value),self.assertRaises(ValueError):maintenance.packet(value)
 
+    def test_interruption_after_guest_success_remains_held_for_separate_review(self):
+        write=fc.write_new
+        def fail_completion(path,data):
+            if path==self.operation/'complete.json':raise OSError('synthetic interruption after guest success')
+            return write(path,data)
+        with patch.object(fc,'write_new',side_effect=fail_completion):
+            with self.assertRaises(OSError):self.run_confirmation()
+        self.deployment.quiet.assert_called_once()
+        self.assertTrue((self.operation/'confirmation-claim.json').is_file())
+        self.assertFalse((self.operation/'complete.json').exists())
+        with self.assertRaises(FileExistsError):self.run_confirmation()
+        self.deployment.quiet.assert_called_once()
+        for name,data in self.original.items():self.assertEqual((self.operation/name).read_bytes(),data)
+
 
 if __name__=='__main__':unittest.main()

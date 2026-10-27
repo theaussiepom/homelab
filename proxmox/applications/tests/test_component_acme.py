@@ -134,5 +134,16 @@ class ComponentTests(unittest.TestCase):
         profile=json.loads((Path(component.__file__).parent/'foundation-profiles/ingress.site.json').read_text())
         self.assertEqual(component.HEALTH,profile['app']['health_checks'][0]['argv'])
 
+    def test_guest_completion_write_failure_keeps_the_original_hold_active(self):
+        selected=self.confirmation();save=shared.save
+        def fail_completion(path,data):
+            if path==self.operation/'complete.json':raise OSError('synthetic receipt write failure')
+            return save(path,data)
+        with patch.object(shared,'save',side_effect=fail_completion):
+            with self.assertRaises(OSError):component.run(self.settings,confirmation=selected)
+        self.assertTrue((self.operation/'HOLD.json').is_file())
+        self.assertFalse((self.operation/'failed-HOLD.json').exists())
+        self.assertFalse((self.operation/'complete.json').exists())
+
 
 if __name__=='__main__':unittest.main()
