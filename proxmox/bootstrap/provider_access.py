@@ -276,6 +276,9 @@ def admit_minted_continuation(api, c, before, root, backup, response_sha256):
     acls = api.call('/access/acl')['data']
     require(not any(r.get('ugid') == token or r.get('roleid') == role for r in acls),
             'Partial discovery already has ACLs; no continuation')
+    permissions = api.discovery(token + '=' + minted['value']).call('/access/permissions')['data']
+    require(not any(permissions.values()),
+            'Partial discovery effective permissions differ; no continuation')
     path = '/nodes/' + c['node'] + '/firewall'
     require(not before['exists'] and not before['role'] and not before['metadata'] and not before['acl']
             and normalized(api.call(path + '/rules')['data']) == before['rules']

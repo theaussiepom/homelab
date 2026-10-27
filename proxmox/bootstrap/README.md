@@ -465,7 +465,8 @@ and NAS receipts. Do not mint another token or delete the failed directory. Afte
 reviewing the exact failure, an operator can supply `--resume-discovery` with a
 private JSON packet containing `attempt`, `plan_sha256` and `minted_sha256`.
 This path handles only the saved response failure before any discovery ACL was
-added. It checks both copies, live token/role metadata, the completed host plan
+added. It checks both copies, authenticates the original saved token with no
+effective grants, and checks live token/role metadata, the completed host plan
 and unchanged firewall before making any changes.
 
 The continuation consumes its one-use claim before admission checks and before
@@ -481,6 +482,10 @@ needs a separate review: compare the local/NAS result receipts, inspect the
 recorded marker state, restore any single archived marker to its matching hold,
 then archive the owned pair. Keep all receipts and the consumed claim. This
 manual step changes only bookkeeping; there is no automatic recovery mode.
+If either result receipt is missing, retain or restore both matching markers.
+Separately verify the completed provider state and recover the private result
+receipts in both locations before considering archival. Missing receipts never
+justify rerunning the provider.
 
 ## When something goes wrong
 

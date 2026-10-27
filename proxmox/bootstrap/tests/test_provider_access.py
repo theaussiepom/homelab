@@ -230,7 +230,7 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_continuation_rejects_drift_before_any_write(self):
         for drift in ('plan_hash', 'response_hash', 'nas_response', 'owner', 'config', 'marker',
-                      'role', 'token_expiry', 'extra_acl', 'firewall', 'host_network', 'partial_token'):
+                      'role', 'token_expiry', 'secret', 'effective_permission', 'extra_acl', 'firewall', 'host_network', 'partial_token'):
             with self.subTest(drift=drift), tempfile.TemporaryDirectory() as directory:
                 self.root = Path(directory)/'state'; self.root.mkdir()
                 self.nas = Path(directory)/'nas'; self.nas.mkdir()
@@ -244,6 +244,8 @@ class DiscoveryTests(unittest.TestCase):
                 elif drift == 'marker': (self.root/'CONFIGURING').write_text('{}')
                 elif drift == 'role': self.api.roles[0]['privs'] += ',VM.PowerMgmt'
                 elif drift == 'token_expiry': self.api.tokens[0]['expire'] = 123
+                elif drift == 'secret': self.api.valid_secret += '-changed'
+                elif drift == 'effective_permission': self.api.extra_permission = True
                 elif drift == 'extra_acl': self.api.acls.append({'path':'/', 'roleid':'HomelabTraefikRead212',
                     'propagate':1, 'type':'token', 'ugid':'root@pam!other'})
                 elif drift == 'firewall': self.api.rules[0]['action'] = 'ACCEPT'
