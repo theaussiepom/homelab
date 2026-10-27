@@ -29,7 +29,7 @@ def main():
         raise ValueError('Run only inside the disposable root test container')
     print(run([sys.executable, str(Path(__file__).with_name('bastion_stage_fixture.py'))], timeout=180).stdout.strip())
     with tempfile.TemporaryDirectory(prefix='bastion-') as tmp:
-        root=Path(tmp);os.chmod(root,0o755)
+        root=Path(tmp)
         for name in ('host','client','wrong-host'):
             run(['ssh-keygen','-q','-t','ed25519','-N','','-f',str(root/name)])
         public=(root/'client.pub').read_text().split()
