@@ -3,6 +3,9 @@
 [Proxmox guide](../README.md) · [Bootstrap](../bootstrap/README.md) ·
 [Databases](DATABASES.md) · [HTTPS and sign-in](FOUNDATION.md) · [pgAdmin](PGADMIN.md) · [PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
 
+[Bitwarden Lite preparation](BITWARDEN.md) has a separate disabled preview and
+restore checklist. It is not admitted to the deployment graph yet.
+
 The deployment guest receives GitHub jobs. These scripts are the next step:
 **OpenTofu creates one application guest; Ansible installs its applications and
 restores its saved configuration. Database guests are the exception: CD prepares

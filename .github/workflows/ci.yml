@@ -79,6 +79,11 @@ jobs:
           docker pull --platform linux/amd64 redis@sha256:6cbef353e480a8a6e7f10ec545f13d7d3fa85a212cdcc5ffaf5a1c818b9d3798
           docker pull --platform linux/amd64 postgres@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
           python3 proxmox/applications/tests/identity_fixture.py
+      - name: Exercise existing Bitwarden Lite with synthetic MariaDB and no external route
+        run: |
+          docker pull --platform linux/amd64 ghcr.io/bitwarden/lite@sha256:8b42485f544a5da4abcdc13ac10b38ca355bc4f0d5ab60efef4dcdf11e27a6f8
+          docker pull --platform linux/amd64 mariadb@sha256:805c8e104bd563d5bfa24fadd3f31cd419ea859cb5277f32b5dbf2db714f9ed1
+          python3 proxmox/applications/tests/bitwarden_fixture.py
       - name: Prove the selected PostgreSQL clean SQL adapter with synthetic databases
         run: |
           docker pull --platform linux/amd64 postgres@sha256:9d4951e6dc70422022512ff05ac86e0ae360da051c563accbed85d6f654c3357

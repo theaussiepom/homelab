@@ -1,0 +1,22 @@
+{
+  "kind": "bitwarden",
+  "guest_memory_mib": 1792,
+  "timezone": "Etc/UTC",
+  "bitwarden": {
+    "schema": "homelab-bitwarden-preparation-v1",
+    "bind_address": "198.18.30.45",
+    "runtime_env_file": "/opt/homelab-app/runtime/bitwarden.env",
+    "database_provider": "mysql",
+    "restore_in_cd": false,
+    "deployment_enabled": false
+  },
+  "services": {
+    "bitwarden": {
+      "image": "ghcr.io/bitwarden/lite@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "memory_mib": 1536,
+      "cpus": 1,
+      "pids_limit": 256,
+      "restart": "no"
+    }
+  }
+}
