@@ -163,9 +163,15 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual((self.root / packet['attempt'] / 'continuation-result.json').read_bytes(),
                          (self.nas / packet['attempt'] / 'continuation-result.json').read_bytes())
         writes = copy.deepcopy(self.api.writes)
-        self.continue_cd(packet)  # A completed packet permits only ordinary unchanged verification.
+        with self.assertRaisesRegex(ValueError, 'hold'): self.continue_cd(packet)
+        self.run_cd()  # Completed setup uses ordinary unchanged verification, never the resume flag.
         self.assertEqual(self.api.writes, writes)
         self.assertNotIn(SECRET, json.dumps(result))
+
+    def test_resume_never_falls_through_without_both_failed_markers(self):
+        packet = {'attempt':'cd-1', 'plan_sha256':'0'*64, 'minted_sha256':'0'*64}
+        with self.assertRaisesRegex(ValueError, 'hold'): self.continue_cd(packet)
+        self.assertEqual(self.api.writes, [])
 
     def test_failed_continuation_is_consumed_and_cannot_be_replayed(self):
         packet = self.failed_mint_packet()

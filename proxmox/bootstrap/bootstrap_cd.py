@@ -326,9 +326,10 @@ def run(c, api, root=Path('/var/lib/homelab-bootstrap'), backup=Path('/srv/homel
     validate(c)
     require(root.is_dir() and not root.is_symlink(), 'Existing bootstrap state directory is required')
     hold, marker = root / 'BOOTSTRAP-CD-HOLD.json', root / 'CONFIGURING'
-    require(resume is not None or not hold.exists() and not marker.exists(),
+    require((resume is None and not hold.exists() and not marker.exists())
+            or (resume is not None and hold.exists() and marker.exists()),
             'Existing bootstrap hold or maintenance marker needs review')
-    if resume is not None and (hold.exists() or marker.exists()):
+    if resume is not None:
         return resume_discovery(c, api, root, backup, resume)
     check_backup(c, backup)
     evidence = root / ('cd-' + str(time.time_ns()))
