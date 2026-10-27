@@ -31,6 +31,14 @@ repair or replay it automatically.
 
 ## Requirements for the shared maintenance packet
 
+`identity_database.rules_candidate(original_guest_rules, before, after_rule)`
+replaces the sole exact legacy Authentik PostgreSQL egress rule with
+`database_networks.rules(contract, 'postgresql', vmid)[0]`. It retains HTTP and
+all non-SQL rules in their original order. Duplicate, changed, unbounded or
+additional TCP rules allowing SQL are held for review; no fallback SQL allowance
+is retained. The new rule has one client `/32`, one server `/32` and the selected
+PostgreSQL port.
+
 The common database-network mechanism owns the packet schema and source pin.
 This service helper does not define a second packet or execution engine.
 The common packet needs to bind:
@@ -44,21 +52,28 @@ The common packet needs to bind:
   custody. A completed update must verify on later runs without recreating it.
 
 Derive the guest overlay with
-`database_networks.attach(original_guest, contract, ['postgresql'])`; use its
+`database_networks.attach(original_guest, contract, ['postgresql'])`, then set
+its `rules` to `rules_candidate(original_guest['rules'], before,
+database_networks.rules(contract, 'postgresql', vmid)[0])`. Use the shared
 `interface`/`rules` output rather than repeating NIC or rule literals. The new
 NIC is untagged, has no gateway and is appended after the existing management
 and application backend NICs. Preserve their order, addresses, MACs, gateway,
-HTTP ingress, storage and existing rules. Do not remove a legacy database rule
-implicitly: its exact retirement requires the common mechanism's reviewed
-policy and a working new connection. There is no unrelated firewall cleanup.
+HTTP ingress and storage. Replace only the exact legacy SQL allowance, retaining
+all non-SQL rules. The old PostgreSQL network must not remain as a fallback;
+there is no period of dual PostgreSQL access and no unrelated firewall cleanup.
+The application backend interface remains for HTTP/OAuth, even though database
+traffic leaves it.
 
 ## Ordering and target evidence
 
 This is the Authentik/pgAdmin next update group. It does not depend on migrating
 other application clients. The selected order is:
 
-1. Commission the PostgreSQL private bridge, PG server NIC/listener and exact
-   client access through Root's common database/bootstrap maintenance.
+1. Coordinate PostgreSQL, Authentik and pgAdmin as one cutover group. Root's
+   common database/bootstrap maintenance prepares the private bridge and
+   replaces PostgreSQL's old database NIC/listener/HBA/firewall with the selected
+   private network and exact client access. Do not retain the old SQL network or
+   use an additive listener transition.
 2. Through that mechanism, verify the existing Authentik identity, installation
    bindings and original runtime; append its contract-selected NIC/rules and
    read back the exact guest state. Require its persistent PostgreSQL interface

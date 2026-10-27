@@ -5,8 +5,10 @@ from the SHA256-bound private catalogue. It owns guest identity/receipt checks,
 NIC/firewall application, startup and holds. This module performs no I/O and
 must never be used to regenerate installed foundation inputs or restore data.
 """
+import copy
 import ipaddress
 import json
+import re
 
 HOST = 'AUTHENTIK_POSTGRESQL__HOST'
 PORT = 'AUTHENTIK_POSTGRESQL__PORT'
@@ -65,3 +67,57 @@ def candidate(original, before, after):
     for name in ('server', 'worker'):
         value['services'][name]['environment'].update({HOST: after['address'], PORT: str(after['port'])})
     return (json.dumps(value, indent=2) + '\n').encode()
+
+
+def sql_egress(rule, port):
+    """Hold unmodelled TCP allowances rather than retaining a SQL fallback."""
+    require(isinstance(rule, dict) and rule.get('direction') in {'in', 'out'}
+            and rule.get('proto') in {'tcp', 'udp', 'icmp', 'icmpv6'},
+            'Review the existing firewall rules')
+    if rule.get('direction') != 'out' or rule.get('proto') != 'tcp':
+        return False
+    ports = rule.get('port')
+    require(isinstance(ports, str) and ports, 'Review unbounded TCP egress before the SQL cutover')
+    allows = False
+    for part in ports.split(','):
+        require(re.fullmatch(r'[0-9]+(?:[:-][0-9]+)?', part), 'Review unmodelled TCP egress')
+        limits = re.split('[:-]', part)
+        low, high = int(limits[0]), int(limits[-1])
+        require(1 <= low <= high <= 65535, 'Review invalid TCP egress')
+        allows = allows or low <= port <= high
+    return allows
+
+
+def rules_candidate(original, before, after):
+    """Replace the sole old SQL allowance with one contract-derived client rule.
+
+    `after` is database_networks.rules(contract, 'postgresql', vmid)[0].
+    The common caller appends the contract NIC with database_networks.attach,
+    then uses this result for the guest rules, preserving HTTP and all other
+    non-SQL allowances. Both helpers are pure; neither applies guest state.
+    """
+    endpoint(before)
+    require(isinstance(original, list) and isinstance(after, dict)
+            and set(after) == {'direction', 'proto', 'port', 'source', 'destination', 'comment'}
+            and after['direction'] == 'out' and after['proto'] == 'tcp'
+            and after['port'] == str(before['port'])
+            and isinstance(after['comment'], str)
+            and re.fullmatch(r'postgresql approved client [a-z][a-z0-9-]{0,62}', after['comment']),
+            'Select one exact contract-derived PostgreSQL client rule')
+    for key in ('source', 'destination'):
+        try:
+            subnet = ipaddress.IPv4Network(after[key], strict=True)
+        except (ValueError, TypeError):
+            raise ValueError('Select literal PostgreSQL client/server host rules') from None
+        require(isinstance(after[key], str) and subnet.prefixlen == 32,
+                'Select literal PostgreSQL client/server host rules')
+        endpoint({'address': str(subnet.network_address), 'port': before['port']})
+    legacy = {'direction': 'out', 'proto': 'tcp', 'port': str(before['port']),
+              'destination': before['address'] + '/32', 'comment': 'Restored Authentik database only'}
+    require(after['destination'] != legacy['destination'], 'Retire the old PostgreSQL network')
+    matches = [index for index, rule in enumerate(original) if sql_egress(rule, before['port'])]
+    require(len(matches) == 1 and original[matches[0]] == legacy,
+            'The original SQL rule differs or another SQL allowance remains')
+    result = copy.deepcopy(original)
+    result[matches[0]] = copy.deepcopy(after)
+    return result

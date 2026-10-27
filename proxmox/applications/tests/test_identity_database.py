@@ -110,5 +110,66 @@ class IdentityDatabaseTests(unittest.TestCase):
         self.assertNotIn('synthetic-private-input', str(caught.exception))
 
 
+class IdentityDatabaseRulesTests(unittest.TestCase):
+    def fixture(self):
+        self.old = {'direction': 'out', 'proto': 'tcp', 'port': '5432',
+                    'destination': BEFORE['address'] + '/32',
+                    'comment': 'Restored Authentik database only'}
+        self.new = {'direction': 'out', 'proto': 'tcp', 'port': '5432',
+                    'source': '10.88.31.20/32', 'destination': AFTER['address'] + '/32',
+                    'comment': 'postgresql approved client authentik'}
+        return [{'direction': 'in', 'proto': 'tcp', 'port': '9000',
+                 'source': '10.88.30.33/32', 'destination': '10.88.30.20/32',
+                 'comment': 'Existing HTTP backend'}, self.old,
+                {'direction': 'out', 'proto': 'tcp', 'port': '80,443',
+                 'destination': '0.0.0.0/0', 'comment': 'Existing downloads'}]
+
+    def test_exact_sql_allowance_is_replaced_while_http_and_other_rules_remain(self):
+        original = self.fixture(); before = copy.deepcopy(original)
+        result = identity.rules_candidate(original, BEFORE, self.new)
+        self.assertEqual(result, [original[0], self.new, original[2]])
+        self.assertEqual(original, before)
+        self.assertNotIn(self.old, result)
+        result[1]['comment'] = 'edited candidate'
+        self.assertEqual(self.new['comment'], 'postgresql approved client authentik')
+
+    def test_missing_duplicate_or_drifted_legacy_rule_is_not_implicitly_repaired(self):
+        original = self.fixture()
+        variants = [[], original[:1] + original[2:], original + [copy.deepcopy(self.old)],
+                    [dict(self.old, comment='unknown existing SQL allowance')],
+                    [dict(self.old, source='10.88.30.20/32')]]
+        for value in variants:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                identity.rules_candidate(value, BEFORE, self.new)
+        with self.assertRaises(ValueError):
+            identity.rules_candidate(identity.rules_candidate(original, BEFORE, self.new), BEFORE, self.new)
+
+    def test_a_second_or_broader_sql_allowance_holds_without_retaining_fallback(self):
+        for port in ('5432', '53,5432', '1:65535', '5430-5440', None, '', 'postgresql'):
+            original = self.fixture()
+            original.append({'direction': 'out', 'proto': 'tcp', 'port': port,
+                             'destination': '0.0.0.0/0', 'comment': 'Unmodelled egress'})
+            with self.subTest(port=port), self.assertRaises(ValueError):
+                identity.rules_candidate(original, BEFORE, self.new)
+
+    def test_unmodelled_direction_or_protocol_cannot_hide_sql_fallback(self):
+        for change in ({'proto': None}, {'proto': 'all'}, {'direction': None}):
+            original = self.fixture()
+            original.append(dict(self.old, **change))
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                identity.rules_candidate(original, BEFORE, self.new)
+
+    def test_new_rule_requires_one_exact_client_and_server_not_a_subnet(self):
+        self.fixture()
+        changes = [{'source': '10.88.31.0/24'}, {'destination': '10.88.31.0/24'},
+                   {'destination': BEFORE['address'] + '/32'}, {'source': '0.0.0.0/32'},
+                   {'port': '5432,5544'}, {'proto': 'udp'}, {'direction': 'in'},
+                   {'gateway': '10.88.31.1'}, {'comment': 'different scope'}]
+        for change in changes:
+            original = self.fixture(); after = dict(self.new, **change)
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                identity.rules_candidate(original, BEFORE, after)
+
+
 if __name__ == '__main__':
     unittest.main()
