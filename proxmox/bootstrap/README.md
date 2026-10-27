@@ -454,6 +454,26 @@ configuration. That optional addition creates one provider token and one exact
 guest-to-host API firewall allowance. Traefik never receives the bootstrap
 administrator token.
 
+### A discovery token was saved, but bootstrap stopped
+
+Proxmox may return a new token's numeric metadata as text (`"1"` and `"0"`).
+Bootstrap accepts those exact values and their integer equivalents, while still
+requiring separated privileges and the selected token lifetime.
+
+If an older run stopped at that response check, keep its hold and private local
+and NAS receipts. Do not mint another token or delete the failed directory. After
+reviewing the exact failure, an operator can supply `--resume-discovery` with a
+private JSON packet containing `attempt`, `plan_sha256` and `minted_sha256`.
+This path handles only the saved response failure before any discovery ACL was
+added. It checks both copies, live token/role metadata, the completed host plan
+and unchanged firewall before making any changes.
+
+The continuation saves a one-use claim before completing the original token's
+ACLs and API allowance. Another failure retains the hold and cannot replay that
+claim. Success preserves the original failure and archives its matching markers;
+subsequent ordinary CD runs only verify the completed setup. This is a separately
+approved recovery step, not an automatic retry or a general repair mode.
+
 ## When something goes wrong
 
 | What you see | What to do |

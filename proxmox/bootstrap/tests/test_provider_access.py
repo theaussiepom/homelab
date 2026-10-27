@@ -2,6 +2,7 @@
 import contextlib
 import copy
 import io
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -26,6 +27,7 @@ class ProviderAPI(FakeAPI):
         self.fail_provider_acl = False
         self.lose_rule = False
         self.fail_token_response = False
+        self.string_mint_metadata = False
         self.secret_was_saved = None
         self.extra_permission = False
         self.valid_secret = 'root@pam!homelab-traefik-212=' + SECRET
@@ -56,7 +58,8 @@ class ProviderAPI(FakeAPI):
                 self.tokens.append({'tokenid': 'homelab-traefik-212', **values})
                 if self.fail_token_response:
                     raise discovery.ProviderAccessError('Synthetic lost token response')
-                return {'data': {'full-tokenid': 'root@pam!homelab-traefik-212', 'value': SECRET, 'info': values}}
+                info = {k:str(v) if type(v) is int else v for k,v in values.items()} if self.string_mint_metadata else values
+                return {'data': {'full-tokenid': 'root@pam!homelab-traefik-212', 'value': SECRET, 'info': info}}
             elif path == '/access/acl':
                 if self.secret_was_saved:
                     self.secret_was_saved()
@@ -119,6 +122,94 @@ class DiscoveryTests(unittest.TestCase):
         writes = copy.deepcopy(self.api.writes)
         self.assertFalse(self.run_cd()['service_discovery']['created'])
         self.assertEqual(self.api.writes, writes)
+
+    def test_native_mint_metadata_may_be_decimal_strings_without_changing_scope(self):
+        self.api.string_mint_metadata = True
+        self.assertTrue(self.run_cd()['service_discovery']['created'])
+        self.assertEqual(len(self.api.tokens), 1)
+        self.assertFalse(self.run_cd()['service_discovery']['created'])
+
+    def failed_mint_packet(self):
+        self.api.string_mint_metadata = True
+        with patch.object(discovery, 'validate_minted', side_effect=discovery.ProviderAccessError(
+                'Created discovery token response differs; preserve its private partial receipt')):
+            with self.assertRaisesRegex(ValueError, 'Created discovery token response'):
+                self.run_cd()
+        attempt = json.loads((self.root / 'BOOTSTRAP-CD-HOLD.json').read_text())['attempt']
+        return {'attempt':attempt, 'plan_sha256':hashlib.sha256((self.root / attempt / 'plan.json').read_bytes()).hexdigest(),
+                'minted_sha256':hashlib.sha256((self.root / 'service-discovery/minted-response.json').read_bytes()).hexdigest()}
+
+    def continue_cd(self, packet):
+        mount = {'filesystems': [{'target':str(self.nas), 'source':self.c['backup_source'], 'fstype':'nfs4'}]}
+        with patch.object(cd.subprocess, 'check_output', return_value=json.dumps(mount).encode()):
+            return cd.run(self.c, self.api, self.root, self.nas, resume=packet)
+
+    def test_exact_continuation_reuses_token_and_archives_matching_hold(self):
+        packet = self.failed_mint_packet()
+        original_failure = (self.root / packet['attempt'] / 'failure.json').read_bytes()
+        writes = len(self.api.writes)
+        with self.assertRaisesRegex(ValueError, 'hold'): self.run_cd()
+        result = self.continue_cd(packet)
+        self.assertTrue(result['service_discovery']['resumed'])
+        self.assertFalse(result['service_discovery']['created'])
+        self.assertEqual(len(self.api.writes)-writes, 5)  # Four exact ACL rows and one API rule.
+        self.assertEqual(len(self.api.tokens), 1)
+        self.assertEqual(len(self.api.roles), 1)
+        self.assertEqual((self.root / packet['attempt'] / 'failure.json').read_bytes(), original_failure)
+        self.assertTrue((self.root / packet['attempt'] / 'CONFIGURING.original').exists())
+        self.assertTrue((self.root / packet['attempt'] / 'BOOTSTRAP-CD-HOLD.json.original').exists())
+        self.assertFalse((self.root / 'CONFIGURING').exists())
+        self.assertFalse((self.root / 'BOOTSTRAP-CD-HOLD.json').exists())
+        self.assertEqual((self.root / packet['attempt'] / 'continuation-result.json').read_bytes(),
+                         (self.nas / packet['attempt'] / 'continuation-result.json').read_bytes())
+        writes = copy.deepcopy(self.api.writes)
+        self.continue_cd(packet)  # A completed packet permits only ordinary unchanged verification.
+        self.assertEqual(self.api.writes, writes)
+        self.assertNotIn(SECRET, json.dumps(result))
+
+    def test_failed_continuation_is_consumed_and_cannot_be_replayed(self):
+        packet = self.failed_mint_packet()
+        self.api.fail_provider_acl = True
+        with self.assertRaisesRegex(ValueError, 'ACL failure'): self.continue_cd(packet)
+        writes = copy.deepcopy(self.api.writes)
+        self.assertTrue((self.root / 'BOOTSTRAP-CD-HOLD.json').exists())
+        self.assertTrue((self.nas / packet['attempt'] / 'continuation-failure.json').exists())
+        with self.assertRaisesRegex(ValueError, 'already consumed'): self.continue_cd(packet)
+        self.assertEqual(self.api.writes, writes)
+
+    def test_continuation_rejects_drift_before_any_write(self):
+        for drift in ('plan_hash', 'response_hash', 'nas_response', 'owner', 'config', 'marker',
+                      'role', 'token_expiry', 'extra_acl', 'firewall', 'host_network', 'partial_token'):
+            with self.subTest(drift=drift), tempfile.TemporaryDirectory() as directory:
+                self.root = Path(directory)/'state'; self.root.mkdir()
+                self.nas = Path(directory)/'nas'; self.nas.mkdir()
+                self.api = ProviderAPI()
+                packet = self.failed_mint_packet()
+                if drift == 'plan_hash': packet['plan_sha256'] = '0'*64
+                elif drift == 'response_hash': packet['minted_sha256'] = '0'*64
+                elif drift == 'nas_response': (self.nas/'service-discovery/minted-response.json').write_text('{}')
+                elif drift == 'owner': (self.root/'service-discovery/owner.json').write_text('{}')
+                elif drift == 'config': self.c['node'] = 'other-node'
+                elif drift == 'marker': (self.root/'CONFIGURING').write_text('{}')
+                elif drift == 'role': self.api.roles[0]['privs'] += ',VM.PowerMgmt'
+                elif drift == 'token_expiry': self.api.tokens[0]['expire'] = 123
+                elif drift == 'extra_acl': self.api.acls.append({'path':'/', 'roleid':'HomelabTraefikRead212',
+                    'propagate':1, 'type':'token', 'ugid':'root@pam!other'})
+                elif drift == 'firewall': self.api.rules[0]['action'] = 'ACCEPT'
+                elif drift == 'host_network': self.api.network[0]['bridge_ports'] = 'different0'
+                elif drift == 'partial_token': (self.root/'service-discovery/token.json').write_text('{}')
+                writes = copy.deepcopy(self.api.writes)
+                with self.assertRaises(ValueError): self.continue_cd(packet)
+                self.assertEqual(self.api.writes, writes)
+                if drift == 'config': self.c['node'] = 'pve'
+
+    def test_mint_numeric_metadata_is_exact_not_coerced(self):
+        base = {'full-tokenid':'root@pam!homelab-traefik-212', 'value':SECRET, 'info':{'privsep':1,'expire':0}}
+        for key, value in (('privsep', True), ('privsep', 1.0), ('privsep','01'), ('privsep','0'),
+                           ('expire',False), ('expire',0.0), ('expire','00'), ('expire',None)):
+            minted = copy.deepcopy(base); minted['info'][key] = value
+            with self.subTest(key=key,value=value), self.assertRaises(ValueError):
+                discovery.validate_minted(self.c, minted)
 
     def test_secret_is_saved_locally_and_on_nas_before_any_acl_grant(self):
         checks = []

@@ -4,6 +4,7 @@ Only bootstrap CD calls the write methods. The retained provider credential is
 never part of a plan, result, exception message or ordinary evidence artifact.
 """
 import ipaddress
+import hashlib
 import json
 import os
 import re
@@ -202,10 +203,27 @@ def reconcile(api, c, before, root, backup):
     # even if its metadata fails the next validation. Never send it to evidence.
     save_new(local / 'minted-response.json', minted)
     save_new(remote / 'minted-response.json', minted)
+    validate_minted(c, minted)
+    return finish_minted(api, c, before, root, backup, minted)
+
+
+def validate_minted(c, minted):
+    token = identity(c)[1]
+    info = minted.get('info') if isinstance(minted, dict) else None
     require(isinstance(minted, dict) and minted.get('full-tokenid') == token
             and isinstance(minted.get('value'), str) and re.fullmatch(r'[A-Za-z0-9-]+', minted['value'])
-            and minted.get('info', {}).get('privsep') == 1 and minted.get('info', {}).get('expire') == 0,
+            and isinstance(info, dict) and type(info.get('privsep')) in (int, str)
+            and type(info.get('expire')) in (int, str)
+            and str(info['privsep']) == '1' and str(info['expire']) == '0',
             'Created discovery token response differs; preserve its private partial receipt')
+
+
+def finish_minted(api, c, before, root, backup, minted):
+    """Finish a newly minted identity after its exact private evidence is admitted."""
+    validate_minted(c, minted)
+    token = identity(c)[1]
+    rule = allowance(c)
+    local, remote = root / 'service-discovery', backup / 'service-discovery'
     credential = {'schema': SCHEMA, 'identity': token, 'token': token + '=' + minted['value']}
     save_new(local / 'token.json', credential)
     save_new(remote / 'token.json', credential)
@@ -229,3 +247,38 @@ def reconcile(api, c, before, root, backup):
     return {'status': 'ready', 'created': True, 'token_id': token,
             'secret_file': 'service-discovery/token.json', 'new_acl_rows': len(acl_rows(c)),
             'firewall_rule_created': True}
+
+
+def admit_minted_continuation(api, c, before, root, backup, response_sha256):
+    """Read-only admission of the specific pre-ACL failure, never general adoption."""
+    local, remote = root / 'service-discovery', backup / 'service-discovery'
+    for folder in (local, remote):
+        private_directory(folder)
+        require({p.name for p in folder.iterdir()} == {'owner.json', 'minted-response.json'},
+                'Only the preserved pre-ACL mint failure can continue')
+    for name in ('owner.json', 'minted-response.json'):
+        require(read_private(local / name) == read_private(remote / name),
+                'Partial discovery receipt and NAS copy differ')
+    require(json.loads(read_private(local / 'owner.json')) == owner(c),
+            'Partial discovery owner differs')
+    raw = read_private(local / 'minted-response.json')
+    require(hashlib.sha256(raw).hexdigest() == response_sha256, 'Partial mint response digest differs')
+    minted = json.loads(raw)
+    validate_minted(c, minted)
+    token_id, token, role = identity(c)
+    roles = [r for r in api.call('/access/roles')['data'] if r['roleid'] == role]
+    tokens = [r for r in api.call('/access/users/root@pam/token')['data'] if r['tokenid'] == token_id]
+    require(len(roles) == 1 and not roles[0].get('special')
+            and set(roles[0].get('privs', '').split(',')) == PRIVILEGES,
+            'Partial discovery role differs')
+    require(len(tokens) == 1 and tokens[0].get('privsep') == 1 and tokens[0].get('expire') == 0
+            and tokens[0].get('comment') == allowance(c)['comment'], 'Partial discovery token metadata differs')
+    acls = api.call('/access/acl')['data']
+    require(not any(r.get('ugid') == token or r.get('roleid') == role for r in acls),
+            'Partial discovery already has ACLs; no continuation')
+    path = '/nodes/' + c['node'] + '/firewall'
+    require(not before['exists'] and not before['role'] and not before['metadata'] and not before['acl']
+            and normalized(api.call(path + '/rules')['data']) == before['rules']
+            and {k:v for k,v in api.call(path + '/options')['data'].items() if k != 'digest'} == before['options'],
+            'Host firewall changed after the failed mint')
+    return minted
