@@ -9,8 +9,10 @@ import math
 import os
 from pathlib import Path
 import re
-import monitoring
 from urllib.parse import urlsplit
+_monitoring_spec = importlib.util.spec_from_file_location('homelab_monitoring', Path(__file__).with_name('monitoring.py'))
+monitoring = importlib.util.module_from_spec(_monitoring_spec)
+_monitoring_spec.loader.exec_module(monitoring)
 _foundation_spec = importlib.util.spec_from_file_location('homelab_foundation', Path(__file__).with_name('foundation.py'))
 foundation = importlib.util.module_from_spec(_foundation_spec)
 _foundation_spec.loader.exec_module(foundation)

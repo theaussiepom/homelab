@@ -3,6 +3,7 @@ import copy
 import json
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 
@@ -28,6 +29,12 @@ def fixture(root):
 
 
 class MonitoringTests(unittest.TestCase):
+    def test_renderer_loads_without_application_directory_on_python_path(self):
+        program = "import importlib.util,sys; s=importlib.util.spec_from_file_location('standalone_render',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)"
+        result = subprocess.run([sys.executable, '-I', '-c', program,
+                                 str(Path(__file__).resolve().parents[1] / 'render.py')], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_clean_stack_uses_file_password_and_trusted_api_ca(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = fixture(Path(tmp)); document = render.compose(cfg)
