@@ -20,7 +20,7 @@ class InitialCollectionTests(unittest.TestCase):
                       'agents': [{'hostname': 'fixture-linux', 'psk_identity': 'fixture-linux'}],
                       'proxmox_hostname': 'fixture-pve', 'commissioned_vmids': [213]}
             def response(result): return io.StringIO(json.dumps({'result': result}))
-            for outcome in ('identity', 'pending', 'passed'):
+            for outcome in ('identity', 'pending', 'passed', 'passed_outer'):
                 with self.subTest(outcome=outcome):
                     values = [response('fixture-token')]
                     if outcome == 'identity':
@@ -39,13 +39,19 @@ class InitialCollectionTests(unittest.TestCase):
                             response([{'verify_peer': '1', 'verify_host': '1'}]),
                             response([{'verify_peer': '1', 'verify_host': '1'}])])
                         expected, message = verification.FreshnessPending, 'Waiting for fresh'
-                        if outcome == 'passed':
+                        if outcome.startswith('passed'):
                             ui = io.BytesIO(b'Zabbix'); ui.status = 200; values.append(ui)
                             expected, message = OSError, 'synthetic logout failure'
                     values.append(OSError('synthetic logout failure'))
                     opener = Mock(); opener.open.side_effect = values
                     with patch.object(verification, 'build_opener', return_value=opener):
-                        with self.assertRaisesRegex(expected, message): verification._verify_once(config)
+                        if outcome == 'passed_outer':
+                            try:
+                                raise RuntimeError('unrelated caller exception')
+                            except RuntimeError:
+                                with self.assertRaisesRegex(expected, message): verification.verify(config)
+                        else:
+                            with self.assertRaisesRegex(expected, message): verification._verify_once(config)
 
     def test_resource_inventory_rejects_malformed_samples_with_fixed_safe_reason(self):
         for raw in ('private-synthetic-data', 'null', '{}', '{"data":null}', '{"data":{}}',
