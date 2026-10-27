@@ -51,6 +51,7 @@ class ConfirmationTests(unittest.TestCase):
         for name,data in self.original.items():self.assertEqual((self.operation/name).read_bytes(),data)
         complete=json.loads((self.operation/'complete.json').read_bytes())
         self.assertEqual(complete,{'packet':self.selected,'state_sha256':self.confirmation['state_sha256']})
+        self.assertFalse((self.work/'CONTINUATION-HOLD.json').exists())
         self.assertFalse(self.run_confirmation()['changed'])
         self.deployment.quiet.assert_called_once()
         for row in self.native['resource_changes']:
@@ -65,7 +66,7 @@ class ConfirmationTests(unittest.TestCase):
         self.deployment.quiet.side_effect=RuntimeError('synthetic failed readiness')
         with self.assertRaises(RuntimeError):self.run_confirmation()
         self.confirmation['revision']='f'*40
-        with self.assertRaises(FileExistsError):self.run_confirmation()
+        with self.assertRaises((ValueError,FileExistsError)):self.run_confirmation()
         self.deployment.quiet.assert_called_once()
         self.assertFalse((self.operation/'complete.json').exists())
 
@@ -92,9 +93,30 @@ class ConfirmationTests(unittest.TestCase):
         self.deployment.quiet.assert_called_once()
         self.assertTrue((self.operation/'confirmation-claim.json').is_file())
         self.assertFalse((self.operation/'complete.json').exists())
-        with self.assertRaises(FileExistsError):self.run_confirmation()
+        with self.assertRaises((ValueError,FileExistsError)):self.run_confirmation()
         self.deployment.quiet.assert_called_once()
         for name,data in self.original.items():self.assertEqual((self.operation/name).read_bytes(),data)
+
+    def test_late_nas_receipt_failure_blocks_the_original_update_reader(self):
+        write=fc.write_new
+        nas=Path(self.cfg['paths']['backup_directory'])/str(self.selected['vmid'])
+        target=nas/(self.operation.name+'-confirmation-complete.json')
+        def fail_last_receipt(path,data):
+            if path==target:raise OSError('synthetic late NAS receipt failure')
+            return write(path,data)
+        with patch.object(fc,'write_new',side_effect=fail_last_receipt):
+            with self.assertRaises(OSError):self.run_confirmation()
+        self.assertTrue((self.operation/'complete.json').exists())
+        self.assertTrue((nas/(self.operation.name+'-complete.json')).exists())
+        self.deployment.quiet.assert_called_once()
+        for row in self.native['resource_changes']:
+            row['change']['before']=copy.deepcopy(row['change']['after']);row['change']['actions']=['no-op']
+        self.calls=[];self.deployment.quiet.side_effect=self.command
+        with self.assertRaises(ValueError):
+            acme.run(self.deployment,fc,self.cfg,self.site,Path(acme.__file__).parent,self.selected,self.state)
+        self.deployment.quiet.assert_called_once()
+        self.assertEqual(self.calls,[])
+        self.assertEqual(json.loads((self.work/'CONTINUATION-HOLD.json').read_bytes()),self.confirmation)
 
 
 if __name__=='__main__':unittest.main()

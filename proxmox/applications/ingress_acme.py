@@ -146,6 +146,10 @@ def confirm(deployment, fc, cfg, site, source, selected, state_root):
         check_plan(json.loads(fc.regular(operation/'attempt/dns.tfplan.json',private=True)),
                    cfg['site']['node'],original['vmid'],original['after'])
         fc.write_new(claim,fc.encoded(selected))
+        # All existing readers, including the original pinned implementation,
+        # honor this standard hold until both local and NAS custody is complete.
+        marker = work/'CONTINUATION-HOLD.json'
+        fc.write_new(marker,fc.encoded(selected))
         deployment.backup(cfg,work/'terraform.tfstate','before-acme-verification')
         fc.write_new(nas/(operation.name+'-confirmation-claim.json'),fc.encoded(selected))
         evidence = operation/'confirmation-attempt';evidence.mkdir(mode=0o700)
@@ -168,6 +172,8 @@ def confirm(deployment, fc, cfg, site, source, selected, state_root):
         fc.write_new(done,completion);fc.write_new(nas/(operation.name+'-complete.json'),completion)
         fc.write_new(confirmation,fc.encoded(selected))
         fc.write_new(nas/(operation.name+'-confirmation-complete.json'),fc.encoded(selected))
+        require(fc.regular(marker,private=True) == fc.encoded(selected), 'Confirmation hold ownership changed')
+        marker.unlink();fc.sync(work)
         return {'status':'passed','changed':False}
 
 

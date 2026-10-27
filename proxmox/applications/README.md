@@ -148,6 +148,9 @@ show a no-change plan. A failed confirmation cannot retry on the next push.
 An interrupted confirmation also stays held for separate review, even if the
 guest check succeeded before CD lost control; a later push does not reconstruct
 missing completion records automatically.
+The standard continuation hold stays active until both local and NAS completion
+records are saved, so other deployment entry points also stop if that final save
+fails.
 After the dependency is fixed, a separately approved verification continuation can
 check the existing pgAdmin guest without reinstalling it or restoring its data.
 
