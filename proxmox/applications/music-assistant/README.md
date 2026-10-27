@@ -92,7 +92,8 @@ players are required; the current candidate does not enable guest IPv6.
 
 ## What a passing check means
 
-The Compose healthcheck performs only an HTTP GET to this server's `/info` endpoint. Use the existing `plan → apply → stage → start → verify` path, exact saved-plan fingerprint, host-key check, capture
+The Compose healthcheck performs an HTTP GET to this server's `/info` endpoint
+and opens/closes its own stream8097 TCP listener without requesting any audio. Use the existing `plan → apply → stage → start → verify` path, exact saved-plan fingerprint, host-key check, capture
 checksum, NAS state protection and failure holds. Retire old writers before
 `deploy`/`start`; never put the old and new server on the same LAN identity.
 
@@ -102,7 +103,7 @@ a unique Docker `--internal` network with no peers, no published ports and
 no real mounts or credentials. A real virtual interface is needed for discovery
 initialization; loopback-only `--network none` fails multicast membership. The
 internal network has no external route and is removed with the fixture. It
-records the actual image ID/version and checks local HTTP readiness only. Its result does not qualify
+records the actual image ID/version and checks local HTTP and stream-listener readiness only. Its result does not qualify
 Proxmox nesting, systemd boot, household routing, cloud providers or speakers.
 Ben performs real provider, library, browser and speaker acceptance after a
 separately authorized rollout. No playback, volume, queue or player commands

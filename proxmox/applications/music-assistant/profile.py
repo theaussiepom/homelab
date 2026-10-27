@@ -26,7 +26,7 @@ def configure_compose(cfg, service):
     # /info is local metadata only: no authentication, provider or player commands.
     service['healthcheck'] = {
         'test': ['CMD', 'python3', '-c',
-                 f"import urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({{}})).open('http://{bind_address}:8095/info', timeout=3).close()"],
+                 f"import socket, urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({{}})).open('http://{bind_address}:8095/info', timeout=3).close(); socket.create_connection(('{bind_address}', 8097), timeout=3).close()"],
         'interval': '30s', 'timeout': '5s', 'retries': 5, 'start_period': '60s'}
 
 

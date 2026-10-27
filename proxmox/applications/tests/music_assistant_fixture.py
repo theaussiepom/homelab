@@ -38,9 +38,9 @@ def run(image):
                '--tmpfs', '/tmp:rw,exec,nosuid,nodev,size=128m',
                '--entrypoint', 'python3', image, '-c', seed,
                stdout=subprocess.DEVNULL)
-        probe = ("import importlib.metadata,json,urllib.request; "
+        probe = ("import json,socket,urllib.request; "
                  "r=urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://127.0.0.1:8095/info',timeout=3); "
-                 "assert r.status==200; assert isinstance(json.load(r),dict)")
+                 "assert r.status==200; assert isinstance(json.load(r),dict); socket.create_connection(('127.0.0.1',8097),timeout=3).close()")
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
             result = subprocess.run(['docker', 'exec', name, 'python3', '-c', probe],
@@ -49,7 +49,7 @@ def run(image):
                 identity = docker('inspect', '--format', '{{.Image}}', name, capture_output=True, text=True).stdout.strip()
                 installed = docker('exec', name, 'python3', '-c', "import importlib.metadata; print(importlib.metadata.version('music-assistant'))", capture_output=True, text=True).stdout.strip()
                 print(f'Tested image {identity}; installed version {installed}.')
-                print('Synthetic latest Music Assistant local /info passed; '
+                print('Synthetic latest Music Assistant local /info and stream listener passed; '
                       'no LXC, provider, speaker or playback acceptance.')
                 return
             if docker('inspect', '--format', '{{.State.Running}}', name,
