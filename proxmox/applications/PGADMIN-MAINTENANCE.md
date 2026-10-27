@@ -20,7 +20,10 @@ For the selected `db-tools` guest, Root's maintenance packet needs to:
 1. Bind the commissioned VMID/hostname, management address/MAC, original source,
    private-input hashes, Terraform state and successful installation receipts.
    Hold on unexplained drift or another maintenance operation.
-2. Derive `attach(installed_guest, catalogue, ['postgresql'])`. Preserve existing
+2. Use `database_network_maintenance.candidate_guest` with `engine='postgresql'`,
+   `phase='cutover'`, the selected client VMIDs and observed legacy server address.
+   It composes the shared catalogue interface/rules into an exact candidate.
+   Preserve existing
    management/backend NIC ordering, addresses, MACs, gateway and HTTP listener.
    Append only the selected PostgreSQL NIC: untagged private bridge, manual IPv6,
    no gateway. Keep guest autostart enabled. Never join another database network.
@@ -29,8 +32,12 @@ For the selected `db-tools` guest, Root's maintenance packet needs to:
    to PostgreSQL-server `/32` TCP 5432 allowance, with the matching server rule
    owned by Root. Removal of the old PostgreSQL allowance is mandatory in the
    same coordinated cutover; bind its observed-before/exact-after replacement in
-   the shared packet. `attach` only appends and cannot perform this replacement
-   by itself. Do not leave an old SQL route, allowance or fallback. Retain SSH, DNS,
+   the shared packet. Activation requires human approval of the observed old
+   allowance and exact replacement rules; packet hashes alone grant no authority.
+   Existing valid approval remains valid within its exact scope. The common
+   cutover compiler removes the old rule; bare `attach` only appends and is
+   insufficient. Do not leave a database-specific route, SQL allowance or fallback.
+   Retain SSH, DNS,
    Authentik HTTPS and Traefik HTTP access.
 4. Keep the existing shared network-ready implementation. Docker must require
    successful IPv4 readiness on the existing management/backend NICs and the
@@ -40,6 +47,38 @@ For the selected `db-tools` guest, Root's maintenance packet needs to:
    startup ordering must not restart Docker or unrelated containers. Root must
    decide how its mechanism activates a newly appended NIC; this proposal does
    not assume that a running LXC hotplug is qualified.
+
+## Common source checkpoint and remaining activation gap
+
+The [common source proposal](https://github.com/theaussiepom/homelab/pull/42)
+supplies `database_network_maintenance.plan/check_plan` and
+`ansible/network-update.yml`. These are separate from the original installation:
+
+- `plan` uses the original installer, authoritative state/backend and existing
+  workflow/deployment locks, writes separate private evidence and retains failed
+  or interrupted-plan holds. Calling it contacts the pinned Proxmox API. It is
+  not an offline compiler and has not been run against a target by this component.
+- `check_plan` checks a supplied provider plan against the exact existing guest,
+  firewall and permitted NIC/SQL-rule delta. A passing result still reports
+  `apply_supported=False` and `lifecycle_effects_verified=False`. The common
+  planner has no apply entry point.
+- `network-update.yml` accepts the existing `app` identity,
+  `network_ready_interfaces`, `network_ready_gate_sha256` and
+  `network_ready_dependency_sha256`. For pgAdmin it selects `docker.service`,
+  matches the current gate/dependency files and guest identity, waits for all
+  selected IPv4 interfaces and verifies that the service process is unchanged.
+  It needs the new NICs already active; it does not apply the provider plan or
+  activate a saved-connection change.
+
+The remaining common activation gap is finite: actual provider saved plans and
+their lifecycle behavior; exact current startup/runtime/profile/receipt bindings;
+the authoritative server/user selector and old endpoint; and Root's admitted
+coordinated activation/verification packet. Root owns binding those observations
+to the reviewed source and catalogue, applying the exact network/rule changes,
+sequencing the two quiesced clients and resuming/verifying their retained services.
+Do not invent a private executor, infer that a source plan grants activation, or
+replace missing native evidence with synthetic results. No additional live read
+or action is requested by this document.
 
 ## Saved connection adapter
 
