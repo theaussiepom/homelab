@@ -20,6 +20,9 @@ RESOURCES = {
     'module.guest.proxmox_virtual_environment_firewall_rules.guest': 'container_id',
 }
 RULES = list(RESOURCES)[-1]
+FAILURE_FILES = ('claim.json','attempt/ansible.log','attempt/dns.tfplan',
+                 'attempt/dns.tfplan.json','attempt/tofu.log','attempt/reviewed-plan.json',
+                 'attempt/variables.json','attempt/host-key-evidence.json')
 
 
 def require(value, message):
@@ -100,6 +103,72 @@ def check_plan(value, node, vmid, selected, completed=False):
         expected = provider_rules(selected)
         require(len(rules) >= len(expected) and all(all(actual.get(k) == v for k,v in wanted.items())
                 for actual,wanted in zip(rules[-len(expected):],expected)), 'Completed DNS rules differ')
+
+
+def confirm(deployment, fc, cfg, site, source, selected, state_root):
+    """Verify a precisely bound partial update; never plan/apply or recreate it.
+
+    A failed confirmation cannot run again under a different source revision.
+    The original packet and evidence stay intact. Only success completes its
+    existing receipt, allowing normal CD to require a fresh no-change plan.
+    """
+    import fcntl
+    import foundation_maintenance as maintenance
+    original = selected['update']
+    work = state_root / str(selected['vmid'])
+    with (work/'deployment.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        maintenance.expected(deployment,fc,cfg,site,work,original)
+        require(cfg['app']['kind'] == 'ingress' and not any((work/n).exists() or (work/n).is_symlink() for n in fc.HOLDS)
+                and deployment.sha(work/'foundation-complete.json') == original['foundation_complete_sha256']
+                and deployment.sha(work/'terraform.tfstate') == selected['state_sha256'],
+                'Applied ingress state or installation completion differs')
+        operation = work/('acme-resolvers-'+hashlib.sha256(fc.encoded(original['after'])).hexdigest()[:16])
+        fc.private_directory(operation)
+        nas = Path(cfg['paths']['backup_directory'])/str(selected['vmid'])
+        require(fc.regular(operation/'claim.json',private=True) == fc.encoded(original)
+                and fc.regular(nas/(operation.name+'-claim.json'),private=True) == fc.encoded(original),
+                'Original resolver claim custody differs')
+        for name in FAILURE_FILES:
+            require(deployment.sha(operation/name) == selected['failure_hashes'][name],
+                    'Failed resolver evidence differs')
+        done = operation/'complete.json'
+        confirmation = operation/'confirmation-complete.json'
+        claim = operation/'confirmation-claim.json'
+        completion = fc.encoded({'packet':original,'state_sha256':selected['state_sha256']})
+        if confirmation.exists():
+            require(fc.regular(claim,private=True) == fc.regular(confirmation,private=True) == fc.encoded(selected)
+                    and fc.regular(nas/(operation.name+'-confirmation-complete.json'),private=True) == fc.encoded(selected)
+                    and fc.regular(done,private=True) == fc.regular(nas/(operation.name+'-complete.json'),private=True) == completion,
+                    'Completed resolver confirmation custody differs')
+            return {'status':'passed','changed':False}
+        require(not done.exists() and not done.is_symlink(), 'Resolver update is already completed')
+        check_plan(json.loads(fc.regular(operation/'attempt/dns.tfplan.json',private=True)),
+                   cfg['site']['node'],original['vmid'],original['after'])
+        fc.write_new(claim,fc.encoded(selected))
+        deployment.backup(cfg,work/'terraform.tfstate','before-acme-verification')
+        fc.write_new(nas/(operation.name+'-confirmation-claim.json'),fc.encoded(selected))
+        evidence = operation/'confirmation-attempt';evidence.mkdir(mode=0o700)
+        address = deployment.application_address(cfg)
+        require(address == cfg['app']['address'], 'No alternate ingress address')
+        deployment.guest_identity.pin(cfg,evidence,address,lambda path:deployment.api_get(cfg,path),deployment.write)
+        fc.write_new(evidence/'inventory.json',fc.encoded({'application':{'hosts':{cfg['app']['hostname']:{
+            'ansible_host':address,'ansible_user':'root'}}}}))
+        fc.write_new(evidence/'variables.json',fc.encoded({'app':cfg['app'],'acme_settings':original,
+            'acme_verify_only':False,'acme_confirmation':selected}))
+        env = os.environ.copy()
+        env.update(LC_ALL='C.UTF-8',LANG='C.UTF-8',ANSIBLE_CONFIG=str(source/'ansible/ansible.cfg'),
+            ANSIBLE_HOST_KEY_CHECKING='True',ANSIBLE_SSH_ARGS=
+            '-F /dev/null -o StrictHostKeyChecking=yes -o BatchMode=yes -o ControlMaster=no '
+            '-o GlobalKnownHostsFile=/dev/null -o VerifyHostKeyDNS=no -o UpdateHostKeys=no -o IdentitiesOnly=yes '
+            '-o UserKnownHostsFile='+shlex.quote(cfg['paths']['known_hosts']))
+        deployment.quiet(['ansible-playbook','-i',str(evidence/'inventory.json'),'--private-key',cfg['paths']['private_key'],
+            str(source/'ansible/component-acme.yml'),'--extra-vars','@'+str(evidence/'variables.json')],env,evidence/'ansible.log')
+        require(deployment.sha(work/'terraform.tfstate') == selected['state_sha256'], 'Canonical state changed during confirmation')
+        fc.write_new(done,completion);fc.write_new(nas/(operation.name+'-complete.json'),completion)
+        fc.write_new(confirmation,fc.encoded(selected))
+        fc.write_new(nas/(operation.name+'-confirmation-complete.json'),fc.encoded(selected))
+        return {'status':'passed','changed':False}
 
 
 def run(deployment, fc, cfg, site, source, selected, state_root):

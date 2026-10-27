@@ -138,7 +138,13 @@ CD maintenance path. Its private packet names the old and new resolvers and bind
 the existing guest, configuration and state. OpenTofu previews only the matching
 DNS firewall additions; Ansible changes only that resolver list and recreates the
 Traefik container once. It keeps the image, tokens, certificates and other settings.
-Guest networking and Docker itself are not restarted. A failed attempt stays held.
+Guest networking and Docker itself are not restarted. The existing health check
+allows normal startup time before checking the running container. A failed attempt
+stays held. If the change applied but its startup check failed, a separately
+reviewed confirmation can check that same running container without applying the
+firewall change or recreating it again. It preserves the failed logs and settings;
+only a successful check archives its matching hold. The next CD step must still
+show a no-change plan. A failed confirmation cannot retry on the next push.
 After the dependency is fixed, a separately approved verification continuation can
 check the existing pgAdmin guest without reinstalling it or restoring its data.
 
