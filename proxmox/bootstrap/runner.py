@@ -132,6 +132,7 @@ def install_locked(work):
     with log.open('w') as stream:
         proc = subprocess.run(['ansible-playbook', '-i', str(work / 'inventory.json'),
             str(HERE / 'ansible/install-runner.yml'), '-e', '@' + str(variables)],
+            env=dict(os.environ, LC_ALL='C.UTF-8', LANG='C.UTF-8'),
             stdout=stream, stderr=subprocess.STDOUT, timeout=1200)
     if proc.returncode: raise Refused('Runner setup failed; preserve the attempt and inspect the private runner-install.log')
     write(work / 'runner-result.json', {'status': 'installed', 'repository': settings['repository'],
