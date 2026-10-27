@@ -11,7 +11,7 @@ The separate-guest decision was made on 26 October 2026.
 **This change prepares a proposal and a Compose preview. It is not an admitted
 installer.** No PegaProx guest or credentials are created. `deploy.py` refuses
 `app.kind=pegaprox` before reading target or credential inputs. Keep the paired
-private PR draft and unmerged until the missing inputs have been reviewed.
+private PR unmerged until the missing inputs have been reviewed.
 
 ## Smallest practical starting point
 
@@ -105,6 +105,13 @@ these features. Syslog is enabled by default inside the app: it is unpublished
 here, should be switched off at setup, and needs explicit approval before use.
 Set cluster SSH off; supplying no SSH credential is an additional constraint.
 No WAN route, shared Traefik route, OIDC client or device access is added.
+Initial testing uses PegaProx directly, without Authentik or forward-auth.
+The selected 1.4.1 release has no documented anonymous management-UI mode: its
+[cluster API requires authentication](https://github.com/PegaProx/project-pegaprox/blob/ea40c362c78b8d16f869f07a4d00d3f1a2028e71/pegaprox/api/clusters.py#L41-L43),
+and the [authentication guard](https://github.com/PegaProx/project-pegaprox/blob/ea40c362c78b8d16f869f07a4d00d3f1a2028e71/pegaprox/utils/auth.py#L1369-L1401)
+returns 401 without a valid session/token. Public health or optional metrics
+access does not remove the UI login. Use its native account for this release;
+review a future upstream anonymous mode or Authentik integration separately.
 
 Only the selected management client should reach the **first-run setup wizard**.
 There is no default web administrator. Complete setup, configure 2FA and verify
