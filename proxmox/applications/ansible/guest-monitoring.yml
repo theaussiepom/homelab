@@ -1,0 +1,17 @@
+---
+# Invoked by one guest's existing CD/maintenance job, under its own trust/hold boundary.
+- name: Configure monitoring for exactly the owning guest
+  hosts: guest_monitoring
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Refuse a central fleet rollout or a dependency on the Zabbix API
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - zabbix_agent.credential_file is defined
+          - zabbix_agent.machine_id == ansible_facts.machine_id
+  tasks:
+    - name: Use the same shared tasks as new guest commissioning
+      ansible.builtin.import_tasks: ../../common/ansible/zabbix-agent.yml

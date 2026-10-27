@@ -2,6 +2,8 @@
 import argparse
 import json
 import sys
+import uuid
+import hashlib
 import yaml
 import monitoring
 
@@ -33,6 +35,32 @@ def prepared(name):
     if name not in monitoring.VERSIONS['templates']:
         raise ValueError('Select a pinned official template')
     document = yaml.safe_load((monitoring.ROOT / 'templates' / name).read_text())
+    if name == 'template_app_docker.yaml':
+        template = document['zabbix_export']['templates'][0]
+        old_name, new_name = template['template'], 'HomeLab Docker by active agent 2'
+        def active_copy(node):
+            if isinstance(node, dict):
+                for key, child in list(node.items()):
+                    if key == 'uuid':
+                        # Zabbix import requires UUIDv4. Deterministic bytes keep
+                        # this derived template stable without colliding with upstream.
+                        raw = hashlib.sha256(('homelab/docker-active/' + child).encode()).digest()[:16]
+                        node[key] = uuid.UUID(bytes=raw, version=4).hex
+                    elif isinstance(child, str):
+                        node[key] = child.replace(old_name, new_name)
+                    else:
+                        active_copy(child)
+                for key in ('items', 'item_prototypes', 'discovery_rules'):
+                    for item in node.get(key, []):
+                        if item.get('type', 'ZABBIX_PASSIVE') == 'ZABBIX_PASSIVE':
+                            item['type'] = 'ZABBIX_ACTIVE'
+            elif isinstance(node, list):
+                for child in node: active_copy(child)
+        for key, child in document['zabbix_export'].items():
+            if key != 'template_groups': active_copy(child)
+    if name == 'template_db_influxdb_http.yaml':
+        for item in http_agents(document):
+            item.update(verify_peer='YES', verify_host='YES')
     if name == 'template_app_proxmox.yaml':
         for item in http_agents(document):
             item.update(verify_peer='YES', verify_host='YES')

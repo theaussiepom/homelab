@@ -1,15 +1,4 @@
 ---
-- name: Collect statistics after the clean schema import
-  hosts: monitoring_database
-  become: true
-  become_user: postgres
-  gather_facts: false
-  tasks:
-    - name: Analyze the new Zabbix schema before template linking
-      ansible.builtin.command:
-        argv: [psql, -X, -v, ON_ERROR_STOP=1, -d, zabbix, -c, ANALYZE]
-      changed_when: false
-
 - name: Configure the clean monitoring server using upstream API modules
   hosts: monitoring_api
   gather_facts: false
@@ -21,13 +10,61 @@
     ansible_zabbix_url_path: ''
     ansible_command_timeout: 180
   tasks:
+    - name: Start a fresh host-resolution list for this invocation
+      ansible.builtin.set_fact:
+        monitoring_bound_hosts: []
+        monitoring_resolved_hosts: []
+      no_log: true
+
+    - name: Validate CD-owned host credentials without creating or rotating them
+      ansible.builtin.command:
+        argv: [python3, "{{ playbook_dir }}/../monitoring_credentials.py", --check, "{{ item.credential_file }}", --hostname, "{{ item.hostname }}", --machine-id, "{{ item.machine_id }}"]
+      delegate_to: localhost
+      vars:
+        ansible_connection: local
+      changed_when: false
+      loop: "{{ monitoring_hosts }}"
+      no_log: true
+
+    - name: Require CD credential references for every admitted host
+      ansible.builtin.assert:
+        that: item.credential_file is defined
+      loop: "{{ monitoring_hosts }}"
+      no_log: true
+
+    - name: Resolve each host's same persistent credential for server admission
+      ansible.builtin.set_fact:
+        monitoring_bound_hosts: "{{ monitoring_bound_hosts | default([]) + [item | combine({'psk_identity': credential.psk_identity, 'psk': credential.psk})] }}"
+      vars:
+        credential: "{{ lookup('ansible.builtin.file', item.credential_file) | from_json }}"
+      loop: "{{ monitoring_hosts }}"
+      no_log: true
+
+    - name: Select reusable workload profiles for each admitted host
+      ansible.builtin.command:
+        argv: [python3, "{{ playbook_dir }}/../monitoring_profiles.py", --host-profile]
+        stdin: "{{ {'profiles': item.profiles | default(['linux']), 'settings': item.profile_settings | default({})} | to_json }}"
+      delegate_to: localhost
+      vars:
+        ansible_connection: local
+      changed_when: false
+      loop: "{{ monitoring_bound_hosts }}"
+      register: monitoring_host_profiles
+      no_log: true
+
+    - name: Bind the server-side template selection to the guest profile
+      ansible.builtin.set_fact:
+        monitoring_resolved_hosts: "{{ monitoring_resolved_hosts | default([]) + [item.item | combine(item.stdout | from_json)] }}"
+      loop: "{{ monitoring_host_profiles.results }}"
+      no_log: true
+
     - name: Require a finite host list and distinct PSK identities and keys
       ansible.builtin.assert:
         that:
-          - monitoring_hosts | length > 0
-          - monitoring_hosts | map(attribute='hostname') | unique | length == monitoring_hosts | length
-          - monitoring_hosts | map(attribute='psk_identity') | unique | length == monitoring_hosts | length
-          - monitoring_hosts | map(attribute='psk') | unique | length == monitoring_hosts | length
+          - monitoring_resolved_hosts | length > 0
+          - monitoring_resolved_hosts | map(attribute='hostname') | unique | length == monitoring_resolved_hosts | length
+          - monitoring_resolved_hosts | map(attribute='psk_identity') | unique | length == monitoring_resolved_hosts | length
+          - monitoring_resolved_hosts | map(attribute='psk') | unique | length == monitoring_resolved_hosts | length
       no_log: true
 
     - name: Prepare official templates with the reviewed HTTP TLS policy
@@ -37,7 +74,7 @@
       vars:
         ansible_connection: local
       changed_when: false
-      loop: [template_app_proxmox.yaml, template_os_linux_active.yaml]
+      loop: [template_app_proxmox.yaml, template_os_linux_active.yaml, template_app_docker.yaml, template_db_postgresql_agent2_active.yaml, template_db_mysql_agent2_active.yaml, template_db_influxdb_http.yaml]
       register: monitoring_prepared_templates
 
     - name: Import the pinned templates and explicit TLS settings
@@ -78,7 +115,7 @@
         that:
           - (monitored_before.hosts | selectattr('host', 'equalto', item.hostname) | list | length == 0) or (monitored_before.hosts | selectattr('host', 'equalto', item.hostname) | map(attribute='description') | first == 'HomeLab active agent; PSK identity=' ~ item.psk_identity)
           - item.psk is match('^[0-9a-f]{64}$')
-      loop: "{{ monitoring_hosts }}"
+      loop: "{{ monitoring_resolved_hosts }}"
       no_log: true
 
     - name: Admit selected hosts with the standard active Linux template
@@ -86,7 +123,7 @@
         host_name: "{{ item.hostname }}"
         description: "HomeLab active agent; PSK identity={{ item.psk_identity }}"
         host_groups: [HomeLab]
-        link_templates: [Linux by Zabbix agent active]
+        link_templates: "{{ item.link_templates }}"
         interfaces: []
         tls_connect: 2
         tls_accept: 2
@@ -94,7 +131,18 @@
         tls_psk: "{{ item.psk if item.hostname not in (monitored_before.hosts | map(attribute='host') | list) else omit }}"
         status: enabled
         state: present
-      loop: "{{ monitoring_hosts }}"
+      loop: "{{ monitoring_resolved_hosts }}"
+      no_log: true
+
+    - name: Bind database templates to guest-local named sessions without DB passwords
+      community.zabbix.zabbix_hostmacro:
+        host_name: "{{ item.0.hostname }}"
+        macro_name: "{{ item.1.macro }}"
+        macro_value: "{{ item.1.value }}"
+        macro_type: "{{ item.1.type | default('text') }}"
+        force: "{{ item.1.type | default('text') != 'secret' }}"
+        state: present
+      loop: "{{ query('subelements', monitoring_resolved_hosts, 'profile_macros') }}"
       no_log: true
 
     - name: Bind the existing API host to its commissioning identity

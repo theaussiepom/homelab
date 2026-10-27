@@ -109,8 +109,9 @@ def compose(cfg):
 
 
 def agent_config(value):
-    require(set(value) == {'hostname', 'server_active', 'psk_identity', 'psk_path'}, 'Use the closed active agent configuration')
-    for key in value:
+    require(set(value) - {'plugins'} == {'hostname', 'server_active', 'psk_identity', 'psk_path'}, 'Use the closed active agent configuration')
+    require(type(value.get('plugins', False)) is bool, 'Select only the fixed workload configuration include')
+    for key in ('hostname', 'server_active', 'psk_identity', 'psk_path'):
         text(value[key])
     require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', value['hostname']), 'Invalid agent hostname')
     require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', value['psk_identity']), 'Invalid PSK identity')
@@ -119,7 +120,8 @@ def agent_config(value):
     return ('LogType=system\nHostname=' + value['hostname'] + '\nServerActive=' + value['server_active']
             + '\nTLSConnect=psk\nTLSPSKIdentity=' + value['psk_identity']
             + '\nTLSPSKFile=' + value['psk_path'] + '\nDenyKey=system.run[*]\n'
-            'ControlSocket=/run/zabbix/agent.sock\n')
+            'ControlSocket=/run/zabbix/agent.sock\n'
+            + ('Include=/etc/zabbix/homelab-monitoring.conf\n' if value.get('plugins', False) else ''))
 
 
 if __name__ == '__main__':

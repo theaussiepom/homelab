@@ -1,195 +1,253 @@
-# A clean Zabbix server for Proxmox
+# Zabbix owned by guest CD
 
-[Application guide](README.md) · [Bootstrap](../bootstrap/README.md) ·
-[Database servers](DATABASES.md)
+[Application guide](README.md) · [Bootstrap](../bootstrap/README.md) · [Database servers](DATABASES.md)
 
-This prepares a new monitoring system. It does not restore an old Zabbix database,
-configuration or history. Source tests and Docker fixtures are separate from a
-working installation on a physical Proxmox host.
-
-The first deployment has one small, unprivileged Debian 13 LXC. Official Zabbix
-server and web images run inside it. Its dedicated database lives on the existing
-PostgreSQL guest. Traefik provides HTTPS for the web UI. Native Agent 2 runs on the
-Proxmox host and each selected, commissioned guest.
+Reusable implementation belongs here; the private site repository supplies inventory,
+secret references, network bindings and immutable source pins. This source does not
+deploy a site. It prepares a clean installation without restoring Zabbix history.
 
 ```mermaid
 flowchart LR
-  Browser -->|HTTPS| Traefik
-  Traefik --> Web[Zabbix web]
-  Web --> Database[Dedicated database on existing PostgreSQL]
-  Server[Zabbix server] --> Database
-  Server -->|Trusted HTTPS and audit token| Proxmox[Proxmox API]
-  Host[Host Agent 2] -->|Active TLS PSK| Server
-  Guests[Guest agents] -->|Active TLS PSK| Server
+  subgraph Guest[Each commissioned guest]
+    OS[Linux metrics] --> Agent[One native Agent 2]
+    Docker[Docker API when approved] --> Agent
+    DB[Local database statistics] --> Agent
+  end
+  GuestCD[That guest's CD] -. installs and configures .-> Agent
+  Secret[Protected per-guest PSK record] -. same key .-> GuestCD
+  Secret -. same key .-> ServerCD[Server and UI CD]
+  Agent -->|Active TLS PSK TCP 10051| Server[Zabbix server]
+  HostAgent[Proxmox host Agent 2] -->|Active TLS PSK| Server
+  HostCD[Host bootstrap CD] -. owns .-> HostAgent
+  ServerCD -. owns .-> Server
+  Server -->|Trusted HTTPS audit token| PVE[Proxmox API: nodes, guests, storage]
+  Server --> PG[Dedicated Zabbix database on PostgreSQL guest]
+  Browser -->|HTTPS via Traefik| UI[Zabbix web UI]
+  UI --> PG
+  ServerCD -. owns .-> UI
 ```
 
-The official **Proxmox VE by HTTP** template discovers nodes, guests and storage.
-The official **Linux by Zabbix agent active** template supplies CPU, memory, swap,
-filesystem, uptime and reachability metrics. Each agent has its own 256-bit PSK
-and identity. Agents initiate TCP 10051 connections; their configuration omits
-`Server`, so they do not open passive TCP 10050. `system.run` is denied and the
-complete configuration includes no vendor plugin directories or custom commands.
+The Proxmox API covers hypervisor inventory and resource statistics. An agent in
+**each monitored guest** supplies guest OS and local workload metrics. Docker uses
+that guest's single agent, not an agent in every application container. Special
+appliances without a supported native agent need a separately selected HTTP/API
+integration. A server on the same physical host cannot report while that host is off.
 
-This first deployment does not configure notification delivery, automatic
-remediation, Docker socket access or application sensors. A server on the same
-physical host cannot continue reporting while that host is off.
+## Ownership and ordering
 
-## What is pinned?
-
-`monitoring/versions.json` pins matching Zabbix **7.0.32** x86 container manifests
-and hashes of the two unmodified official template source files. At configuration
-time, an in-memory copy explicitly enables peer and hostname verification on all
-seven Proxmox HTTP items and prototypes. The standard module imports that copy
-and exports it again for readback; the vendored bytes and UUIDs stay unchanged.
-The cluster-resource master retains one hour of inventory values so the API's
-history-backed `lastclock` and `lastvalue` can prove fresh native data. Other
-upstream retention settings remain unchanged. Their source is commit
-`0d6fa36d0a0df4552d8df07e5b13deb664089047` from the upstream `7.0.32` release.
-The bundled AGPL licence applies to those templates; see the third-party notices.
-The [7.0 support policy](https://www.zabbix.com/life_cycle_and_release_policy)
-lists full support through June 2027. PostgreSQL 16 is within the
-[supported database versions](https://www.zabbix.com/documentation/7.0/en/manual/installation/requirements).
-The actual installed Proxmox version and native runtime still require acceptance.
-
-Native Agent 2 uses the official Debian 13 amd64 package:
-
-```text
-https://repo.zabbix.com/zabbix/7.0/debian/pool/main/z/zabbix/zabbix-agent2_7.0.32-1%2Bdebian13_amd64.deb
-Version: 1:7.0.32-1+debian13
-SHA256: d846b7f6b2eae0d5457decf6f0814df8169361d3335aa900d93e0eb838ab36e7
-```
-
-`monitoring/collections.lock.json` pins upstream `community.zabbix` API modules
-and their HTTP API dependencies. `install-collections.py` verifies the archives
-and installs only those dependencies. Native agent installation uses shared
-builtin Ansible tasks, with vendor service startup suppressed until the full
-active-only configuration is validated.
-
-## How CD owns the installation
-
-The existing `deploy.py`, OpenTofu guest module, saved plan, trusted creation
-identity, state recovery and failure holds remain the guest lifecycle path.
-Only `kind: monitoring` with `installation: clean` may omit a capture. A clean
-monitoring guest cannot accept a restore capture. Other application capture and
-exclusive-writer requirements remain in place.
-
-The small `monitoring_cd.py` adapter sequences fixed calls to that installer and
-the existing Ansible/CD path:
-
-| Phase | Work |
+| Owning CD path | Responsibility |
 | --- | --- |
-| Bootstrap | Dedicated API authority and narrow host API allowance; native host agent through bootstrap CD |
-| Database | New database and restricted owner; one guest allowance and role-specific rejects before existing HBA rules |
-| Server | Apply the exact reviewed new-guest plan, verify its SSH identity, render/start server and web |
-| Configure | Analyze the fresh schema; import official templates; admit selected hosts and replace the factory admin password |
-| Agents | Install the same shared native agent tasks on the commissioned guest inventory |
-| Verify | Require fresh active PSK data from every selected host, fresh Proxmox values and a responding HTTPS UI |
+| Proxmox bootstrap | Host Agent 2, audit-only Proxmox API identity and its narrow allowance |
+| Each guest | Its native Agent 2, persistent PSK consumption, selected local plugins, monitoring DB account and Docker permission |
+| PostgreSQL guest | Dedicated Zabbix database/owner and scoped database access, before server startup |
+| Zabbix server/UI | Clean server/web deployment, pinned templates, finite host admission, UI password and readback |
+| Future homelab-site integration | Private inventory, protected secret storage/recovery bindings, network contract, dependency ordering and source pin |
 
-The Proxmox user is `homelab-zabbix@pve`, with a privilege-separated `monitoring`
-token. Its dedicated role contains only `Sys.Audit`, `VM.Audit` and
-`Datastore.Audit`, propagated from `/` as required by the cluster template.
-This reads the cluster; it cannot start/stop guests or change configuration.
-Bootstrap stores the validated credential once in each protected local/NAS
-location. An unexpected mint response is retained only as failed-attempt evidence
-under the existing hold; successful setup has no redundant raw response file.
-Publishing that credential into private GitHub secrets and the operator's vault
-is a separately reviewed handover; the script never prints it or rotates it.
+Guest monitoring does **not** call the Zabbix API or require the server to exist.
+The PostgreSQL guest can commission its agent and monitoring session first. Agents
+connect when the server becomes available; server CD later admits the same identity.
+Existing guest lifecycle, trusted SSH, backup, saved-plan and durable failure-hold
+rules remain the caller's responsibility. This PR does not add a central fleet rollout.
 
-The PostgreSQL role is a login/owner for `zabbix`, without superuser, role/database
-creation, replication or bypass-RLS privileges. Its HBA block permits only the
-monitoring address to reach that database; it rejects other TCP and local-socket
-connections for that role. Existing HBA lines are preserved byte for byte.
-The helper checks the reviewed HBA digest, saves the original and globals, checks
-the HBA parser and reloads PostgreSQL configuration without restarting it. Parser
-or reload failure restores the original HBA file with its metadata, preserves the
-rejected proposal and retains the failure hold.
-An independently verified current native database backup is required first.
+`ansible/guest-monitoring.yml` accepts exactly one host in `guest_monitoring` and
+checks its hostname, machine ID, address, virtualization type and Debian 13 amd64
+platform before changing it. Call it from that guest's existing commissioning or
+reviewed maintenance job. The optional `app.zabbix_agent` hook also remains available
+in `site.yml`. Newly generated machine IDs/credential records belong in a subsequent
+commissioning step, not an already signed guest plan with a nonexistent secret file.
+Use the standalone `monitoring-bootstrap.yml` agent entrypoint only from host CD.
 
-Private site inputs select addresses, guest IDs, domain, inventory and secret
-bindings. Keep actual values and credentials out of public source. The database
-password is file-backed in both containers. Runtime files are copied with the
-official image user's UID 1997/GID 1995 and mode 0400. The server receives the
-trusted Proxmox CA and the template macro `{$HTTP.TLS.VERIFY}=full`.
-The CA is validated and mounted in the official image's `ssl/ssl_ca` input
-directory. Its entrypoint copies it into the internal trust directory and builds
-the OpenSSL hash links required by libcurl.
+The server adapter now requires **`schema: homelab-monitoring-cd-v2`** and has only
+`bootstrap`, `server`, `configure`, `verify` phases. Bootstrap provisions audit API
+access; it no longer installs a host agent. Configure imports templates and admits
+hosts; it does not SSH into PostgreSQL, analyze its schema or install guest agents.
+The retained `monitoring-database.yml`/`monitoring_database.py` helper belongs to the
+PostgreSQL CD path. The old `agents` and `database` server phases are rejected.
+Old private consumers must remain on their old source pin until explicitly migrated.
 
-## Before enabling the private proposal
+The adapter binds site/inventory/variables/SSH trust and recursively referenced
+`*_file` inputs by SHA256, requires native trusted HTTPS, and retains local/NAS
+holds on failure. Completed write phases are not replayed. A changed packet or
+retained credential/configuration requires reviewed maintenance, not automatic adoption.
 
-Keep it disabled and unmerged while the host is running its other operating
-system. Approval of the design is not approval of a native rollout.
+## Persistent agent secrets
 
-The exact native packet needs:
+`monitoring_credentials.py` creates a 256-bit PSK **once per commissioned guest**.
+The public PSK identity combines hostname and machine ID. Both guest CD and server
+CD read the same protected `credential.json`; neither generates a replacement during
+a normal deploy. Hostname reuse with a different machine ID is a hold.
 
-- Fresh Proxmox version, API/CA identity, unused VMID/addresses/MACs and resource budget.
-  Verify the native certificate's hostname and trusted CA chain, then require an
-  authenticated native API sample; synthetic TLS checks do not establish these facts.
-- Trusted host keys and machine IDs for the host and commissioned guests; no dormant guest creation.
-- Explicit host SSH/service authority for bootstrap CD and each selected guest.
-- A current PostgreSQL backup verification and the exact existing HBA digest.
-- Finite host/guest firewall changes for agent TCP 10051, API TCP 8006, database TCP 5432,
-  Traefik TCP 8080, runner SSH and existing DNS/package egress. Existing commissioned
-  guest firewalls need reviewed maintenance, not guest creation/replacement.
-- A Traefik discovery route and DNS record, admitted after the factory password is replaced.
-- New random database/admin credentials, a separate API token and individual agent PSKs,
-  bound privately in GitHub and the operator's vault.
-  Review each independently generated PSK's provenance and controller-file protection
-  (owner-only mode 0600 or stricter). Synthetic wrong-key tests prove rejection, not
-  native key provenance or storage protection.
-- The saved new-guest plan and SHA256; its application input files, CA and secrets
-  are bound by digest. Recheck package availability before the native window.
+The controller's provision config is a private mode-0600 JSON file, for example:
 
-The enabled adapter packet uses `schema: homelab-monitoring-cd-v1`, `site_file`,
-`inventory`, `variables`, `ssh_key`, `known_hosts`, `plan_sha256` and
-`input_sha256` for every native input file. Its `access` object points to the
-bootstrap access config, existing bootstrap token, CA, local state and actual
-NAS backup mount. Inventory groups are `monitoring_bootstrap`,
-`monitoring_database`, `monitoring_api` and `monitoring_agents`.
-Use trusted HTTPS for the native API inventory. Fixture-only HTTP overrides
-must never appear in an admitted packet.
+```json
+{
+  "schema": "homelab-agent-secret-v1",
+  "hostname": "example-guest",
+  "machine_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "store": "/protected/agent-credentials",
+  "recovery": "/mounted/private-recovery",
+  "backup_source": "nas.example.invalid:/private-recovery",
+  "allow_create": true
+}
+```
 
-Bootstrap access readback deliberately keeps exact firewall snapshots. Later
-rule/order/option drift requires a reviewed baseline update; it is not silently
-adopted as legitimate peer maintenance. The native review must also approve token
-lifetime and confirm the NAS export restricts access to the intended host/account
-and protects the retained once-returned credential evidence.
+Both root directories must already exist, owned by the CD user with mode 0700.
+Recovery must be the **actual expected NFS mount**, checked using the existing
+bootstrap backup guard; a lookalike local folder is refused. They must be distinct,
+non-nested paths. Creation uses a lock, exclusive writes, fsync and holds in both
+copies before generating the key. An interrupted/partial/mismatched copy stays held.
+Repeat provisioning verifies both copies and reuses the original key. `allow_create`
+is explicit commissioning authority; it can be false for subsequent jobs.
 
-The adapter keeps per-phase receipts and a durable hold on the existing local
-and NAS state boundary. A failed or interrupted phase is not replayed on a later
-push. An existing partial identity/database/agent configuration is held rather
-than adopted or overwritten. Inspect and approve a separate correction through
-PR, CI/review, merge and automatic CD. Do not dispatch Actions or patch targets.
+The helper prints only the identity/path and creation status. It neither prints the
+PSK nor publishes GitHub/vault secrets. The protected store/recovery mechanism and
+its private CD bindings must be admitted in homelab-site later. Never commit records,
+passwords, generated plugin configs, secret-bearing CLI stdout or private job logs.
+Credential recovery is distinct from backup of Zabbix's own history database.
 
-## Adding later guests
+Synthetic guest-CD variables (all referenced files are controller-local):
 
-Register a future guest's hostname and individual PSK through the same upstream
-API configuration play. Include `app.zabbix_agent` in its private application
-profile: `server_active`, `psk_identity`, `psk_file`, `package_file` and the exact
-package `version` above. The existing new-guest guard supplies its verified
-hostname/address, fresh machine identity and LXC type to the shared agent tasks.
-The package and PSK file are bound to the guest plan. Existing guests instead
-require their previously recorded machine ID in the fleet inventory. This does
-not create, boot or enrol an uncommissioned guest.
+```yaml
+zabbix_agent:
+  hostname: example-guest
+  address: 198.18.30.21
+  machine_id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  virtualization_type: lxc
+  server_active: 198.18.30.50:10051
+  version: '1:7.0.32-1+debian13'
+  package_file: /protected/packages/zabbix-agent2.deb
+  credential_file: /protected/agent-credentials/example-guest/credential.json
+  secret_provision_file: /protected/example-guest-provision.json # optional; otherwise record must exist
+  workloads:
+    docker:
+      socket_access_approved: true
+```
 
-## What testing establishes
+Server CD uses that existing record, with no need to contact the guest:
 
-The source suite checks clean-install admission, fixed services/images, secret
-binding, input injection, HBA scope and failure holds. The disposable Docker
-fixture uses an internal network with no published ports and synthetic secrets.
-It exercises the rendered server/web against a fresh PostgreSQL schema, upstream
-template/host modules, an unchanged second configuration run, active PSK data and
-rejection of the wrong key. The exact Debian agent binary has a separate offline
-configuration/process/no-passive-listener fixture.
+```yaml
+monitoring_hosts:
+  - hostname: example-guest
+    machine_id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    credential_file: /protected/agent-credentials/example-guest/credential.json
+    profiles: [linux, docker]
+    profile_settings:
+      docker:
+        matches: '^/(web|worker)$'
+        not_matches: '^/deploy-.*$'
+```
 
-Initial native acceptance can wait up to ten minutes for fresh samples within
-one read-only attempt. Identity, TLS and unsupported-item errors fail immediately;
-the wait never restarts a service or replays a failed phase.
+Finite profile/filter selections belong to the same private guest inventory consumed
+by both jobs. The public helpers validate selections, but do not reconcile independently
+maintained inventories. Private integration must keep those inputs consistent.
 
-These tests do not prove LXC nesting, host firewall paths, real Proxmox API data,
-native systemd startup, every guest's telemetry, browser sign-in or household
-acceptance. `monitoring_verify.py` is the later native readback; browser sign-in
-still needs a human check.
+## Workload profiles and credentials
+
+`monitoring_profiles.py` provides `linux`, `docker`, `postgresql`, `mysql` (also
+MariaDB), and `influxdb` selections. Agent connections initiate TCP 10051, omit
+`Server`, open no passive 10050 listener, and deny `system.run`. OS-only config has
+no plugin include. Workloads add exactly one fixed config file, not arbitrary vendor
+include directories or custom commands.
+
+Docker monitoring uses the standard plugin on `/var/run/docker.sock`. Access is
+root-equivalent inside that guest and requires explicit `socket_access_approved`.
+CD checks the existing root-owned `docker` group socket, adds only the agent user
+to that group and does not loosen the socket mode or expose the daemon over TCP.
+The upstream Docker template is passive; an in-memory derived template converts
+collectors/discovery to active checks, renames it and assigns stable distinct UUIDv4
+identities. It can coexist with the stock template. Review permanent/transient
+container discovery filters before enabling alerts.
+
+PostgreSQL and MySQL sessions use a dedicated **`zbx_monitor`** account. Guest input:
+
+```yaml
+zabbix_agent:
+  # Include the identity/package/credential fields from the earlier example.
+  postgresql_package_file: /protected/packages/zabbix-agent2-plugin-postgresql.deb
+  manage_database_accounts: true
+  workloads:
+    postgresql:
+      uri: tcp://127.0.0.1:5432
+      password_file: /protected/example-postgresql-monitor-password
+```
+
+For MariaDB select `mysql`, use port 3306, and omit the PostgreSQL archive. Endpoint
+IP must belong to this guest or be 127.0.0.1. Controller password files must be
+owner-only mode 0600, containing a 32–128-character URL-safe password. The renderer
+runs only in `no_log` tasks; its plugin output contains the password. Guest plugin
+config is root:zabbix 0640. Server macros reference named session `homelab` with empty
+user/password overrides, so database credentials stay off the Zabbix server.
+
+`manage_database_accounts: true` is optional one-time commissioning for **one** local
+native database. PostgreSQL grants `pg_monitor` without superuser, database/role
+creation, replication or bypass-RLS. MariaDB grants statistics privileges
+PROCESS/REPLICATION CLIENT/SHOW DATABASES/SHOW VIEW for this source IP, with three
+connections. The helper refuses preexisting unowned identities, missing retained
+accounts, receipt drift and interrupted operations. Authentication must succeed
+before completing the ownership receipt; it never resets an existing password.
+Database CD still owns backup/approval, trusted local admin access, HBA/listen rules,
+privilege drift review and any future credential rotation. The helper does not edit
+HBA, restart databases or adopt application-owner credentials. A failed new account
+operation leaves ACCOUNT-HOLD for investigation.
+
+InfluxDB uses the official HTTP template, rather than a remote database Agent 2
+session. Server profile settings require an approved trusted **HTTPS origin** in
+`url` and owner-only `token_file`. The API token is a Zabbix secret macro installed
+without forced replay; use a minimum-privilege monitoring token. There is no implicit
+plain-HTTP fallback or new database-network membership. A trusted route/CA and token
+scope require later private integration and native readback.
+
+## Pins and licensing
+
+`monitoring/versions.json` pins official Zabbix **7.0.32** server/web container
+manifests and all six unmodified upstream template files from commit
+`0d6fa36d0a0df4552d8df07e5b13deb664089047`. The bundled AGPL licence and
+[third-party notices](../../THIRD_PARTY_NOTICES.md) apply to those bytes. Runtime
+copies enable peer/hostname verification for Proxmox and InfluxDB HTTP items.
+Proxmox cluster-resource values retain one hour of history for fresh-value readback;
+its seven HTTP item/prototype TLS settings are exported and checked after import.
+
+Native Debian 13 amd64 packages are exact version `1:7.0.32-1+debian13`:
+
+| Package | SHA256 |
+| --- | --- |
+| zabbix-agent2 | `d846b7f6b2eae0d5457decf6f0814df8169361d3335aa900d93e0eb838ab36e7` |
+| zabbix-agent2-plugin-postgresql | `5d3d4ef1089c80cbefd52b4d8dc15aa9c4ab77b5678f8bf9952ca65f4c2983a2` |
+
+Package URLs are in CI and `monitoring_profiles.POSTGRESQL_PLUGIN`.
+`monitoring/collections.lock.json` pins upstream API modules and dependencies;
+`install-collections.py` verifies their archives. Vendor startup is suppressed until
+the complete agent config is installed and validated. Unexpected existing package,
+PSK or plugin config is held before service convergence.
+
+The audit-only Proxmox identity remains `homelab-zabbix@pve!monitoring`, privilege
+separated with only Sys.Audit/VM.Audit/Datastore.Audit. The dedicated Zabbix PostgreSQL
+owner remains distinct from the local `zbx_monitor` statistics reader. Server/web
+consume file-backed database credentials; Traefik admits the UI after replacing the
+factory administrator password. Shared database network/bootstrap contracts belong
+to their owning implementation; no site addresses or bridge rules are embedded here.
+
+## Validation and native admission
+
+Source tests cover finite profiles, private credential protection, interrupted writes,
+identity/recovery drift, template transforms and CD dependency/hold behavior. Isolated
+Docker fixtures exercise fresh schema, all template imports, unchanged second API
+configuration, canonical PSK reuse, active OS/Docker samples and wrong-key rejection.
+Docker metrics use a synthetic API without mounting the host Docker socket. Separate
+fixtures check the exact Debian binary and real PostgreSQL/MariaDB statistics sessions
+using SQL rendered from the shared tasks. These establish source/container behavior.
+
+Native acceptance still needs fresh commissioned identities and SSH trust; exact
+reviewed plan/input hashes; backups; protected secret storage/recovery; local DB
+privileges/HBA; guest Docker approval; Proxmox version/token/CA; firewall routes;
+Traefik/DNS; supported LXC/systemd startup; fresh workload metrics; and browser sign-in.
+`monitoring_verify.py` checks active OS/Proxmox freshness and HTTPS, not every optional
+workload metric. Native workload acceptance must additionally read the selected
+Docker/database items and investigate unsupported items. No native changes or
+notification delivery are authorized by this source PR.
 
 Official references: [Proxmox integration](https://www.zabbix.com/integrations/proxmox),
 [Agent 2 configuration](https://www.zabbix.com/documentation/7.0/en/manual/appendix/config/zabbix_agent2),
-[container installation](https://www.zabbix.com/documentation/7.0/en/manual/installation/containers).
+[Docker integration](https://www.zabbix.com/integrations/docker),
+[PostgreSQL integration](https://www.zabbix.com/integrations/postgresql),
+[MySQL integration](https://www.zabbix.com/integrations/mysql).

@@ -27,6 +27,21 @@ def fixture(root):
 
 
 class DeployTests(unittest.TestCase):
+    def test_guest_plan_binds_nested_monitoring_credentials_and_plugin_packages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); cfg = fixture(root)
+            for name in ('ca', 'credential', 'password', 'plugin'):
+                (root / name).write_text('original-' + name)
+            cfg['app']['zabbix_agent'] = {'credential_file': str(root / 'credential'),
+                'postgresql_package_file': str(root / 'plugin'),
+                'workloads': {'postgresql': {'password_file': str(root / 'password')}}}
+            original = deploy.input_hashes(cfg)
+            for name in ('credential', 'password', 'plugin'):
+                path = root / name; path.write_text('changed-' + name)
+                self.assertNotEqual(original[str(path)], deploy.input_hashes(cfg)[str(path)])
+            cfg['app']['zabbix_agent']['credential_file'] = 'relative'
+            with self.assertRaises(deploy.InputNeeded): deploy.input_hashes(cfg)
+
     def test_network_gate_waits_for_backend_even_when_management_exists(self):
         cfg={'guest':{'interfaces':[{'ipv4':'dhcp'},{'ipv4':'10.88.30.23/24'},{'ipv4':'manual'}]}}
         self.assertEqual(deploy.required_network_interfaces(cfg),['eth0','eth1'])

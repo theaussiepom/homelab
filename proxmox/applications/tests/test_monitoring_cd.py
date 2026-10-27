@@ -16,7 +16,7 @@ class MonitoringCDTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.cfg = {'app': {'kind': 'monitoring'}, 'paths': {
             'state_root': str(self.root / 'state'), 'backup_directory': str(self.root / 'backup')}}
-        self.packet = {'enabled': True, 'schema': 'homelab-monitoring-cd-v1', 'plan_sha256': '0' * 64}
+        self.packet = {'enabled': True, 'schema': 'homelab-monitoring-cd-v2', 'plan_sha256': '0' * 64}
         for key in ('site_file', 'inventory', 'variables', 'known_hosts', 'ssh_key'):
             path = self.root / key
             path.write_text(json.dumps(self.cfg if key == 'site_file' else {}))
@@ -41,6 +41,15 @@ class MonitoringCDTests(unittest.TestCase):
         for name in ('backup', 'quiet', 'execute'):
             self.commands[name].assert_not_called()
 
+    def test_server_cannot_own_guest_agent_or_database_phases(self):
+        for phase in ('agents', 'database'):
+            with self.subTest(phase=phase), self.assertRaises(ValueError):
+                monitoring_cd.run(self.packet, phase)
+        self.assert_no_commands()
+        self.packet['schema'] = 'homelab-monitoring-cd-v1'
+        with self.assertRaises(ValueError): monitoring_cd.run(self.packet, 'server')
+        self.assert_no_commands()
+
     def test_completed_phase_is_not_replayed(self):
         self.receipt('configure')
         self.assertEqual(monitoring_cd.run(self.packet, 'configure'),
@@ -56,9 +65,9 @@ class MonitoringCDTests(unittest.TestCase):
     def test_missing_or_mismatched_dependency_cannot_run(self):
         for present in (False, True):
             with self.subTest(present=present):
-                if present: self.receipt('bootstrap', dict(self.packet, plan_sha256='1' * 64))
+                if present: self.receipt('server', dict(self.packet, plan_sha256='1' * 64))
                 with self.assertRaisesRegex(ValueError, 'matching monitoring dependency'):
-                    monitoring_cd.run(self.packet, 'database')
+                    monitoring_cd.run(self.packet, 'configure')
                 self.assert_no_commands()
 
     def test_failed_phase_retains_local_and_nas_holds_and_cannot_retry(self):
@@ -109,7 +118,7 @@ class MonitoringCDTests(unittest.TestCase):
 
     def test_enabled_packet_needs_reviewed_exact_inputs_before_target_access(self):
         with patch.object(monitoring_cd.deploy, 'validate') as validate:
-            packet = {'enabled': True, 'schema': 'homelab-monitoring-cd-v1',
+            packet = {'enabled': True, 'schema': 'homelab-monitoring-cd-v2',
                       'input_sha256': {'relative-path': '0' * 64}}
             with self.assertRaises(ValueError): monitoring_cd.run(packet, 'server')
             validate.assert_not_called()

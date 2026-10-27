@@ -156,7 +156,17 @@ def input_hashes(cfg):
     paths.extend(item['key_path'] for item in app.get('repositories', []))
     paths.extend(item['source'] for item in app.get('database', {}).get('config_files', []))
     if 'zabbix_agent' in app:
-        paths.extend(app['zabbix_agent'][key] for key in ('package_file', 'psk_file'))
+        def agent_files(value):
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if key.endswith('_file') and isinstance(child, str):
+                        if not Path(child).is_absolute():
+                            raise InputNeeded('Monitoring file references must be absolute')
+                        paths.append(child)
+                    agent_files(child)
+            elif isinstance(value, list):
+                for child in value: agent_files(child)
+        agent_files(app['zabbix_agent'])
     return {path: sha(path) for path in sorted(set(paths))}
 
 
