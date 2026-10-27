@@ -1,0 +1,162 @@
+---
+# Shared by host bootstrap CD, existing guest CD and future guest commissioning.
+# The caller owns trusted SSH, approval, backup and durable failure holds.
+- name: Require the commissioned machine and exact active agent inputs
+  ansible.builtin.assert:
+    that:
+      - zabbix_agent.hostname == ansible_facts.hostname
+      - zabbix_agent.address in ansible_facts.all_ipv4_addresses
+      - zabbix_agent.machine_id == ansible_facts.machine_id
+      - zabbix_agent.virtualization_type == ansible_facts.virtualization_type
+      - ansible_facts.distribution == 'Debian'
+      - ansible_facts.distribution_major_version == '13'
+      - ansible_facts.architecture == 'x86_64'
+      - zabbix_agent.version == '1:7.0.32-1+debian13'
+      - zabbix_agent.psk_identity is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')
+      - lookup('ansible.builtin.file', zabbix_agent.psk_file) | trim is match('^[0-9a-f]{64}$')
+    fail_msg: 'Stop: agent identity, Debian package or individual PSK differs from the reviewed packet.'
+  no_log: true
+
+- name: Verify the exact upstream Agent 2 package on the controller
+  ansible.builtin.stat:
+    path: "{{ zabbix_agent.package_file }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: agent_package
+
+- name: Require the selected Debian 13 package digest
+  ansible.builtin.assert:
+    that:
+      - agent_package.stat.checksum == 'd846b7f6b2eae0d5457decf6f0814df8169361d3335aa900d93e0eb838ab36e7'
+
+- name: Render the closed active-only configuration before changing the target
+  ansible.builtin.command:
+    argv: [python3, "{{ playbook_dir }}/../monitoring.py", --agent-config, '-']
+    stdin: "{{ {'hostname': zabbix_agent.hostname, 'server_active': zabbix_agent.server_active, 'psk_identity': zabbix_agent.psk_identity, 'psk_path': '/etc/zabbix/agent.psk'} | to_json }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  register: agent_configuration
+
+- name: Inspect an existing agent configuration
+  ansible.builtin.stat:
+    path: /etc/zabbix/zabbix_agent2.conf
+    checksum_algorithm: sha256
+  register: old_agent_configuration
+
+- name: Hold configuration drift rather than adopting an existing agent
+  ansible.builtin.assert:
+    that:
+      - not old_agent_configuration.stat.exists or old_agent_configuration.stat.checksum == (agent_configuration.stdout ~ '\n') | hash('sha256')
+    fail_msg: 'An existing Agent 2 configuration needs separate review before replacement.'
+
+- name: Inspect the retained PSK before installing any package
+  ansible.builtin.stat:
+    path: /etc/zabbix/agent.psk
+  register: old_agent_psk
+
+- name: Refuse a partial agent configuration or secret
+  ansible.builtin.assert:
+    that: old_agent_configuration.stat.exists == old_agent_psk.stat.exists
+    fail_msg: 'Partial agent state needs review before package or service changes.'
+
+- name: Read the existing PSK for preflight only
+  ansible.builtin.slurp:
+    src: /etc/zabbix/agent.psk
+  register: old_agent_key
+  no_log: true
+  when: old_agent_psk.stat.exists
+
+- name: Refuse a changed retained key before package changes
+  ansible.builtin.assert:
+    that: (old_agent_key.content | b64decode | trim) == (lookup('ansible.builtin.file', zabbix_agent.psk_file) | trim)
+  no_log: true
+  when: old_agent_psk.stat.exists
+
+- name: Inspect the installed package before any convergence
+  ansible.builtin.command:
+    argv: [dpkg-query, -W, '-f=${Version}', zabbix-agent2]
+  changed_when: false
+  register: old_agent_package
+  failed_when: old_agent_package.rc not in [0, 1]
+
+- name: Hold package drift rather than upgrading an existing agent implicitly
+  ansible.builtin.assert:
+    that:
+      - old_agent_package.rc == 1 or (old_agent_configuration.stat.exists and old_agent_package.stdout == zabbix_agent.version)
+
+- name: Stage the verified upstream package
+  ansible.builtin.copy:
+    src: "{{ zabbix_agent.package_file }}"
+    dest: /var/tmp/homelab-zabbix-agent2.deb
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Install Agent 2 without starting vendor defaults
+  ansible.builtin.apt:
+    deb: /var/tmp/homelab-zabbix-agent2.deb
+    policy_rc_d: 101
+    allow_downgrade: false
+    fail_on_autoremove: true
+
+- name: Read back the installed package version
+  ansible.builtin.command:
+    argv: [dpkg-query, -W, '-f=${Version}', zabbix-agent2]
+  changed_when: false
+  register: installed_agent
+
+- name: Verify the package version
+  ansible.builtin.assert:
+    that: installed_agent.stdout == zabbix_agent.version
+
+- name: Install the individual agent PSK
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.file', zabbix_agent.psk_file) | trim }}\n"
+    dest: /etc/zabbix/agent.psk
+    owner: zabbix
+    group: zabbix
+    mode: '0400'
+    force: false
+  no_log: true
+
+- name: Verify the retained PSK before any service start
+  ansible.builtin.slurp:
+    src: /etc/zabbix/agent.psk
+  register: installed_agent_psk
+  no_log: true
+
+- name: Refuse PSK drift or implicit rotation
+  ansible.builtin.assert:
+    that: (installed_agent_psk.content | b64decode | trim) == (lookup('ansible.builtin.file', zabbix_agent.psk_file) | trim)
+  no_log: true
+
+- name: Install only the reviewed complete agent configuration
+  ansible.builtin.copy:
+    content: "{{ agent_configuration.stdout }}\n"
+    dest: /etc/zabbix/zabbix_agent2.conf
+    owner: root
+    group: zabbix
+    mode: '0640'
+    backup: true
+  register: agent_configured
+
+- name: Validate before starting the new agent
+  ansible.builtin.command:
+    argv: [/usr/sbin/zabbix_agent2, -T, -c, /etc/zabbix/zabbix_agent2.conf]
+  changed_when: false
+  become_user: zabbix
+
+- name: Enable the active-only agent
+  ansible.builtin.systemd_service:
+    name: zabbix-agent2
+    enabled: true
+    state: started
+
+- name: Verify that no passive Agent 2 port was opened
+  ansible.builtin.command:
+    argv: [ss, -H, -lnt, 'sport = :10050']
+  changed_when: false
+  register: passive_listener
+  failed_when: passive_listener.stdout | length > 0

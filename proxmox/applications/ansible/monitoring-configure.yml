@@ -1,0 +1,128 @@
+---
+- name: Collect statistics after the clean schema import
+  hosts: monitoring_database
+  become: true
+  become_user: postgres
+  gather_facts: false
+  tasks:
+    - name: Analyze the new Zabbix schema before template linking
+      ansible.builtin.command:
+        argv: [psql, -X, -v, ON_ERROR_STOP=1, -d, zabbix, -c, ANALYZE]
+      changed_when: false
+
+- name: Configure the clean monitoring server using upstream API modules
+  hosts: monitoring_api
+  gather_facts: false
+  vars:
+    ansible_connection: ansible.netcommon.httpapi
+    ansible_network_os: community.zabbix.zabbix
+    ansible_httpapi_validate_certs: true
+    ansible_httpapi_use_ssl: true
+    ansible_zabbix_url_path: ''
+    ansible_command_timeout: 180
+  tasks:
+    - name: Require a finite host list and distinct PSK identities and keys
+      ansible.builtin.assert:
+        that:
+          - monitoring_hosts | length > 0
+          - monitoring_hosts | map(attribute='hostname') | unique | length == monitoring_hosts | length
+          - monitoring_hosts | map(attribute='psk_identity') | unique | length == monitoring_hosts | length
+          - monitoring_hosts | map(attribute='psk') | unique | length == monitoring_hosts | length
+      no_log: true
+
+    - name: Import the exact official templates
+      community.zabbix.zabbix_template:
+        template_yaml: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../monitoring/templates/' ~ item) }}"
+        state: present
+      loop: [template_app_proxmox.yaml, template_os_linux_active.yaml]
+
+    - name: Create the monitoring host group
+      community.zabbix.zabbix_group:
+        host_groups: [HomeLab]
+        state: present
+
+    - name: Inspect the current host identities before applying the selected list
+      community.zabbix.zabbix_host_info:
+      register: monitored_before
+      no_log: true
+
+    - name: Bind existing identities rather than replacing an unknown PSK
+      ansible.builtin.assert:
+        that:
+          - (monitored_before.hosts | selectattr('host', 'equalto', item.hostname) | list | length == 0) or (monitored_before.hosts | selectattr('host', 'equalto', item.hostname) | map(attribute='description') | first == 'HomeLab active agent; PSK identity=' ~ item.psk_identity)
+          - item.psk is match('^[0-9a-f]{64}$')
+      loop: "{{ monitoring_hosts }}"
+      no_log: true
+
+    - name: Admit selected hosts with the standard active Linux template
+      community.zabbix.zabbix_host:
+        host_name: "{{ item.hostname }}"
+        description: "HomeLab active agent; PSK identity={{ item.psk_identity }}"
+        host_groups: [HomeLab]
+        link_templates: [Linux by Zabbix agent active]
+        interfaces: []
+        tls_connect: 2
+        tls_accept: 2
+        tls_psk_identity: "{{ item.psk_identity if item.hostname not in (monitored_before.hosts | map(attribute='host') | list) else omit }}"
+        tls_psk: "{{ item.psk if item.hostname not in (monitored_before.hosts | map(attribute='host') | list) else omit }}"
+        status: enabled
+        state: present
+      loop: "{{ monitoring_hosts }}"
+      no_log: true
+
+    - name: Bind the existing API host to its commissioning identity
+      ansible.builtin.assert:
+        that:
+          - (monitored_before.hosts | selectattr('host', 'equalto', monitoring_proxmox.hostname) | list | length == 0) or (monitored_before.hosts | selectattr('host', 'equalto', monitoring_proxmox.hostname) | map(attribute='description') | first == 'HomeLab Proxmox API; token=' ~ monitoring_proxmox.token_id)
+      no_log: true
+
+    - name: Configure the official Proxmox template
+      community.zabbix.zabbix_host:
+        host_name: "{{ monitoring_proxmox.hostname }}"
+        description: "HomeLab Proxmox API; token={{ monitoring_proxmox.token_id }}"
+        host_groups: [HomeLab]
+        link_templates: [Proxmox VE by HTTP]
+        interfaces: []
+        status: enabled
+        state: present
+      no_log: true
+
+    - name: Configure API macros without replaying a write-only token secret
+      community.zabbix.zabbix_hostmacro:
+        host_name: "{{ monitoring_proxmox.hostname }}"
+        macro_name: "{{ item.macro }}"
+        macro_value: "{{ item.value }}"
+        macro_type: "{{ item.type | default('text') }}"
+        macro_description: "{{ item.description | default('') }}"
+        force: "{{ item.type | default('text') != 'secret' }}"
+        state: present
+      loop:
+        - macro: '{$PVE.URL.HOST}'
+          value: "{{ monitoring_proxmox.address }}"
+        - macro: '{$PVE.URL.PORT}'
+          value: '8006'
+        - macro: '{$PVE.TOKEN.ID}'
+          value: "{{ monitoring_proxmox.token_id }}"
+        - macro: '{$PVE.TOKEN.SECRET}'
+          value: "{{ monitoring_proxmox.token_secret }}"
+          type: secret
+          description: 'Reviewed initial monitoring credential; rotation requires a separate packet'
+        - macro: '{$HTTP.TLS.VERIFY}'
+          value: full
+      no_log: true
+
+    - name: Disable the unused default passive example host
+      community.zabbix.zabbix_host:
+        host_name: Zabbix server
+        status: disabled
+        state: present
+
+    - name: Replace the factory administrator password before ingress admission
+      community.zabbix.zabbix_user:
+        username: Admin
+        passwd: "{{ monitoring_admin_password }}"
+        current_passwd: "{{ ansible_httpapi_pass }}"
+        override_passwd: "{{ monitoring_initial_password | default(false) }}"
+        usrgrps: [Zabbix administrators]
+        state: present
+      no_log: true
