@@ -50,8 +50,9 @@ def validate(cfg):
     if not isinstance(topic, str) or not topic or any(c in topic for c in '\x00\r\n+#'):
         raise ValueError('Preserve the existing literal MQTT base topic')
     hashes = cfg['state_sha256']
-    if not isinstance(hashes, dict) or set(hashes) != FILES or any(
-            not re.fullmatch(r'[0-9a-f]{64}', str(value)) for value in hashes.values()):
+    if (not isinstance(hashes, dict) or not FILES <= set(hashes) or len(hashes) > 4 or any(
+            not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]*\.ya?ml', name) for name in set(hashes) - FILES) or any(
+            not re.fullmatch(r'[0-9a-f]{64}', str(value)) for value in hashes.values())):
         raise ValueError('Hash the prepared configuration, device database and coordinator backup')
     return cfg
 
@@ -77,29 +78,46 @@ def check_configuration(data, cfg):
         identity = value['advanced']
         network_key = identity['network_key']
         # Zigbee2MQTT supports quoted file references for network_key only.
-        # Their contents must be reviewed separately; never resolve them here.
-        key_reference = isinstance(network_key, str) and re.fullmatch(r'!\S+ [^\s]+', network_key)
+        # Resolve only from the separately hashed capture, never arbitrary disk.
+        key_reference = isinstance(network_key, str) and re.fullmatch(r'!([A-Za-z0-9_][A-Za-z0-9_.-]*) ([^\s]+)', network_key)
         if not byte_array(network_key, 16) and not key_reference:
             raise ValueError
         pan_id = identity['pan_id']
         if type(pan_id) is not int or not 1 <= pan_id <= 65534 or not byte_array(identity['ext_pan_id'], 8):
             raise ValueError
+        if key_reference:
+            filename, key = key_reference.groups()
+            if not filename.endswith(('.yaml', '.yml')):
+                filename += '.yaml'
+            return filename, key
     except (yaml.YAMLError, KeyError, TypeError, AttributeError, ValueError):
         raise ValueError('Prepare and review the preserved Zigbee settings outside CD; no conversion or new network is allowed') from None
 
 
 def check_bytes(files, cfg):
+    """Bind all required bytes and validate any captured network-key reference."""
     validate(cfg)
-    if set(files) != FILES:
+    if set(files) != set(cfg['state_sha256']):
         raise ValueError('The prepared Zigbee state is incomplete')
     for name, data in files.items():
         if not data or len(data) > MAX_FILE_BYTES or hashlib.sha256(data).hexdigest() != cfg['state_sha256'][name]:
             raise ValueError('Prepared Zigbee state does not match its reviewed hashes')
-    check_configuration(files['configuration.yaml'], cfg)
+    reference = check_configuration(files['configuration.yaml'], cfg)
+    expected = FILES | ({reference[0]} if reference else set())
+    if set(files) != expected:
+        raise ValueError('Capture and hash exactly the required files and any referenced network-key file')
+    if reference:
+        import yaml
+        try:
+            if not byte_array(yaml.safe_load(files[reference[0]])[reference[1]], 16):
+                raise ValueError
+        except (yaml.YAMLError, KeyError, TypeError, ValueError):
+            raise ValueError('The captured network-key reference must contain a preserved 16-byte key') from None
 
 
 def check_archive(path, cfg):
     """Read required members only, before the existing generic restore can run."""
+    validate(cfg)
     files, names = {}, set()
     with tarfile.open(path) as archive:
         for member in archive:
@@ -109,7 +127,7 @@ def check_archive(path, cfg):
                     not (member.isdir() or member.isfile())):
                 raise ValueError('Use one Zigbee data tree without links, duplicate paths or other services')
             names.add(str(name))
-            if str(name) in {'zigbee2mqtt/' + item for item in FILES}:
+            if str(name) in {'zigbee2mqtt/' + item for item in cfg['state_sha256']}:
                 if not member.isfile() or not 0 < member.size <= MAX_FILE_BYTES:
                     raise ValueError('Required Zigbee state must be bounded regular files')
                 files[name.name] = archive.extractfile(member).read(MAX_FILE_BYTES + 1)
@@ -122,7 +140,8 @@ def check_directory(root, cfg):
     if root.is_symlink() or not root.is_dir():
         raise ValueError('Use the restored Zigbee directory')
     files = {}
-    for name in FILES:
+    validate(cfg)
+    for name in cfg['state_sha256']:
         path = root / name
         info = path.lstat()
         if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_FILE_BYTES:

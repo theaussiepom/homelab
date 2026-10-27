@@ -47,7 +47,7 @@ class ZigbeeTests(unittest.TestCase):
                 stack_path=root/'stack.json'; stack_path.write_text(json.dumps(stack))
                 cfg['guest']['serial_device']={'path':DEVICE}
                 cfg['guest']['interfaces'][0]['role']='backend'
-                cfg['app'].update(kind='zigbee2mqtt',stack_config=str(stack_path))
+                cfg['app'].update(kind='zigbee2mqtt',stack_config=str(stack_path),usb_stage='prepare')
                 site.write_text(json.dumps(cfg))
                 receipt=json.loads((work/'plan.json').read_text())
                 receipt.update(site_sha256=deploy.sha(site), input_hashes=deploy.input_hashes(cfg))
@@ -81,7 +81,7 @@ class ZigbeeTests(unittest.TestCase):
             root=Path(tmp); cfg=site_fixture(root); stack=fixture()
             stack['zigbee']['bind_address']=cfg['app']['address']
             path=root/'stack.json'; path.write_text(json.dumps(stack))
-            cfg['app'].update(kind='zigbee2mqtt', stack_config=str(path))
+            cfg['app'].update(kind='zigbee2mqtt', stack_config=str(path),usb_stage='prepare')
             cfg['guest']['serial_device']={'path':DEVICE}
             cfg['guest']['interfaces'][0]['role']='backend'
             self.assertEqual(deploy.validate(cfg),6101)
@@ -92,6 +92,7 @@ class ZigbeeTests(unittest.TestCase):
             with self.assertRaises(ValueError): deploy.validate(cfg)
 
     def test_radio_listener_requires_one_explicit_backend_interface(self):
+        """Check synthetic role selection only, never native deployment acceptance."""
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); cfg=site_fixture(root); stack=fixture()
             cfg['guest']['interfaces'][0]['role']='management'
@@ -99,7 +100,7 @@ class ZigbeeTests(unittest.TestCase):
             cfg['guest']['interfaces'].append(backend)
             cfg['guest']['serial_device']={'path':DEVICE}
             path=root/'stack.json'; path.write_text(json.dumps(stack))
-            cfg['app'].update(kind='zigbee2mqtt', stack_config=str(path))
+            cfg['app'].update(kind='zigbee2mqtt', stack_config=str(path),usb_stage='prepare')
             self.assertEqual(deploy.validate(cfg),6101)
             for mode in ('management-listener','missing-role','duplicate-role'):
                 bad=copy.deepcopy(cfg)
@@ -118,7 +119,8 @@ class ZigbeeTests(unittest.TestCase):
         import zigbee2mqtt
         for key, invalid in (
                 ('network_key', [[], [1]*15, [1]*17, [True]*16, [1.5]*16, [-1]*16,
-                                 [256]*16, {}, 'not-a-key', '!secret.yaml', '!secret.yaml ']),
+                                 [256]*16, {}, 'not-a-key', '!secret.yaml', '!secret.yaml ',
+                                 '!../secret.yaml network_key', '!sub/secret.yaml network_key']),
                 ('pan_id', [True, 0, -1, 65535, 1.5, [], {}, '1234', '!secret.yaml pan_id']),
                 ('ext_pan_id', [[], [1]*7, [1]*9, [True]*8, [1.5]*8, [-1]*8,
                                 [256]*8, {}, 1234, '!secret.yaml ext_pan_id'])):
@@ -136,6 +138,37 @@ class ZigbeeTests(unittest.TestCase):
                 value=yaml.safe_load(state()['configuration.yaml'])
                 value['advanced'].update(network_key=key,pan_id=pan_id,ext_pan_id=[0,255]*4)
                 zigbee2mqtt.check_configuration(yaml.safe_dump(value),fixture()['zigbee'])
+
+    def test_referenced_key_must_be_captured_hashed_and_a_valid_preserved_key(self):
+        import yaml
+        import zigbee2mqtt
+        for reference in ('!secret.yaml network_key','!secret network_key'):
+            value=yaml.safe_load(state()['configuration.yaml'])
+            value['advanced']['network_key']=reference
+            files=state();files['configuration.yaml']=yaml.safe_dump(value).encode()
+            cfg=fixture()['zigbee'];cfg['state_sha256']={n:hashlib.sha256(v).hexdigest() for n,v in files.items()}
+            with self.assertRaises(ValueError):zigbee2mqtt.check_bytes(files,cfg)
+            files['secret.yaml']=b'network_key: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]\n'
+            cfg['state_sha256']={n:hashlib.sha256(v).hexdigest() for n,v in files.items()}
+            zigbee2mqtt.check_bytes(files,cfg)
+            with tempfile.TemporaryDirectory() as tmp:
+                root=Path(tmp)
+                for name,data in files.items():(root/name).write_bytes(data)
+                zigbee2mqtt.check_directory(root,cfg)
+                capture=root/'capture.tar'
+                with tarfile.open(capture,'w') as archive:
+                    for name,data in files.items():
+                        member=tarfile.TarInfo('zigbee2mqtt/'+name);member.size=len(data)
+                        archive.addfile(member,io.BytesIO(data))
+                zigbee2mqtt.check_archive(capture,cfg)
+                (root/'secret.yaml').write_bytes(b'network_key: GENERATE\n')
+                with self.assertRaises(ValueError):zigbee2mqtt.check_directory(root,cfg)
+                (root/'secret.yaml').unlink();(root/'secret.yaml').symlink_to(root/'configuration.yaml')
+                with self.assertRaises(ValueError):zigbee2mqtt.check_directory(root,cfg)
+            for data in (b'network_key: []\n',b'network_key: GENERATE\n',b'other: [1,2]\n'):
+                files['secret.yaml']=data
+                cfg['state_sha256']['secret.yaml']=hashlib.sha256(data).hexdigest()
+                with self.assertRaises(ValueError):zigbee2mqtt.check_bytes(files,cfg)
 
     def test_archive_and_restored_state_are_checked_without_modification(self):
         import zigbee2mqtt

@@ -23,6 +23,7 @@ import discovery
 import foundation
 import ingress_routing
 import zigbee2mqtt
+import zigbee_usb
 
 check_merge_create_plan = discovery.check_merge_create_plan
 
@@ -83,6 +84,7 @@ def validate(cfg):
     app = cfg['app']
     device = cfg['guest'].get('serial_device')
     if app.get('kind') == 'zigbee2mqtt':
+        zigbee_usb.stage(cfg)
         stack = json.loads(Path(app['stack_config']).read_text())
         radio = zigbee2mqtt.validate(stack.get('zigbee'))
         backend = [nic for nic in cfg['guest']['interfaces'] if nic.get('role') == 'backend']
@@ -90,7 +92,7 @@ def validate(cfg):
                 device != {'path': radio['serial_device']} or
                 len(backend) != 1 or radio['bind_address'] != backend[0]['ipv4'].split('/')[0]):
             raise ValueError('Zigbee must bind the same exact USB device and guest backend address')
-    elif device is not None:
+    elif device is not None or 'usb_stage' in app:
         raise ValueError('Serial passthrough belongs only to the selected Zigbee guest')
     discovery.labels(cfg)
     if 'frontend_routing' in app:
@@ -262,6 +264,13 @@ def _execute_step(action, cfg_path, approved_plan=None):
         if (work / 'HOLD.json').exists():
             raise ValueError('A failed mutation is held for review; preserve its state and logs')
         state = work / 'terraform.tfstate'
+        radio = cfg['app'].get('kind') == 'zigbee2mqtt'
+        if radio:
+            if zigbee_usb.stage(cfg) == 'attached':
+                zigbee_usb.require_prepared(cfg, work)
+                zigbee_usb.verify_live(cfg, api_get)
+            elif action not in {'plan', 'apply'}:
+                raise InputNeeded('The stopped radio preparation cannot stage/start; finish the operator USB attachment first')
         backup(cfg, state, 'before-' + action)
         environment = os.environ.copy()
         environment.update({'TF_IN_AUTOMATION': '1', 'CHECKPOINT_DISABLE': '1',
@@ -273,13 +282,17 @@ def _execute_step(action, cfg_path, approved_plan=None):
             shutil.copytree(SOURCE / 'tofu', work / 'tofu', dirs_exist_ok=True,
                             ignore=shutil.ignore_patterns('.terraform', '*.tfstate*', '*.tfplan'))
             variables = {k: cfg[k] for k in ('site', 'guest', 'ssh_public_keys')}
-            variables['guest'] = dict(cfg['guest'], routing_labels=discovery.labels(cfg))
+            variables['guest'] = dict(zigbee_usb.guest_variables(cfg), routing_labels=discovery.labels(cfg))
             write(work / 'tofu' / 'site.auto.tfvars.json', variables)
             quiet(tofu + ['init', '-input=false', '-lockfile=readonly', '-backend-config=path=' + str(state)], environment, logfile)
             quiet(tofu + ['plan', '-input=false', '-lock-timeout=30s', '-out=' + str(work / 'guest.tfplan')], environment, logfile)
             output = subprocess.check_output(tofu + ['show', '-json', str(work / 'guest.tfplan')], env=environment)
             plan_value = json.loads(output)
             check_plan(plan_value, cfg['site']['node'], vmid)
+            if radio:
+                zigbee_usb.check_plan(plan_value, cfg)
+                if zigbee_usb.stage(cfg) == 'prepare':
+                    check_merge_create_plan(plan_value, cfg['site']['node'], vmid)
             write(work / 'guest.tfplan.json', plan_value)
             creates_guest = any(row['address'] == 'module.guest.proxmox_virtual_environment_container.guest'
                                 and row['change']['actions'] == ['create'] and row['change'].get('before') is None
@@ -288,6 +301,8 @@ def _execute_step(action, cfg_path, approved_plan=None):
                        'plan_json_sha256': sha(work / 'guest.tfplan.json'), 'site_sha256': sha(cfg_path),
                        'source_sha256': source_hash(), 'input_hashes': input_hashes(cfg), 'vmid': vmid,
                        'creates_guest': creates_guest}
+            if radio:
+                receipt['usb_stage'] = zigbee_usb.stage(cfg)
             write(work / 'plan.json', receipt)
             return receipt
         receipt = json.loads((work / 'plan.json').read_text())
@@ -298,6 +313,14 @@ def _execute_step(action, cfg_path, approved_plan=None):
         if action == 'apply':
             if not approved_plan or approved_plan != receipt['plan_sha256'] or approved_plan != sha(work / 'guest.tfplan'):
                 raise ValueError('Apply requires the exact reviewed plan SHA256')
+            if radio:
+                plan_path = work / 'guest.tfplan.json'
+                if plan_path.is_symlink() or sha(plan_path) != receipt.get('plan_json_sha256'):
+                    raise ValueError('Preserve the matching radio JSON plan before apply')
+                selected_plan = json.loads(plan_path.read_text())
+                zigbee_usb.check_plan(selected_plan, cfg)
+                if zigbee_usb.stage(cfg) == 'prepare':
+                    check_merge_create_plan(selected_plan, cfg['site']['node'], vmid)
         elif action not in {'stage', 'start', 'verify'}:
             raise ValueError('Unknown deployment step')
         applied = work / 'applied.json'
@@ -322,6 +345,8 @@ def _execute_step(action, cfg_path, approved_plan=None):
                 quiet(tofu + ['apply', '-input=false', '-lock-timeout=30s', str(work / 'guest.tfplan')], environment, logfile)
                 write(work / 'apply-window.json', dict(window, finished_at_ns=time.time_ns()))
                 write(work / 'applied.json', receipt)
+                if radio and zigbee_usb.stage(cfg) == 'prepare':
+                    write(work / 'usb-prepared.json', zigbee_usb.prepared_receipt(cfg, state))
             else:
                 app = dict(cfg['app'], start_services=(action == 'start'), render_dir=str(work / 'rendered'))
                 write(work / 'variables.json', {'app': app,
@@ -352,6 +377,8 @@ def execute(action, cfg_path, approved_plan=None):
     os.umask(0o077)
     cfg = json.loads(cfg_path.read_text())
     vmid = validate(cfg)
+    if cfg['app'].get('kind') == 'zigbee2mqtt' and action == 'deploy':
+        raise InputNeeded('Zigbee uses two stages: plan/apply prepare, operator USB attachment, then plan/apply attached and stage/start/verify')
     if action == 'apply' and cfg['app'].get('kind') == 'zigbee2mqtt':
         capture = cfg['app'].get('capture', {})
         path = Path(capture.get('path', ''))
