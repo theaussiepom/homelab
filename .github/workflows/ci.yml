@@ -25,6 +25,10 @@ jobs:
             --tmpfs /tmp:rw,exec,nosuid,nodev,size=768m,mode=1777 \
             -v "$PWD:/src:ro" -e HOME=/tmp homelab-app-test \
             sh /src/proxmox/applications/tests/check.sh
+      - name: Fetch the pinned PegaProx image explicitly
+        run: docker pull --platform linux/amd64 ghcr.io/pegaprox/pegaprox@sha256:8d295a524a52f0b923616a3eb415ff6422fe62beba5bb441f35c75d8985f1add
+      - name: Prove clean PegaProx login and password-free CD verification without network
+        run: python3 proxmox/applications/tests/pegaprox_fixture.py
       - name: Rehearse the bootstrap with synthetic provider and runner fixtures
         run: |
           docker run --rm --platform linux/amd64 --network none --read-only \

@@ -77,7 +77,11 @@ def write(path, value):
 
 def validate(cfg):
     if cfg.get('app', {}).get('kind') == 'pegaprox':
-        raise InputNeeded('PegaProx is source preparation; review clean-install integration and native access before deployment')
+        import pegaprox
+        try:
+            pegaprox.validate_deployment(cfg)
+        except ValueError as error:
+            raise InputNeeded(str(error)) from None
     vmid = cfg['guest']['vmid']
     if isinstance(vmid, bool) or not isinstance(vmid, int) or vmid < 100 or vmid in {900, 4914, 4915, 4920}:
         raise ValueError('Select one application guest, never the deployment controller or protected targets')
@@ -144,6 +148,8 @@ def input_hashes(cfg):
         paths.append(app['stack_config'])
         stack = json.loads(Path(app['stack_config']).read_text())
         paths.extend(foundation.source_files(stack))
+    if app.get('kind') == 'pegaprox':
+        paths.append(app['pegaprox']['key_source'])
     paths.extend(item['key_path'] for item in app.get('repositories', []))
     paths.extend(item['source'] for item in app.get('database', {}).get('config_files', []))
     return {path: sha(path) for path in sorted(set(paths))}
@@ -375,7 +381,7 @@ def execute(action, cfg_path, approved_plan=None):
             check_merge_create_plan(json.loads(json_plan.read_text()), cfg['site']['node'], vmid)
         except ValueError:
             raise InputNeeded('Deploy needs three fresh creates for the selected guest and node; use reviewed steps for an existing installation') from None
-        if cfg['app'].get('kind') not in DATABASE_KINDS:
+        if cfg['app'].get('kind') not in DATABASE_KINDS | {'pegaprox'}:
             if cfg['app'].get('exclusive_writer_confirmed') is not True:
                 raise InputNeeded('Confirm the selected service migration and retire its old writers before deploy')
             capture = cfg['app']['capture']

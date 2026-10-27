@@ -1,0 +1,40 @@
+---
+- name: Create the initial local administrator exactly once
+  when: app.start_services | default(false) | bool and not ansible_check_mode
+  block:
+    - name: Require the bootstrap-only GitHub Environment secret
+      ansible.builtin.assert:
+        that: lookup('ansible.builtin.env', 'PEGAPROX_ADMIN_PASSWORD') | length > 0
+      no_log: true
+
+    - name: Allocate a private temporary file in guest volatile storage
+      ansible.builtin.tempfile:
+        state: file
+        path: /run
+        prefix: homelab-pegaprox-admin-
+      register: pegaprox_password_file
+      no_log: true
+
+    - name: Stage the temporary password in guest volatile storage
+      ansible.builtin.copy:
+        content: "{{ lookup('ansible.builtin.env', 'PEGAPROX_ADMIN_PASSWORD') }}"
+        dest: "{{ pegaprox_password_file.path }}"
+        owner: root
+        group: root
+        mode: '0600'
+        force: true
+      no_log: true
+
+    - name: Bootstrap and prove the initial account over container loopback
+      ansible.builtin.command:
+        argv: [python3, /opt/homelab-app/pegaprox-setup.py, bootstrap, --password-file,
+               "{{ pegaprox_password_file.path }}", --username, "{{ app.pegaprox.admin_username }}"]
+      changed_when: true
+      no_log: true
+  always:
+    - name: Remove the temporary guest password file
+      ansible.builtin.file:
+        path: "{{ pegaprox_password_file.path }}"
+        state: absent
+      when: pegaprox_password_file.path is defined
+      no_log: true

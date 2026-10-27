@@ -90,7 +90,7 @@
 
 - name: Load preserved custom images by verified archive
   ansible.builtin.include_tasks: image.yml
-  loop: "{{ stack.services | dict2items | selectattr('value.archive', 'defined') | list }}"
+  loop: "{{ stack.services | default({}) | dict2items | selectattr('value.archive', 'defined') | list }}"
   loop_control:
     loop_var: image_input
     label: "{{ image_input.key }}"
@@ -133,3 +133,7 @@
   changed_when: "'Started' in compose_start.stderr or 'Created' in compose_start.stderr or 'Recreated' in compose_start.stderr"
   no_log: true
   when: app.start_services | default(false) | bool and not ansible_check_mode
+
+- name: Initialise the clean PegaProx account after its first start
+  ansible.builtin.import_tasks: pegaprox-bootstrap.yml
+  when: app.kind == 'pegaprox'

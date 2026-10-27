@@ -8,10 +8,10 @@ The selected home here is a **separate unprivileged Debian LXC**, independent
 of the deployment runner. An LXC is a Linux container managed by Proxmox.
 The separate-guest decision was made on 26 October 2026.
 
-**This change prepares a proposal and a Compose preview. It is not an admitted
-installer.** No PegaProx guest or credentials are created. `deploy.py` refuses
-`app.kind=pegaprox` before reading target or credential inputs. Keep the paired
-private PR unmerged until the missing inputs have been reviewed.
+**CD source is prepared; native deployment is disabled.** The private selection
+and both deployment jobs remain off. The profile refuses missing allocation,
+client or clean-install admission. No PegaProx guest or Proxmox credentials have
+been created by this work. Review the native packet before enabling the jobs.
 
 ## Smallest practical starting point
 
@@ -145,33 +145,90 @@ a moving `latest` tag, a new scheduler, or apt inside this container. Review
 release behaviour changes and protect config/key before each update; 1.4's
 history conversion means an image downgrade is not a complete state rollback.
 
-## What the prepared source can do
+## Follow the CD path
 
-Preview using the invented example (this prints JSON; it does not install):
+The private parent graph has a **PegaProx** branch after DNS. It does not depend
+on Authentik or Traefik for the first test. The called job selects its own exact
+public source revision; existing services retain their commissioned revisions.
+The private parent job, called job and `deployment.json` are all disabled until
+a separate native review. Missing MAC or individual HTTPS client allowances
+also stop the profile before planning or reading deployment secrets.
+
+Once admitted, `pegaprox_cd.py` prepares this guest's private inputs and passes
+them into the **existing foundation CD protocol**. It creates one saved plan,
+checks the three fresh guest/firewall resources, deploys that exact binary plan,
+pins the new guest's original SSH identity, stages the stack, starts it and
+checks readiness. The same `deploy.py`, `plan.py`, guest identity, NAS state
+recovery, shared queue and failure holds remain in charge. This adds a closed
+profile to that protocol, not another provisioning engine.
+
+Ansible requires empty image-owned configuration/log directories, refuses key
+or ownership drift, installs the separate database key and starts the pinned
+image. A clean install has no restore capture. Failed or interrupted work stays
+held; a later job never adopts a partial guest, resets its password or replays it.
+Completed runs only verify the original installation.
+
+### The temporary administrator password
+
+The initial username is a private setting. Supply its password through the
+GitHub Environment secret **`PEGAPROX_ADMIN_PASSWORD`**. Do not put its value in
+site JSON, a stack environment variable, commands, a capture or Git.
+Supply the separate 32-byte encryption key through **`PEGAPROX_DB_KEY`**.
+
+The profile requires the password before the first rollout, but does not write
+it into the runner's permanent input bundle, manifest or saved-plan inputs.
+During first startup, Ansible stages it in a newly allocated root-only file in
+volatile guest `/run`. The helper sends it on stdin to a Python process inside
+the container. That process uses only the fixed loopback endpoint to create
+the account, sign in, confirm its administrator role and log out. It prints a
+fixed result, never a password or session token. Ansible removes the temporary
+file in its `always` block. A killed job retains its normal failure hold; any
+unconfirmed remote cleanup must be reviewed before continuation.
+
+The generated self-signed loopback certificate is accepted only by this internal
+probe. Browser, Proxmox and IdP certificate trust remain separate acceptance checks.
+A second bootstrap is refused, even with a different password. Readiness after
+completion needs no administrator password, so deleting that GitHub Secret
+later will not break ordinary CD verification.
+
+### Move to Authentik after testing
+
+Use PegaProx's native OIDC support when the first installation is proven. Verify
+an Authentik administrator sign-in and the required roles before retiring the
+local test account. Upstream refuses to overwrite a local account with an OIDC
+identity of the same name, so use a separate SSO identity or a separately reviewed
+account migration. Decide whether to retain an independently protected recovery
+account. Retire the test password/account and its sessions deliberately, then
+delete `PEGAPROX_ADMIN_PASSWORD` from the GitHub Environment. **Deleting the
+Secret alone does not disable the existing local account.** Keep the database
+key and its independent recovery custody after the Authentik switch.
+
+No OIDC provider, Authentik application, proxy middleware or automatic secret
+removal is created by this initial CD preparation.
+
+### Preview and synthetic tests
+
+The original invented preview remains available and prints JSON only:
 
 ```sh
 python3 proxmox/applications/pegaprox.py proxmox/applications/examples/pegaprox.preparation.example.json
 ```
 
-Do not run the output against a real host. The two false flags are enforced
-preparation markers; setting them true does not enable deployment.
-`tests/test_pegaprox.py` checks listener, image, resource and refusal boundaries.
-`tests/pegaprox_fixture.py` exercises the actual image with invented data,
-disposable volumes, no network and no published ports. Fetch the pinned image
-explicitly before running it; the fixture uses `--pull=never` and refuses an
-uncached image instead of allowing Docker to fetch it implicitly. It checks local health,
-encrypted database/key separation and restart persistence. It does not log in
-to Proxmox or establish LXC, firewall, browser, native TLS or restore readiness.
+Its two false markers describe that preview. The CD stack is a separate plain
+runtime document; actual admission is controlled by the private CD selection
+and disabled jobs. Do not run an unreviewed Compose preview on a real host.
 
-Activation is a later scoped source change to the **existing** single-guest
-OpenTofu/Ansible path: add clean directory/key preflight and installation,
-then the private disabled-to-reviewed CD selection. Reuse `deploy.py`,
-`plan.py`, `guest_identity.py`, NAS-backed state recovery, saved-plan hashes,
-original SSH identity, shared queue and failure holds. Do not invent a second
-engine or replace a failed guest. The current restore-oriented Ansible path
-has no PegaProx clean-install support; no fake capture is supplied to bypass it.
+The tests cover the shared saved-plan/hold protocol, password-free completed
+repeats, stdin-only bootstrap, key drift, empty-directory metadata and private
+job gates. `tests/pegaprox_fixture.py` uses the actual pinned image with invented
+credentials, disposable volumes, no network and no published ports. It creates
+and signs in to the first account, refuses bootstrap replay, verifies readiness
+without the password after restart, and checks encrypted data/key persistence.
+Fetch the image explicitly first; every fixture run uses `--pull=never`.
 
-Before that change: confirm allocation and free resources, exact Debian image
-and package versions, key/CA custody, finite client/API access and effective
-privileges. Review an exact saved plan and native packet with Ben. A failed
-native attempt stops under the existing hold and is never replayed automatically.
+These are synthetic checks. Native unprivileged LXC/Docker, package availability,
+real API trust/permissions, browser login and coherent backup/restore still need
+qualification. Review the unused ID/address, MAC, resources, exact Debian
+packages/template, individual client allowance, scoped runner grant and separate
+key custody. CD does not yet connect PegaProx to a Proxmox cluster or grant it
+API/SSH authority; that follows the separately reviewed runtime-access decision.

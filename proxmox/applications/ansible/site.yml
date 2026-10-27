@@ -52,6 +52,10 @@
       ansible.builtin.import_tasks: tasks/database.yml
       when: app.kind in ['mariadb', 'postgresql', 'influxdb']
 
+    - name: Prepare the clean PegaProx directories and database key
+      ansible.builtin.import_tasks: tasks/pegaprox.yml
+      when: app.kind == 'pegaprox'
+
     - name: Configure the application stack
       ansible.builtin.import_tasks: tasks/compose.yml
-      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools']
+      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'pegaprox']

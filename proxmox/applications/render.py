@@ -81,6 +81,9 @@ def pgadmin_environment(value):
 def compose(cfg):
     """Keep placement fixed; site-specific images, restored data and routes are inputs."""
     kind = cfg.get('kind')
+    if kind == 'pegaprox':
+        import pegaprox
+        return pegaprox.compose(cfg)
     if kind not in KINDS:
         raise ValueError('Choose dns, identity, ingress, automation or db-tools; databases are native')
     inputs = cfg.get('services', {})

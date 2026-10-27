@@ -9,6 +9,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pegaprox
+import pegaprox_setup
 
 
 def run(*args):
@@ -51,6 +52,16 @@ def main():
 
         outcome['health'] = healthy()
         assert outcome['health'] == {'status': 'ok', 'version': '1.4.1'}
+        command = ['docker', 'exec', '-i', name]
+        pegaprox_setup.invoke(command, 'bootstrap', 'practice-admin', 'Synthetic-fixture-123')
+        try:
+            pegaprox_setup.invoke(command, 'bootstrap', 'practice-admin', 'Changed-fixture-456')
+        except ValueError:
+            outcome['bootstrap_replay_refused'] = True
+        else:
+            raise AssertionError('Existing account must never be reset by bootstrap')
+        pegaprox_setup.invoke(command, 'verify')
+        outcome['initial_admin_login'] = True
         inspect = json.loads(run('inspect', name))[0]
         assert inspect['HostConfig']['NetworkMode'] == 'none'
         assert not inspect['HostConfig']['PortBindings']
@@ -61,6 +72,8 @@ def main():
         run('exec', name, 'python3', '-c', "from pathlib import Path; Path('/app/config/fixture-marker').write_text('invented-state')")
         run('restart', '--time', '20', name)
         healthy()
+        pegaprox_setup.invoke(command, 'verify')
+        outcome['passwordless_cd_verification_after_restart'] = True
         after = json.loads(run('exec', name, 'python3', '-c', state))
         assert before == after
         run('exec', name, 'python3', '-c', "from pathlib import Path; assert Path('/app/config/fixture-marker').read_text()=='invented-state'")
