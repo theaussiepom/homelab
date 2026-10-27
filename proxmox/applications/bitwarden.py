@@ -3,7 +3,6 @@
 import argparse
 import ipaddress
 import json
-import re
 from urllib.parse import urlsplit
 from urllib.request import build_opener, HTTPHandler, HTTPSHandler, HTTPRedirectHandler, ProxyHandler
 
@@ -37,9 +36,9 @@ def validate(cfg):
         raise ValueError('Bitwarden uses one application container and the separate shared MariaDB')
     service = services['bitwarden']
     if (set(service) - {'image', 'memory_mib', 'cpus', 'pids_limit', 'restart'}
-            or not re.fullmatch(r'ghcr\.io/bitwarden/lite@sha256:[0-9a-f]{64}', service.get('image', ''))
+            or service.get('image') != 'ghcr.io/bitwarden/lite:latest'
             or service.get('restart', 'no') != 'no'):
-        raise ValueError('Preserve a reviewed official Lite digest, default startup and private env file')
+        raise ValueError('Use official Lite latest, default startup and the private env file')
     return str(address)
 
 
@@ -53,13 +52,14 @@ def configure(cfg, document):
         {'type': 'bind', 'source': f'/srv/homelab/data/bitwarden/{name}',
          'target': target, 'bind': {'create_host_path': False}}
         for name, target in [('data', '/etc/bitwarden'), ('logs', '/var/log/bitwarden')]]
-    # Keep the pinned image's own healthcheck and default process identity.
+    # Keep the image's own healthcheck and default process identity.
     # No absent capture can silently become an empty vault directory.
     return document
 
 
-def health(fetch, version, issuer):
+def health(fetch, issuer):
     """A passing result proves only these unauthenticated response contracts."""
+    observed_version = None
     for path in ENDPOINTS:
         status, body = fetch(path)
         if status != 200 or len(body) > 262144:
@@ -69,10 +69,18 @@ def health(fetch, version, issuer):
                 value = json.loads(body)
             except (ValueError, UnicodeError):
                 raise ValueError('Bitwarden health response is not JSON') from None
-            key, expected = ('version', version) if path == '/api/config' else ('issuer', issuer)
-            if not isinstance(value, dict) or value.get(key) != expected:
-                raise ValueError('Bitwarden version or retained identity issuer differs')
-    return {'status': 'passed', 'scope': 'unauthenticated alive/config/identity only'}
+            if not isinstance(value, dict):
+                raise ValueError('Bitwarden health JSON must be an object')
+            if path == '/api/config':
+                observed_version = value.get('version')
+                if (not isinstance(observed_version, str) or not observed_version.strip()
+                        or len(observed_version) > 128
+                        or any(ord(char) < 32 for char in observed_version)):
+                    raise ValueError('Bitwarden must report its current API version')
+            elif value.get('issuer') != issuer:
+                raise ValueError('Bitwarden retained identity issuer differs')
+    return {'status': 'passed', 'observed_version': observed_version,
+            'scope': 'unauthenticated alive/config/identity only'}
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -99,11 +107,10 @@ def reader(origin):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--origin', required=True)
-    parser.add_argument('--version', required=True)
     parser.add_argument('--issuer', required=True)
     args = parser.parse_args()
     try:
-        result = health(reader(args.origin), args.version, args.issuer)
+        result = health(reader(args.origin), args.issuer)
     except (ValueError, OSError):
         parser.exit(1, 'Bitwarden health contract failed; inspect privately.\n')
     print(json.dumps(result))

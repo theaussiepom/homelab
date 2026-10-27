@@ -18,7 +18,7 @@ import bitwarden
 import render
 from test_bitwarden import fixture
 
-IMAGE = 'ghcr.io/bitwarden/lite@sha256:8b42485f544a5da4abcdc13ac10b38ca355bc4f0d5ab60efef4dcdf11e27a6f8'
+IMAGE = 'ghcr.io/bitwarden/lite:latest'
 DATABASE = 'mariadb@sha256:805c8e104bd563d5bfa24fadd3f31cd419ea859cb5277f32b5dbf2db714f9ed1'
 
 
@@ -34,7 +34,7 @@ def inside():
     deadline = time.monotonic() + 240
     while True:
         try:
-            result = bitwarden.health(fetch, '2026.4.1', 'http://localhost')
+            result = bitwarden.health(fetch, 'http://localhost')
             print(json.dumps(result))
             return
         except (OSError, ValueError):
@@ -54,6 +54,8 @@ def main():
     args = parser.parse_args()
     if args.inside:
         return inside()
+    # Evidence of this invocation's pull; the deployment reference remains latest.
+    docker('image', 'inspect', '--format', '{{json .RepoDigests}}', IMAGE)
     project = 'homelab-bitwarden-fixture-' + uuid.uuid4().hex[:10]
     with tempfile.TemporaryDirectory(prefix=project) as temporary:
         root = Path(temporary)
@@ -127,7 +129,7 @@ def main():
             docker('run', '--rm', '--name', seed_name, '--network', 'none', '--read-only',
                    '--cap-drop', 'ALL', '--cpus', '0.5', '--memory', '128m', '--pids-limit', '32',
                    '-v', project + '_data:/data:ro', '--entrypoint', 'python3', args.tools_image, '-c', check)
-            print('Synthetic Lite2026.4.1 / MariaDB12.3.3 startup and restart passed; no migration acceptance.')
+            print('Synthetic Lite latest / MariaDB12.3.3 startup and restart passed; no migration acceptance.')
         finally:
             # Only resources with this invocation's random project/name are removed.
             subprocess.run(['docker', 'rm', '-f', client_name, seed_name],

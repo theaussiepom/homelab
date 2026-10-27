@@ -106,7 +106,10 @@ def compose(cfg):
     result = {'name': f'homelab-{kind}', 'services': {}}
     for name, value in inputs.items():
         image = value.get('image', '')
-        if re.fullmatch(r'sha256:[0-9a-f]{64}', image):
+        if kind == 'bitwarden' and image == 'ghcr.io/bitwarden/lite:latest':
+            # Explicit service policy: the operator selected latest, without a version pin.
+            policy = 'always'
+        elif re.fullmatch(r'sha256:[0-9a-f]{64}', image):
             if not str(value.get('archive', '')).startswith('/') or not re.fullmatch(r'[0-9a-f]{64}', value.get('archive_sha256', '')):
                 raise ValueError('A local image needs its SHA256-verified image archive')
             policy = 'never'

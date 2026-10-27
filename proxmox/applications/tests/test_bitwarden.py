@@ -25,13 +25,16 @@ class BitwardenTests(unittest.TestCase):
         self.assertNotIn('network_mode', service)
         self.assertEqual(service['ports'], ['198.18.30.45:8080:8080'])
         self.assertEqual(service['restart'], 'no')
+        self.assertEqual(service['image'], 'ghcr.io/bitwarden/lite:latest')
+        self.assertEqual(service['pull_policy'], 'always')
         self.assertEqual([(m['target'], m['bind']['create_host_path']) for m in service['volumes']],
                          [('/etc/bitwarden', False), ('/var/log/bitwarden', False)])
         self.assertNotIn('BW_DB_PASSWORD', json.dumps(service))
 
     def test_preservation_contract_cannot_substitute_product_or_expose_secrets(self):
         for update in ({'image': 'vaultwarden/server@sha256:' + '1' * 64},
-                       {'image': 'ghcr.io/bitwarden/lite:latest'},
+                       {'image': 'ghcr.io/bitwarden/lite:2026.4.1'},
+                       {'image': 'ghcr.io/bitwarden/lite@sha256:' + '1' * 64},
                        {'environment': {'BW_INSTALLATION_KEY': 'do-not-commit'}},
                        {'user': '1000:1000'}, {'entrypoint': ['sh']},
                        {'extra_mounts': [{'source': '/tmp', 'target': '/etc/bitwarden'}]}):
@@ -52,8 +55,8 @@ class BitwardenTests(unittest.TestCase):
             cfg = fixture(); cfg['bitwarden'][key] = value
             with self.subTest(key=key), self.assertRaises(ValueError): render.compose(cfg)
 
-    def test_health_checks_version_and_existing_identity_without_vault_requests(self):
-        expected = {'version': '2026.4.1', 'issuer': 'http://localhost'}
+    def test_health_observes_version_and_checks_existing_identity_without_vault_requests(self):
+        expected = {'issuer': 'http://localhost'}
         responses = {'/api/alive': (200, b'"alive"'),
                      '/api/config': (200, b'{"version":"2026.4.1"}'),
                      '/identity/.well-known/openid-configuration':
@@ -64,8 +67,11 @@ class BitwardenTests(unittest.TestCase):
             return responses[path]
         self.assertEqual(bitwarden.health(fetch, **expected)['status'], 'passed')
         self.assertEqual(calls, list(responses))
+        newer = copy.deepcopy(responses)
+        newer['/api/config'] = (200, b'{"version":"2026.10.0"}')
+        self.assertEqual(bitwarden.health(newer.__getitem__, **expected)['observed_version'], '2026.10.0')
         for path, response in [('/api/alive', (302, b'')),
-                               ('/api/config', (200, b'{"version":"upgraded"}')),
+                               ('/api/config', (200, b'{"version":""}')),
                                ('/identity/.well-known/openid-configuration', (200, b'{"issuer":"changed"}')),
                                ('/api/config', (200, b'{}'))]:
             changed = copy.deepcopy(responses); changed[path] = response

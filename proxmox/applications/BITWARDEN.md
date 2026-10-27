@@ -7,9 +7,12 @@ It renders a reviewable Compose preview and checks three unauthenticated health
 responses. Deployment is deliberately disabled. The generic installer refuses
 the Bitwarden kind before reading host or credential inputs.
 
-Keep the existing application version and immutable image digest. A migration
-is not an upgrade, a new installation, a vault export/import or a move to
-Vaultwarden. Bitwarden Lite supports an external MariaDB database through its
+The selected image policy is `ghcr.io/bitwarden/lite:latest`, with no application
+version or digest pin. A later approved deployment will pull the current tag;
+record the resolved image and reported API version as evidence. This can include
+an application upgrade and database schema changes, so the later restore/start
+review must cover that compatibility. Preserve the existing vault and installation
+identity throughout. Bitwarden Lite supports an external MariaDB database through its
 `mysql` provider; reuse the matching commissioned native database service.
 See the vendor's [Lite guide](https://bitwarden.com/help/install-and-deploy-lite/)
 and [database options](https://bitwarden.com/help/database-options/).
@@ -17,8 +20,8 @@ and [database options](https://bitwarden.com/help/database-options/).
 ## Preview the application
 
 Copy [the synthetic example](examples/bitwarden.stack.example.json) into your
-private site repository. Select the exact observed image digest and a proposed
-backend address. The example digest is invented and cannot be pulled.
+private site repository. Keep the official `latest` reference and select a
+proposed backend address. Other applications retain their existing image policies.
 
 ```sh
 python3 public-source/proxmox/applications/render.py \
@@ -32,7 +35,7 @@ and discover the future backend from the existing Proxmox Notes mechanism.
 Bitwarden keeps its own authentication; review API and notification/WebSocket
 paths without adding an Authentik login gate in front of native clients.
 
-The two bind mounts refuse to create missing source directories. The exact image
+The two bind mounts refuse to create missing source directories. The selected image
 keeps its own default entrypoint, process identity and healthcheck. Do not add
 PUID/PGID, a `user`, alternate image or new security/runtime defaults during this
 move without separately proving compatibility with the retained filesystem.
@@ -59,7 +62,7 @@ Before any future start, obtain one coherent, privately retained recovery set:
 | Entire `/etc/bitwarden` tree | Attachments and Send blobs, data-protection keys, identity certificates, licenses and other existing files; file hashes and numeric UID/GID/modes/ACLs/xattrs |
 | `/var/log/bitwarden` | Retained privately with metadata; logs may contain personal data |
 | Effective runtime configuration | Existing installation/license identity, secrets, SMTP and non-secret settings; safe private custody and an exact before/after comparison |
-| Exact image and tools | Immutable registry digest or separately verified archive, matching API version and architecture, selected Docker/Compose package locks |
+| Selected image and tools | Pull official Lite latest and record its resolved digest/API version as evidence; review restore/schema compatibility and architecture, retain selected Docker/Compose package locks |
 | New target and recovery destination | Unused VMID/MAC/addresses, NAS protection, empty target paths, approved disk/resource limits and available space |
 
 A recent archive's presence is not proof of consistency or restore usability.
@@ -97,14 +100,15 @@ plan; simply restarting the old container would risk losing those writes.
 ## Health and acceptance
 
 The source helper sends only GET requests to `/api/alive`, `/api/config`, and
-`/identity/.well-known/openid-configuration`. It requires HTTP200, the retained
-API version and the explicitly selected existing issuer. TLS verification stays
+`/identity/.well-known/openid-configuration`. It requires HTTP200, a non-empty
+reported API version and the explicitly selected existing issuer. The version
+is observed, not pinned. TLS verification stays
 enabled and redirects are refused. It does not unlock, list or sync a vault,
 send mail, or authenticate a client.
 
 ```sh
 python3 public-source/proxmox/applications/bitwarden.py \
-  --origin https://vault.example.invalid --version EXISTING_API_VERSION \
+  --origin https://vault.example.invalid \
   --issuer EXISTING_DISCOVERY_ISSUER
 ```
 
@@ -114,7 +118,7 @@ client login/sync, notification delivery, attachments, organization membership,
 settings, licensing, SMTP delivery, physical reboot or Proxmox readiness.
 Those remain later supervised acceptance tasks with separate authorization.
 
-The Docker fixture starts only the pinned Lite2026.4.1 and MariaDB12.3.3 images,
+The Docker fixture starts official Lite latest and the matching MariaDB12.3.3 image,
 on an internal network with disposable volumes, no published ports and synthetic
 credentials. It checks initial health, a synthetic attachment across restart and
 health after restart. It uses no personal vault data and proves no native

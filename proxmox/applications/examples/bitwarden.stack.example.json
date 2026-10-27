@@ -12,7 +12,7 @@
   },
   "services": {
     "bitwarden": {
-      "image": "ghcr.io/bitwarden/lite@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "image": "ghcr.io/bitwarden/lite:latest",
       "memory_mib": 1536,
       "cpus": 1,
       "pids_limit": 256,

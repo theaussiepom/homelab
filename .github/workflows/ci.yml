@@ -81,7 +81,7 @@ jobs:
           python3 proxmox/applications/tests/identity_fixture.py
       - name: Exercise existing Bitwarden Lite with synthetic MariaDB and no external route
         run: |
-          docker pull --platform linux/amd64 ghcr.io/bitwarden/lite@sha256:8b42485f544a5da4abcdc13ac10b38ca355bc4f0d5ab60efef4dcdf11e27a6f8
+          docker pull --platform linux/amd64 ghcr.io/bitwarden/lite:latest
           docker pull --platform linux/amd64 mariadb@sha256:805c8e104bd563d5bfa24fadd3f31cd419ea859cb5277f32b5dbf2db714f9ed1
           python3 proxmox/applications/tests/bitwarden_fixture.py
       - name: Prove the selected PostgreSQL clean SQL adapter with synthetic databases
