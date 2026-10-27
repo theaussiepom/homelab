@@ -2,9 +2,11 @@
 import copy
 import json
 from pathlib import Path
+import sys
 import unittest
 from unittest.mock import patch
 
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import foundation_cd as fc
 import ingress_acme as acme
 import test_foundation_maintenance as maintenance_fixtures
@@ -72,6 +74,14 @@ class ControllerTests(unittest.TestCase):
         self.native['resource_changes'][0]['change']['actions']=['update']
         with self.assertRaises(ValueError):self.run_update()
         self.assertFalse(any('apply' in c or 'ansible-playbook' in c for c in self.calls))
+
+    def test_saved_plan_replacement_during_inspection_cannot_be_applied(self):
+        def replaced(argv,**kwargs):
+            Path(argv[-1]).write_bytes(b'substituted after the plan was inspected')
+            return json.dumps(self.native).encode()
+        acme.subprocess.check_output.side_effect=replaced
+        with self.assertRaises(ValueError):self.run_update()
+        self.assertFalse(any('apply' in c for c in self.calls))
 
 
 if __name__=='__main__':unittest.main()

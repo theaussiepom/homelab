@@ -148,10 +148,10 @@ def run(deployment, fc, cfg, site, source, selected, state_root):
         tofu = ['tofu','-chdir='+str(tofu_dir)]; log = evidence / 'tofu.log'; plan = evidence / 'dns.tfplan'
         deployment.quiet(tofu + ['init','-input=false','-lockfile=readonly','-backend-config=path='+str(work/'terraform.tfstate')],env,log)
         deployment.quiet(tofu + ['plan','-input=false','-lock-timeout=30s','-out='+str(plan)],env,log)
+        plan_hash = deployment.sha(plan)
         value = json.loads(subprocess.check_output(tofu + ['show','-json',str(plan)],env=env,timeout=60))
         fc.write_new(evidence / 'dns.tfplan.json',fc.encoded(value))
         check_plan(value,cfg['site']['node'],selected['vmid'],selected['after'],completed)
-        plan_hash = deployment.sha(plan)
         fc.write_new(evidence / 'reviewed-plan.json',fc.encoded({'plan_sha256':plan_hash,'scope':'DNS egress additions only'}))
         if not completed:
             require(deployment.sha(plan) == plan_hash, 'Saved DNS plan changed')
