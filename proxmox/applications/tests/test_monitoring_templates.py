@@ -13,6 +13,11 @@ class TemplateTrustTests(unittest.TestCase):
         templates.check_readback(document)
         items = list(templates.http_agents(document))
         self.assertEqual(len(items), 7)
+        resources = next(row for row in items if row['key'] == 'proxmox.cluster.resources')
+        self.assertEqual(resources['history'], '1h')
+        bad = copy.deepcopy(document)
+        next(row for row in templates.http_agents(bad) if row['key'] == 'proxmox.cluster.resources')['history'] = '0'
+        with self.assertRaises(ValueError): templates.check_readback(bad)
         for field in ('verify_peer', 'verify_host'):
             bad = copy.deepcopy(document)
             next(templates.http_agents(bad))[field] = 'NO'

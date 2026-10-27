@@ -40,7 +40,10 @@ physical host cannot continue reporting while that host is off.
 and hashes of the two unmodified official template source files. At configuration
 time, an in-memory copy explicitly enables peer and hostname verification on all
 seven Proxmox HTTP items and prototypes. The standard module imports that copy
-and exports it again for readback; the vendored bytes and UUIDs stay unchanged. Their source is commit
+and exports it again for readback; the vendored bytes and UUIDs stay unchanged.
+The cluster-resource master retains one hour of inventory values so the API's
+history-backed `lastclock` and `lastvalue` can prove fresh native data. Other
+upstream retention settings remain unchanged. Their source is commit
 `0d6fa36d0a0df4552d8df07e5b13deb664089047` from the upstream `7.0.32` release.
 The bundled AGPL licence applies to those templates; see the third-party notices.
 The [7.0 support policy](https://www.zabbix.com/life_cycle_and_release_policy)

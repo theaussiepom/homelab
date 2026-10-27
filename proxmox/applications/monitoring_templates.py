@@ -23,6 +23,9 @@ def check_readback(document):
     items = list(http_agents(document))
     if len(items) != 7 or any(row.get(field) != 'YES' for row in items for field in ('verify_peer', 'verify_host')):
         raise ValueError('Every pinned Proxmox HTTP item and prototype must verify its peer and hostname')
+    resources = [row for row in items if row.get('key') == 'proxmox.cluster.resources']
+    if len(resources) != 1 or resources[0].get('history') not in ('1h', '3600'):
+        raise ValueError('Retain one hour of cluster-resource values for authenticated native readback')
 
 
 def prepared(name):
@@ -33,6 +36,10 @@ def prepared(name):
     if name == 'template_app_proxmox.yaml':
         for item in http_agents(document):
             item.update(verify_peer='YES', verify_host='YES')
+            if item.get('key') == 'proxmox.cluster.resources':
+                # item.get lastclock/lastvalue come from stored history. The
+                # upstream raw master disables it, making acceptance unreadable.
+                item['history'] = '1h'
         check_readback(document)
     return document
 

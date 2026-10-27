@@ -88,6 +88,8 @@ def client():
         http_items.extend(api(method, {'hostids': [pve_host['hostid']], 'filter': {'type': 19},
                                        'output': ['verify_peer', 'verify_host']}, token))
     assert len(http_items) == 7 and all(row['verify_peer'] == '1' and row['verify_host'] == '1' for row in http_items)
+    resources = api('item.get', {'hostids': [pve_host['hostid']], 'filter': {'key_': ['proxmox.cluster.resources']}, 'output': ['history']}, token)
+    assert len(resources) == 1 and resources[0]['history'] in ('1h', '3600')
     hosts = api('host.get', {'filter': {'host': ['fixture-linux']}, 'output': 'extend'}, token)
     assert len(hosts) == 1 and hosts[0]['tls_accept'] == '2'
     hostid = hosts[0]['hostid']
