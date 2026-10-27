@@ -25,15 +25,20 @@
           - not pve_directory.stat.exists
           - network_startup_restart | default(false) | type_debug == 'bool'
           - not network_startup_restart | default(false) or (app.kind == 'postgresql' and postgresql_cluster_unit == 'postgresql@16-main.service')
+          - app.kind != 'postgresql' or postgresql_cluster_unit is match('^postgresql@[0-9]+-[a-z][a-z0-9_]*\.service$')
         fail_msg: 'Select one existing Debian application LXC; only the reviewed PostgreSQL correction may restart a service.'
 
     - name: Select only this application's service dependency
       ansible.builtin.set_fact:
         selected_network_unit: "{{ {'dns':'docker.service', 'ingress':'docker.service', 'mariadb':'mariadb.service', 'postgresql':'postgresql@.service', 'influxdb':'influxdb.service'}[app.kind] }}"
 
+    - name: Select the actual service process while retaining the template dependency
+      ansible.builtin.set_fact:
+        selected_process_unit: "{{ postgresql_cluster_unit if app.kind == 'postgresql' else selected_network_unit }}"
+
     - name: Record the healthy service process before changing its startup dependency
       ansible.builtin.command:
-        argv: [systemctl, show, "{{ selected_network_unit }}", '--property=MainPID,ActiveEnterTimestampMonotonic', --value]
+        argv: [systemctl, show, "{{ selected_process_unit }}", '--property=MainPID,ActiveEnterTimestampMonotonic', --value]
       register: network_service_before
       changed_when: false
       when: not network_startup_restart | default(false)
@@ -64,7 +69,7 @@
 
     - name: Read back the healthy service process without restarting it
       ansible.builtin.command:
-        argv: [systemctl, show, "{{ selected_network_unit }}", '--property=MainPID,ActiveEnterTimestampMonotonic', --value]
+        argv: [systemctl, show, "{{ selected_process_unit }}", '--property=MainPID,ActiveEnterTimestampMonotonic', --value]
       register: network_service_after
       changed_when: false
       failed_when: network_service_after.stdout != network_service_before.stdout

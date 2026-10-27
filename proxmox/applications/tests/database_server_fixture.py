@@ -49,6 +49,8 @@ with tempfile.TemporaryDirectory() as tmp:
         require(destination.stat().st_mode & 0o777 == 0o600, 'Server configuration must stay private')
         gate=configparser.ConfigParser(interpolation=None)
         gate.read('/etc/systemd/system/homelab-network-ready.service')
+        require('network-online.target' not in gate['Unit']['After'].split(),
+                'The bounded interface wait must not start after a separate network-online wait')
         require(gate['Service']['RemainAfterExit']=='yes', 'Readiness gate must retain successful startup state')
         require(gate['Service']['ExecStart'].split()==[
             '/usr/lib/systemd/systemd-networkd-wait-online','--ipv4','--timeout=30',

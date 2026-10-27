@@ -6,6 +6,7 @@ python3 -m unittest discover -s /src/proxmox/applications/tests -v
 python3 /src/proxmox/applications/tests/restore_fixture.py
 python3 /src/proxmox/applications/tests/database_account_fixture.py
 python3 /src/proxmox/applications/tests/database_server_fixture.py
+python3 /src/proxmox/applications/tests/runner_network_guard_fixture.py
 cp -R /src/proxmox/applications/tofu /tmp/app-tofu
 cd /tmp/app-tofu
 tofu fmt -check -recursive

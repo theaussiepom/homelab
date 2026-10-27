@@ -30,8 +30,8 @@
     content: |
       [Unit]
       Description=Wait for the homelab guest IPv4 networks
-      Wants=network-online.target systemd-networkd.service
-      After=network-online.target systemd-networkd.service
+      Wants=systemd-networkd.service
+      After=systemd-networkd.service
 
       [Service]
       Type=oneshot
