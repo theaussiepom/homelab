@@ -468,8 +468,8 @@ This path handles only the saved response failure before any discovery ACL was
 added. It checks both copies, live token/role metadata, the completed host plan
 and unchanged firewall before making any changes.
 
-The continuation saves a one-use claim before completing the original token's
-ACLs and API allowance. Another failure retains the hold and cannot replay that
+The continuation consumes its one-use claim before admission checks and before
+completing the original token's ACLs and API allowance. Another failure retains the hold and cannot replay that
 claim. Success preserves the original failure and archives its matching markers;
 subsequent ordinary CD runs only verify the completed setup. This is a separately
 approved recovery step, not an automatic retry or a general repair mode.

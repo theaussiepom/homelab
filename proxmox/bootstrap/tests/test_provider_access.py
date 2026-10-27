@@ -177,6 +177,24 @@ class DiscoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'already consumed'): self.continue_cd(packet)
         self.assertEqual(self.api.writes, writes)
 
+    def test_failed_admission_consumes_the_approved_continuation(self):
+        packet = self.failed_mint_packet()
+        self.api.rules[0]['action'] = 'ACCEPT'
+        writes = copy.deepcopy(self.api.writes)
+        with self.assertRaises(ValueError): self.continue_cd(packet)
+        self.api.rules[0]['action'] = 'DROP'
+        with self.assertRaisesRegex(ValueError, 'already consumed'): self.continue_cd(packet)
+        self.assertEqual(self.api.writes, writes)
+
+    def test_missing_nas_consumes_claim_without_writing_unmounted_backup_path(self):
+        packet = self.failed_mint_packet()
+        with patch.object(cd.subprocess, 'check_output', return_value=b'{"filesystems":[]}'):
+            with self.assertRaisesRegex(ValueError, 'mounted filesystem'):
+                cd.run(self.c, self.api, self.root, self.nas, resume=packet)
+        self.assertTrue((self.root/packet['attempt']/'continuation-failure.json').exists())
+        self.assertFalse((self.nas/packet['attempt']/'continuation-failure.json').exists())
+        with self.assertRaisesRegex(ValueError, 'already consumed'): self.continue_cd(packet)
+
     def test_continuation_rejects_drift_before_any_write(self):
         for drift in ('plan_hash', 'response_hash', 'nas_response', 'owner', 'config', 'marker',
                       'role', 'token_expiry', 'extra_acl', 'firewall', 'host_network', 'partial_token'):

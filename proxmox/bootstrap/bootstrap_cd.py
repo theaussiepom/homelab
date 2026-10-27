@@ -241,6 +241,14 @@ def reconcile(api, c, before, evidence, root=None, backup=None):
     return result
 
 
+def check_backup(c, backup):
+    mount = json.loads(subprocess.check_output(['findmnt', '-J', '-M', str(backup), '-o', 'TARGET,SOURCE,FSTYPE'], timeout=10))
+    entries = mount.get('filesystems', [])
+    require(len(entries) == 1 and entries[0]['target'] == str(backup)
+            and entries[0]['source'] == c['backup_source'] and entries[0]['fstype'] in ('nfs', 'nfs4'),
+            'The declared NAS backup must be an actual mounted filesystem')
+
+
 def resume_discovery(c, api, root, backup, packet):
     """One reviewed continuation of a preserved mint response; no credential rotation."""
     require(isinstance(packet, dict) and set(packet) == {'attempt', 'plan_sha256', 'minted_sha256'}
@@ -253,38 +261,41 @@ def resume_discovery(c, api, root, backup, packet):
             and json.loads(provider_access.read_private(marker)) == expected,
             'Continuation does not own both failed-operation markers')
     evidence, destination = root / packet['attempt'], backup / packet['attempt']
-    for folder in (evidence, destination):
-        provider_access.private_directory(folder)
-        require(not (folder / 'continuation-started.json').exists(), 'The one continuation was already consumed')
+    provider_access.private_directory(evidence)
+    require(not (evidence / 'continuation-started.json').exists(), 'The one continuation was already consumed')
     raw = provider_access.read_private(evidence / 'plan.json')
-    require(raw == provider_access.read_private(destination / 'plan.json')
-            and hashlib.sha256(raw).hexdigest() == packet['plan_sha256'], 'Failed plan or NAS copy differs')
+    require(hashlib.sha256(raw).hexdigest() == packet['plan_sha256'], 'Failed plan digest differs')
     saved = json.loads(raw)
     require(saved['configuration'] == c and 'service_discovery' in c, 'Continuation configuration differs')
     failed = provider_access.read_private(evidence / 'failure.json')
-    require(failed == provider_access.read_private(destination / 'failure.json')
-            and json.loads(failed) == {'status':'held', 'automatic_retry':False,
+    require(json.loads(failed) == {'status':'held', 'automatic_retry':False,
                 'error':'Created discovery token response differs; preserve its private partial receipt'},
             'Continuation is only for the recorded mint-response failure')
-    after = json.loads(provider_access.read_private(evidence / 'after.json'))
-    original = saved['plan']
-    require(inspect(api, c) == after and after['bridge_exists'] and not after['missing']
-            and after['token_metadata'] == original['token_metadata']
-            and {k:v for k,v in after['networks'].items() if k != c['bridge']} ==
-                {k:v for k,v in original['networks'].items() if k != c['bridge']},
-            'Base bootstrap changed or did not finish; continuation refused')
-    minted = provider_access.admit_minted_continuation(api, c, saved['plan']['service_discovery'],
-                                                     root, backup, packet['minted_sha256'])
-    # Persist the one-shot claim before any native continuation write. A partial
-    # claim is also a hold; neither caller nor later merges may replay it.
-    for folder in (evidence, destination):
-        provider_access.save_new(folder / 'continuation-started.json', packet)
+    # Consume the exact approved operation before any admission check can fail.
+    # Even a missing NAS mount or transient read failure cannot enable replay.
+    provider_access.save_new(evidence / 'continuation-started.json', packet)
+    nas_admitted = False
     try:
+        check_backup(c, backup)
+        provider_access.private_directory(destination)
+        nas_admitted = True
+        require(not (destination / 'continuation-started.json').exists(), 'NAS continuation claim already exists')
+        require(raw == provider_access.read_private(destination / 'plan.json')
+                and failed == provider_access.read_private(destination / 'failure.json'), 'Failed receipt or NAS copy differs')
+        provider_access.save_new(destination / 'continuation-started.json', packet)
+        after = json.loads(provider_access.read_private(evidence / 'after.json'))
+        original = saved['plan']
+        require(inspect(api, c) == after and after['bridge_exists'] and not after['missing']
+                and after['token_metadata'] == original['token_metadata']
+                and {k:v for k,v in after['networks'].items() if k != c['bridge']} ==
+                    {k:v for k,v in original['networks'].items() if k != c['bridge']},
+                'Base bootstrap changed or did not finish; continuation refused')
+        minted = provider_access.admit_minted_continuation(api, c, original['service_discovery'],
+                                                         root, backup, packet['minted_sha256'])
         result = {'status':'passed', 'plan_sha256':packet['plan_sha256'], 'bridge_created':False,
                   'new_acl_rows':0, 'token_lifetime_changed':False, 'guest_lifecycle_changed':False,
                   'trigger_commit':os.environ.get('GITHUB_SHA'), 'resumed_attempt':packet['attempt'],
-                  'service_discovery':provider_access.finish_minted(
-                      api, c, saved['plan']['service_discovery'], root, backup, minted)}
+                  'service_discovery':provider_access.finish_minted(api, c, original['service_discovery'], root, backup, minted)}
         result['service_discovery'].update(created=False, resumed=True)
         for folder in (evidence, destination):
             provider_access.save_new(folder / 'continuation-result.json', result)
@@ -299,8 +310,15 @@ def resume_discovery(c, api, root, backup, packet):
             path.rename(archived)
         return result
     except Exception as exc:
-        for folder in (evidence, destination):
-            save(folder / 'continuation-failure.json', {'status':'held', 'error':str(exc), 'automatic_retry':False})
+        failure = {'status':'held', 'error':str(exc), 'automatic_retry':False}
+        save(evidence / 'continuation-failure.json', failure)
+        if nas_admitted:
+            try:
+                check_backup(c, backup)
+                provider_access.private_directory(destination)
+                save(destination / 'continuation-failure.json', failure)
+            except Exception:
+                pass  # Preserve the primary error and local claim if NAS is unavailable.
         raise
 
 
@@ -310,13 +328,9 @@ def run(c, api, root=Path('/var/lib/homelab-bootstrap'), backup=Path('/srv/homel
     hold, marker = root / 'BOOTSTRAP-CD-HOLD.json', root / 'CONFIGURING'
     require(resume is not None or not hold.exists() and not marker.exists(),
             'Existing bootstrap hold or maintenance marker needs review')
-    mount = json.loads(subprocess.check_output(['findmnt', '-J', '-M', str(backup), '-o', 'TARGET,SOURCE,FSTYPE'], timeout=10))
-    entries = mount.get('filesystems', [])
-    require(len(entries) == 1 and entries[0]['target'] == str(backup)
-            and entries[0]['source'] == c['backup_source'] and entries[0]['fstype'] in ('nfs', 'nfs4'),
-            'The declared NAS backup must be an actual mounted filesystem')
     if resume is not None and (hold.exists() or marker.exists()):
         return resume_discovery(c, api, root, backup, resume)
+    check_backup(c, backup)
     evidence = root / ('cd-' + str(time.time_ns()))
     evidence.mkdir(mode=0o700)
     before = inspect(api, c)
