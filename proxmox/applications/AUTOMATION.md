@@ -63,6 +63,27 @@ The optional `extra_hosts` service map preserves old Docker database names while
 pointing them at the selected new server. This avoids rewriting passwords or
 sprinkling addresses throughout application configuration.
 
+### Connect to the databases
+
+If your site gives each database its own private Proxmox bridge, keep its
+addresses and approved clients in one shared catalogue. The private site can
+use the shared `database_networks.py` helper from a separately pinned revision
+to append the required network cards and narrow firewall rules. This does not
+require updating an already selected application installer or its source lock.
+
+Keep the guest's original network cards in order. Append only the database
+connections it needs, and keep HTTP/MQTT networking separate. For this site,
+automation needs the planned MariaDB and InfluxDB connections; it has no
+PostgreSQL membership. Preserve the existing HA Recorder hostname with an
+`extra_hosts` alias whose address comes from the catalogue. Check the current
+Node-RED flows before adding other aliases: having a database module installed
+does not establish an actual connection.
+
+All four jobs must consume the same effective deployment settings. A missing or
+changed catalogue stops preparation. Rendering those settings does not create
+bridges, migrate a database, rewrite HA settings or prove an app can connect.
+Those prerequisites must be ready before enabling deployment.
+
 ## Keep the existing Node-RED login
 
 For an existing native Authentik OIDC setup, use `node_red_login: oidc` in the
