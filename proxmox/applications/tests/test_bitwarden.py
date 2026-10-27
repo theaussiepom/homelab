@@ -27,6 +27,8 @@ class BitwardenTests(unittest.TestCase):
         self.assertEqual(service['restart'], 'no')
         self.assertEqual(service['image'], 'ghcr.io/bitwarden/lite:latest')
         self.assertEqual(service['pull_policy'], 'always')
+        self.assertEqual(service['healthcheck']['test'],
+                         ['CMD-SHELL', 'curl -fsSo /dev/null http://localhost:8080'])
         self.assertEqual([(m['target'], m['bind']['create_host_path']) for m in service['volumes']],
                          [('/etc/bitwarden', False), ('/var/log/bitwarden', False)])
         self.assertNotIn('BW_DB_PASSWORD', json.dumps(service))

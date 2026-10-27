@@ -48,11 +48,13 @@ def configure(cfg, document):
     del service['network_mode']
     service['env_file'] = [ENV_FILE]
     service['ports'] = [f'{address}:8080:8080']
+    # Retain the existing root HTTP readiness probe, suppressing response output.
+    service['healthcheck'] = {'test': ['CMD-SHELL', 'curl -fsSo /dev/null http://localhost:8080']}
     service['volumes'] = [
         {'type': 'bind', 'source': f'/srv/homelab/data/bitwarden/{name}',
          'target': target, 'bind': {'create_host_path': False}}
         for name, target in [('data', '/etc/bitwarden'), ('logs', '/var/log/bitwarden')]]
-    # Keep the image's own healthcheck and default process identity.
+    # Keep the image's default process identity.
     # No absent capture can silently become an empty vault directory.
     return document
 

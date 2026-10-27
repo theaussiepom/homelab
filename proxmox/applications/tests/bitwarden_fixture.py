@@ -7,6 +7,7 @@ import argparse
 import http.client
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -113,7 +114,15 @@ def main():
             seed = ('from pathlib import Path; '
                     'p=Path("/data/attachments/synthetic-preservation.bin"); '
                     'p.parent.mkdir(exist_ok=True); p.write_bytes(b"synthetic-ciphertext-fixture")')
-            docker('run', '--rm', '--name', seed_name, '--network', 'none', '--read-only',
+            # The application owns its private directory. Use its observed synthetic
+            # ownership rather than granting root DAC bypass or changing ownership.
+            owner = subprocess.check_output(['docker', *command, 'exec', '-T', 'bitwarden',
+                                             'stat', '-c', '%u:%g', '/etc/bitwarden/attachments'],
+                                            text=True, timeout=15).strip()
+            if not re.fullmatch(r'[0-9]+:[0-9]+', owner):
+                raise ValueError('Expected numeric synthetic attachment ownership')
+            docker('run', '--rm', '--platform', 'linux/amd64', '--user', owner,
+                   '--name', seed_name, '--network', 'none', '--read-only',
                    '--cap-drop', 'ALL', '--cpus', '0.5', '--memory', '128m', '--pids-limit', '32',
                    '-v', project + '_data:/data', '--entrypoint', 'python3', args.tools_image, '-c', seed)
             # This restart touches only the uniquely named synthetic project.
@@ -126,7 +135,8 @@ def main():
             check = ('from pathlib import Path; assert '
                      'Path("/data/attachments/synthetic-preservation.bin").read_bytes() '
                      '== b"synthetic-ciphertext-fixture"; print("SYNTHETIC_ATTACHMENT_OK")')
-            docker('run', '--rm', '--name', seed_name, '--network', 'none', '--read-only',
+            docker('run', '--rm', '--platform', 'linux/amd64', '--user', owner,
+                   '--name', seed_name, '--network', 'none', '--read-only',
                    '--cap-drop', 'ALL', '--cpus', '0.5', '--memory', '128m', '--pids-limit', '32',
                    '-v', project + '_data:/data:ro', '--entrypoint', 'python3', args.tools_image, '-c', check)
             print('Synthetic Lite latest / MariaDB12.3.3 startup and restart passed; no migration acceptance.')
@@ -134,7 +144,7 @@ def main():
             # Only resources with this invocation's random project/name are removed.
             subprocess.run(['docker', 'rm', '-f', client_name, seed_name],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
-            docker(*command, 'down', '--volumes', '--remove-orphans', timeout=60)
+            docker(*command, 'down', '--volumes', '--remove-orphans', '--timeout', '10', timeout=60)
 
 
 if __name__ == '__main__':

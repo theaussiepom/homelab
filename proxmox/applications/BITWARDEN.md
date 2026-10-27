@@ -36,7 +36,8 @@ Bitwarden keeps its own authentication; review API and notification/WebSocket
 paths without adding an Authentik login gate in front of native clients.
 
 The two bind mounts refuse to create missing source directories. The selected image
-keeps its own default entrypoint, process identity and healthcheck. Do not add
+keeps its own default entrypoint and process identity. The existing root HTTP
+readiness probe is retained with response output suppressed. Do not add
 PUID/PGID, a `user`, alternate image or new security/runtime defaults during this
 move without separately proving compatibility with the retained filesystem.
 
