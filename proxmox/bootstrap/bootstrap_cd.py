@@ -241,16 +241,125 @@ def reconcile(api, c, before, evidence, root=None, backup=None):
     return result
 
 
-def run(c, api, root=Path('/var/lib/homelab-bootstrap'), backup=Path('/srv/homelab-backups')):
-    validate(c)
-    require(root.is_dir() and not root.is_symlink(), 'Existing bootstrap state directory is required')
-    hold, marker = root / 'BOOTSTRAP-CD-HOLD.json', root / 'CONFIGURING'
-    require(not hold.exists() and not marker.exists(), 'Existing bootstrap hold or maintenance marker needs review')
+def check_backup(c, backup):
     mount = json.loads(subprocess.check_output(['findmnt', '-J', '-M', str(backup), '-o', 'TARGET,SOURCE,FSTYPE'], timeout=10))
     entries = mount.get('filesystems', [])
     require(len(entries) == 1 and entries[0]['target'] == str(backup)
             and entries[0]['source'] == c['backup_source'] and entries[0]['fstype'] in ('nfs', 'nfs4'),
             'The declared NAS backup must be an actual mounted filesystem')
+
+
+def archive_markers(hold, marker, evidence):
+    """Archive the owned marker pair; roll back a partial move without API calls."""
+    pairs = [(path, evidence / (path.name + '.original')) for path in (hold, marker)]
+    originals = {}
+    for path, archived in pairs:
+        require(not archived.exists() and not archived.is_symlink(), 'Failed marker archive already exists')
+        originals[path] = provider_access.read_private(path)
+    moved = []
+    try:
+        for path, archived in pairs:
+            path.rename(archived)
+            moved.append((path, archived))
+    except Exception:
+        for path, archived in reversed(moved):
+            try:
+                require(not path.exists() and not path.is_symlink()
+                        and provider_access.read_private(archived) == originals[path],
+                        'Marker changed during archival rollback')
+                archived.rename(path)
+            except Exception:
+                pass  # Completion-held evidence records any mixed state; never replay the provider.
+        raise
+
+
+def resume_discovery(c, api, root, backup, packet):
+    """One reviewed continuation of a preserved mint response; no credential rotation."""
+    require(isinstance(packet, dict) and set(packet) == {'attempt', 'plan_sha256', 'minted_sha256'}
+            and isinstance(packet.get('attempt'), str) and re.fullmatch(r'cd-[0-9]+', packet['attempt'])
+            and all(isinstance(packet.get(key), str) and re.fullmatch(r'[0-9a-f]{64}', packet[key])
+                    for key in ('plan_sha256', 'minted_sha256')), 'Use the exact reviewed discovery continuation packet')
+    hold, marker = root / 'BOOTSTRAP-CD-HOLD.json', root / 'CONFIGURING'
+    expected = {'attempt':packet['attempt'], 'automatic_retry':False}
+    require(json.loads(provider_access.read_private(hold)) == expected
+            and json.loads(provider_access.read_private(marker)) == expected,
+            'Continuation does not own both failed-operation markers')
+    evidence, destination = root / packet['attempt'], backup / packet['attempt']
+    provider_access.private_directory(evidence)
+    require(not (evidence / 'continuation-started.json').exists(), 'The one continuation was already consumed')
+    raw = provider_access.read_private(evidence / 'plan.json')
+    require(hashlib.sha256(raw).hexdigest() == packet['plan_sha256'], 'Failed plan digest differs')
+    saved = json.loads(raw)
+    require(saved['configuration'] == c and 'service_discovery' in c, 'Continuation configuration differs')
+    failed = provider_access.read_private(evidence / 'failure.json')
+    require(json.loads(failed) == {'status':'held', 'automatic_retry':False,
+                'error':'Created discovery token response differs; preserve its private partial receipt'},
+            'Continuation is only for the recorded mint-response failure')
+    # Consume the exact approved operation before any admission check can fail.
+    # Even a missing NAS mount or transient read failure cannot enable replay.
+    provider_access.save_new(evidence / 'continuation-started.json', packet)
+    nas_admitted, native_completed, phase = False, False, 'admission'
+    try:
+        check_backup(c, backup)
+        provider_access.private_directory(destination)
+        nas_admitted = True
+        require(not (destination / 'continuation-started.json').exists(), 'NAS continuation claim already exists')
+        require(raw == provider_access.read_private(destination / 'plan.json')
+                and failed == provider_access.read_private(destination / 'failure.json'), 'Failed receipt or NAS copy differs')
+        provider_access.save_new(destination / 'continuation-started.json', packet)
+        after = json.loads(provider_access.read_private(evidence / 'after.json'))
+        original = saved['plan']
+        require(inspect(api, c) == after and after['bridge_exists'] and not after['missing']
+                and after['token_metadata'] == original['token_metadata']
+                and {k:v for k,v in after['networks'].items() if k != c['bridge']} ==
+                    {k:v for k,v in original['networks'].items() if k != c['bridge']},
+                'Base bootstrap changed or did not finish; continuation refused')
+        minted = provider_access.admit_minted_continuation(api, c, original['service_discovery'],
+                                                         root, backup, packet['minted_sha256'])
+        phase = 'discovery'
+        result = {'status':'passed', 'plan_sha256':packet['plan_sha256'], 'bridge_created':False,
+                  'new_acl_rows':0, 'token_lifetime_changed':False, 'guest_lifecycle_changed':False,
+                  'trigger_commit':os.environ.get('GITHUB_SHA'), 'resumed_attempt':packet['attempt'],
+                  'service_discovery':provider_access.finish_minted(api, c, original['service_discovery'], root, backup, minted)}
+        native_completed, phase = True, 'result-custody'
+        result['service_discovery'].update(created=False, resumed=True)
+        for folder in (evidence, destination):
+            provider_access.save_new(folder / 'continuation-result.json', result)
+        require(provider_access.read_private(evidence / 'continuation-result.json') ==
+                provider_access.read_private(destination / 'continuation-result.json'),
+                'Continuation result NAS readback differs')
+        require(json.loads(provider_access.read_private(hold)) == expected
+                and json.loads(provider_access.read_private(marker)) == expected, 'Failed marker ownership changed')
+        phase = 'marker-archival'
+        archive_markers(hold, marker, evidence)
+        return result
+    except Exception as exc:
+        failure = {'status':'completion-held' if native_completed else 'held', 'error':str(exc),
+                   'automatic_retry':False, 'phase':phase,
+                   'native_outcome':'completed' if native_completed else 'unconfirmed',
+                   'markers':{path.name:{'present':path.exists(),
+                       'archived':(evidence/(path.name+'.original')).exists()} for path in (hold, marker)}}
+        save(evidence / 'continuation-failure.json', failure)
+        if nas_admitted:
+            try:
+                check_backup(c, backup)
+                provider_access.private_directory(destination)
+                save(destination / 'continuation-failure.json', failure)
+            except Exception:
+                pass  # Preserve the primary error and local claim if NAS is unavailable.
+        raise
+
+
+def run(c, api, root=Path('/var/lib/homelab-bootstrap'), backup=Path('/srv/homelab-backups'), resume=None):
+    validate(c)
+    require(root.is_dir() and not root.is_symlink(), 'Existing bootstrap state directory is required')
+    hold, marker = root / 'BOOTSTRAP-CD-HOLD.json', root / 'CONFIGURING'
+    require((resume is None and not hold.exists() and not marker.exists())
+            or (resume is not None and hold.exists() and marker.exists()),
+            'Existing bootstrap hold or maintenance marker needs review')
+    if resume is not None:
+        return resume_discovery(c, api, root, backup, resume)
+    check_backup(c, backup)
     evidence = root / ('cd-' + str(time.time_ns()))
     evidence.mkdir(mode=0o700)
     before = inspect(api, c)
@@ -288,13 +397,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', required=True, type=Path)
     parser.add_argument('--ca', type=Path, default=Path('/usr/local/share/ca-certificates/homelab-pve.crt'))
+    parser.add_argument('--resume-discovery', type=Path, help='Exact separately reviewed failed-mint continuation packet')
     args = parser.parse_args()
     os.umask(0o077)
     try:
         c = json.loads(args.config.read_text())
         validate(c)
         api = API(c['endpoint'], os.environ['PROXMOX_BOOTSTRAP_TOKEN'], args.ca)
-        print(json.dumps(run(c, api)))
+        resume = json.loads(args.resume_discovery.read_text()) if args.resume_discovery else None
+        print(json.dumps(run(c, api, resume=resume)))
     except (BootstrapDiagnostic, provider_access.ProviderAccessError) as exc:
         raise SystemExit('Bootstrap CD stopped: ' + str(exc) + '. Inspect its private plan/hold; do not automatically rerun.') from None
     except Exception:
