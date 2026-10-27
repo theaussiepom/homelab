@@ -38,9 +38,12 @@
 
     - name: Record the healthy service process before changing its startup dependency
       ansible.builtin.command:
-        argv: [systemctl, show, "{{ selected_process_unit }}", '--property=MainPID,ActiveEnterTimestampMonotonic', --value]
+        argv: [systemctl, show, "{{ selected_process_unit }}", '--property=MainPID,ActiveEnterTimestampMonotonic,ActiveState']
       register: network_service_before
       changed_when: false
+      failed_when: >-
+        'ActiveState=active' not in network_service_before.stdout_lines or
+        network_service_before.stdout is not search('(?m)^MainPID=[1-9][0-9]*$')
       when: not network_startup_restart | default(false)
 
     - name: Inspect existing network startup definitions before the approved correction
@@ -69,7 +72,7 @@
 
     - name: Read back the healthy service process without restarting it
       ansible.builtin.command:
-        argv: [systemctl, show, "{{ selected_process_unit }}", '--property=MainPID,ActiveEnterTimestampMonotonic', --value]
+        argv: [systemctl, show, "{{ selected_process_unit }}", '--property=MainPID,ActiveEnterTimestampMonotonic,ActiveState']
       register: network_service_after
       changed_when: false
       failed_when: network_service_after.stdout != network_service_before.stdout
