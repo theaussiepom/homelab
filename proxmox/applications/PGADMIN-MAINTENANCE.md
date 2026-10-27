@@ -12,8 +12,8 @@ Root's private `networks/databases.json` with schema
 `homelab-database-networks-v1` is authoritative. The shared
 `database_networks.read`/`validate`, `interface`, `endpoint`, `rules` and `attach`
 functions own network values; this component does not carry another catalogue.
-The shared helper is being prepared separately and must be pinned by Root before
-integration. No private catalogue or shared workflow is changed by this proposal.
+The shared helper must be pinned by Root before integration. No private catalogue
+or shared workflow is changed by this proposal.
 
 For the selected `db-tools` guest, Root's maintenance packet needs to:
 
@@ -24,11 +24,13 @@ For the selected `db-tools` guest, Root's maintenance packet needs to:
    management/backend NIC ordering, addresses, MACs, gateway and HTTP listener.
    Append only the selected PostgreSQL NIC: untagged private bridge, manual IPv6,
    no gateway. Keep guest autostart enabled. Never join another database network.
-3. Use `rules(catalogue, 'postgresql', vmid)` for the exact client-source `/32`
+3. Replace the old PostgreSQL egress allowance with
+   `rules(catalogue, 'postgresql', vmid)` for the exact client-source `/32`
    to PostgreSQL-server `/32` TCP 5432 allowance, with the matching server rule
-   owned by Root. Any obsolete PostgreSQL allowance on the former backend needs
-   an explicit observed-before/exact-after replacement in the shared packet;
-   `attach` only appends and does not retire the old rule. Retain SSH, DNS,
+   owned by Root. Removal of the old PostgreSQL allowance is mandatory in the
+   same coordinated cutover; bind its observed-before/exact-after replacement in
+   the shared packet. `attach` only appends and cannot perform this replacement
+   by itself. Do not leave an old SQL route, allowance or fallback. Retain SSH, DNS,
    Authentik HTTPS and Traefik HTTP access.
 4. Keep the existing shared network-ready implementation. Docker must require
    successful IPv4 readiness on the existing management/backend NICs and the
@@ -84,14 +86,21 @@ HTTP/TLS routing configuration unchanged.
 
 ## Acceptance after Root integrates and admits the pair
 
-Root owns the order: private bridge/access and PostgreSQL server acceptance,
-then commissioned Authentik and pgAdmin maintenance as the next update group.
-Do not wait for unrelated application migrations.
+Root owns one coordinated PostgreSQL + Authentik + pgAdmin cutover. The PostgreSQL
+server replaces its former backend database NIC/listener/HBA/firewall with the
+selected private database network; there is no period of dual PostgreSQL network
+service. The clients retain their backend NICs for HTTP/OAuth, and replace their
+old SQL allowance and application endpoint with the new private path. Root must
+sequence the quiesced clients, exact network/rule changes, server acceptance and
+saved-endpoint edits before resuming clients. Do not leave a fallback SQL path or
+wait for unrelated application migrations.
 
 - Check the append-only NIC delta and exact firewall rule replacement; confirm
   the old management/default route and backend HTTP listener remain unchanged.
   Check host and container routing and the effective NAT source. The eventual
   PostgreSQL query should observe the selected client's database-network IP.
+  Also prove the former PostgreSQL backend endpoint is unreachable and no old
+  TCP 5432 allowance remains; HTTP/OAuth on the client's backend must still work.
 - Verify all non-endpoint SQLite content and original file metadata against the
   coherent backup, without exposing credentials. Verify the original install
   inputs/state/receipts remain unchanged; record maintenance separately.
