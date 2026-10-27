@@ -53,10 +53,32 @@ def prepare_inputs(config, destination=INPUTS, environment=None):
     return cfg, destination / 'site.json'
 
 
-def run(phase, config, destination=INPUTS, environment=None, deployment=deploy):
+def prerequisites(cfg, packet_path):
+    """The actual guest cannot be created or started by skipping its CD prerequisites."""
+    expected=cfg['app'].get('prerequisite_packet_sha256')
+    if expected is None:
+        return
+    files.require(packet_path is not None and deploy.sha(packet_path) == expected,
+                  'Supply the exact reviewed automation prerequisite packet')
+    import automation_maintenance
+    packet=json.loads(files.regular(packet_path));automation_maintenance.validate(packet)
+    for phase in ('ingress','identity'):
+        row=packet[phase];work=Path(cfg['paths']['state_root'])/str(row['vmid'])
+        receipt=work/'automation-200-prerequisite/complete.json'
+        result=json.loads(files.regular(receipt,private=True))
+        nas=Path(cfg['paths']['backup_directory'])/str(row['vmid'])/'automation-200-complete.json'
+        files.require(result['binding'] == {'packet':row,'maintenance_source_sha256':automation_maintenance.source_hash()}
+                      and result['state_sha256'] == deploy.sha(work/'terraform.tfstate')
+                      and files.regular(nas,private=True) == files.regular(receipt,private=True)
+                      and not any((work/name).exists() or (work/name).is_symlink() for name in files.HOLDS),
+                      'The selected prerequisite is incomplete, changed or held')
+
+
+def run(phase, config, destination=INPUTS, environment=None, deployment=deploy, maintenance=None):
     """A merged packet creates once; subsequent unchanged jobs only read back."""
     files.require(phase in ('guest', *SERVICES), 'Select guest setup or one automation service')
     cfg, site = prepare_inputs(config, destination, environment)
+    prerequisites(cfg,maintenance)
     vmid = deployment.validate(cfg)
     work = Path(cfg['paths']['state_root']) / str(vmid)
     work.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -104,9 +126,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--phase', required=True, choices=('guest', *SERVICES))
     parser.add_argument('--config', required=True, type=Path)
+    parser.add_argument('--maintenance',type=Path)
     args = parser.parse_args()
     try:
-        print(json.dumps(run(args.phase, args.config)))
+        print(json.dumps(run(args.phase, args.config, maintenance=args.maintenance)))
     except deploy.InputNeeded as error:
         raise SystemExit(str(error)) from None
     except (OSError, ValueError, KeyError, deploy.subprocess.CalledProcessError) as error:

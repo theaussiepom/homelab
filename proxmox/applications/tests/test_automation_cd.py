@@ -7,9 +7,47 @@ from unittest.mock import Mock, patch
 
 from test_deploy import deploy, fixture, ROOT
 import automation_cd
+from test_automation_maintenance import setup as maintenance_setup
+import automation_maintenance
+import foundation_cd
 
 
 class AutomationCDTests(unittest.TestCase):
+    def test_guest_requires_exact_completed_prerequisites_and_unchanged_custody(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg, work, site, packet, _, nas = maintenance_setup(root)
+            selected = root / 'maintenance.json'
+            selected.write_text(json.dumps(packet))
+            cfg['app']['prerequisite_packet_sha256'] = deploy.sha(selected)
+            for phase in ('ingress', 'identity'):
+                row = packet[phase]
+                state = root / 'state' / str(row['vmid'])
+                state.mkdir(parents=True, exist_ok=True)
+                (state / 'terraform.tfstate').write_text('synthetic state')
+                operation = state / 'automation-200-prerequisite'
+                operation.mkdir(mode=0o700)
+                receipt = {'binding': {'packet': row, 'maintenance_source_sha256': automation_maintenance.source_hash()},
+                           'state_sha256': deploy.sha(state / 'terraform.tfstate')}
+                target = root / 'nas/backups' / str(row['vmid'])
+                target.mkdir(parents=True, exist_ok=True)
+                foundation_cd.write_new(operation / 'complete.json', foundation_cd.encoded(receipt))
+                foundation_cd.write_new(target / 'automation-200-complete.json', foundation_cd.encoded(receipt))
+            automation_cd.prerequisites(cfg, selected)
+            with self.assertRaisesRegex(ValueError, 'exact reviewed'):
+                automation_cd.prerequisites(cfg, None)
+            (work / 'CONTINUATION-HOLD.json').write_text('held')
+            with self.assertRaisesRegex(ValueError, 'incomplete, changed or held'):
+                automation_cd.prerequisites(cfg, selected)
+            (work / 'CONTINUATION-HOLD.json').unlink()
+            (work / 'terraform.tfstate').write_text('changed')
+            with self.assertRaisesRegex(ValueError, 'incomplete, changed or held'):
+                automation_cd.prerequisites(cfg, selected)
+            (work / 'terraform.tfstate').write_text('synthetic state')
+            (nas / 'automation-200-complete.json').write_text('changed')
+            with self.assertRaisesRegex(ValueError, 'incomplete, changed or held'):
+                automation_cd.prerequisites(cfg, selected)
+
     def setup(self, root):
         inputs = root / 'inputs'; inputs.mkdir(mode=0o700)
         destination = inputs / 'automation'

@@ -41,7 +41,13 @@ def compile_config(foundation, automation):
     # This validates the plan structure only. Bootstrap CD independently checks
     # the existing live bridges, original owner record and exact effective ACLs.
     bootstrap_cd.validate(boot)
-    return {'bootstrap.json': boot}
+    dns=base['dns-settings.json']
+    if 'mqtt_hostname' in cfg['app']:
+        import foundation_dns
+        address=cfg['app'].get('frontend_routing',{}).get('address',cfg['app']['address']).split('/')[0]
+        dns['extra_records']={cfg['app']['mqtt_hostname']:address}
+        foundation_dns.configure(dns)
+    return {'bootstrap.json': boot, 'dns-settings.json': dns}
 
 
 def main():

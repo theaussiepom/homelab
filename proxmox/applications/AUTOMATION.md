@@ -22,6 +22,11 @@ Guest setup creates the LXC, checks its identity, waits for its networks, instal
 Docker and restores its saved data and original custom images. It prepares the
 shared Compose file once, **without starting the applications**.
 
+The same job first completes the declared prerequisites: Traefik's narrow access
+to the new guest, the existing Node-RED login callback, and the broker's DNS name.
+Their private `automation/maintenance.json` records select the existing guests and
+completed installation evidence. Those installation sources remain pinned.
+
 Each later job starts and checks only its named application. Node-RED waits for
 HA because the selected flows use it. Independent guest jobs can run at the same
 time when runner capacity permits; changes within this shared guest use one lock.
@@ -91,6 +96,11 @@ the application profile. Its discovery extension adds only the selected guest
 to the existing read-only token; it does not replace that token or change its
 role. Private CD selects that bootstrap source only when `enabled` is true.
 
+An optional `ha_legacy_sensor` input removes the obsolete raw InfluxDB directory
+size sensor and its directory allowlist entry from the restored HA files. It
+requires their original hashes and retains private originals. It does not mount
+the database server's files inside HA or replace the sensor with a false value.
+
 ## Before switching the house
 
 1. Check the actual guest addresses and the networks needed by existing devices.
@@ -99,9 +109,9 @@ role. Private CD selects that bootstrap source only when `enabled` is true.
 3. Restore HA's existing MariaDB Recorder database separately from server CD.
    Creating an empty MariaDB server does not migrate its history.
 4. Review the endpoint, discovery, login and firewall changes together. Resolve
-   local Bluetooth/DBus and the old raw InfluxDB-directory sensor explicitly;
+   local Bluetooth/DBus and any obsolete local-directory sensors explicitly;
    never expose the Proxmox host's control sockets as a shortcut.
-5. Protect new application writes on the NAS, then verify MQTT, HA, Node-RED,
+5. At cutover, protect new application writes on the NAS, then verify MQTT, HA, Node-RED,
    Zigbee and real household actions together.
 
 Do not copy the old broken Avahi socket mount. Starting the containers is one

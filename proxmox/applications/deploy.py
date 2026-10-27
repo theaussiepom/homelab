@@ -103,6 +103,12 @@ def validate(cfg, stack=None):
         if (not proxy.is_private or proxy.is_loopback or proxy.is_unspecified
                 or proxy.is_link_local or proxy.is_multicast):
             raise ValueError('HA requires the selected private proxy address')
+    if 'ha_legacy_sensor' in app:
+        selected=app['ha_legacy_sensor']
+        if (app.get('kind') != 'automation' or 'ha_http' not in app or not isinstance(selected,dict)
+                or set(selected) != {'homeassistant_sha256','command_line_sha256'}
+                or any(not isinstance(v,str) or len(v) != 64 or any(c not in '0123456789abcdef' for c in v) for v in selected.values())):
+            raise ValueError('Select both original hashes for the obsolete Influx directory sensor')
     if app['vmid'] != vmid or app['hostname'] != cfg['guest']['hostname'] or app['memory_mib'] != cfg['guest']['memory_mib']:
         raise ValueError('OpenTofu and Ansible must select the same guest and resource budget')
     if not any(nic['ipv4'].split('/')[0] == app['address'] and nic['mac'].lower() == app['mac'].lower() for nic in cfg['guest']['interfaces']):

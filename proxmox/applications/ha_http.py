@@ -13,24 +13,20 @@ def digest(value):
     return hashlib.sha256(value).hexdigest()
 
 
-def configure(path, backup, expected, proxy):
-    ip = ipaddress.IPv4Address(proxy)
-    if not ip.is_private or ip.is_loopback or ip.is_unspecified or ip.is_link_local or ip.is_multicast:
-        raise ValueError('Select only the private Traefik backend address')
-    block = ('\n# BEGIN HOMELAB HTTP PROXY\nhttp:\n  use_x_forwarded_for: true\n'
-             '  trusted_proxies:\n    - ' + str(ip) + '\n# END HOMELAB HTTP PROXY\n').encode()
+def rewrite(path, backup, expected, transform):
+    """Change only the bound source bytes, retaining the original inode metadata."""
     fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
     with os.fdopen(fd, 'r+b') as stream:
         before = os.fstat(stream.fileno())
         if not stat.S_ISREG(before.st_mode) or before.st_size > 1048576:
             raise ValueError('Expected the bounded restored HA configuration')
         value = stream.read()
-        if value.endswith(block) and digest(value[:-len(block)]) == expected:
-            return False
-        if digest(value) != expected or re.search(rb'(?m)^http\s*:', value):
-            raise ValueError('The restored HA HTTP configuration differs; preserve it for review')
-        if not value.endswith(b'\n'):
-            raise ValueError('The selected HA configuration must end with its original newline')
+        if digest(value) != expected:
+            if (backup.is_file() and not backup.is_symlink() and backup.stat().st_size <= 1048576
+                    and digest(backup.read_bytes()) == expected and transform(backup.read_bytes()) == value):
+                return False
+            raise ValueError('The restored HA configuration differs; preserve it for review')
+        desired = transform(value)
         attributes = {key: os.getxattr(path, key) for key in os.listxattr(path)}
         if backup.exists():
             if backup.is_symlink() or digest(backup.read_bytes()) != expected:
@@ -39,7 +35,6 @@ def configure(path, backup, expected, proxy):
             out = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             with os.fdopen(out, 'wb') as original:
                 original.write(value); original.flush(); os.fsync(original.fileno())
-        desired = value + block
         stream.seek(0); stream.write(desired); stream.truncate(); stream.flush(); os.fsync(stream.fileno())
         stream.seek(0)
         after = os.fstat(stream.fileno())
@@ -50,14 +45,55 @@ def configure(path, backup, expected, proxy):
     return True
 
 
+def configure(path, backup, expected, proxy):
+    ip = ipaddress.IPv4Address(proxy)
+    if not ip.is_private or ip.is_loopback or ip.is_unspecified or ip.is_link_local or ip.is_multicast:
+        raise ValueError('Select only the private Traefik backend address')
+    block = ('\n# BEGIN HOMELAB HTTP PROXY\nhttp:\n  use_x_forwarded_for: true\n'
+             '  trusted_proxies:\n    - ' + str(ip) + '\n# END HOMELAB HTTP PROXY\n').encode()
+    def transform(value):
+        if re.search(rb'(?m)^http\s*:', value) or not value.endswith(b'\n'):
+            raise ValueError('Preserve the existing HA HTTP settings for review')
+        return value + block
+    return rewrite(path,backup,expected,transform)
+
+
+def legacy_sensor(root, backup, home_sha, command_sha):
+    """Remove only the obsolete raw Influx directory sensor; never fake its size."""
+    def allowlist(value):
+        line=b'  - /influxdb_data\n'
+        if value.count(line) != 1:
+            raise ValueError('The selected legacy directory allowlist differs')
+        return value.replace(line,b'',1)
+    def command(value):
+        blocks=re.split(rb'(?m)(?=^- sensor:)',value)
+        selected=[i for i,block in enumerate(blocks) if re.search(
+            rb'(?m)^\s+unique_id:\s*command_line_influxdb_size\s*$',block)]
+        if len(selected) != 1 or b'du -shm /influxdb_data | cut -f1' not in blocks[selected[0]]:
+            raise ValueError('The selected legacy directory sensor differs')
+        index=selected[0]
+        blocks[index]=b''
+        return b''.join(blocks)
+    first=rewrite(root/'homeassistant.yaml',backup/'homeassistant.before-legacy.yaml',home_sha,allowlist)
+    second=rewrite(root/'command_line.yaml',backup/'command-line.before-legacy.yaml',command_sha,command)
+    return first or second
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--expected-sha256', required=True)
     parser.add_argument('--proxy', required=True)
+    parser.add_argument('--legacy-home-sha256')
+    parser.add_argument('--legacy-command-sha256')
     args = parser.parse_args()
     try:
         changed = configure(Path('/srv/homelab/data/homeassistant/config/configuration.yaml'),
                             Path('/opt/homelab-app/configuration.before-proxy.yaml'), args.expected_sha256, args.proxy)
+        if args.legacy_home_sha256 or args.legacy_command_sha256:
+            if not args.legacy_home_sha256 or not args.legacy_command_sha256:
+                raise ValueError('Supply both original legacy configuration hashes')
+            changed=legacy_sensor(Path('/srv/homelab/data/homeassistant/config'),Path('/opt/homelab-app'),
+                                  args.legacy_home_sha256,args.legacy_command_sha256) or changed
         print(json.dumps({'changed': changed}))
     except (OSError, ValueError):
         raise SystemExit('HA proxy configuration held; inspect the retained private original') from None

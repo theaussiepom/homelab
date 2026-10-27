@@ -10,6 +10,22 @@ import ha_http
 
 
 class HaHttpTests(unittest.TestCase):
+    def test_legacy_sensor_and_only_its_allowlist_entry_are_removed_with_originals_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'config';root.mkdir();backup=Path(tmp)/'private';backup.mkdir()
+            home=b'packages: !include_dir_named integrations\nallowlist_external_dirs:\n  - /influxdb_data\n  - /config/energy_logs\n'
+            other=b'- sensor:\n    name: Other\n    unique_id: keep_this\n    command: "printf value"\n'
+            legacy=b'- sensor:\n    name: InfluxDB size\n    unique_id: command_line_influxdb_size\n    command: "du -shm /influxdb_data | cut -f1"\n    unit_of_measurement: MB\n'
+            (root/'homeassistant.yaml').write_bytes(home);(root/'command_line.yaml').write_bytes(other+legacy)
+            before={p.name:p.stat().st_ino for p in root.iterdir()}
+            hashes=[hashlib.sha256(v).hexdigest() for v in (home,other+legacy)]
+            self.assertTrue(ha_http.legacy_sensor(root,backup,*hashes))
+            self.assertFalse(ha_http.legacy_sensor(root,backup,*hashes))
+            self.assertEqual((root/'command_line.yaml').read_bytes(),other)
+            self.assertEqual((root/'homeassistant.yaml').read_bytes(),home.replace(b'  - /influxdb_data\n',b''))
+            self.assertEqual((backup/'command-line.before-legacy.yaml').read_bytes(),other+legacy)
+            self.assertEqual(before,{p.name:p.stat().st_ino for p in root.iterdir()})
+
     def test_proxy_is_added_once_and_original_inode_mode_xattr_are_retained(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'configuration.yaml'; backup = Path(tmp) / 'original'

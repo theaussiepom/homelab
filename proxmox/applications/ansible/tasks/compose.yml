@@ -165,7 +165,7 @@
 
 - name: Configure the selected HA proxy before first application startup
   ansible.builtin.command:
-    argv: [python3, /opt/homelab-app/ha_http.py, --expected-sha256, "{{ app.ha_http.source_sha256 }}", --proxy, "{{ app.ha_http.trusted_proxy }}"]
+    argv: "{{ ['python3', '/opt/homelab-app/ha_http.py', '--expected-sha256', app.ha_http.source_sha256, '--proxy', app.ha_http.trusted_proxy] + (['--legacy-home-sha256', app.ha_legacy_sensor.homeassistant_sha256, '--legacy-command-sha256', app.ha_legacy_sensor.command_line_sha256] if app.ha_legacy_sensor is defined else []) }}"
   register: ha_proxy_configuration
   changed_when: (ha_proxy_configuration.stdout | from_json).changed
   when: app.kind == 'automation' and app.ha_http is defined and not ansible_check_mode
