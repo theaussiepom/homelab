@@ -3,6 +3,8 @@
 [Proxmox guide](../README.md) · [Bootstrap](../bootstrap/README.md) ·
 [Databases](DATABASES.md) · [HTTPS and sign-in](FOUNDATION.md) · [pgAdmin](PGADMIN.md) · [PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
 
+For host and appliance interfaces, see [internal administration route preparation](ingress-admin.md).
+
 The deployment guest receives GitHub jobs. These scripts are the next step:
 **OpenTofu creates one application guest; Ansible installs its applications and
 restores its saved configuration. Database guests are the exception: CD prepares

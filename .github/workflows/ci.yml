@@ -47,6 +47,7 @@ jobs:
         run: |
           docker pull --platform linux/amd64 traefik@sha256:6b9cbca6fac42ab0075f5437d8dc1685cfd188626d8d515839ea94f8b6271c42
           python3 proxmox/applications/tests/ingress_fixture.py
+          python3 proxmox/applications/tests/ingress_admin_fixture.py
       - name: Fetch the exact service discovery fixture source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
