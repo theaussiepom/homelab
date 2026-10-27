@@ -54,10 +54,12 @@ def main():
                     capture_output=True, text=True, check=False)
             good = connect('198.18.156.10')
             assert good.returncode == 0 and good.stdout.strip() == '1', good.stderr
-            assert connect('198.18.156.11').returncode != 0
-            assert connect('198.18.156.10', 'postgres').returncode != 0
-            assert connect('198.18.156.10', statement='CREATE DATABASE forbidden').returncode != 0
-            assert connect('198.18.156.10', statement='CREATE ROLE forbidden').returncode != 0
+            def refused(result, message):
+                assert result.returncode != 0 and message in result.stderr, result.stderr
+            refused(connect('198.18.156.11'), 'pg_hba.conf rejects connection')
+            refused(connect('198.18.156.10', 'postgres'), 'pg_hba.conf rejects connection')
+            refused(connect('198.18.156.10', statement='CREATE DATABASE forbidden'), 'permission denied to create database')
+            refused(connect('198.18.156.10', statement='CREATE ROLE forbidden'), 'permission denied to create role')
             print(json.dumps({'new_database': True, 'owner_not_cluster_admin': True,
                 'single_source_and_database': True, 'second_run_changed': False,
                 'original_hba_preserved': True, 'postgresql_restarted': False}))

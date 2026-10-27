@@ -10,6 +10,34 @@ import monitoring_access as access
 
 
 class MonitoringAccessTests(unittest.TestCase):
+    def test_failure_after_mint_keeps_validated_credential_and_holds_without_replay(self):
+        config = {'schema': 'homelab-zabbix-access-v1', 'endpoint': 'https://198.18.25.10:8006/',
+                  'node': 'practice-pve', 'address': '10.88.30.50', 'backup_source': 'nas.invalid:/fixture'}
+        before = {'users': [], 'roles': [], 'tokens': [], 'acl': [], 'rules': [], 'options': {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); state = root / 'state'; nas = root / 'nas'
+            state.mkdir(mode=0o700); nas.mkdir(mode=0o700)
+            api = Mock()
+            def call(path, method='GET', values=None):
+                if '/token/' in path:
+                    return {'data': {'full-tokenid': access.IDENTITY, 'value': 'synthetic-fixture-key'}}
+                if path == '/access/acl': raise OSError('synthetic ACL failure after mint')
+                return {'data': None}
+            api.call.side_effect = call
+            with patch.object(access, 'check_backup'), patch.object(access, 'inspect', return_value=before):
+                with self.assertRaisesRegex(OSError, 'after mint'):
+                    access.initialize(api, config, state, nas)
+                for directory in (state, nas):
+                    self.assertEqual((directory / 'monitoring-access/token.json').read_bytes(),
+                        access.read_private(state / 'monitoring-access/token.json'))
+                    self.assertEqual((directory / 'monitoring-access/token.json').stat().st_mode & 0o777, 0o600)
+                    self.assertFalse((directory / 'monitoring-access/minted-response.json').exists())
+                    self.assertTrue((directory / 'monitoring-access/HOLD.json').is_file())
+                    self.assertFalse((directory / 'monitoring-access/READY.json').exists())
+                api.reset_mock()
+                with self.assertRaisesRegex(ValueError, 'held'): access.initialize(api, config, state, nas)
+                api.call.assert_not_called()
+
     def test_success_retains_only_the_validated_credential_and_invalid_mint_keeps_evidence(self):
         config = {'schema': 'homelab-zabbix-access-v1', 'endpoint': 'https://10.88.25.10:8006/',
                   'node': 'practice-pve', 'address': '10.88.30.50', 'backup_source': 'nas.invalid:/fixture'}
