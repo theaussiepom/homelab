@@ -1,4 +1,4 @@
-"""Reconcile one isolated backend bridge and explicit application-token grants."""
+"""Reconcile declared isolated bridges and explicit application-token grants."""
 import argparse
 import hashlib
 import json
@@ -36,7 +36,8 @@ def save(path, value):
 def validate(c):
     fields = {'schema', 'endpoint', 'node', 'deploy', 'bridge', 'applications',
               'existing_grants', 'backup_source'}
-    require(set(c) in (fields, fields | {'service_discovery'}), 'Use the closed bootstrap CD configuration')
+    require(fields <= set(c) <= fields | {'service_discovery', 'private_bridges'},
+            'Use the closed bootstrap CD configuration')
     require(c['schema'] == 'homelab-bootstrap-cd-v1', 'Unsupported bootstrap CD schema')
     endpoint = urlsplit(c['endpoint'])
     require(endpoint.scheme == 'https' and endpoint.hostname and endpoint.port == 8006
@@ -48,6 +49,18 @@ def validate(c):
             and re.fullmatch(r'02(:[0-9a-fA-F]{2}){5}', d['mac']), 'Select the existing deployment guest 900')
     require(re.fullmatch(r'vmbr[1-9][0-9]{0,3}', c['bridge']) and c['bridge'] not in ('vmbr0', 'vmbr1'),
             'Choose a separate private bridge')
+    if 'private_bridges' in c:
+        require(isinstance(c['private_bridges'], list) and 1 <= len(c['private_bridges']) <= 8,
+                'Declare a finite private bridge list')
+        names = set()
+        for bridge in c['private_bridges']:
+            require(isinstance(bridge, dict) and set(bridge) == {'name', 'description'}
+                    and isinstance(bridge['name'], str) and re.fullmatch(r'vmbr[1-9][0-9]{0,3}', bridge['name'])
+                    and bridge['name'] not in {'vmbr0', 'vmbr1'} and bridge['name'] not in names
+                    and isinstance(bridge['description'], str) and 1 <= len(bridge['description']) <= 200
+                    and all(32 <= ord(char) < 127 for char in bridge['description']),
+                    'Declare distinct private bridges with printable purpose descriptions')
+            names.add(bridge['name'])
     require(isinstance(c['applications'], list) and 1 <= len(c['applications']) <= 32,
             'Declare a finite application list')
     seen = {900, 4914, 4915, 4920}
@@ -76,7 +89,14 @@ def rows(items):
 def desired(c):
     return rows(c['existing_grants']) | {('/vms/' + str(a['vmid']), 'PVEVMAdmin', 0)
                                       for a in c['applications']} | {
-        ('/sdn/zones/localnetwork/' + c['bridge'], 'PVESDNUser', 0)}
+        ('/sdn/zones/localnetwork/' + name, 'PVESDNUser', 0) for name in bridge_definitions(c)}
+
+
+def bridge_definitions(c):
+    # Preserve the original v1 bridge and its saved receipts. Additional names
+    # can only be supplied by the finite, closed private_bridges input.
+    return {c['bridge']: 'HomeLab CD private backend; no physical uplink',
+            **{row['name']: row['description'] for row in c.get('private_bridges', [])}}
 
 
 def network_state(data):
@@ -175,11 +195,12 @@ def inspect(api, c):
     network = api.call(node + '/network')
     require(not network.get('changes'), 'Unrelated pending host-network changes need review')
     interfaces = network['data']
-    bridge = [r for r in interfaces if r['iface'] == c['bridge']]
-    require(len(bridge) <= 1, 'Duplicate bridge identity')
-    if bridge:
-        isolated(bridge[0], active=True)
-    return {'networks': network_state(interfaces), 'bridge_exists': bool(bridge),
+    for name in bridge_definitions(c):
+        bridge = [r for r in interfaces if r['iface'] == name]
+        require(len(bridge) <= 1, 'Duplicate bridge identity')
+        if bridge:
+            isolated(bridge[0], active=True)
+    return {'networks': network_state(interfaces), 'bridge_exists': c['bridge'] in network_state(interfaces),
             'token_metadata': meta, 'acl': [list(r) for r in sorted(actual)],
             'missing': [list(r) for r in sorted(missing)]}
 
@@ -192,18 +213,33 @@ def reconcile(api, c, before, evidence, root=None, backup=None):
         require(provider_access.inspect(api, c, root, backup) == before['service_discovery'],
                 'Service discovery changed after the saved plan')
     node = '/nodes/' + c['node']
-    if not before['bridge_exists']:
-        # Omit bridge_ports: the API treats 'none' as a literal device name.
-        # PVE serializes an absent port list as `bridge-ports none` itself.
-        api.call(node + '/network', 'POST', {'iface': c['bridge'], 'type': 'bridge',
-                 'autostart': 1,
-                 'comments': 'HomeLab CD private backend; no physical uplink'})
+    definitions = bridge_definitions(c)
+    explicit = {r['name'] for r in c.get('private_bridges', [])}
+    expected = dict(before['networks'])
+    changed = False
+    for name, description in definitions.items():
+        if name in expected:
+            # Existing legacy configurations do not acquire a new comment edit.
+            if name not in explicit or expected[name].get('comments', '').rstrip('\n') == description:
+                continue
+            api.call(node + '/network/' + name, 'PUT', {'comments': description})
+            expected[name] = dict(expected[name], comments=description)
+        else:
+            # Omit bridge_ports: the API treats 'none' as a literal device name.
+            # PVE serializes an absent port list as `bridge-ports none` itself.
+            api.call(node + '/network', 'POST', {'iface': name, 'type': 'bridge',
+                     'autostart': 1, 'comments': description})
+            expected[name] = None
         pending = api.call(node + '/network')
         proposed = network_state(pending['data'])
-        require(set(proposed) == set(before['networks']) | {c['bridge']}
-                and {k: v for k, v in proposed.items() if k != c['bridge']} == before['networks'],
+        require(set(proposed) == set(expected)
+                and all(value is None or proposed[k] == value for k, value in expected.items()),
                 'Network delta contains more than the isolated bridge; reload refused')
-        isolated(proposed[c['bridge']])
+        isolated(proposed[name])
+        require(proposed[name].get('comments', '').rstrip('\n') == description, 'Bridge purpose readback differs')
+        expected = proposed
+        changed = True
+    if changed:
         save(evidence / 'network-before-reload.json', pending)
         task = api.call(node + '/network', 'PUT', {})['data']
         require(isinstance(task, str) and task.startswith('UPID:'), 'Missing network task identity')
@@ -223,8 +259,7 @@ def reconcile(api, c, before, evidence, root=None, backup=None):
     after = inspect(api, c)
     require(after['bridge_exists'] and not after['missing'] and after['token_metadata'] == before['token_metadata'],
             'Bootstrap CD readback failed')
-    require({k: v for k, v in after['networks'].items() if k != c['bridge']}
-            == {k: v for k, v in before['networks'].items() if k != c['bridge']}, 'Existing host networks changed')
+    require(after['networks'] == expected, 'Existing host networks changed')
     permissions = api.call('/access/permissions?' + urlencode({'userid': 'root@pam!homelab-deploy-900'}))['data']
     for path, role, _ in desired(c):
         required = {'PVEVMAdmin': 'VM.Allocate', 'PVEAuditor': 'Sys.Audit' if path.startswith('/nodes/') else 'Datastore.Audit',
@@ -235,6 +270,9 @@ def reconcile(api, c, before, evidence, root=None, backup=None):
     result = {'status': 'passed', 'bridge': c['bridge'], 'bridge_created': not before['bridge_exists'],
             'new_acl_rows': len(before['missing']), 'token_lifetime_changed': False,
             'guest_lifecycle_changed': False, 'trigger_commit': os.environ.get('GITHUB_SHA')}
+    if 'private_bridges' in c:
+        result['private_bridges'] = [{'name': name, 'description': purpose,
+            'created': name not in before['networks']} for name, purpose in definitions.items()]
     if 'service_discovery' in c:
         result['service_discovery'] = provider_access.reconcile(
             api, c, before['service_discovery'], root, backup)
