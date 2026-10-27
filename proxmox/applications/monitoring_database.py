@@ -60,6 +60,23 @@ def hba_content(original, address):
     return prefix.encode() + original
 
 
+def replace_hba(hba, content, attributes):
+    info = hba.stat()
+    fd, name = tempfile.mkstemp(prefix='.homelab-zabbix-', dir=hba.parent)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            os.fchmod(stream.fileno(), info.st_mode & 0o777)
+            os.fchown(stream.fileno(), info.st_uid, info.st_gid)
+            stream.write(content); stream.flush(); os.fsync(stream.fileno())
+        shutil.copystat(hba, name, follow_symlinks=False)
+        if {key: base64.b64encode(os.getxattr(name, key)).decode() for key in os.listxattr(name)} != attributes:
+            raise ValueError('PostgreSQL HBA metadata could not be preserved')
+        os.replace(name, hba)
+        sync(hba.parent)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
 def provision(root, hba, expected, address, password):
     if not re.fullmatch(r'[A-Za-z0-9_-]{32,128}', password):
         raise ValueError('Use a new random URL-safe database credential of at least 32 characters')
@@ -99,24 +116,18 @@ def provision(root, hba, expected, address, password):
     # Restricted URL-safe password above prevents SQL injection. Keep it off argv.
     sql("SET password_encryption='scram-sha-256'; CREATE ROLE zabbix LOGIN PASSWORD '" + password + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;")
     sql('CREATE DATABASE zabbix OWNER zabbix;')
-    info = hba.stat()
-    fd, name = tempfile.mkstemp(prefix='.homelab-zabbix-', dir=hba.parent)
+    replace_hba(hba, updated, attributes)
     try:
-        with os.fdopen(fd, 'wb') as stream:
-            os.fchmod(stream.fileno(), info.st_mode & 0o777)
-            os.fchown(stream.fileno(), info.st_uid, info.st_gid)
-            stream.write(updated); stream.flush(); os.fsync(stream.fileno())
-        shutil.copystat(hba, name, follow_symlinks=False)
-        if {key: base64.b64encode(os.getxattr(name, key)).decode() for key in os.listxattr(name)} != attributes:
-            raise ValueError('PostgreSQL HBA metadata could not be preserved')
-        os.replace(name, hba)
-        sync(hba.parent)
-    finally:
-        Path(name).unlink(missing_ok=True)
-    if sql('SELECT count(*) FROM pg_hba_file_rules WHERE error IS NOT NULL') != '0':
-        raise ValueError('PostgreSQL HBA parser rejected the proposal; retain the original and hold')
-    if sql('SELECT pg_reload_conf()') != 't':
-        raise ValueError('PostgreSQL configuration reload failed; retain hold')
+        if sql('SELECT count(*) FROM pg_hba_file_rules WHERE error IS NOT NULL') != '0':
+            raise ValueError('PostgreSQL HBA parser rejected the proposal')
+        if sql('SELECT pg_reload_conf()') != 't':
+            raise ValueError('PostgreSQL configuration reload failed')
+    except Exception:
+        save(root / 'pg_hba.rejected', updated)
+        if hba.read_bytes() != updated:
+            raise ValueError('HBA changed during the failed attempt; preserve all evidence and hold') from None
+        replace_hba(hba, original, attributes)
+        raise ValueError('PostgreSQL HBA preparation failed; original restored and hold retained') from None
     verify()
     salt = os.urandom(16)
     credential_check = {'salt': salt.hex(), 'scrypt': hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1).hex()}

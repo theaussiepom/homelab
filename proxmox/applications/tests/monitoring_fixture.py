@@ -82,6 +82,12 @@ def client():
     second = configure(2)
     assert 'changed=0' in second, second
     token = api('user.login', {'username': 'Admin', 'password': password})
+    pve_host = api('host.get', {'filter': {'host': ['fixture-pve-api']}, 'output': ['hostid']}, token)[0]
+    http_items = []
+    for method in ('item.get', 'itemprototype.get'):
+        http_items.extend(api(method, {'hostids': [pve_host['hostid']], 'filter': {'type': 19},
+                                       'output': ['verify_peer', 'verify_host']}, token))
+    assert len(http_items) == 7 and all(row['verify_peer'] == '1' and row['verify_host'] == '1' for row in http_items)
     hosts = api('host.get', {'filter': {'host': ['fixture-linux']}, 'output': 'extend'}, token)
     assert len(hosts) == 1 and hosts[0]['tls_accept'] == '2'
     hostid = hosts[0]['hostid']

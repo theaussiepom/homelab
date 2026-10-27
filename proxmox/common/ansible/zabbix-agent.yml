@@ -13,8 +13,11 @@
       - ansible_facts.architecture == 'x86_64'
       - zabbix_agent.version == '1:7.0.32-1+debian13'
       - zabbix_agent.psk_identity is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')
-      - lookup('ansible.builtin.file', zabbix_agent.psk_file) | trim is match('^[0-9a-f]{64}$')
     fail_msg: 'Stop: agent identity, Debian package or individual PSK differs from the reviewed packet.'
+
+- name: Require a valid individual PSK without logging its contents
+  ansible.builtin.assert:
+    that: lookup('ansible.builtin.file', zabbix_agent.psk_file) | trim is match('^[0-9a-f]{64}$')
   no_log: true
 
 - name: Verify the exact upstream Agent 2 package on the controller

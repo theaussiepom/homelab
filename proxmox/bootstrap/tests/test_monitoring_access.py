@@ -10,6 +10,21 @@ import monitoring_access as access
 
 
 class MonitoringAccessTests(unittest.TestCase):
+    def test_unreviewed_peer_firewall_changes_remain_drift_holds(self):
+        config = {'schema': 'homelab-zabbix-access-v1', 'endpoint': 'https://10.88.25.10:8006/',
+                  'node': 'practice-pve', 'address': '10.88.30.50', 'backup_source': 'nas.invalid:/fixture'}
+        after = {'users': [{'userid': access.USER, 'enable': 1}],
+                 'roles': [{'roleid': access.ROLE, 'privs': ','.join(access.PRIVILEGES)}],
+                 'tokens': [{'tokenid': access.TOKEN, 'privsep': 1, 'expire': 0}],
+                 'acl': [{'type': kind, 'ugid': identity, 'path': '/', 'roleid': access.ROLE, 'propagate': 1}
+                         for kind, identity in [('user', access.USER), ('token', access.IDENTITY)]],
+                 'rules': [{'comment': 'Unreviewed peer rule'}, access.rule(config)], 'options': {}}
+        api = Mock()
+        with patch.object(access, 'inspect', return_value=after):
+            with self.assertRaisesRegex(ValueError, 'firewall readback differs'):
+                access.verify(api, config, {'token': 'unused'}, [])
+        api.call.assert_not_called()
+
     def test_failure_before_token_return_is_held_locally_and_on_nas(self):
         config = {'schema': 'homelab-zabbix-access-v1', 'endpoint': 'https://198.18.25.10:8006/',
                   'node': 'practice-pve', 'address': '10.88.30.50', 'backup_source': 'nas.invalid:/fixture'}

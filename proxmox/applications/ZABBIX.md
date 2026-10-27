@@ -37,7 +37,10 @@ physical host cannot continue reporting while that host is off.
 ## What is pinned?
 
 `monitoring/versions.json` pins matching Zabbix **7.0.32** x86 container manifests
-and hashes of the two unmodified official templates. Their source is commit
+and hashes of the two unmodified official template source files. At configuration
+time, an in-memory copy explicitly enables peer and hostname verification on all
+seven Proxmox HTTP items and prototypes. The standard module imports that copy
+and exports it again for readback; the vendored bytes and UUIDs stay unchanged. Their source is commit
 `0d6fa36d0a0df4552d8df07e5b13deb664089047` from the upstream `7.0.32` release.
 The bundled AGPL licence applies to those templates; see the third-party notices.
 The [7.0 support policy](https://www.zabbix.com/life_cycle_and_release_policy)
@@ -92,7 +95,9 @@ creation, replication or bypass-RLS privileges. Its HBA block permits only the
 monitoring address to reach that database; it rejects other TCP and local-socket
 connections for that role. Existing HBA lines are preserved byte for byte.
 The helper checks the reviewed HBA digest, saves the original and globals, checks
-the HBA parser and reloads PostgreSQL configuration without restarting it.
+the HBA parser and reloads PostgreSQL configuration without restarting it. Parser
+or reload failure restores the original HBA file with its metadata, preserves the
+rejected proposal and retains the failure hold.
 An independently verified current native database backup is required first.
 
 Private site inputs select addresses, guest IDs, domain, inventory and secret
@@ -133,6 +138,12 @@ NAS backup mount. Inventory groups are `monitoring_bootstrap`,
 Use trusted HTTPS for the native API inventory. Fixture-only HTTP overrides
 must never appear in an admitted packet.
 
+Bootstrap access readback deliberately keeps exact firewall snapshots. Later
+rule/order/option drift requires a reviewed baseline update; it is not silently
+adopted as legitimate peer maintenance. The native review must also approve token
+lifetime and confirm the NAS export restricts access to the intended host/account
+and protects the retained once-returned credential evidence.
+
 The adapter keeps per-phase receipts and a durable hold on the existing local
 and NAS state boundary. A failed or interrupted phase is not replayed on a later
 push. An existing partial identity/database/agent configuration is held rather
@@ -159,6 +170,10 @@ It exercises the rendered server/web against a fresh PostgreSQL schema, upstream
 template/host modules, an unchanged second configuration run, active PSK data and
 rejection of the wrong key. The exact Debian agent binary has a separate offline
 configuration/process/no-passive-listener fixture.
+
+Initial native acceptance can wait up to ten minutes for fresh samples within
+one read-only attempt. Identity, TLS and unsupported-item errors fail immediately;
+the wait never restarts a service or replays a failed phase.
 
 These tests do not prove LXC nesting, host firewall paths, real Proxmox API data,
 native systemd startup, every guest's telemetry, browser sign-in or household

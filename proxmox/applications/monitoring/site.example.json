@@ -41,9 +41,65 @@
       {
         "direction": "out",
         "proto": "tcp",
-        "port": "443",
+        "port": "80,443",
         "destination": "0.0.0.0/0",
         "comment": "Package and image downloads"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "53",
+        "destination": "198.18.100.53/32",
+        "comment": "Selected DNS only"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": "53",
+        "destination": "198.18.100.53/32",
+        "comment": "Selected DNS only"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "5432",
+        "destination": "198.18.30.23/32",
+        "comment": "Dedicated PostgreSQL database"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "8006",
+        "destination": "198.18.25.10/32",
+        "comment": "Trusted Proxmox API"
+      },
+      {
+        "direction": "in",
+        "proto": "tcp",
+        "port": "10051",
+        "source": "198.18.25.10/32",
+        "comment": "One selected active agent"
+      },
+      {
+        "direction": "in",
+        "proto": "tcp",
+        "port": "10051",
+        "source": "198.18.30.23/32",
+        "comment": "One selected active agent"
+      },
+      {
+        "direction": "in",
+        "proto": "tcp",
+        "port": "10051",
+        "source": "198.18.30.50/32",
+        "comment": "One selected active agent"
+      },
+      {
+        "direction": "in",
+        "proto": "tcp",
+        "port": "8080",
+        "source": "198.18.30.33/32",
+        "comment": "Selected Traefik backend; route admission follows password setup"
       }
     ]
   },

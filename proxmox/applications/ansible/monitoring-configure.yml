@@ -30,11 +30,38 @@
           - monitoring_hosts | map(attribute='psk') | unique | length == monitoring_hosts | length
       no_log: true
 
-    - name: Import the exact official templates
-      community.zabbix.zabbix_template:
-        template_yaml: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../monitoring/templates/' ~ item) }}"
-        state: present
+    - name: Prepare official templates with the reviewed HTTP TLS policy
+      ansible.builtin.command:
+        argv: [python3, "{{ playbook_dir }}/../monitoring_templates.py", --name, "{{ item }}"]
+      delegate_to: localhost
+      vars:
+        ansible_connection: local
+      changed_when: false
       loop: [template_app_proxmox.yaml, template_os_linux_active.yaml]
+      register: monitoring_prepared_templates
+
+    - name: Import the pinned templates and explicit TLS settings
+      community.zabbix.zabbix_template:
+        template_json: "{{ item.stdout }}"
+        state: present
+      loop: "{{ monitoring_prepared_templates.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Export the configured Proxmox template for complete TLS readback
+      community.zabbix.zabbix_template_info:
+        template_name: Proxmox VE by HTTP
+        format: json
+      register: monitoring_tls_readback
+
+    - name: Require peer and host verification on every HTTP item and prototype
+      ansible.builtin.command:
+        argv: [python3, "{{ playbook_dir }}/../monitoring_templates.py", --check-readback]
+        stdin: "{{ monitoring_tls_readback.template_json | to_json }}"
+      delegate_to: localhost
+      vars:
+        ansible_connection: local
+      changed_when: false
 
     - name: Create the monitoring host group
       community.zabbix.zabbix_group:

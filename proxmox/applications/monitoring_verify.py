@@ -9,7 +9,11 @@ from urllib.request import Request, build_opener, HTTPSHandler, ProxyHandler
 from deploy import RefuseRedirects
 
 
-def verify(c):
+class FreshnessPending(ValueError):
+    pass
+
+
+def _verify_once(c):
     url = urlsplit(c['url'])
     if url.scheme != 'https' or not url.hostname or url.username or url.password or url.path not in ('', '/') or url.query or url.fragment:
         raise ValueError('Use the reviewed HTTPS frontend origin')
@@ -26,6 +30,7 @@ def verify(c):
     token = call('user.login', {'username': 'Admin', 'password': Path(c['password_file']).read_text().strip()})
     try:
         cutoff = max(time.time() - c.get('max_age_seconds', 900), c['not_before'])
+        pending = False
         for row in c['agents']:
             hosts = call('host.get', {'filter': {'host': [row['hostname']]}, 'output': 'extend'}, token)
             # Zabbix does not return PSK material/identity through host.get.
@@ -35,21 +40,35 @@ def verify(c):
                 raise ValueError('An agent is missing or does not require its individual PSK')
             samples = call('item.get', {'hostids': [hosts[0]['hostid']], 'filter': {'key_': ['system.uptime']},
                                        'output': ['type', 'lastclock', 'lastvalue', 'state']}, token)
-            if len(samples) != 1 or samples[0]['type'] != '7' or int(samples[0]['lastclock']) < cutoff or samples[0]['state'] != '0' or float(samples[0]['lastvalue']) <= 0:
-                raise ValueError('An agent has no fresh authenticated active uptime sample')
+            if len(samples) != 1 or samples[0]['type'] != '7' or samples[0]['state'] != '0':
+                raise ValueError('An agent does not have its supported active uptime item')
+            if int(samples[0]['lastclock']) < cutoff or float(samples[0]['lastvalue']) <= 0:
+                pending = True
         host = call('host.get', {'filter': {'host': [c['proxmox_hostname']]}, 'output': ['hostid'], 'selectMacros': 'extend'}, token)
         if len(host) != 1 or not any(m['macro'] == '{$HTTP.TLS.VERIFY}' and m['value'] == 'full' for m in host[0]['macros']):
             raise ValueError('Proxmox monitoring must require full API TLS verification')
         items = call('item.get', {'hostids': [host[0]['hostid']],
                      'filter': {'key_': ['proxmox.api.available', 'proxmox.cluster.resources']}, 'output': 'extend'}, token)
         by_key = {row['key_']: row for row in items}
-        if len(by_key) != 2 or any(row['state'] != '0' or int(row['lastclock']) < cutoff for row in items) or by_key['proxmox.api.available']['lastvalue'] != '200':
-            raise ValueError('No fresh successful Proxmox API result')
-        resources = json.loads(by_key['proxmox.cluster.resources']['lastvalue'])['data']
-        if not set(c['commissioned_vmids']) <= {row.get('vmid') for row in resources}:
-            raise ValueError('Commissioned guests are missing from the Proxmox API sample')
-        if not any(row.get('type') == 'node' for row in resources):
-            raise ValueError('No Proxmox node values arrived')
+        for method in ('item.get', 'itemprototype.get'):
+            http = call(method, {'hostids': [host[0]['hostid']], 'filter': {'type': 19},
+                                'output': ['verify_peer', 'verify_host']}, token)
+            if not http or any(row.get('verify_peer') != '1' or row.get('verify_host') != '1' for row in http):
+                raise ValueError('A Proxmox HTTP item or prototype does not require full TLS verification')
+        if len(by_key) != 2 or any(row['state'] != '0' for row in items):
+            raise ValueError('Proxmox API items are missing or unsupported')
+        if any(int(row['lastclock']) < cutoff for row in items):
+            pending = True
+        else:
+            if by_key['proxmox.api.available']['lastvalue'] != '200':
+                raise ValueError('The Proxmox API returned an unsuccessful status')
+            resources = json.loads(by_key['proxmox.cluster.resources']['lastvalue'])['data']
+            if not set(c['commissioned_vmids']) <= {row.get('vmid') for row in resources}:
+                raise ValueError('Commissioned guests are missing from the Proxmox API sample')
+            if not any(row.get('type') == 'node' for row in resources):
+                raise ValueError('No Proxmox node values arrived')
+        if pending:
+            raise FreshnessPending('Waiting for fresh agent and Proxmox samples')
         with opener.open(c['url'], timeout=20) as response:
             if response.status != 200 or b'Zabbix' not in response.read(1024 * 1024):
                 raise ValueError('Monitoring HTTPS UI did not respond')
@@ -57,6 +76,21 @@ def verify(c):
                 'browser_sign_in_verified': False}
     finally:
         call('user.logout', [], token)
+
+
+def verify(c):
+    wait_seconds = c.get('collection_wait_seconds', 600)
+    if type(wait_seconds) is not int or not 0 <= wait_seconds <= 600:
+        raise ValueError('Bound the initial read-only collection wait to ten minutes')
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        try:
+            return _verify_once(c)
+        except FreshnessPending:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError('Fresh monitoring samples did not arrive within the approved collection wait') from None
+            time.sleep(min(5, remaining))
 
 
 if __name__ == '__main__':
