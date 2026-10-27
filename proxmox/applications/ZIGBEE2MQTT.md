@@ -126,6 +126,14 @@ approval must be true before even using that command. The writer confirmation
 must be true before attachment. These are inputs to a separately reviewed
 migration packet, never inferred from synthetic tests or set by this preparation.
 
+The command requires `--revision FULL_REVIEWED_COMMIT`. It verifies that this is
+the checkout's HEAD, that Git accepts its signature using the operator's existing
+trusted signers, and that both executed source files match that commit byte for
+byte. A branch name, unsigned commit or modified helper is refused before SSH.
+Review the selected SSH key's authority for this root action in the native
+packet. The pinned SSH host key authenticates the target; the reported hostname
+is only an additional node consistency check.
+
 The command accepts `--bootstrap`, `--request`, `--ssh-key`, `--known-hosts` and,
 for the single edit, `--apply PLAN_SHA256`. It uses only the management endpoint
 and node already selected by the bootstrap bundle. It never copies workstation

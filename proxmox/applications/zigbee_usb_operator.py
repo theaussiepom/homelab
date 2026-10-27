@@ -20,6 +20,27 @@ import zigbee_usb
 HERE=Path(__file__).resolve().parent
 
 
+def authenticated_revision(revision):
+    """Require the explicitly reviewed signed commit and its exact source bytes."""
+    if not re.fullmatch(r'[0-9a-f]{40}',revision):
+        raise ValueError('Select the full reviewed, signed source revision')
+    def git(*args,text=False):
+        return subprocess.check_output(['git',*args],cwd=HERE,stderr=subprocess.PIPE,timeout=15,text=text)
+    root=Path(git('rev-parse','--show-toplevel',text=True).strip()).resolve()
+    if git('rev-parse','HEAD',text=True).strip()!=revision:
+        raise ValueError('The operator checkout must be at the exact reviewed revision')
+    # Uses the operator's existing trusted Git signer configuration; fail closed.
+    git('verify-commit',revision)
+    if git('log','-1','--format=%G?',revision,text=True).strip()!='G':
+        raise ValueError('The reviewed source must have a good signature from an existing trusted signer')
+    if Path(zigbee_usb.__file__).resolve()!=HERE/'zigbee_usb.py':
+        raise ValueError('The loaded USB helper must come from this signed checkout')
+    for path in (Path(__file__).resolve(),HERE/'zigbee_usb.py'):
+        if path.is_symlink() or path.read_bytes()!=git('show',revision+':'+path.relative_to(root).as_posix()):
+            raise ValueError('Operator/helper source differs from the authenticated commit')
+    return revision
+
+
 def write(path,value,exclusive=False):
     """Keep operator plans and uncertain outcomes private and durable."""
     flags=os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW|(os.O_EXCL if exclusive else os.O_TRUNC)
@@ -29,9 +50,10 @@ def write(path,value,exclusive=False):
         json.dump(value,stream,indent=2);stream.write('\n');stream.flush();os.fsync(stream.fileno())
 
 
-def execute(work,request,key,known_hosts,approved=''):
+def execute(work,request,key,known_hosts,approved='',revision=''):
     """Use pinned bootstrap authority, a reviewed live hash and one attempt hold."""
     zigbee_usb.validate_request(request)
+    reviewed=authenticated_revision(revision)
     if approved and not re.fullmatch(r'[0-9a-f]{64}',approved):
         raise ValueError('Select the exact reviewed USB plan SHA256')
     for path in (work,key,known_hosts):
@@ -44,7 +66,7 @@ def execute(work,request,key,known_hosts,approved=''):
         raise ValueError('The radio must use the node and management endpoint already pinned by bootstrap')
     source=(HERE/'zigbee_usb.py').read_text()
     source_hash=hashlib.sha256(source.encode()+Path(__file__).read_bytes()).hexdigest()
-    binding={'request':request,'source_sha256':source_hash,
+    binding={'request':request,'revision':reviewed,'source_sha256':source_hash,
              'known_hosts_sha256':hashlib.sha256(known_hosts.read_bytes()).hexdigest(),
              'bootstrap_site_sha256':hashlib.sha256(authority.read_bytes()).hexdigest()}
     saved=work/f'zigbee-usb-plan-{request["vmid"]}.json'
@@ -62,6 +84,8 @@ def execute(work,request,key,known_hosts,approved=''):
                 raise ValueError('Review the exact unchanged source, request and operator plan before apply')
             write(hold,{'binding':binding,'plan_sha256':approved,'remote_closure':'unconfirmed','automatic_retry':False},exclusive=True)
         payload={'source':source,'request':request,'apply':approved}
+        # Pinned SSH host keys authenticate the host. Its hostname is an
+        # additional node consistency check, not the authentication mechanism.
         remote=("import json,os,socket,sys; p=json.loads(sys.argv[1]); "
                 "assert os.geteuid()==0 and socket.gethostname().split('.')[0]==p['request']['node']; "
                 "n={'__name__':'operator_usb_remote'};exec(compile(p['source'],'operator_usb_remote','exec'),n); "
@@ -96,10 +120,11 @@ def main():
     parser.add_argument('--request',required=True,type=Path)
     parser.add_argument('--ssh-key',required=True,type=Path)
     parser.add_argument('--known-hosts',required=True,type=Path)
+    parser.add_argument('--revision',required=True,help='Full reviewed commit, verified with existing trusted Git signers')
     parser.add_argument('--apply',default='',help='Exact SHA256 from the reviewed operator plan')
     args=parser.parse_args()
     try:
-        result=execute(args.bootstrap,json.loads(args.request.read_text()),args.ssh_key,args.known_hosts,args.apply)
+        result=execute(args.bootstrap,json.loads(args.request.read_text()),args.ssh_key,args.known_hosts,args.apply,args.revision)
         print(json.dumps({'status':result.get('status','planned'),'plan_sha256':result.get('plan_sha256'),
                           'native_radio_qualified':False,'runner_refresh_required':bool(args.apply)}))
     except (OSError,ValueError,KeyError,subprocess.SubprocessError):
