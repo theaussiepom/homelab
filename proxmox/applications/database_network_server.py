@@ -1,10 +1,11 @@
-"""Pure additive listener candidates for the existing database-network catalogue.
+"""Pure listener candidates for the existing database-network catalogue.
 
 No files are read/written and no service, network or authentication operation is
 performed. Keep commissioned inputs/receipts unchanged: a separately reviewed
 maintenance operation must bind these candidates to actual installed files.
-Legacy listeners and HBA records are retained. Client transition and removal of
-old access are later steps, never an effect of this renderer.
+PostgreSQL has an explicit cutover phase, removing its previous remote listener
+and HBA paths. Only the operation's selected clients receive access. MariaDB and
+InfluxDB remain additive; their existing wildcard listeners need no change.
 """
 import configparser
 import ipaddress
@@ -22,47 +23,59 @@ def require(ok, message):
         raise ValueError(message)
 
 
-def postgres(sources, address, clients):
+def clients(value, engine, client_vmids):
+    """Select a finite operation subset without changing the full catalogue."""
+    net = networks.selected(value, engine)
+    require(isinstance(client_vmids, list) and client_vmids
+            and all(type(vmid) is int for vmid in client_vmids)
+            and len(client_vmids) == len(set(client_vmids)), 'Select explicit unique database clients')
+    members = {client['vmid']: client for client in net['clients']}
+    require(set(client_vmids) <= set(members), 'A selected client is absent from the database catalogue')
+    return [dict(members[vmid]) for vmid in sorted(client_vmids)]
+
+
+def postgres(sources, address, selected):
     config, hba = sources['homelab.conf'], sources['pg_hba.conf']
     matches = list(re.finditer(r"(?m)^([ \t]*listen_addresses[ \t]*=[ \t]*)'([^'\r\n]*)'([ \t]*(?:#[^\r\n]*)?)$", config))
     require(len(matches) == len(re.findall(r'(?m)^[ \t]*listen_addresses[ \t]*=', config)) == 1,
             'Review the missing, ambiguous or unsupported PostgreSQL listener')
     match = matches[0]
     addresses = [part.strip() for part in match[2].split(',')]
-    require(all(addresses), 'Keep the existing TCP listener during the additive stage')
+    require(all(addresses), 'Review the empty existing PostgreSQL TCP listener')
     for item in addresses:
         if item not in {'*', 'localhost'}:
             ipaddress.ip_address(item)
     ports = re.findall(r'(?m)^[ \t]*port[ \t]*=([^\n]*)$', config)
     require(not ports or (len(ports) == 1 and ports[0].split('#')[0].strip() == str(networks.PORTS['postgresql'])),
             'Review a nonstandard or ambiguous PostgreSQL port')
-    rows = set()
+    retained = []
     remote_policy = False
     for line in hba.splitlines():
         fields = tuple(line.split('#', 1)[0].split())
         if not fields:
+            retained.append(line)
             continue
         if fields[0] == 'local':
             require(len(fields) == 4 and fields[3] == 'peer', 'Review the existing PostgreSQL local authentication policy')
+            retained.append(line)
         else:
             require(len(fields) == 5 and fields[:3] == ('host', 'all', 'all') and fields[4] == 'scram-sha-256',
-                    'Review other PostgreSQL authentication policy before adding clients')
+                    'Review other PostgreSQL authentication policy before replacing remote clients')
             subnet = ipaddress.ip_network(fields[3], strict=True)
             remote_policy = remote_policy or not subnet.is_loopback
-        rows.add(fields)
-    require(remote_policy, 'Require the existing remote SCRAM policy before extending it')
-    additions = ['host all all ' + client + '/32 scram-sha-256' for client in clients
-                 if ('host', 'all', 'all', client + '/32', 'scram-sha-256') not in rows]
+            if subnet.is_loopback:
+                retained.append(line)
+    require(remote_policy, 'Require the existing remote SCRAM policy before the cutover')
+    additions = ['host all all ' + client['address'] + '/32 scram-sha-256' for client in selected]
     files = dict(sources)
-    if address not in addresses and not {'*', '0.0.0.0'} & set(addresses):
-        files['homelab.conf'] = config[:match.start(2)] + match[2] + ',' + address + config[match.end(2):]
-    if additions:
-        files['pg_hba.conf'] = hba + ('' if hba.endswith('\n') else '\n') + '\n'.join(additions) + '\n'
-    activation = 'restart' if files['homelab.conf'] != config else 'reload' if additions else 'none'
+    files['homelab.conf'] = config[:match.start(2)] + '127.0.0.1,' + address + config[match.end(2):]
+    files['pg_hba.conf'] = '\n'.join([*retained, *additions]) + '\n'
+    activation = ('restart' if files['homelab.conf'] != config else
+                  'reload' if files['pg_hba.conf'] != hba else 'none')
     return files, activation
 
 
-def render(value, engine, sources):
+def render(value, engine, sources, *, phase='additive', client_vmids=None):
     """Return candidate text plus required activation, never target readiness.
 
     The supported HBA baseline is the commissioned local-peer/host-all-all-SCRAM
@@ -72,13 +85,16 @@ def render(value, engine, sources):
     specific listener to work around a transition problem.
     """
     net = networks.selected(value, engine)
+    require(phase == ('cutover' if engine == 'postgresql' else 'additive'),
+            'PostgreSQL requires explicit cutover; other database cutovers are not selected')
     require(isinstance(sources, dict) and set(sources) == FILES[engine]
             and all(isinstance(text, str) and len(text.encode()) <= 131072 and '\x00' not in text
                     for text in sources.values()), 'Supply only the existing bounded server configuration texts')
-    clients = [client['address'] for client in net['clients']]
     files, activation = dict(sources), 'none'
+    selected = clients(value, engine, client_vmids) if client_vmids is not None else None
     if engine == 'postgresql':
-        files, activation = postgres(sources, net['server']['address'], clients)
+        require(selected is not None, 'PostgreSQL cutover requires explicit selected client IDs')
+        files, activation = postgres(sources, net['server']['address'], selected)
     elif engine == 'mariadb':
         config = configparser.ConfigParser(interpolation=None, allow_no_value=True)
         try:
@@ -93,4 +109,5 @@ def render(value, engine, sources):
     else:
         require(tomllib.loads(sources['config.toml']).get('http-bind-address') == ':' + str(networks.PORTS[engine]),
                 'Preserve the existing wildcard Influx listener; review other listener changes separately')
-    return {'files': files, 'activation': activation, 'endpoint': networks.endpoint(value, engine)}
+    return {'files': files, 'activation': activation, 'endpoint': networks.endpoint(value, engine),
+            'phase': phase, 'client_vmids': [client['vmid'] for client in selected] if selected else None}
