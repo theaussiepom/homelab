@@ -244,6 +244,11 @@ across applications. Original Host headers pass through, so issuer and OAuth
 callback URLs keep the requested hostname. This does not rewrite an application's
 canonical issuer, callback allowlist or cookie configuration.
 
+The following settings describe the **legacy file-provider renderer**, retained
+for existing inputs. The new [foundation deployment](FOUNDATION.md) generates
+fresh shared Traefik configuration and discovers routes from Proxmox Notes;
+it does not consume these legacy route fields or copy the old routing tree.
+
 `ingress_entrypoint` defaults to `websecure`; select the restored entrypoint
 name explicitly when different (for example `https`). Optional
 `ingress_cert_resolver` selects the existing resolver (for example `cloudflare`);

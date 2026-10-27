@@ -103,6 +103,29 @@ Shared HTTPS settings live in freshly generated Traefik configuration. No Docker
 socket or old collection of routing files is copied across. Authentik and
 pgAdmin use their own sign-in; they do not receive a second forward-auth layer.
 
+These are **Proxmox Notes labels**, not Docker Compose labels. For the example
+above, CD generates entries such as:
+
+```text
+traefik.enable: true
+traefik.http.routers.identity.rule: Host(`sso.example.net`)
+traefik.http.routers.identity.entrypoints: websecure
+traefik.http.routers.identity.tls: true
+traefik.http.routers.identity.tls.certresolver: letsencrypt
+traefik.http.services.identity.loadbalancer.server.url: http://10.77.30.20:9000
+```
+
+Edit the private site settings and let CD generate the Notes. Hand-editing Notes
+in Proxmox creates a difference from the OpenTofu configuration.
+
+Home Assistant, Node-RED and MQTT are a later deployment. HA keeps its own login;
+Node-RED needs Authentik forward-auth, its outpost callback route and a backend
+port restricted to the proxy. The selected foundation profiles do not create
+those routes or update the restored Node-RED outpost settings. The legacy
+file-provider renderer's Node-RED tests do not prove that this later Notes-based
+deployment is ready. Keep its job disabled until those inputs are prepared and
+tested together.
+
 The ingress `foundation` settings must also list the recursive DNS servers its
 firewall allows, including port 53, for example
 `"acme_dns_resolvers": ["198.18.40.2:53", "198.18.100.4:53"]`.
