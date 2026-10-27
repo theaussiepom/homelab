@@ -1,4 +1,4 @@
-"""Start the operator-selected latest image using invented state and no network.
+"""Start the operator-selected latest image using invented state on an internal-only network.
 
 No production paths, provider credentials, published ports or player commands.
 """
@@ -14,6 +14,7 @@ def run(image):
     if image != 'ghcr.io/music-assistant/server:latest':
         raise ValueError('Use the requested Music Assistant latest image')
     name = 'music-synthetic-' + uuid.uuid4().hex[:10]
+    network = name + '-network'
     state = {'server_id': '00000000000000000000000000000001', 'onboard_done': True,
              'providers': {}, 'players': {}, 'core': {
                  'webserver': {'domain': 'webserver', 'values': {'bind_ip': '127.0.0.1'}},
@@ -27,8 +28,11 @@ def run(image):
     def docker(*args, **kwargs):
         return subprocess.run(['docker', *args], check=True, timeout=180, **kwargs)
     try:
+        # Discovery needs a multicast-capable interface; network=none has only lo.
+        # An internal bridge supplies that interface without external routes or peers.
+        docker('network', 'create', '--internal', network, stdout=subprocess.DEVNULL)
         docker('run', '-d', '--name', name, '--platform', 'linux/amd64', '--pull', 'never',
-               '--network', 'none', '--cpus', '2', '--memory', '1536m', '--pids-limit', '256',
+               '--network', network, '--cpus', '2', '--memory', '1536m', '--pids-limit', '256',
                '--security-opt', 'no-new-privileges', '--cap-drop', 'ALL',
                '--tmpfs', '/data:rw,nosuid,nodev,size=128m',
                '--tmpfs', '/tmp:rw,exec,nosuid,nodev,size=128m',
@@ -58,6 +62,8 @@ def run(image):
         raise RuntimeError('Synthetic Music Assistant failed local readiness: ' + logs.stderr[-6000:])
     finally:
         subprocess.run(['docker', 'rm', '-f', '-v', name], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, timeout=30)
+        subprocess.run(['docker', 'network', 'rm', network], stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL, timeout=30)
 
 
