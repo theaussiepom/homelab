@@ -105,7 +105,8 @@ def rules_candidate(original, before, after):
     require(isinstance(original, list) and isinstance(after, dict)
             and set(after) == {'direction', 'proto', 'port', 'source', 'destination', 'comment'}
             and after['direction'] == 'out' and after['proto'] == 'tcp'
-            and after['port'] == str(before['port'])
+            and isinstance(after['port'], str) and re.fullmatch(r'[1-9][0-9]{0,4}', after['port'])
+            and int(after['port']) <= 65535
             and isinstance(after['comment'], str)
             and re.fullmatch(r'postgresql approved client [a-z][a-z0-9-]{0,62}', after['comment']),
             'Select one exact contract-derived PostgreSQL client rule')
@@ -120,7 +121,9 @@ def rules_candidate(original, before, after):
     legacy = {'direction': 'out', 'proto': 'tcp', 'port': str(before['port']),
               'destination': before['address'] + '/32', 'comment': 'Restored Authentik database only'}
     require(after['destination'] != legacy['destination'], 'Retire the old PostgreSQL network')
-    matches = [index for index, rule in enumerate(original) if sql_egress(rule, before['port'])]
+    ports = {before['port'], int(after['port'])}
+    matches = [index for index, rule in enumerate(original)
+               if any(sql_egress(rule, port) for port in ports)]
     require(len(matches) == 1 and original[matches[0]] == legacy,
             'The original SQL rule differs or another SQL allowance remains')
     result = copy.deepcopy(original)

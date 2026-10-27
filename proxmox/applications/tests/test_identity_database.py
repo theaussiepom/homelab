@@ -145,6 +145,17 @@ class IdentityDatabaseRulesTests(unittest.TestCase):
         result[1]['comment'] = 'edited candidate'
         self.assertEqual(self.new['comment'], 'postgresql approved client authentik')
 
+    def test_selected_port_can_differ_but_neither_port_has_an_extra_allowance(self):
+        original = self.fixture(); before = dict(BEFORE, port=5544)
+        original[1]['port'] = '5544'
+        updated = identity.rules_candidate(original, before, self.new)
+        self.assertEqual(updated, [original[0], self.new, original[2]])
+        for port in ('5432', '5544', '5430:5550'):
+            extra = {'direction': 'out', 'proto': 'tcp', 'port': port,
+                     'destination': '0.0.0.0/0', 'comment': 'Additional SQL path'}
+            with self.subTest(port=port), self.assertRaises(ValueError):
+                identity.rules_candidate(original + [extra], before, self.new)
+
     def test_missing_duplicate_or_drifted_legacy_rule_is_not_implicitly_repaired(self):
         original = self.fixture()
         variants = [[], original[:1] + original[2:], original + [copy.deepcopy(self.old)],
@@ -175,7 +186,8 @@ class IdentityDatabaseRulesTests(unittest.TestCase):
         self.fixture()
         changes = [{'source': '10.88.31.0/24'}, {'destination': '10.88.31.0/24'},
                    {'destination': BEFORE['address'] + '/32'}, {'source': '0.0.0.0/32'},
-                   {'port': '5432,5544'}, {'proto': 'udp'}, {'direction': 'in'},
+                   {'port': '5432,5544'}, {'port': '0'}, {'port': '65536'},
+                   {'port': '05432'}, {'port': 5432}, {'proto': 'udp'}, {'direction': 'in'},
                    {'gateway': '10.88.31.1'}, {'comment': 'different scope'}]
         for change in changes:
             original = self.fixture(); after = dict(self.new, **change)
