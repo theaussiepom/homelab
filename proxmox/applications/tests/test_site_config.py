@@ -17,6 +17,34 @@ class SiteConfigurationTests(unittest.TestCase):
     def setUp(self):
         self.cfg = site.read(site.ROOT / 'examples/foundation.site.example.json')
 
+    def test_dns_and_generated_acme_names_respect_the_full_wire_name_limit(self):
+        def long_name(length):
+            suffix = 'lab.example.org'
+            remaining = length - len(suffix) - 1
+            labels = []
+            while remaining > 63:
+                labels.append('a' * 63); remaining -= 64
+            labels.append('b' * remaining)
+            return '.'.join([*labels, suffix])
+        for length in (238, 239, 253, 254):
+            cfg = copy.deepcopy(self.cfg)
+            cfg['domains']['identity'] = long_name(length)
+            with self.subTest(route_length=length), self.assertRaises(ValueError): site.render(cfg)
+        cfg = copy.deepcopy(self.cfg); cfg['domains']['identity'] = long_name(237)
+        files = site.render(cfg)
+        dns.configure(files['dns-settings.json'])
+        self.assertEqual(len(files['dns-settings.json']['acme_exceptions'][0]), 253)
+        # Preserved zones do not have generated children, so the ordinary253 limit applies.
+        cfg = copy.deepcopy(self.cfg); cfg['domains']['preserve'][0]['name'] = long_name(253)
+        dns.configure(site.render(cfg)['dns-settings.json'])
+        cfg['domains']['preserve'][0]['name'] = long_name(254)
+        with self.assertRaises(ValueError): site.render(cfg)
+        settings = site.render(self.cfg)['dns-settings.json']
+        previous = next(iter(settings['records']))
+        settings['records'][long_name(239)] = settings['records'].pop(previous)
+        settings['acme_exceptions'] = ['_acme-challenge.' + name for name in settings['records']]
+        with self.assertRaises(ValueError): dns.configure(settings)
+
     def test_generated_profiles_use_existing_compose_renderer_and_private_secret_files(self):
         files = site.render(self.cfg)
         for kind in site.KINDS:
@@ -52,6 +80,24 @@ class SiteConfigurationTests(unittest.TestCase):
         self.assertEqual(files['identity/site.json']['app']['discovery_routes'][0]['host'], 'login.lab.example.org')
         self.assertEqual(files['db-tools/stack.json']['foundation']['identity_url'], 'https://login.lab.example.org')
         self.assertIn('_acme-challenge.login.lab.example.org', files['dns-settings.json']['acme_exceptions'])
+
+    def test_frontend_policy_does_not_add_a_second_proxmox_default_gateway(self):
+        files = site.render(self.cfg)
+        cfg = files['ingress/site.json']
+        self.assertEqual(cfg['app']['frontend_routing'], {'address':'10.88.40.33/24', 'gateway':'10.88.40.1',
+                         'mac':self.cfg['guests']['ingress']['interfaces']['frontend']['mac']})
+        self.assertEqual([nic['gateway'] for nic in cfg['guest']['interfaces'] if 'gateway' in nic], ['10.88.25.1'])
+        self.cfg['guests']['ingress']['interfaces']['frontend']['address'] = '10.88.40.34'
+        self.assertEqual(site.render(self.cfg)['ingress/site.json']['app']['frontend_routing']['address'], '10.88.40.34/24')
+        import deploy
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary)/'stack.json'; path.write_text(json.dumps(files['ingress/stack.json']))
+            cfg['app']['stack_config'] = str(path)
+            self.assertEqual(deploy.validate(cfg), cfg['guest']['vmid'])
+            original = cfg['app'].pop('frontend_routing')
+            with self.assertRaisesRegex(ValueError, 'Multihomed ingress'): deploy.validate(cfg)
+            cfg['app']['frontend_routing'] = dict(original, mac='02:00:00:00:00:99')
+            with self.assertRaisesRegex(ValueError, 'exact selected guest interface'): deploy.validate(cfg)
 
     def test_object_key_order_cannot_move_the_management_interface_or_bootstrap_targets(self):
         before = site.render(self.cfg)

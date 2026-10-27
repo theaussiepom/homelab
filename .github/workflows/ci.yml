@@ -39,6 +39,10 @@ jobs:
           for kind in dns identity ingress automation db-tools; do
             docker compose -f "$RUNNER_TEMP/app-compose/$kind.json" config --quiet
           done
+      - name: Prove symmetric frontend replies through an isolated stateful router
+        run: |
+          docker build --platform linux/amd64 --build-arg TOOLS_IMAGE=homelab-app-test -t homelab-routing-test:1 proxmox/applications/tests/routing
+          python3 proxmox/applications/tests/ingress_routing_fixture.py --output "$RUNNER_TEMP/ingress-routing"
       - name: Exercise ingress aliases and login boundaries through pinned Traefik
         run: |
           docker pull --platform linux/amd64 traefik@sha256:6b9cbca6fac42ab0075f5437d8dc1685cfd188626d8d515839ea94f8b6271c42

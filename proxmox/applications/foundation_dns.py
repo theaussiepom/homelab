@@ -76,6 +76,7 @@ def configure(value):
             'Selected names and redirects must use the same declared proxy')
     require(not set(value['redirects']) & set(value['unchanged']), 'Selected and preserved redirects overlap')
     require(isinstance(value['acme_exceptions'], list)
+            and all(isinstance(name, str) and len(name) <= 253 for name in value['acme_exceptions'])
             and len(value['acme_exceptions']) == len(value['records'])
             and set(value['acme_exceptions']) == {'_acme-challenge.' + name for name in value['records']},
             'ACME transparency must match only the selected names')

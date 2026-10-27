@@ -21,6 +21,7 @@ from restore import sync_directory, validate_archive
 import guest_identity
 import discovery
 import foundation
+import ingress_routing
 
 check_merge_create_plan = discovery.check_merge_create_plan
 
@@ -71,6 +72,13 @@ def validate(cfg):
         raise ValueError('Select one application guest, never the deployment controller or protected targets')
     app = cfg['app']
     discovery.labels(cfg)
+    if 'frontend_routing' in app:
+        if app.get('kind') != 'ingress':
+            raise ValueError('Frontend source routing belongs only to ingress')
+        address, _, _, mac = ingress_routing.validate(app['frontend_routing'])
+        if not any(nic['ipv4'] == app['frontend_routing']['address'] and nic['mac'].lower() == mac
+                   for nic in cfg['guest']['interfaces']):
+            raise ValueError('Frontend routing must bind the exact selected guest interface')
     if app['vmid'] != vmid or app['hostname'] != cfg['guest']['hostname'] or app['memory_mib'] != cfg['guest']['memory_mib']:
         raise ValueError('OpenTofu and Ansible must select the same guest and resource budget')
     if not any(nic['ipv4'].split('/')[0] == app['address'] and nic['mac'].lower() == app['mac'].lower() for nic in cfg['guest']['interfaces']):
@@ -95,6 +103,9 @@ def validate(cfg):
     if 'stack_config' in app:
         stack = json.loads(Path(app['stack_config']).read_text())
         selected = foundation.validate(stack)
+        if selected and app.get('kind') == 'ingress' and len(cfg['guest']['interfaces']) > 1:
+            if 'frontend_routing' not in app or ingress_routing.validate(app['frontend_routing'])[0] != selected['bind_address']:
+                raise ValueError('Multihomed ingress needs routing for its exact frontend listener')
         if selected and app.get('kind') in {'identity', 'ingress'}:
             if selected['bind_address'] not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
                 raise ValueError('Foundation listeners must select an address assigned to this guest')

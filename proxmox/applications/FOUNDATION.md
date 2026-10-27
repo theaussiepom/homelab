@@ -118,6 +118,25 @@ credential privately on the runner and NAS, and admits only the proxy's address
 to the host API. Review that new access in
 [service discovery access](../bootstrap/SERVICE-DISCOVERY.md) before deployment.
 
+## Replies use the frontend network
+
+Traefik has management, private backend and client-facing interfaces. HTTPS
+replies from its frontend address must return through that network's gateway;
+otherwise a reply to a management client can bypass the router that handled the
+request. Enter the frontend gateway in the single site file as well.
+
+Ansible installs a small routing service inside the ingress guest, before Docker
+starts. It manages only table/rule10040 for the frontend's own source address.
+The management default route and direct backend routes stay in place. Unexpected
+existing policy is refused, and verification reads the policy back without
+changing it. Other guests do not receive this service.
+
+The isolated routing fixture checks verified HTTPS from a management client and
+a guest with both management and backend interfaces through a stateful router.
+It also checks repeat runs, fresh kernel-state setup and preservation of foreign
+policy. This is source confidence; the real UDM/PVE path and physical reboot are
+still checked during the selected native deployment.
+
 ## Where passwords go
 
 The optional `foundation` stack settings contain **file paths**, not passwords.

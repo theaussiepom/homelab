@@ -95,7 +95,7 @@ def validate(cfg):
     for value in (cfg['runner'], cfg['dns'], *cfg['databases'].values(), *cfg['guests'].values()):
         target(value)
     address(cfg['host']['address'], 'management'); address(cfg['runner']['address'], 'management')
-    address(cfg['networks']['management']['gateway'], 'management'); address(cfg['dns']['address'], 'frontend')
+    address(cfg['networks']['management']['gateway'], 'management'); address(cfg['networks']['frontend']['gateway'], 'frontend'); address(cfg['dns']['address'], 'frontend')
     address(cfg['databases']['postgresql']['address'], 'backend')
     mac(cfg['runner']['mac']); mac(cfg['dns']['mac']); ipv4(cfg['dns']['fallback']); ipv4(cfg['dns']['legacy_proxy'])
     for kind, guest in cfg['guests'].items():
@@ -111,10 +111,11 @@ def validate(cfg):
     domains = cfg['domains']
     names = [domains['identity'], domains['db_tools'], *domains['redirect'], *[row['name'] for row in domains['preserve']]]
     for name in names:
-        require(re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}', name) is not None,
+        require(len(name) <= 253 and re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}', name) is not None,
                 'Use lowercase fully qualified DNS names')
     require(len(set(names)) == len(names), 'Selected DNS names or zones collide')
     for name in (domains['identity'], domains['db_tools']):
+        require(len('_acme-challenge.' + name) <= 253, 'ACME challenge name exceeds the DNS length limit')
         require(sum(name.endswith('.' + zone) for zone in domains['redirect']) == 1,
                 'Each route must belong to exactly one selected redirect zone')
     for row in domains['preserve']:
@@ -202,6 +203,9 @@ def render(cfg):
     for kind in KINDS:
         for name in ('site', 'stack'):
             files[f'{kind}/{name}.json'] = expand(read(ROOT / f'foundation-profiles/{kind}.{name}.json'), context)
+    files['ingress/site.json']['app']['frontend_routing'] = dict(
+        address=proxy['frontend']['address'] + '/24', gateway=cfg['networks']['frontend']['gateway'],
+        mac=proxy['frontend']['mac'])
     files['rollout.json'] = {'schema': 'homelab-foundation-rollout-v1', 'targets': {
         kind: {'vmid': cfg['guests'][kind]['vmid'], 'policy': 'merge-create-only-v1'} for kind in KINDS}}
     # The bootstrap and guest jobs consume the very same declared identities.
