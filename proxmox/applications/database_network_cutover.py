@@ -82,6 +82,9 @@ def packet(value):
         client_ids(value)
         import database_server_network_runtime
         database_server_network_runtime.validate(value['members'][engine]['runtime_packet'])
+        require(value['members'][engine]['runtime_packet']['before']['identity']['vmid']
+                == value['members'][engine]['vmid'],
+                'The server runtime identity differs from its selected member')
     return value
 
 
