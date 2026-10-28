@@ -2,6 +2,12 @@
 
 Sent by the fixed playbook, not installed. Never restore data, change an account,
 read a token/password, enable a firewall, or resume an interrupted operation.
+
+Client inactivity is scoped to this database endpoint, not whole-guest status.
+A running ingress proxy may serve unrelated routes while its selected database
+consumer route remains unconfigured. That declaration needs separately retained
+current owner evidence in the exact review/approval packet. Absence of TCP
+sessions is not route-absence proof. Keep all selected IDs/no_clients checks intact.
 """
 import argparse
 import configparser
@@ -191,7 +197,7 @@ def validate(value):
     ids = [c['vmid'] for c in value['clients']]
     require(ids and all(type(i) is int for i in ids) and len(ids) == len(set(ids))
             and sorted(value['inactive_client_vmids']) == sorted(ids),
-            'Every selected app remains inactive and owns its later activation/authentication')
+            'Every selected database consumer remains inactive on this endpoint until its owner activates it')
     conf = before['config']; require(set(conf) == {'text', 'sha256', 'uid', 'gid', 'mode'}
         and conf['sha256'] == sha(conf['text'].encode()) and conf['mode'] == 0o600
         and type(conf['uid']) is int and type(conf['gid']) is int, 'Bind original configuration bytes/ownership')
