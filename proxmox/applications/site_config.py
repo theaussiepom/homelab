@@ -158,7 +158,7 @@ def rule(direction, port, comment, peer, value, proto='tcp', destination=None):
     return result
 
 
-def render(cfg):
+def render(cfg, database_networks=None):
     validate(cfg)
     context = copy.deepcopy(cfg)
     site = {'node': cfg['host']['node'], 'api_endpoint': 'https://' + cfg['host']['address'] + ':8006/'}
@@ -229,11 +229,23 @@ def render(cfg):
         redirects={name: proxy['frontend']['address'] for name in cfg['domains']['redirect']},
         unchanged={row['name']: row['address'] for row in cfg['domains']['preserve']},
         legacy_proxy=cfg['dns']['legacy_proxy'], acme_exceptions=['_acme-challenge.' + name for name in (cfg['domains']['identity'], cfg['domains']['db_tools'])])
+    if database_networks is not None:
+        import database_networks as dbnets
+        dbnets.validate(database_networks, [n['cidr'] for n in cfg['networks'].values()])
+        site_bridges = {n['bridge'] for n in cfg['networks'].values()}
+        require(not any(net['bridge'] in site_bridges for net in database_networks['networks'].values()),
+                'A database bridge must differ from every site network bridge')
+        for engine, net in database_networks['networks'].items():
+            require(all(net['server'][key] == cfg['databases'][engine][key] for key in ('vmid', 'hostname')),
+                    'The database catalogue must select the existing declared database guests')
+        # This option extends host-bootstrap only. It must never turn rendering
+        # into an implicit reinstallation or input replacement of a live app.
+        files['bootstrap.json']['private_bridges'] = dbnets.bridges(database_networks)
     return files
 
 
-def write_bundle(cfg, output):
-    files = render(cfg)  # Validate everything before creating the output.
+def write_bundle(cfg, output, database_networks=None):
+    files = render(cfg, database_networks)  # Validate everything before creating the output.
     output.mkdir(mode=0o700)
     for name, value in files.items():
         path = output / name
@@ -247,5 +259,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--database-networks', type=Path,
+                        help='Explicit private bridge catalogue for the host bootstrap only')
     args = parser.parse_args()
-    write_bundle(read(args.config), args.output)
+    write_bundle(read(args.config), args.output,
+                 read(args.database_networks) if args.database_networks else None)

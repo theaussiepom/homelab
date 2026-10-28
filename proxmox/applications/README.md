@@ -1,5 +1,8 @@
 # After bootstrap: bring home automation across one guest at a time
 
+For separate database networks, see the [private database network guide](database-networks.md).
+It explains which settings belong to bootstrap, database CD and each application.
+
 [Proxmox guide](../README.md) · [Bootstrap](../bootstrap/README.md) ·
 [Databases](DATABASES.md) · [HTTPS and sign-in](FOUNDATION.md) · [pgAdmin](PGADMIN.md) · [PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
 

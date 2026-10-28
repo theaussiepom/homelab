@@ -168,6 +168,29 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(self.api.writes, writes)
         self.assertNotIn(SECRET, json.dumps(result))
 
+    def test_exact_continuation_accepts_all_previously_completed_private_bridges(self):
+        self.c['private_bridges'] = [{'name':'vmbr31', 'description':'PostgreSQL private clients only'},
+                                    {'name':'vmbr32', 'description':'MariaDB private clients only'}]
+        packet = self.failed_mint_packet()
+        networks = copy.deepcopy(self.api.network)
+        writes = len(self.api.writes)
+        result = self.continue_cd(packet)
+        self.assertTrue(result['service_discovery']['resumed'])
+        self.assertEqual(self.api.network, networks)
+        self.assertEqual(len(self.api.writes) - writes, 5)
+        self.assertFalse(any('/network' in path for path, _, _ in self.api.writes[writes:]))
+
+    def test_private_bridge_missing_from_completed_state_refuses_continuation(self):
+        self.c['private_bridges'] = [{'name':'vmbr31', 'description':'PostgreSQL private clients only'}]
+        packet = self.failed_mint_packet()
+        self.api.network = [row for row in self.api.network if row['iface'] != 'vmbr31']
+        after = self.root / packet['attempt'] / 'after.json'
+        data = json.loads(after.read_bytes()); data['networks'].pop('vmbr31')
+        after.write_text(json.dumps(data)); after.chmod(0o600)
+        writes = copy.deepcopy(self.api.writes)
+        with self.assertRaisesRegex(ValueError, 'Base bootstrap'): self.continue_cd(packet)
+        self.assertEqual(self.api.writes, writes)
+
     def test_resume_never_falls_through_without_both_failed_markers(self):
         packet = {'attempt':'cd-1', 'plan_sha256':'0'*64, 'minted_sha256':'0'*64}
         with self.assertRaisesRegex(ValueError, 'hold'): self.continue_cd(packet)
