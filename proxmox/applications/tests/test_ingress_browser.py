@@ -15,7 +15,8 @@ def settings():
             'backend': 'http://10.88.33.26:8086', 'authentik': 'http://10.88.30.20:9000',
             'issuer': 'https://sso.example.invalid', 'proxy_address': '10.88.33.33',
             'frontend_address': '10.88.40.33',
-            'source_cidrs': ['10.88.15.0/24'], 'header_domain': 'example.invalid'}
+            'source_cidrs': ['10.88.15.0/24'], 'header_domain': 'example.invalid',
+            'cors_allow_origin': 'https://influx.example.invalid'}
 
 
 class BrowserTests(unittest.TestCase):
@@ -89,6 +90,16 @@ class BrowserTests(unittest.TestCase):
             shared = json.loads(artifacts['shared.yml'])
             for section, objects in expected.items():
                 for name, value in objects.items(): self.assertEqual(shared['http'][section][name], value)
+
+    def test_cors_origin_is_explicit_and_cannot_substitute_an_unrelated_site(self):
+        value = settings()
+        self.assertEqual(browser.objects(value)['http']['middlewares']['influx-security']['headers']
+                         ['accessControlAllowOriginList'], ['https://influx.example.invalid'])
+        value['cors_allow_origin'] = '*'
+        self.assertEqual(browser.objects(value)['http']['middlewares']['influx-security']['headers']
+                         ['accessControlAllowOriginList'], ['*'])
+        value['cors_allow_origin'] = 'https://unrelated.example.invalid'
+        with self.assertRaises(ValueError): browser.validate(value)
 
 
 if __name__ == '__main__': unittest.main()

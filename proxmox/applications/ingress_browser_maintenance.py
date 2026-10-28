@@ -40,9 +40,10 @@ def run(deployment, fc, cfg, site, source, selected, state_root):
             while parent != state_root:
                 fc.private_directory(parent)
                 parent = parent.parent
-            require(fc.digest(fc.regular(prerequisite, private=True)) == settings[name]['sha256'],
+            raw = fc.regular(prerequisite, private=True)
+            require(fc.digest(raw) == settings[name]['sha256'],
                     'Network completion or exact access/SSO review differs')
-            prerequisites[name] = json.loads(fc.regular(prerequisite, private=True))
+            prerequisites[name] = json.loads(raw)
         admission(settings, prerequisites['network_evidence'], prerequisites['policy_evidence'])
         operation = work / 'influx-browser-route'
         if not operation.exists(): operation.mkdir(mode=0o700)

@@ -41,6 +41,9 @@ files must be private owned regular files beneath the selected guest's state.
   newline). It requires true `provider_host_confirmed`,
   `outpost_membership_confirmed`, `access_policy_confirmed`,
   `issuer_alignment_confirmed`, and `direct_peer_allowlist_approved` fields.
+  Its `cors_allow_origin` must match the selected route exactly, and
+  `cors_wildcard_approved` must be true for `*` and false for the same HTTPS
+  browser origin. A new route must select one of those two explicit CORS values.
   Produce this only after the restored configuration and the access decision
   are actually reviewed; retained snapshots alone do not establish them.
 
@@ -55,8 +58,10 @@ browser hostname's TLS certificate against the selected frontend and observes
 an anonymous SSO redirect. Container identity/start time must stay unchanged.
 
 A failed attempt keeps its original and holds. Changing the source revision
-does not grant another attempt. A later successful CD invocation verifies the
-same overlay and installed helper bytes without rewriting them. The original
+does not grant another attempt. A later successful CD invocation must keep the
+completed claim's exact revision selected: the checked-out HEAD must match it.
+It verifies the same overlay and installed helper bytes without rewriting them.
+A newer helper revision does not inherit verification authority. The original
 installation renderer must not be replayed after maintenance; normal CD must
 select the maintained state and its exact verification path.
 

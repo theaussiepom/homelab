@@ -26,7 +26,8 @@ class MaintenanceTests(unittest.TestCase):
                 value = dict(schema='homelab-influx-browser-policy-evidence-v1', vmid=702,
                     route_sha256=fc.digest(fc.encoded(self.selected['route'])), provider_host_confirmed=True,
                     outpost_membership_confirmed=True, access_policy_confirmed=True, issuer_alignment_confirmed=True,
-                    direct_peer_allowlist_approved=True)
+                    direct_peer_allowlist_approved=True, cors_allow_origin=self.selected['route']['cors_allow_origin'],
+                    cors_wildcard_approved=False)
             p = evidence/(name+'.json'); fc.write_new(p, fc.encoded(value))
             self.selected[name] = {'path': str(p), 'sha256': fc.digest(p.read_bytes())}
         p = patch.object(browser, 'EVIDENCE_ROOT', PurePosixPath(self.state)); p.start(); self.addCleanup(p.stop)
@@ -78,6 +79,33 @@ class MaintenanceTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError): self.run_update()
         self.deployment.quiet.assert_not_called()
         self.assertFalse((self.work/'influx-browser-route').exists())
+
+    def test_each_prerequisite_is_read_once_for_hash_and_parsing(self):
+        regular = fc.regular; seen = {}
+        targets = {Path(self.selected[n]['path']) for n in ('network_evidence', 'policy_evidence')}
+        def one_read(path, **kwargs):
+            raw = regular(path, **kwargs)
+            if path in targets:
+                seen[path] = seen.get(path, 0) + 1
+                if seen[path] > 1:
+                    value = json.loads(raw); value['vmid'] = 703
+                    return fc.encoded(value)
+            return raw
+        with patch.object(fc, 'regular', side_effect=one_read):
+            self.assertTrue(self.run_update()['changed'])
+        self.assertEqual(seen, {path: 1 for path in targets})
+
+    def test_wildcard_cors_requires_approval_of_that_exact_value(self):
+        self.selected['route']['cors_allow_origin'] = '*'
+        self.selected['shared_after_sha256'] = fc.digest(browser.candidate(self.original, self.selected['route']))
+        path = Path(self.selected['policy_evidence']['path']); value = json.loads(path.read_bytes())
+        value.update(route_sha256=fc.digest(fc.encoded(self.selected['route'])), cors_allow_origin='*')
+        path.write_bytes(fc.encoded(value)); self.selected['policy_evidence']['sha256'] = fc.digest(path.read_bytes())
+        with self.assertRaises(ValueError): self.run_update()
+        self.deployment.quiet.assert_not_called()
+        value['cors_wildcard_approved'] = True
+        path.write_bytes(fc.encoded(value)); self.selected['policy_evidence']['sha256'] = fc.digest(path.read_bytes())
+        self.assertTrue(self.run_update()['changed'])
 
 
 if __name__ == '__main__': unittest.main()

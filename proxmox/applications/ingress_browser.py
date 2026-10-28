@@ -50,9 +50,12 @@ def origin(value, port):
 
 def validate(value):
     require(isinstance(value, dict) and set(value) == {
-        'schema', 'host', 'backend', 'authentik', 'issuer', 'proxy_address', 'frontend_address', 'source_cidrs', 'header_domain'}
+        'schema', 'host', 'backend', 'authentik', 'issuer', 'proxy_address', 'frontend_address', 'source_cidrs',
+        'header_domain', 'cors_allow_origin'}
         and value['schema'] == SCHEMA, 'Use the closed Influx browser policy')
     require(dns(value['host']) and dns(value['header_domain']), 'Select literal browser and header DNS names')
+    require(value['cors_allow_origin'] in ('*', 'https://' + value['host']),
+            'Select the same browser origin or the explicitly reviewed historical wildcard')
     backend = origin(value['backend'], 8086)
     origin(value['authentik'], 9000)
     proxy = address(value['proxy_address'])
@@ -98,7 +101,7 @@ def objects(settings):
             'influx-security': {'headers': {
                 'customResponseHeaders': {'Server': value['header_domain'], 'X-Powered-By': value['header_domain']},
                 'accessControlAllowMethods': ['GET', 'POST'], 'accessControlMaxAge': 100,
-                'accessControlAllowOriginList': ['*'], 'addVaryHeader': True,
+                'accessControlAllowOriginList': [value['cors_allow_origin']], 'addVaryHeader': True,
                 'contentSecurityPolicy': "child-src 'self'; frame-ancestors 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
                 'contentTypeNosniff': True, 'referrerPolicy': 'origin-when-cross-origin',
                 'stsSeconds': 63072000, 'stsIncludeSubdomains': True, 'stsPreload': True,
@@ -171,10 +174,14 @@ def admission(settings, network, policy):
             and network.get('state_sha256') == settings['state_sha256'], 'Use the completed current ingress network overlay')
     checks = {'provider_host_confirmed', 'outpost_membership_confirmed', 'access_policy_confirmed',
               'issuer_alignment_confirmed', 'direct_peer_allowlist_approved'}
-    require(isinstance(policy, dict) and set(policy) == checks | {'schema', 'vmid', 'route_sha256'}
+    require(isinstance(policy, dict) and set(policy) == checks | {
+                'schema', 'vmid', 'route_sha256', 'cors_allow_origin', 'cors_wildcard_approved'}
             and policy['schema'] == 'homelab-influx-browser-policy-evidence-v1'
             and policy['vmid'] == settings['vmid'] and all(policy[name] is True for name in checks),
             'Restored SSO and the explicit local access policy need their separate exact review')
+    require(policy['cors_allow_origin'] == settings['route']['cors_allow_origin']
+            and policy['cors_wildcard_approved'] is (policy['cors_allow_origin'] == '*'),
+            'The exact wildcard CORS value needs explicit access-policy approval')
     import hashlib
     require(policy['route_sha256'] == hashlib.sha256(
         (json.dumps(settings['route'], sort_keys=True, indent=2) + '\n').encode()).hexdigest(),
