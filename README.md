@@ -88,6 +88,15 @@ See the [ISO verification record](proxmox/iso/verification/README.md) and
 [bootstrap verification record](proxmox/bootstrap/verification.md) for exact test
 scope, later corrections and remaining limits.
 
+## Checks on GitHub
+
+Open **Actions → Validate HomeLab** to see the source checks in one graph.
+Application tests, repository checks and security checks run independently on
+GitHub's machines. ISO source tests run on every pull request; the longer ISO
+build and virtual boot checks run when installer or validation-workflow inputs
+change. The manual entry runs those ISO checks, and the weekly entry runs CodeQL.
+These checks use synthetic data and do not deploy to your Proxmox host.
+
 ## Other folders
 
 These are separate from the two-step Proxmox setup:

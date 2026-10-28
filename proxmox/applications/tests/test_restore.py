@@ -30,6 +30,18 @@ class RestoreTests(unittest.TestCase):
             path = self.archive(Path(tmp), [('config/a', None), ('link', 'config/a')])
             restore.validate_archive(path)
 
+    def test_original_npm_bin_links_can_point_to_their_sibling_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.archive(Path(tmp), [('node-red/data/node_modules/acorn/bin/acorn', None),
+                ('node-red/data/node_modules/.bin/acorn', '../acorn/bin/acorn')])
+            restore.validate_archive(path)
+
+    def test_parent_components_cannot_hide_an_intermediate_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.archive(Path(tmp), [('a/link', 'target'), ('a/nested/escape', '../link/../../outside')])
+            with self.assertRaisesRegex(ValueError, 'traverses'):
+                restore.validate_archive(path)
+
     def test_escape_and_symlink_traversal_are_refused(self):
         for members in ([('../escape', None)], [('/etc/shadow', None)], [('link', '/etc')],
                         [('config/link', '../../etc')], [('config/link', '..')],

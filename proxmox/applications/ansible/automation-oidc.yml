@@ -1,0 +1,28 @@
+---
+- name: Extend only the existing Node-RED native callback
+  hosts: application
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Install the selected provider maintenance helper
+      ansible.builtin.copy:
+        src: '{{ maintenance_source }}/automation_oidc.py'
+        dest: /opt/homelab-app/automation-oidc.py
+        owner: root
+        group: root
+        mode: '0600'
+      when: not maintenance_verify
+    - name: Bind the exact existing provider settings
+      ansible.builtin.copy:
+        content: '{{ oidc_settings | to_json }}'
+        dest: /opt/homelab-app/automation-oidc.json
+        owner: root
+        group: root
+        mode: '0600'
+      when: not maintenance_verify
+    - name: Add the declared callback once or verify the completed addition
+      ansible.builtin.command:
+        argv: "{{ ['python3', '/opt/homelab-app/automation-oidc.py', '--config', '/opt/homelab-app/automation-oidc.json'] + (['--verify'] if maintenance_verify else []) }}"
+      changed_when: not maintenance_verify
+      no_log: true

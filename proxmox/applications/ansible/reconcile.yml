@@ -1,0 +1,98 @@
+---
+- name: Reconcile one ordinary application guest without restoring data
+  hosts: application
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  vars:
+    ordinary_reconcile: true
+  tasks:
+    - name: Confirm the selected guest before any application changes
+      ansible.builtin.assert:
+        that:
+          - groups['application'] | length == 1
+          - app.hostname == ansible_facts.hostname
+          - app.address in ansible_facts.all_ipv4_addresses
+          - app.mac | lower in (ansible_facts.interfaces | map('extract', ansible_facts) | selectattr('macaddress', 'defined') | map(attribute='macaddress') | map('lower') | list)
+          - ansible_facts.virtualization_type == 'lxc'
+          - ansible_facts.distribution == 'Debian'
+          - app.kind in ['postgresql', 'mariadb', 'influxdb', 'identity', 'db-tools', 'automation']
+          - app.capture is not defined
+          - app.packages | select('match', '^[a-z0-9][a-z0-9+.-]*=[0-9][A-Za-z0-9.+:~\-]*$') | list | length == app.packages | length
+          - app.health_checks | length > 0
+
+    - name: Inspect separately restored application data before package or service changes
+      ansible.builtin.stat:
+        path: "{{ '/srv/homelab/data/authentik' if app.kind == 'identity' else '/srv/homelab/data/pgadmin' if app.kind == 'db-tools' else '/srv/homelab/data/homeassistant/config' }}"
+        follow: false
+      register: ordinary_data
+      when: app.kind in ['identity', 'db-tools', 'automation']
+
+    - name: Require the retained application data; ordinary deployment never restores it
+      ansible.builtin.assert:
+        that:
+          - ordinary_data.stat.isdir | default(false)
+          - not ordinary_data.stat.islnk | default(false)
+        fail_msg: 'Prepare and verify application data separately before ordinary reconciliation.'
+      when: app.kind in ['identity', 'db-tools', 'automation']
+
+    - name: Require separately prepared automation configuration before changes
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /srv/homelab/data/node-red/data
+        - /srv/homelab/data/mqtt/config
+      register: ordinary_automation_data
+      when: app.kind == 'automation'
+
+    - name: Refuse an incomplete household data preparation
+      ansible.builtin.assert:
+        that:
+          - item.stat.isdir | default(false)
+          - not item.stat.islnk | default(false)
+      loop: "{{ ordinary_automation_data.results }}"
+      when: app.kind == 'automation'
+
+    - name: Reuse guarded repository and account preparation
+      ansible.builtin.import_tasks: tasks/packages.yml
+
+    - name: Reconcile the approved exact packages
+      ansible.builtin.apt:
+        name: "{{ app.packages }}"
+        state: present
+        update_cache: false
+        allow_downgrade: false
+        policy_rc_d: 101
+        fail_on_autoremove: true
+
+    - name: Retain the recorded package-created MariaDB account
+      ansible.builtin.include_tasks: tasks/database-package-account.yml
+      vars:
+        database_account_after_packages: true
+      when: app.kind == 'mariadb' and app.database.account_mode | default('fixed') == 'package'
+
+    - name: Prepare the private application configuration directory
+      ansible.builtin.file:
+        path: /opt/homelab-app
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Reconcile native server configuration and startup
+      ansible.builtin.import_tasks: tasks/database.yml
+      when: app.kind in ['postgresql', 'mariadb', 'influxdb']
+
+    - name: Reconcile the preserved stack and its native login
+      ansible.builtin.import_tasks: tasks/compose.yml
+      when: app.kind in ['identity', 'db-tools', 'automation']
+
+    - name: Check this service after reconciliation
+      ansible.builtin.command:
+        argv: "{{ item.argv }}"
+      loop: "{{ app.health_checks }}"
+      register: ordinary_health
+      changed_when: false
+      failed_when: ordinary_health.rc != 0 or (item.expect | default('')) not in ordinary_health.stdout
+      no_log: true

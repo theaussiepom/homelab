@@ -4,9 +4,9 @@
   vars:
     network_ready_unit: docker.service
 
-- name: Prepare frontend reply routing for the multihomed ingress guest
+- name: Prepare frontend reply routing for the selected multihomed guest
   ansible.builtin.import_tasks: ingress-routing.yml
-  when: app.kind == 'ingress' and app.frontend_routing is defined and not ansible_check_mode
+  when: app.kind in ['ingress', 'automation'] and app.frontend_routing is defined and not ansible_check_mode
 
 - name: Enable the isolated guest Docker service
   ansible.builtin.systemd_service:
@@ -145,9 +145,37 @@
     fail_msg: 'Data is staged. Start requires the selected cutover and exclusive-writer confirmation.'
   when: app.start_services | default(false) | bool and not ansible_check_mode
 
+- name: Install the native Node-RED OIDC wrapper without replacing restored settings
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../node-red-settings.js"
+    dest: /srv/homelab/data/node-red/runtime-settings.js
+    owner: root
+    group: root
+    mode: '0644'
+  when: app.kind == 'automation' and stack.node_red_oidc is defined
+
+- name: Adapt the Node-RED image health check to its current guest loopback listener
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../node-red-healthcheck.js"
+    dest: /srv/homelab/data/node-red/healthcheck.js
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  when: app.kind == 'automation'
+
+- name: Install the bounded automation service probes
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../automation-health.py"
+    dest: /opt/homelab-app/automation-health.py
+    owner: root
+    group: root
+    mode: '0700'
+  when: app.kind == 'automation'
+
 - name: Start exactly this guest stack
   ansible.builtin.command:
-    argv: "{{ ['docker', 'compose', '-f', ('/opt/homelab-app/compose-bootstrap.yml' if app.kind == 'pegaprox' else '/opt/homelab-app/compose.yml'), 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--pull', 'never'] if app.kind == 'bitwarden' else []) }}"
+    argv: "{{ ['docker', 'compose', '-f', ('/opt/homelab-app/compose-bootstrap.yml' if app.kind == 'pegaprox' else '/opt/homelab-app/compose.yml'), 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--pull', 'never'] if app.kind == 'bitwarden' else []) + (['--no-deps', ordinary_service] if ordinary_service is defined else []) }}"
   register: compose_start
   changed_when: "'Started' in compose_start.stderr or 'Created' in compose_start.stderr or 'Recreated' in compose_start.stderr"
   no_log: true

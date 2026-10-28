@@ -25,6 +25,25 @@ UNBOUND_SOURCE = ('remote-control:\n    control-enable: yes\nserver:\n    # keep
 
 
 class MergeTests(unittest.TestCase):
+    def test_additional_broker_host_keeps_other_aliases_and_redirects(self):
+        settings = copy.deepcopy(SETTINGS)
+        settings['extra_records'] = {'broker.mqtt': '10.88.40.21'}
+        settings['extra_records_before'] = {'broker.mqtt':'192.168.200.240'}
+        try:
+            cd.configure(settings)
+            before = ['192.168.200.240 broker.mqtt old-broker.example.org', '10.88.25.2 nas']
+            after = cd.merge_hosts(before)
+            self.assertIn('192.168.200.240 old-broker.example.org', after)
+            self.assertIn('10.88.40.21 broker.mqtt', after)
+            self.assertEqual(cd.merge_hosts(after),after)
+            with self.assertRaisesRegex(ValueError,'unexpected existing binding'):
+                cd.merge_hosts(['192.168.200.241 broker.mqtt'])
+            self.assertEqual(cd.ACME_EXCEPTIONS, tuple(SETTINGS['acme_exceptions']))
+            bad = copy.deepcopy(settings); bad['extra_records'] = {next(iter(SETTINGS['unchanged'])): '10.88.40.21'}
+            with self.assertRaises(ValueError): cd.configure(bad)
+        finally:
+            cd.configure(SETTINGS)
+
     def test_exact_pinned_ftl_unquoted_array_output_and_json_are_supported(self):
         records = ['10.1.2.3 sample.example.invalid sample-alias', '2001:db8::1 ipv6.example.invalid']
         actual = '[ 10.1.2.3 sample.example.invalid sample-alias, 2001:db8::1 ipv6.example.invalid ]\n'
