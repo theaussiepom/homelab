@@ -8,7 +8,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from jinja2 import Environment
+from jinja2 import Environment, select_autoescape
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +22,8 @@ class DeliveryTests(unittest.TestCase):
             self.assertEqual(plugin,'ansible.builtin.file')
             path = Path(path).resolve();self.assertIn(path,[ROOT/'identity_database.py',ROOT/'identity_database_runtime.py'])
             reads.append(path);return path.read_text()
-        env=Environment();env.filters['to_json']=json.dumps;env.globals['lookup']=lookup
+        # This fixture renders Python source; HTML/XML templates still autoescape.
+        env=Environment(autoescape=select_autoescape(default_for_string=False));env.filters['to_json']=json.dumps;env.globals['lookup']=lookup
         program=env.from_string(play['vars']['identity_runtime_program']).render(playbook_dir=str(ROOT/'ansible'))
         compile(program,'<source-delivery>','exec')
         self.assertEqual(set(reads),{ROOT/'identity_database.py',ROOT/'identity_database_runtime.py'})
