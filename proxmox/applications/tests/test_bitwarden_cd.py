@@ -169,6 +169,40 @@ def setup(root):
 
 
 class CDTests(unittest.TestCase):
+    def test_public_cli_requires_adapter_for_every_bitwarden_phase(self):
+        with tempfile.TemporaryDirectory() as d:
+            site = Path(d) / "site.json"
+            private(site, bitwarden_migration.encoded({"app": {"kind": "bitwarden"}}))
+            for action in ("plan", "deploy", "apply", "stage", "start", "verify"):
+                with (
+                    self.subTest(action=action),
+                    patch.object(
+                        sys, "argv", ["deploy.py", action, "--site", str(site)]
+                    ),
+                    patch.object(
+                        deploy,
+                        "execute",
+                        side_effect=AssertionError("CLI must not enter installer"),
+                    ) as execute,
+                ):
+                    with self.assertRaisesRegex(SystemExit, "bitwarden_cd.py"):
+                        deploy.main()
+                    execute.assert_not_called()
+
+    def test_public_cli_keeps_other_guest_dispatch_unchanged(self):
+        with tempfile.TemporaryDirectory() as d:
+            site = Path(d) / "site.json"
+            private(site, bitwarden_migration.encoded({"app": {"kind": "dns"}}))
+            with (
+                patch.object(sys, "argv", ["deploy.py", "verify", "--site", str(site)]),
+                patch.object(
+                    deploy, "execute", return_value={"status": "passed"}
+                ) as execute,
+                patch("builtins.print"),
+            ):
+                deploy.main()
+                execute.assert_called_once_with("verify", site, None)
+
     def test_shared_installer_cannot_skip_admission_when_stack_path_is_missing(self):
         with tempfile.TemporaryDirectory() as d:
             config, _, _, _, _ = setup(Path(d))

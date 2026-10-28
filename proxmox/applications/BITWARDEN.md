@@ -86,6 +86,11 @@ After the inputs and prerequisites are reviewed, the adapter calls the common
 installer. First select `plan` with no old approval. Review its exact new-guest
 saved plan, then supply that fingerprint for `deploy`:
 
+Use `bitwarden_cd.py` for every Bitwarden phase. The public `deploy.py` CLI
+rejects Bitwarden to preserve the adapter's hold, proof and completion records.
+The adapter still calls the same internal installer; other application CLI
+entry points retain their existing behavior.
+
 ```sh
 python3 public-source/proxmox/applications/bitwarden_cd.py \
   --phase plan --config bitwarden/deployment.json

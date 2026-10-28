@@ -457,6 +457,10 @@ def main():
     parser.add_argument('--plan-sha256')
     args = parser.parse_args()
     try:
+        site = json.loads(args.site.read_text())
+        if (isinstance(site, dict) and isinstance(site.get('app'), dict)
+                and site['app'].get('kind') == 'bitwarden'):
+            raise InputNeeded('Bitwarden operations must use bitwarden_cd.py so adapter holds and completion custody are preserved')
         print(json.dumps(execute(args.action, args.site, args.plan_sha256)))
     except InputNeeded as error:
         raise SystemExit(str(error)) from None
