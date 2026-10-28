@@ -48,12 +48,13 @@ def read(path, stop):
 def nas_root(cfg):
     mount = Path(cfg['paths']['backup_mount']).resolve()
     require(os.path.ismount(mount), 'The original NAS custody mount is unavailable')
-    rows = subprocess.check_output(['findmnt','-rn','-o','FSTYPE,SOURCE','--target',str(mount)],
-                                   text=True, timeout=15).strip().split()
-    require(len(rows) == 2 and rows[0] in {'nfs','nfs4','cifs'} and rows[1] == cfg['paths']['backup_source'],
+    lines = subprocess.check_output(['findmnt','-rn','-o','FSTYPE,SOURCE','--target',str(mount)],
+                                    text=True, timeout=15).strip().splitlines()
+    rows = [line.split() for line in lines if line.split() and line.split()[0] in {'nfs','nfs4','cifs'}]
+    require(len(rows) == 1 and len(rows[0]) == 2 and rows[0][1] == cfg['paths']['backup_source'],
             'The original NAS custody mount identity differs')
     root = Path(cfg['paths']['backup_directory']) / str(cfg['guest']['vmid'])
-    require(root.is_relative_to(mount) and root != mount, 'Keep baseline custody under the original NAS mount')
+    require(mount in root.resolve().parents, 'Keep baseline custody under the original NAS mount')
     directory(root)
     return root
 

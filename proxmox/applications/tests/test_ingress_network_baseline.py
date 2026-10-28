@@ -269,4 +269,21 @@ class BaselineTests(unittest.TestCase):
         self.deployment.execute.assert_not_called()
 
 
+class MountTests(unittest.TestCase):
+    def test_autofs_and_one_active_matching_nfs_are_accepted_without_fallback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            mount=Path(temp);nas=mount/'backup/212';nas.mkdir(parents=True,mode=0o700)
+            cfg={'guest':{'vmid':212},'paths':{'backup_mount':str(mount),
+                'backup_directory':str(mount/'backup'),'backup_source':'synthetic-nas:/approved'}}
+            for value,accepted in [('autofs systemd-1\nnfs4 synthetic-nas:/approved\n',True),
+                                   ('autofs systemd-1\nnfs4 other-nas:/different\n',False),
+                                   ('nfs4 synthetic-nas:/approved\nnfs synthetic-nas:/approved\n',False),
+                                   ('autofs systemd-1\n',False)]:
+                with self.subTest(value=value),patch.object(baseline.os.path,'ismount',return_value=True),\
+                        patch.object(baseline.subprocess,'check_output',return_value=value):
+                    if accepted:self.assertEqual(baseline.nas_root(cfg),nas)
+                    else:
+                        with self.assertRaises(ValueError):baseline.nas_root(cfg)
+
+
 if __name__=='__main__':unittest.main()
