@@ -21,9 +21,14 @@ ROLES = ('postgresql', 'identity', 'db-tools')
 SCHEMA = 'homelab-postgresql-service-verification-v1'
 
 
+class ValidationError(ValueError):
+    """Only this module's fixed validation messages may reach the job output."""
+    verification_started = False
+
+
 def require(value, message):
     if not value:
-        raise ValueError(message)
+        raise ValidationError(message)
 
 
 def sha(raw):
@@ -63,8 +68,11 @@ def selection(value, packet, catalogue, desired, acceptance):
 
 
 def source_revision(path, expected):
+    """Require both the selected commit and unchanged tracked source bytes."""
     require(subprocess.check_output(['git', '-C', str(path), 'rev-parse', 'HEAD'],
             text=True, timeout=10).strip() == expected, 'A selected source checkout changed')
+    require(subprocess.run(['git', '-C', str(path), 'diff', '--quiet', 'HEAD', '--'],
+            capture_output=True, timeout=10).returncode == 0, 'A selected source checkout has tracked changes')
 
 
 def load_worker(helper):
@@ -131,7 +139,9 @@ def verification_hold(worker, work, value):
         require(worker.regular(path) == marker, 'Verification hold ownership changed')
         path.unlink()
         worker.network_apply.sync(work)
-    except BaseException:
+    except BaseException as error:
+        if isinstance(error, ValidationError):
+            error.verification_started = True
         worker.maintenance.write_new(failure, marker)
         worker.network_apply.sync(work)
         # Keep the claim too: an interrupted or failed check cannot replay.
@@ -228,8 +238,12 @@ def main():
             result = verify(args.role, value, request, args.helper.resolve(), args.installer.resolve(),
                             Path(__file__).resolve().parents[2], args.catalogue.resolve())
         print(json.dumps(result))
-    except Exception:
+    except ValidationError as error:
+        if not error.verification_started:
+            raise SystemExit('Accepted service validation refused: ' + str(error)) from None
         raise SystemExit('Accepted service verification held; preserve evidence. No automatic recovery or replay.') from None
+    except Exception:
+        raise SystemExit('Accepted service check stopped; preserve any existing claim/hold and private evidence. No automatic recovery or replay.') from None
 
 
 if __name__ == '__main__':

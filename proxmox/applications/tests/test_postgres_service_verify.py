@@ -3,6 +3,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -50,6 +51,40 @@ class SelectionTests(unittest.TestCase):
     def test_selection_has_no_native_mode_or_phase(self):
         for key, value in [('action', 'apply'), ('phase', 'activate'), ('resume', True)]:
             with self.subTest(key=key), self.assertRaises(ValueError): self.check(dict(self.value, **{key: value}))
+
+    def test_source_revision_rejects_dirty_tracked_bytes_even_with_the_right_head(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.check_output(['git', '-C', str(root), *args], text=True).strip()
+            git('init', '-q')
+            source = root / 'worker.py'; source.write_text('original = True\n')
+            git('add', 'worker.py')
+            git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                '-c', 'commit.gpgsign=false', 'commit', '-qm', 'synthetic source')
+            revision = git('rev-parse', 'HEAD')
+            service.source_revision(root, revision)
+            source.write_text('original = False\n')
+            with self.assertRaisesRegex(service.ValidationError, 'tracked changes'):
+                service.source_revision(root, revision)
+            git('add', 'worker.py')
+            with self.assertRaisesRegex(service.ValidationError, 'tracked changes'):
+                service.source_revision(root, revision)
+
+    def test_cli_reports_only_static_preclaim_errors_and_hides_arbitrary_exception_text(self):
+        previous_umask = os.umask(0o077); self.addCleanup(os.umask, previous_umask)
+        argv = ['service']
+        for name in ('selection', 'packet', 'catalogue', 'desired-catalogue', 'acceptance'):
+            argv += ['--' + name, '/fixture/' + name]
+        argv += ['--validate-only']
+        for error, expected in [(service.ValidationError('Use the closed service selection'),
+                                 'Accepted service validation refused: Use the closed service selection'),
+                                (RuntimeError('private-value-must-not-escape'), 'Accepted service check stopped')]:
+            with self.subTest(error=type(error).__name__), patch.object(sys, 'argv', argv), \
+                    patch.object(Path, 'read_bytes', side_effect=error), self.assertRaises(SystemExit) as caught:
+                service.main()
+            self.assertIn(expected, str(caught.exception))
+            self.assertNotIn('private-value-must-not-escape', str(caught.exception))
 
 
 class MemberTests(unittest.TestCase):
@@ -150,6 +185,13 @@ class MemberTests(unittest.TestCase):
         (self.state / '110/SERVICE-VERIFYING.json').write_text('{}')
         with self.assertRaises(FileExistsError): self.run_role('postgresql')
         self.assertEqual(self.events, [])
+
+    def test_after_claim_validation_is_marked_held_and_retains_failure_evidence(self):
+        self.worker.runtime = lambda *a: service.require(False, 'Static post-claim failure')
+        with self.assertRaises(service.ValidationError) as caught:
+            self.run_role('postgresql')
+        self.assertTrue(caught.exception.verification_started)
+        self.assertTrue((self.state / '110/SERVICE-VERIFY-HOLD.json').exists())
 
 
 class CustodyTests(unittest.TestCase):
