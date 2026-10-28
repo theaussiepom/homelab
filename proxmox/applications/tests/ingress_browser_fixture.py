@@ -59,10 +59,10 @@ def request(path, headers=None, host=HOST, peer='127.0.0.1'):
     finally: conn.close()
 
 
-def wait_for(expected):
+def wait_for(expected, path='/', host=HOST):
     for n in range(40):
         try:
-            if request('/')[0] == expected: return
+            if request(path, host=host)[0] == expected: return
         except (OSError, http.client.HTTPException): pass
         if n != 39: time.sleep(0.5)
     raise RuntimeError('Synthetic file-provider load exceeded its bound')
@@ -70,8 +70,10 @@ def wait_for(expected):
 
 def check(stage):
     if stage == 'before':
-        wait_for(404)
-        assert request('/existing', host='other.example.invalid')[0] == 200
+        # An unmatched 404 can occur before the file provider has loaded.
+        # First establish that its known route is serving, then prove absence.
+        wait_for(200, path='/existing', host='other.example.invalid')
+        assert request('/')[0] == 404
         return
     wait_for(302)
     assert request('/')[1]['Location'] == 'https://sso.example.invalid/application/o/authorize/'
