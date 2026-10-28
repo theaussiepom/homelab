@@ -3,6 +3,7 @@ import copy
 import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
@@ -233,6 +234,51 @@ class ApplyTests(unittest.TestCase):
         with patch.object(maintenance, 'tofu', side_effect=different_binary), self.assertRaises(ValueError): self.apply()
         self.assertTrue(all('apply' not in call for call in self.calls))
         self.assertTrue((self.work / 'HOLD.json').exists())
+
+    def test_new_network_computed_address_refresh_is_reported_on_later_verification(self):
+        def refreshed(command,environment,log,output=None):
+            self.fake_native(command,environment,log,output)
+            if output and command[-1] != str(self.evidence / 'guest.tfplan'):
+                value = json.loads(output.read_bytes())
+                row = next(r for r in value['resource_changes'] if r['address'] == maintenance.CONTAINER)
+                row['change']['before']['ipv4'] = {'eth0':'10.88.25.23','eth1':'10.88.31.23'}
+                row['change']['after']['ipv4'] = copy.deepcopy(row['change']['before']['ipv4'])
+                previous = copy.deepcopy(row['change']['before']); previous['ipv4']['docker0'] = '172.17.0.1'
+                value['resource_drift'] = [{'address':maintenance.CONTAINER,'mode':'managed','change':{
+                    'actions':['update'],'before':previous,'after':copy.deepcopy(row['change']['before']),
+                    'after_unknown':{},'replace_paths':[]}}]
+                output.write_bytes(maintenance.encoded(value))
+        with patch.object(maintenance,'tofu',side_effect=refreshed):
+            self.apply(); self.calls.clear(); result = self.verify()
+        self.assertEqual(result['observed_provider_refresh'][0]['computed_address_maps_changed'],['ipv4'])
+        self.assertFalse(any('apply' in command for command in self.calls))
+
+    def test_a_false_provider_observation_summary_refuses_before_any_native_command(self):
+        path = self.evidence / 'review-packet.json'; value = json.loads(path.read_bytes())
+        value['observed_provider_refresh'] = [{'claimed':'unbound observation'}]
+        path.write_bytes(maintenance.encoded(value))
+        self.selected['review_packet_sha256'] = maintenance.digest(path.read_bytes()); self.resave_packet()
+        with patch.object(maintenance,'tofu') as tofu:
+            with self.assertRaisesRegex(ValueError,'observation summary'): self.apply()
+        tofu.assert_not_called()
+
+
+class NasCustodyTests(unittest.TestCase):
+    def test_active_nfs_row_is_selected_without_treating_automount_as_a_second_share(self):
+        with tempfile.TemporaryDirectory() as directory:
+            mount = Path(directory).resolve(); backup = mount / 'backup'; guest = backup / '208'
+            guest.mkdir(parents=True,mode=0o700)
+            cfg = {'guest': {'vmid':208}, 'paths': {'backup_mount':str(mount),
+                'backup_directory':str(backup), 'backup_source':'nas:/approved'}}
+            for rows in ('nfs4 nas:/approved\n','autofs systemd-1\nnfs4 nas:/approved\n'):
+                with self.subTest(rows=rows), patch.object(apply_network.os.path,'ismount',return_value=True), \
+                        patch.object(apply_network.subprocess,'check_output',return_value=rows):
+                    self.assertEqual(apply_network.nas_root(cfg),guest)
+            for rows in ('autofs systemd-1\n','nfs4 nas:/other\n',
+                         'nfs4 nas:/approved\nnfs4 nas:/other\n'):
+                with self.subTest(rows=rows), patch.object(apply_network.os.path,'ismount',return_value=True), \
+                        patch.object(apply_network.subprocess,'check_output',return_value=rows):
+                    with self.assertRaises(ValueError): apply_network.nas_root(cfg)
 
 
 if __name__ == '__main__':

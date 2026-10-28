@@ -61,7 +61,7 @@ def raw_container(guest):
                 mac_address=n['mac'], firewall=True, rate_limit=None, enabled=True) for i, n in enumerate(guest['interfaces'])],
             'initialization': [{'hostname': guest['hostname'], 'user_account': [{'keys': ['original-key']}],
                 'dns': [{'servers': ['10.88.40.2']}], 'ip_config': [dict(ipv4=[dict(address=n['ipv4'], gateway=n.get('gateway'))],
-                ipv6=[dict(address=n['ipv6'])]) for n in guest['interfaces']]}]}
+                ipv6=[dict(address=n['ipv6'], gateway=None)]) for n in guest['interfaces']]}]}
 
 
 def raw_rules(guest):
@@ -84,7 +84,100 @@ def saved_plan(original):
     return {'resource_changes': rows, 'resource_drift': []}
 
 
+def observed_provider_plan(original):
+    """Synthetic values with the exact retained BPG0.117 refresh/plan shapes."""
+    value = saved_plan(original); change = value['resource_changes'][0]['change']
+    for side in ('before','after'):
+        raw = change[side]
+        raw.update(tags=[],environment_variables={},features=[dict(nesting=True,keyctl=False,mount=[])],
+                   ipv4={'eth0':'10.88.25.20','eth1':'10.88.30.20','docker0':'172.17.0.1'},
+                   ipv6={'eth0':'fe80::1','veth123':'fe80::2'})
+        for field in ('disk','mount_point'):
+            for block in raw[field]: block['mount_options'] = []
+        for index,ip in enumerate(raw['initialization'][0]['ip_config']):
+            if index < len(original['guest']['interfaces']):
+                ip['ipv4'][0]['gateway'] = ip['ipv4'][0]['gateway'] or ''
+                ip['ipv6'][0]['gateway'] = ''
+    for row in value['resource_changes'][2]['change'].values():
+        if isinstance(row,dict) and 'rule' in row:
+            for index,rule in enumerate(row['rule']):
+                rule['pos'] = index
+                for key in ('source','dest'): rule[key] = rule[key] or ''
+    refreshed = copy.deepcopy(change['before']); old = copy.deepcopy(refreshed)
+    old.update(tags=None,environment_variables=None)
+    old['ipv4'].pop('docker0'); old['ipv6'].pop('veth123')
+    for field in ('disk','mount_point'):
+        for block in old[field]: block['mount_options'] = None
+    old['features'][0]['mount'] = None
+    value['resource_drift'] = [dict(address=maintenance.CONTAINER,mode='managed',
+        change=dict(actions=['update'],before=old,after=refreshed,after_unknown={}))]
+    return value
+
+
 class PureTests(unittest.TestCase):
+    def test_observed_empty_refresh_and_computed_address_maps_preserve_exact_nic_sql_scope(self):
+        for vmid in (208,211,202):
+            original = cfg(vmid); value = observed_provider_plan(original); saved = copy.deepcopy(value)
+            result = maintenance.check_plan(value,original,contract(),'postgresql',**OP)
+            self.assertEqual(result['candidate_guest'],desired(original))
+            self.assertEqual(value,saved)  # Raw failed evidence is never rewritten.
+
+    def test_empty_gateway_and_firewall_omissions_do_not_allow_real_addresses(self):
+        value = observed_provider_plan(cfg(211)); value['resource_drift'] = []
+        value['resource_changes'][0]['change']['before']['initialization'][0]['ip_config'][1]['ipv4'][0]['gateway'] = '10.88.30.1'
+        with self.assertRaises(ValueError): maintenance.check_plan(value,cfg(211),contract(),'postgresql',**OP)
+
+    def test_material_refresh_changes_remain_held_even_when_plan_before_matches_refresh(self):
+        mutations = [lambda v:v.update(tags=['new-tag']),lambda v:v.update(environment_variables={'NEW':'value'}),
+            lambda v:v['disk'][0].update(mount_options=['discard']),
+            lambda v:v['mount_point'][0].update(mount_options=['ro']),
+            lambda v:v['mount_point'][0].update(read_only=True),lambda v:v['features'][0].update(mount=['nfs']),
+            lambda v:v['features'][0].update(keyctl=True),lambda v:v.update(unprivileged=False),
+            lambda v:v['disk'][0].update(size=99),lambda v:v['network_interface'][0].update(bridge='vmbr99')]
+        for mutate in mutations:
+            value = observed_provider_plan(cfg(211)); drift = value['resource_drift'][0]['change']
+            mutate(drift['after']); value['resource_changes'][0]['change']['before'] = copy.deepcopy(drift['after'])
+            with self.subTest(mutation=mutate), self.assertRaises(ValueError):
+                maintenance.check_plan(value,cfg(211),contract(),'postgresql',**OP)
+
+    def test_material_planned_changes_and_unknowns_remain_held_with_compatible_refresh(self):
+        for mutate in (lambda p:p['resource_changes'][0]['change']['after'].update(tags=['new']),
+                       lambda p:p['resource_changes'][0]['change']['after']['features'][0].update(mount=['nfs']),
+                       lambda p:p['resource_changes'][0]['change'].update(after_unknown={'ipv4':True}),
+                       lambda p:p['resource_drift'][0]['change'].update(after_unknown={'ipv6':True}),
+                       lambda p:p['resource_drift'][0].update(address=maintenance.RULES)):
+            value = observed_provider_plan(cfg(211)); mutate(value)
+            with self.assertRaises(ValueError): maintenance.check_plan(value,cfg(211),contract(),'postgresql',**OP)
+
+    def test_ordered_firewall_positions_must_follow_the_exact_selected_rule_list(self):
+        for side,index in [('before',0),('after',2)]:
+            value = observed_provider_plan(cfg(211))
+            value['resource_changes'][2]['change'][side]['rule'][index]['pos'] = 99
+            with self.subTest(side=side), self.assertRaises(ValueError):
+                maintenance.check_plan(value,cfg(211),contract(),'postgresql',**OP)
+
+    def test_provider_equality_ignores_only_fixed_empty_forms_and_valid_computed_maps(self):
+        first = observed_provider_plan(cfg(211))['resource_drift'][0]['change']['before']
+        second = observed_provider_plan(cfg(211))['resource_drift'][0]['change']['after']
+        self.assertTrue(maintenance.provider_values_equal(maintenance.CONTAINER,first,second))
+        for update in ({'tags':['new']},{'environment_variables':{'NEW':'value'}},{'protection':1}):
+            changed = dict(second,**update)
+            self.assertFalse(maintenance.provider_values_equal(maintenance.CONTAINER,first,changed))
+        self.assertTrue(maintenance.provider_values_equal(maintenance.RULES,
+            {'rule':[{'source':None,'dest':None,'action':'ACCEPT'}]},
+            {'rule':[{'source':'','dest':'','action':'ACCEPT'}]}))
+        self.assertFalse(maintenance.provider_values_equal(maintenance.RULES,
+            {'rule':[{'source':None,'dest':None,'action':'ACCEPT'}]},
+            {'rule':[{'source':'0.0.0.0/0','dest':'','action':'ACCEPT'}]}))
+
+    def test_computed_maps_are_typed_address_observations_only(self):
+        for field,bad in [('ipv4',{'eth0':'not-an-IP'}),('ipv4',{'eth0':'::1'}),
+                          ('ipv6',{'eth0':'127.0.0.1'}),('ipv4',None),('ipv6',['fe80::1'])]:
+            value = observed_provider_plan(cfg(211)); value['resource_drift'][0]['change']['after'][field] = bad
+            value['resource_changes'][0]['change']['before'][field] = copy.deepcopy(bad)
+            with self.subTest(field=field,bad=bad), self.assertRaises(ValueError):
+                maintenance.check_plan(value,cfg(211),contract(),'postgresql',**OP)
+
     def test_pg_server_replaces_same_index_and_only_two_clients_are_granted(self):
         original = cfg(); before = copy.deepcopy(original); catalogue = contract()
         candidate = maintenance.candidate_guest(original['guest'], catalogue, 'postgresql', **OP)

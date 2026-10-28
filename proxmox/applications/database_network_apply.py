@@ -107,7 +107,8 @@ def load(deployment, installed_config_path, catalogue_path, plan_evidence, packe
     require(set(request) == request_fields and request['schema'] == maintenance.SCHEMA
             and request['vmid'] == selected['vmid'] and request['apply_supported'] is False
             and request['lifecycle_effects_verified'] is False
-            and set(review) == request_fields | {'status', 'plan_sha256', 'plan_json_sha256', 'candidate_guest_sha256'}
+            and set(review) == request_fields | {'status', 'plan_sha256', 'plan_json_sha256', 'candidate_guest_sha256',
+                                                'observed_provider_refresh'}
             and {k: review[k] for k in request} == request and review['status'] == 'review_required',
             'Use the unchanged reviewed planning packet, not an apply or readiness assertion')
     helpers = [Path(maintenance.__file__), Path(maintenance.networks.__file__),
@@ -122,6 +123,8 @@ def load(deployment, installed_config_path, catalogue_path, plan_evidence, packe
             'The exact saved binary or JSON plan changed')
     options = {k: request[k] for k in ('phase', 'client_vmids', 'legacy_server_address')}
     checked = maintenance.check_plan(json.loads(shown), cfg, catalogue, request['engine'], **options)
+    require(review['observed_provider_refresh'] == checked['observed_provider_refresh'],
+            'The reviewed provider observation summary changed')
     candidate = checked['candidate_guest']
     require(digest(regular(plan_evidence / 'candidate-guest.json')) == review['candidate_guest_sha256']
             == digest(encoded(candidate)), 'The declared network overlay changed')
@@ -164,8 +167,10 @@ def nas_root(cfg):
     """Same existing NAS authority checks as the commissioned state backup path."""
     mount = Path(cfg['paths']['backup_mount']).resolve()
     require(os.path.ismount(mount), 'The selected NAS mount is unavailable; no local fallback')
-    actual = subprocess.check_output(['findmnt', '-rn', '-o', 'FSTYPE,SOURCE', '--target', str(mount)], text=True, timeout=10).strip().split()
-    require(len(actual) == 2 and actual[0] in {'nfs', 'nfs4', 'cifs'} and actual[1] == cfg['paths']['backup_source'],
+    rows = subprocess.check_output(['findmnt', '-rn', '-o', 'FSTYPE,SOURCE', '--target', str(mount)],
+                                   text=True, timeout=10).strip().splitlines()
+    actual = [row.split() for row in rows if row.split() and row.split()[0] in {'nfs', 'nfs4', 'cifs'}]
+    require(len(actual) == 1 and len(actual[0]) == 2 and actual[0][1] == cfg['paths']['backup_source'],
             'NAS mount identity differs from the selected original backup source')
     destination = Path(cfg['paths']['backup_directory']) / str(cfg['guest']['vmid'])
     require(mount in destination.resolve().parents, 'Keep overlay custody below the selected NAS mount')
@@ -214,17 +219,21 @@ def readonly_overlay(context, directory):
     approved = json.loads(regular(c['plan'] / 'guest.tfplan.json'))
     expected = {row['address']: row['change']['after'] for row in approved['resource_changes']}
     rows = value.get('resource_changes', [])
+    observations = maintenance.validate_provider_drift(value)
     require(len(rows) == len(expected) and {row.get('address') for row in rows} == set(expected)
-            and not value.get('resource_drift') and not value.get('deferred_changes') and not value.get('errored'),
+            and not value.get('deferred_changes') and not value.get('errored'),
             'Review applied network drift, unknown resources or planning errors')
     for row in rows:
         change = row['change']
-        require(change.get('actions') == ['no-op'] and change.get('before') == change.get('after') == expected[row['address']]
+        require(change.get('actions') == ['no-op']
+                and maintenance.provider_values_equal(row['address'],change.get('before'),change.get('after'))
+                and maintenance.provider_values_equal(row['address'],change.get('after'),expected[row['address']])
                 and not maintenance.unknown(change.get('after_unknown', {})) and not change.get('replace_paths')
                 and not change.get('importing') and not row.get('previous_address') and row.get('mode', 'managed') == 'managed',
                 'The applied network overlay is no longer an exact no-op; do not replan legacy inputs')
     return {'status': 'network_overlay_verified', 'vmid': c['selected']['vmid'],
             'plan_json_sha256': digest(regular(directory / 'check.tfplan.json')),
+            'observed_provider_refresh': observations,
             'service_acceptance_verified': False, 'guest_lifecycle_observed': False}
 
 

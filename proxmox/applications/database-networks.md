@@ -78,6 +78,10 @@ For PostgreSQL, the checker permits only the selected database NIC replacement
 and SQL-rule changes. It keeps management, storage and other settings intact.
 It rejects resource creation, replacement, deletion, unrelated changes and
 unknown values. A failed planning attempt remains held across new run IDs.
+The provider also refreshes observed IP addresses and can represent an omitted
+value as empty instead of null. The checker records these limited differences
+without changing the saved evidence. Changes to actual interfaces, routes,
+permissions, disks or other configuration still stop the operation.
 
 [database_network_apply.py](database_network_apply.py) applies an exact checked
 saved plan once. It uses the same original state and locks, keeps the original

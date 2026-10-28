@@ -102,16 +102,89 @@ def nic_projection(nic):
     return {key: nic.get(field) for key, field in [('bridge', 'bridge'), ('vlan', 'vlan_id'), ('mac', 'mac_address')]}
 
 
+def omitted(value):
+    return None if value == '' else value
+
+
+def provider_projection(address, value):
+    """BPG0.117 comparison only; never rewrite the retained provider evidence.
+
+    Top-level ipv4/ipv6 are computed read observations, not initialization.
+    Only the named empty collections and omitted gateways/firewall peers have
+    equivalent null/empty representations. Every configured value stays intact.
+    """
+    require(isinstance(value,dict), 'Expected existing raw provider values')
+    result = copy.deepcopy(value)
+    if address == CONTAINER:
+        for family, version in (('ipv4',4),('ipv6',6)):
+            if family in result:
+                observed = result.pop(family)
+                require(isinstance(observed,dict) and all(isinstance(name,str) and isinstance(ip,str)
+                        and ipaddress.ip_address(ip).version == version for name,ip in observed.items()),
+                        'Computed address observations must be typed IPv4/IPv6 maps')
+        for name, empty in (('tags',[]),('environment_variables',{})):
+            if name in result and result[name] is None:
+                result[name] = empty
+        for name,field in (('disk','mount_options'),('mount_point','mount_options'),('features','mount')):
+            for block in result.get(name,[]):
+                if field in block and block[field] is None:
+                    block[field] = []
+        for initialization in result.get('initialization',[]):
+            for config in initialization.get('ip_config',[]):
+                for family in ('ipv4','ipv6'):
+                    for block in config.get(family,[]):
+                        block['gateway'] = omitted(block.get('gateway'))
+    elif address == RULES:
+        for row in result.get('rule',[]):
+            for name in ('source','dest'):
+                row[name] = omitted(row.get(name))
+    return result
+
+
+def provider_values_equal(address, first, second):
+    """Compare configuration, allowing only the fixed provider representations."""
+    # JSON comparison also preserves bool/int distinctions in raw attributes.
+    return json.dumps(provider_projection(address,first),sort_keys=True) == json.dumps(provider_projection(address,second),sort_keys=True)
+
+
+def validate_provider_drift(value):
+    """Admit only computed/empty refresh on this exact planned container.
+
+    Material state drift, other resources, unknowns and lifecycle changes remain
+    holds. The refreshed value must exactly equal the plan's raw before value.
+    """
+    drift = value.get('resource_drift',[])
+    require(isinstance(drift,list) and len(drift) <= 1, 'Review material or unsupported provider state drift')
+    reports = []
+    for row in drift:
+        change = row.get('change',{})
+        require(row.get('address') == CONTAINER and row.get('mode','managed') == 'managed'
+                and not row.get('previous_address') and change.get('actions') == ['update']
+                and not change.get('replace_paths') and not change.get('importing')
+                and not unknown(change.get('after_unknown',{})), 'Review material or unknown provider state drift')
+        before,after = change.get('before'),change.get('after')
+        matches = [r for r in value.get('resource_changes',[]) if r.get('address') == CONTAINER]
+        require(len(matches) == 1 and after == matches[0].get('change',{}).get('before')
+                and provider_values_equal(CONTAINER,before,after),
+                'Review material configuration drift or an unbound refresh observation')
+        configured_before = {key:item for key,item in before.items() if key not in {'ipv4','ipv6'}}
+        configured_after = {key:item for key,item in after.items() if key not in {'ipv4','ipv6'}}
+        reports.append({'address':CONTAINER,
+                        'computed_address_maps_changed':[name for name in ('ipv4','ipv6') if before.get(name) != after.get(name)],
+                        'empty_representation_refresh':configured_before != configured_after})
+    return reports
+
+
 def ip_projection(value):
     require(isinstance(value, dict) and len(value.get('ipv4', [])) == len(value.get('ipv6', [])) == 1,
             'Review unsupported provider IP configuration')
-    return {'ipv4': value['ipv4'][0].get('address'), 'gateway': value['ipv4'][0].get('gateway'),
-            'ipv6': value['ipv6'][0].get('address')}
+    return {'ipv4': value['ipv4'][0].get('address'), 'gateway': omitted(value['ipv4'][0].get('gateway')),
+            'ipv6': value['ipv6'][0].get('address'), 'ipv6_gateway':omitted(value['ipv6'][0].get('gateway'))}
 
 
 def rule_projection(row):
     require(row.get('action') == 'ACCEPT', 'Unexpected installed firewall action')
-    return {key: row.get(field) for key, field in [('direction', 'type'), ('proto', 'proto'), ('port', 'dport'),
+    return {key: omitted(row.get(field)) if key in {'source','destination'} else row.get(field) for key, field in [('direction', 'type'), ('proto', 'proto'), ('port', 'dport'),
             ('source', 'source'), ('destination', 'dest'), ('comment', 'comment')]}
 
 
@@ -135,7 +208,7 @@ def expected_container(before, original, candidate):
         expected = {'bridge': nic['bridge'], 'vlan': vlan if nic.get('vlan') is None else nic['vlan'], 'mac': nic['mac']}
         require(actual == expected and nics[i].get('name') == 'eth' + str(i) and nics[i].get('firewall') is True,
                 'Installed bridge/MAC/interface name/firewall differs')
-        require(ip_projection(ips[i]) == {k: nic.get(k) for k in ('ipv4', 'gateway', 'ipv6')},
+        require(ip_projection(ips[i]) == {**{k: nic.get(k) for k in ('ipv4', 'gateway', 'ipv6')},'ipv6_gateway':None},
                 'Installed IP/default route differs')
     for i, nic in enumerate(candidate['interfaces']):
         if i < len(original['interfaces']) and nic == original['interfaces'][i]:
@@ -147,7 +220,7 @@ def expected_container(before, original, candidate):
         new_nic, new_ip = copy.deepcopy(nics[template]), copy.deepcopy(ips[template])
         new_nic.update(name='eth' + str(i), bridge=nic['bridge'], mac_address=nic['mac'])
         new_ip['ipv4'][0].update(address=nic['ipv4'], gateway=None)
-        new_ip['ipv6'][0]['address'] = nic['ipv6']
+        new_ip['ipv6'][0].update(address=nic['ipv6'],gateway=None)
         if i == len(result['network_interface']):
             result['network_interface'].append(new_nic); result['initialization'][0]['ip_config'].append(new_ip)
         else:
@@ -158,6 +231,9 @@ def expected_container(before, original, candidate):
 def expected_rules(before, original, candidate, engine):
     result = copy.deepcopy(before)
     rows = before.get('rule', [])
+    positions = any('pos' in row for row in rows)
+    require(not positions or all(type(row.get('pos')) is int and row['pos'] == index
+                                for index,row in enumerate(rows)), 'Installed firewall rule positions differ')
     require([rule_projection(r) for r in rows] == [normal_rule(r) for r in original['rules']],
             'Installed firewall rules differ from commissioned inputs')
     templates = [row for row in rows if row.get('proto') == 'tcp' and row.get('dport') == str(networks.PORTS[engine])]
@@ -165,12 +241,14 @@ def expected_rules(before, original, candidate, engine):
     expected = []
     for rule in candidate['rules']:
         if rule in original['rules']:
-            expected.append(copy.deepcopy(rows[original['rules'].index(rule)]))
+            row = copy.deepcopy(rows[original['rules'].index(rule)])
         else:
             row = copy.deepcopy(templates[0])
             row.update(type=rule['direction'], proto=rule['proto'], dport=rule['port'], action='ACCEPT',
                        source=rule.get('source'), dest=rule.get('destination'), comment=rule.get('comment'))
-            expected.append(row)
+        if positions:
+            row['pos'] = len(expected)
+        expected.append(row)
     result['rule'] = expected
     return result
 
@@ -178,8 +256,9 @@ def expected_rules(before, original, candidate, engine):
 def check_plan(value, original_cfg, catalogue, engine, *, phase, client_vmids, legacy_server_address=None):
     """Accept only exact NIC/IP/SQL-rule changes on an existing known guest.
 
-    All other raw provider attributes must be byte-for-byte JSON-equal. Unknown
-    values, state drift, replacements and provider-shape surprises are holds.
+    Other configuration remains raw-equal apart from fixed empty provider
+    representations. Only computed address/empty refresh is admissible drift;
+    unknowns, material drift, replacements and other surprises remain holds.
     """
     guest = original_cfg['guest']; vmid = guest['vmid']; node = original_cfg['site']['node']
     require(type(vmid) is int and vmid >= 100 and vmid not in {900, 4914, 4915, 4920}, 'Invalid maintenance guest')
@@ -188,7 +267,8 @@ def check_plan(value, original_cfg, catalogue, engine, *, phase, client_vmids, l
     rows = value.get('resource_changes', [])
     require(len(rows) == len(RESOURCES) and {row.get('address') for row in rows} == set(RESOURCES),
             'Plan must contain only the existing guest and its two firewall resources')
-    require(not value.get('resource_drift') and not value.get('deferred_changes') and not value.get('errored'),
+    observed = validate_provider_drift(value)
+    require(not value.get('deferred_changes') and not value.get('errored'),
             'Review state drift, deferred changes or planning errors')
     for row in rows:
         change = row['change']; before, after = change.get('before'), change.get('after')
@@ -205,11 +285,12 @@ def check_plan(value, original_cfg, catalogue, engine, *, phase, client_vmids, l
             expected = expected_rules(before, guest, candidate, engine)
         else:
             expected = before
-        require(after == expected and (before == after) == (change['actions'] == ['no-op']),
+        require(provider_values_equal(row['address'],after,expected)
+                and provider_values_equal(row['address'],before,after) == (change['actions'] == ['no-op']),
                 'Saved plan contains unrelated or inexact resource changes')
     return {'status': 'review_required', 'vmid': vmid, 'engine': engine, 'phase': phase,
             'client_vmids': sorted(client_vmids), 'candidate_guest': candidate, 'apply_supported': False,
-            'lifecycle_effects_verified': False}
+            'lifecycle_effects_verified': False,'observed_provider_refresh':observed}
 
 
 def encoded(value):
@@ -313,7 +394,7 @@ def plan(deployment, installed_config_path, catalogue_path, evidence, engine, *,
     """Prepare a private read-only plan using the ORIGINAL deployment module.
 
     Calling this contacts the existing pinned PVE API for planning. Source tests
-    mock that boundary; this function has not been run against a native guest.
+    mock that boundary; actual retained plans need their own qualification.
     Caller supplies an unused directory directly below that guest's state dir.
     """
     site, catalogue_path, evidence = map(Path, (installed_config_path, catalogue_path, evidence))
@@ -365,7 +446,8 @@ def plan(deployment, installed_config_path, catalogue_path, evidence, engine, *,
             require(bindings(deployment, cfg, site, work)[0] == original and regular(catalogue_path, private=False) == catalogue_raw,
                     'State, original inputs or catalogue drifted during planning')
             result = {**request, 'status': checked['status'], 'plan_sha256': digest(saved),
-                      'plan_json_sha256': digest(shown), 'candidate_guest_sha256': digest(encoded(candidate))}
+                      'plan_json_sha256': digest(shown), 'candidate_guest_sha256': digest(encoded(candidate)),
+                      'observed_provider_refresh': checked['observed_provider_refresh']}
             write_new(evidence / 'review-packet.json', encoded(result))
             return result
         except Exception as error:
