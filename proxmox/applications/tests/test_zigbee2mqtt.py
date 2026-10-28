@@ -217,3 +217,40 @@ class ZigbeeTests(unittest.TestCase):
                         member=tarfile.TarInfo('zigbee2mqtt/database.db' if mode=='duplicate' else 'homeassistant/configuration.yaml')
                         member.size=1; tar.addfile(member,io.BytesIO(b'x'))
                 with self.assertRaises(ValueError): zigbee2mqtt.check_archive(archive,cfg)
+
+    def test_first_start_admission_preserves_live_state_and_refuses_identity_or_receipt_drift(self):
+        import os,yaml
+        import zigbee2mqtt as radio
+        files=state();cfg=fixture()['zigbee']
+        cfg['state_sha256']={n:hashlib.sha256(v).hexdigest() for n,v in files.items()}
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp);root=base/'data/zigbee2mqtt';root.mkdir(parents=True)
+            for n,v in files.items():(root/n).write_bytes(v)
+            receipt=base/'admission.json';restore=base/'restore.json';capture='1'*64
+            restore.write_text(json.dumps({'state':'complete','sha256':capture,'destination':str(root.parent)}));os.chmod(restore,0o600)
+            self.assertFalse(radio.check_start(root,cfg,receipt,restore,capture,False))
+            self.assertFalse(receipt.exists())
+            (root/'database.db').write_bytes(b'changed before first start')
+            with self.assertRaises(ValueError):radio.check_start(root,cfg,receipt,restore,capture,True)
+            self.assertFalse(receipt.exists());(root/'database.db').write_bytes(files['database.db'])
+            self.assertTrue(radio.check_start(root,cfg,receipt,restore,capture,True))
+            sealed=receipt.read_bytes();self.assertEqual(receipt.stat().st_mode&0o777,0o600)
+            self.assertNotIn('network_key',sealed.decode())
+            (root/'database.db').write_bytes(b'updated live database')
+            (root/'coordinator_backup.json').write_bytes(b'{"updated":"live counters"}')
+            config=yaml.safe_load(files['configuration.yaml']);config['friendly_name']='legitimate live setting'
+            (root/'configuration.yaml').write_text(yaml.safe_dump(config))
+            before={p.name:p.read_bytes() for p in root.iterdir()}
+            self.assertFalse(radio.check_start(root,cfg,receipt,restore,capture,True))
+            self.assertEqual(before,{p.name:p.read_bytes() for p in root.iterdir()});self.assertEqual(receipt.read_bytes(),sealed)
+            receipt.unlink()
+            with self.assertRaises(ValueError):radio.check_start(root,cfg,receipt,restore,capture,True)
+            self.assertFalse(receipt.exists());receipt.write_bytes(sealed);os.chmod(receipt,0o600)
+            config['advanced']['pan_id']=4321;(root/'configuration.yaml').write_text(yaml.safe_dump(config))
+            with self.assertRaises(ValueError):radio.check_start(root,cfg,receipt,restore,capture,True)
+            config['advanced']['pan_id']=1234;(root/'configuration.yaml').write_text(yaml.safe_dump(config))
+            restore.write_text(json.dumps({'state':'complete','sha256':'2'*64,'destination':str(root.parent)}))
+            with self.assertRaises(ValueError):radio.check_start(root,cfg,receipt,restore,capture,True)
+            restore.write_text(json.dumps({'state':'complete','sha256':capture,'destination':str(root.parent)}))
+            receipt.write_text('{}')
+            with self.assertRaises(ValueError):radio.check_start(root,cfg,receipt,restore,capture,True)

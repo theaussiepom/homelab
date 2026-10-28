@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import ipaddress
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
@@ -134,8 +135,8 @@ def check_archive(path, cfg):
     check_bytes(files, cfg)
 
 
-def check_directory(root, cfg):
-    """Inspect restored files read-only, before Compose may start the radio."""
+def directory_files(root, cfg):
+    """Read bounded regular state files without opening the radio."""
     root = Path(root)
     if root.is_symlink() or not root.is_dir():
         raise ValueError('Use the restored Zigbee directory')
@@ -147,17 +148,93 @@ def check_directory(root, cfg):
         if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_FILE_BYTES:
             raise ValueError('Required Zigbee state must be bounded regular files')
         files[name] = path.read_bytes()
-    check_bytes(files, cfg)
+    return files
+
+
+def check_directory(root, cfg):
+    """Keep the original exact-capture check for unadmitted data."""
+    check_bytes(directory_files(root, cfg), cfg)
+
+
+def fingerprint(value):
+    """Bind canonical facts without storing network key material in a receipt."""
+    return hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
+
+
+def network_identity(files, cfg):
+    """Allow live counters/settings while sealing key, PAN identities and channel."""
+    import yaml
+    reference=check_configuration(files['configuration.yaml'],cfg)
+    advanced=yaml.safe_load(files['configuration.yaml'])['advanced']
+    key=advanced['network_key']
+    if reference:
+        name,field=reference
+        if name not in files or hashlib.sha256(files[name]).hexdigest()!=cfg['state_sha256'].get(name):
+            raise ValueError('The admitted network-key file changed')
+        try:key=yaml.safe_load(files[name])[field]
+        except (yaml.YAMLError,KeyError,TypeError):raise ValueError('The admitted key reference is invalid') from None
+        if not byte_array(key,16):raise ValueError('The admitted key reference is invalid')
+    return fingerprint({'key':key,'pan':advanced['pan_id'],'extended_pan':advanced['ext_pan_id'],
+                        'channel':advanced.get('channel')})
+
+
+def private_receipt(path):
+    """Read only a bounded regular receipt owned privately by this operator."""
+    info=path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid!=os.geteuid() or
+            stat.S_IMODE(info.st_mode)!=0o600 or not 0<info.st_size<=65536):
+        raise ValueError('Preserve the private regular startup/restore receipt')
+    return json.loads(path.read_text())
+
+
+def check_start(root,cfg,receipt,restore_receipt,capture_sha256,admit=False):
+    """Admit exact first-start bytes once; never rewind mutable live state later."""
+    root=Path(root);receipt=Path(receipt);restore_receipt=Path(restore_receipt)
+    if not re.fullmatch(r'[0-9a-f]{64}',capture_sha256):raise ValueError('Bind the selected restore capture')
+    restored=private_receipt(restore_receipt)
+    if restored!={'state':'complete','sha256':capture_sha256,'destination':str(root.parent)}:
+        raise ValueError('The complete restore receipt must match this capture and data directory')
+    files=directory_files(root,cfg)
+    expected={'schema':1,'capture_sha256':capture_sha256,'selection_sha256':fingerprint(cfg),
+              'network_identity_sha256':network_identity(files,cfg)}
+    if receipt.is_symlink():raise ValueError('The startup admission receipt must not be a link')
+    if receipt.exists():
+        if private_receipt(receipt)!=expected:
+            raise ValueError('Admitted network identity or selected capture facts changed; preserve live data and review')
+        return False
+    check_bytes(files,cfg)
+    if not admit:return False
+    # Written before Compose: a failed first attempt may already mutate state.
+    # This admits initial bytes, not startup success; controller HOLD still applies.
+    fd=os.open(receipt,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+    with os.fdopen(fd,'w') as stream:
+        json.dump(expected,stream,sort_keys=True);stream.write('\n');stream.flush();os.fsync(stream.fileno())
+    directory=os.open(receipt.parent,os.O_RDONLY|os.O_DIRECTORY)
+    try:os.fsync(directory)
+    finally:os.close(directory)
+    return True
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--directory', type=Path, required=True)
+    parser.add_argument('--admission-receipt', type=Path)
+    parser.add_argument('--restore-receipt', type=Path)
+    parser.add_argument('--capture-sha256')
+    parser.add_argument('--admit-first-start', action='store_true')
     args = parser.parse_args()
-    check_directory(args.directory, json.loads(args.config.read_text()))
-    print(json.dumps({'prepared_state': 'matched', 'configuration_changed': False,
-                      'radio_opened': False}))
+    cfg=json.loads(args.config.read_text());created=False
+    if args.admission_receipt:
+        if not args.restore_receipt or not args.capture_sha256:
+            parser.error('Startup admission requires the selected restore receipt and capture SHA256')
+        created=check_start(args.directory,cfg,args.admission_receipt,args.restore_receipt,
+                            args.capture_sha256,args.admit_first_start)
+    else:
+        if args.admit_first_start:parser.error('Select the private startup admission receipt')
+        check_directory(args.directory,cfg)
+    print(json.dumps({'prepared_state': 'matched-or-admitted', 'configuration_changed': False,
+                      'radio_opened': False,'admission_created':created}))
 
 
 if __name__ == '__main__':

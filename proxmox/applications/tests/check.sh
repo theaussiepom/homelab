@@ -4,6 +4,7 @@ set -eu
 export PYTHONDONTWRITEBYTECODE=1
 python3 -m unittest discover -s /src/proxmox/applications/tests -v
 python3 /src/proxmox/applications/tests/restore_fixture.py
+python3 /src/proxmox/applications/tests/zigbee_start_fixture.py
 python3 /src/proxmox/applications/tests/database_account_fixture.py
 python3 /src/proxmox/applications/tests/database_server_fixture.py
 python3 /src/proxmox/applications/tests/runner_network_guard_fixture.py

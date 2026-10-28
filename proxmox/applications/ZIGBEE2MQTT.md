@@ -38,8 +38,8 @@ confirmation is present.
 
 The entire Zigbee data directory is retained. Before creation, CD checks that
 the capture contains its reviewed configuration, device database and coordinator
-backup. Before startup it checks the restored bytes again. A missing or different
-file stops deployment. It does not create a fresh Zigbee network to fill a gap.
+backup. Before the first startup attempt it checks the restored bytes again. A missing
+or different file stops initial deployment. It does not create a fresh Zigbee network to fill a gap.
 
 CD **does not rewrite Zigbee configuration**. Prepare any necessary MQTT endpoint
 or listener changes separately and review that copy before selecting its hashes.
@@ -201,3 +201,25 @@ the radio backend /32. Select frontend API clients and any existing ingress
 proxy separately on the retained frontend port. Do not assume that adding the
 radio's outbound rule also admits it at the broker. Preserve the MQTT topic
 and authentication; no database bridge or new physical network is required.
+
+## First-start admission and later starts
+
+Staging checks the exact captured bytes without creating startup admission.
+The explicit start step first requires the retired-writer confirmation. After
+checking the complete restore receipt and exact prepared hashes, it writes one
+private, durable `zigbee-admission.json` before Compose can open the radio. This
+records capture/selection and network-identity digests, never raw key material.
+It is admission of initial state, not proof of startup success; a failed attempt
+still retains the controller HOLD and cannot replay itself.
+
+On a later reviewed start, the same complete restore and admission receipts
+must match. The checker reads bounded regular files and verifies the selected
+adapter, MQTT endpoint/topic, serial path, frontend and sealed network key,
+PAN/extended-PAN and channel. Database and coordinator-backup counters and other
+non-identity settings may have changed during normal operation. The checker
+never restores original bytes over that live data. The existing restore receipt
+continues to prevent re-extraction. Missing/changed receipts, a different capture
+or selection, identity drift and changed referenced-key files remain holds.
+Deleting a receipt is not an admission or recovery procedure: unadmitted data
+must again match the initial capture hashes. Native runtime acceptance remains
+separate from the synthetic repeated-start fixture.
