@@ -296,9 +296,11 @@ def verify(packet, execute=command):
                 and all(current['files'][name][key] == before['files'][name][key] for key in ('uid','gid','mode','inode','device')),
                 'The installed candidate content or file metadata differs')
     require(current['guards'] == before['guards'], 'An unrelated PostgreSQL configuration file changed')
-    require(current['binary_version'] == before['binary_version']
+    # Later maintenance verification does not own routine minor package updates.
+    # Admission and activation still bind the exact inspected binary version.
+    require(int(current['settings']['version_num']) // 10000 == before['cluster']['major']
             and all(current['settings'][key] == before['settings'][key] for key in
-                    ('version','version_num','data_directory','config_file','hba_file','port')),
+                    ('data_directory','config_file','hba_file','port')),
             'The selected cluster version or paths changed')
     expected = {'127.0.0.1',packet['endpoint']['address']}
     require(listener(current['settings']['listen_addresses']) == sockets(execute) == expected,

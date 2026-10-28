@@ -270,7 +270,10 @@ def bindings(deployment, cfg, site, work):
             'Original source/input/installation/completion bindings differ')
     variables = json.loads(raw['tfvars'])
     expected = {key: copy.deepcopy(cfg[key]) for key in ('site', 'guest', 'ssh_public_keys')}
-    expected['guest']['routing_labels'] = deployment.discovery.labels(cfg)
+    # The commissioned database installer predates discovery labels. Preserve
+    # its original variables/API instead of importing a later installer for it.
+    if hasattr(deployment, 'discovery'):
+        expected['guest']['routing_labels'] = deployment.discovery.labels(cfg)
     require(variables == expected, 'Original installed OpenTofu variables differ')
     state = json.loads(raw['terraform.tfstate'])
     require(isinstance(state.get('lineage'), str) and state['lineage'] and type(state.get('serial')) is int,
@@ -278,6 +281,14 @@ def bindings(deployment, cfg, site, work):
     return {'files': {key: digest(value) for key, value in raw.items()},
             'source_sha256': receipt['source_sha256'], 'input_hashes': receipt['input_hashes'],
             'state_lineage': state['lineage'], 'state_serial': state['serial']}, variables
+
+
+def candidate_variables(variables, candidate):
+    result = copy.deepcopy(variables)
+    result['guest'] = copy.deepcopy(candidate)
+    if 'routing_labels' in variables['guest']:
+        result['guest']['routing_labels'] = copy.deepcopy(variables['guest']['routing_labels'])
+    return result
 
 
 def tofu(command, environment, log, output=None):
@@ -329,7 +340,7 @@ def plan(deployment, installed_config_path, catalogue_path, evidence, engine, *,
             require(not any(p.is_symlink() for p in source.rglob('*')), 'Original ToFu source contains symlinks')
             shutil.copytree(source, evidence / 'tofu', ignore=shutil.ignore_patterns(
                 '.terraform', '*.tfstate*', '*.tfplan*', '*.auto.tfvars*'))
-            variables['guest'] = dict(candidate, routing_labels=variables['guest']['routing_labels'])
+            variables = candidate_variables(variables, candidate)
             write_new(evidence / 'tofu/site.auto.tfvars.json', encoded(variables))
             write_new(evidence / 'candidate-guest.json', encoded(candidate))
             log = evidence / 'plan.log'; write_new(log, b'')

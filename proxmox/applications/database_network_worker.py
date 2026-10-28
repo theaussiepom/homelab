@@ -85,10 +85,19 @@ def ansible(deployment, cfg, source, playbook, variables, directory, label):
             env=environment, stdout=log, stderr=log, check=True, timeout=240, umask=0o077)
 
 
-def runtime(deployment, cfg, adapter, role, member, directory, action):
+def runtime(deployment, cfg, adapter, role, member, directory, action, quiesce_receipt=None):
     output = directory / (action + '-' + str(time.time_ns()) + '.json')
+    request = member['runtime_packet']
+    if role == 'db-tools' and action in {'activate', 'verify'}:
+        require(quiesce_receipt is not None, 'Bind the common pgAdmin quiesce result before profile access')
+        receipt = json.loads(regular(quiesce_receipt))
+        require(receipt.get('phase') == 'quiesce' and receipt.get('role') == role
+                and receipt.get('result', {}).get('status') == 'passed'
+                and receipt['result'].get('action') == 'quiesce'
+                and isinstance(receipt['result'].get('quiesced'), dict), 'The common quiesce phase differs')
+        request = dict(request, quiesced=receipt['result']['quiesced'])
     values = {'app': cfg['app'], 'database_network_action': action,
-              'database_network_request': member['runtime_packet'], 'database_network_result_path': str(output)}
+              'database_network_request': request, 'database_network_result_path': str(output)}
     if role == 'postgresql':
         values = {'app': cfg['app'], 'postgres_runtime_mode': action,
                   'postgres_runtime_request': member['runtime_packet'], 'postgres_runtime_output': str(output)}
@@ -96,7 +105,7 @@ def runtime(deployment, cfg, adapter, role, member, directory, action):
     return json.loads(regular(output))
 
 
-def execute(action, role, member, helper, installer, adapter, catalogue, operation, client_vmids):
+def execute(action, role, member, helper, installer, adapter, catalogue, operation, client_vmids, quiesce_receipt=None):
     source_revision(installer, member['installer_revision']); source_revision(adapter, member['adapter_revision'])
     # The current helper's pure imports resolve before the original installer.
     require('deploy' not in sys.modules, 'Use a fresh process for each commissioned installer')
@@ -147,10 +156,10 @@ def execute(action, role, member, helper, installer, adapter, catalogue, operati
     if action == 'verify':
         network_apply.verify(*args)
         startup_probe(deployment, cfg, json.loads(regular(directory / 'startup-after.json')))
-        return runtime(deployment, cfg, adapter, role, member, directory, 'verify')
+        return runtime(deployment, cfg, adapter, role, member, directory, 'verify', quiesce_receipt)
     require(action in {'quiesce', 'activate'} and (action != 'quiesce' or role != 'postgresql'),
             'Select only a declared member phase')
-    return runtime(deployment, cfg, adapter, role, member, directory, action)
+    return runtime(deployment, cfg, adapter, role, member, directory, action, quiesce_receipt)
 
 
 def bind_runtime(role, packet, context, adapter, client_vmids):
@@ -188,13 +197,15 @@ def main():
     parser.add_argument('--catalogue', type=Path, required=True)
     parser.add_argument('--operation', required=True)
     parser.add_argument('--client-vmid', type=int, action='append', required=True)
+    parser.add_argument('--quiesce-receipt', type=Path)
     args = parser.parse_args(); os.umask(0o077)
     try:
         import re
         require(re.fullmatch(r'postgresql-[a-z0-9][a-z0-9-]{0,63}', args.operation), 'Invalid operation identity')
         member = json.loads(regular(args.member))
         result = execute(args.action, args.role, member, Path(__file__).resolve().parents[2],
-                         args.installer.resolve(), args.adapter.resolve(), args.catalogue, args.operation, args.client_vmid)
+                         args.installer.resolve(), args.adapter.resolve(), args.catalogue, args.operation,
+                         args.client_vmid, args.quiesce_receipt)
         print(json.dumps(result))
     except Exception as error:
         raise SystemExit('Member operation held (' + type(error).__name__ + '); preserve private group evidence') from None

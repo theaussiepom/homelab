@@ -310,6 +310,19 @@ class ReadOnlyPlannerTests(unittest.TestCase):
         with patch.object(maintenance, 'tofu') as tofu, self.assertRaises(ValueError): self.invoke()
         tofu.assert_not_called()
 
+    def test_commissioned_database_installer_without_discovery_keeps_its_original_variables(self):
+        # The actual DB pin f313136 predates the foundation discovery API.
+        del self.deployment.discovery
+        path = self.work / 'tofu/site.auto.tfvars.json'
+        variables = json.loads(path.read_bytes()); variables['guest'].pop('routing_labels')
+        path.write_bytes(maintenance.encoded(variables))
+        before = path.read_bytes()
+        with patch.object(maintenance, 'tofu', side_effect=self.fake_tofu):
+            self.assertEqual(self.invoke()['status'], 'review_required')
+        candidate = json.loads((self.evidence / 'tofu/site.auto.tfvars.json').read_bytes())
+        self.assertNotIn('routing_labels', candidate['guest'])
+        self.assertEqual(path.read_bytes(), before)
+
 
 if __name__ == '__main__':
     unittest.main()

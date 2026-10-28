@@ -95,6 +95,12 @@ adapters; their source pins remain separate from the original installers.
 
 A reviewed native plan and complete server/client activation packet are still
 needed before an actual cutover. Source availability is not deployment approval.
+Before approving it, confirm the current SQL consumer inventory: every existing
+consumer must be in the selected group or explicitly deferred while inactive.
+The approval also covers partial failure: if one client stops and the next step
+fails, that client stays stopped; after both stop, either or both may remain
+stopped until the failure is reviewed. CD never clears that hold or resumes a
+partly moved group automatically.
 A provider's `update` plan alone does not prove lifecycle effects; the packet
 explicitly covers any required guest cycle and the selected PostgreSQL restart.
 After removing an old address, use new-network checks; preserving historical

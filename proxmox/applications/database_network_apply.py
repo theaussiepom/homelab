@@ -86,7 +86,7 @@ def copied_source_files(directory):
 def load(deployment, installed_config_path, catalogue_path, plan_evidence, packet_path, expected_packet_sha256):
     require(isinstance(expected_packet_sha256, str) and re.fullmatch('[0-9a-f]{64}', expected_packet_sha256),
             'Supply the exact reviewed raw packet digest')
-    packet_raw = regular(Path(packet_path), private=False)
+    packet_raw = regular(Path(packet_path))
     require(digest(packet_raw) == expected_packet_sha256, 'Apply packet bytes differ from their reviewed digest')
     selected = packet(json.loads(packet_raw))
     site, catalogue_path, plan_evidence = map(Path, (installed_config_path, catalogue_path, plan_evidence))
@@ -153,7 +153,7 @@ def admission(deployment, context, *, completed=None):
                 and original['state_serial'] == completed['state_serial']
                 and original['state_lineage'] == completed['state_lineage'],
                 'Applied overlay state or original immutable installation bindings changed')
-    variables['guest'] = dict(c['candidate'], routing_labels=variables['guest']['routing_labels'])
+    variables = maintenance.candidate_variables(variables, c['candidate'])
     require(json.loads(regular(c['plan'] / 'tofu/site.auto.tfvars.json')) == variables,
             'Saved candidate variables differ from the original source and selected network overlay')
     require(regular(c['catalogue_path'], private=False) == c['catalogue_raw'], 'Catalogue drifted during admission')

@@ -172,7 +172,7 @@ class NativeDriver:
         self.directory = self.state / ('database-network-cutover-' + selected['operation'])
         require(digest(regular(self.catalogue, private=False)) == selected['catalogue_sha256'],
                 'The exact private database catalogue changed')
-        configs = []
+        configs, requests = [], []
         for role in ROLES:
             member = selected['members'][role]
             source_revision(installers[role], member['installer_revision'])
@@ -182,10 +182,14 @@ class NativeDriver:
                     and cfg['paths']['state_root'] == str(self.state), 'A coordinated member identity differs')
             configs.append(cfg)
             request = json.loads(regular(self.state / str(member['vmid']) / member['plan_directory'] / 'request.json'))
+            requests.append(request)
             require(request.get('engine') == 'postgresql' and request.get('phase') == 'cutover'
                     and request.get('catalogue_sha256') == selected['catalogue_sha256']
                     and sorted(request.get('client_vmids', [])) == sorted(selected['members'][r]['vmid'] for r in ROLES[1:]),
                     'Every plan must bind exactly this group and catalogue, without future clients')
+        require(len({r['legacy_server_address'] for r in requests}) == 1
+                and all(c['site'] == configs[0]['site'] for c in configs),
+                'All members must bind the same old PostgreSQL endpoint and Proxmox site')
         # Membership and endpoint identity come from the one private catalogue.
         import database_networks
         catalogue_value = json.loads(regular(self.catalogue, private=False))
@@ -235,6 +239,10 @@ class NativeDriver:
             '--installer', str(self.installers[role]), '--adapter', str(self.adapters[role]),
             '--catalogue', str(self.catalogue), '--operation', self.selected['operation']]
         for client in ROLES[1:]: command += ['--client-vmid', str(self.selected['members'][client]['vmid'])]
+        if role == 'db-tools' and action in {'activate', 'verify'}:
+            phase_name = '01-quiesce-db-tools.json'
+            self.check_custody(phase_name, regular(self.directory / phase_name))
+            command += ['--quiesce-receipt', str(self.directory / phase_name)]
         result = subprocess.run(command, capture_output=True, check=True, timeout=900, umask=0o077)
         require(len(result.stdout) <= 1024 * 1024, 'Oversized private member result')
         return json.loads(result.stdout)

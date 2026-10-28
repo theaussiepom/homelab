@@ -32,7 +32,6 @@ class ApplyTests(unittest.TestCase):
             'review_packet_sha256': maintenance.digest((self.evidence / 'review-packet.json').read_bytes()),
             'apply_helper_sha256': maintenance.digest(Path(apply_network.__file__).read_bytes()), 'allow_guest_restart': True}
         self.packet_path = self.root / 'operation.json'; maintenance.write_new(self.packet_path, maintenance.encoded(self.selected))
-        self.packet_path.chmod(0o644)  # A non-secret reviewed packet may come from private Git.
         self.packet_sha = maintenance.digest(self.packet_path.read_bytes())
         self.nas = self.root / 'nas/208'; self.nas.mkdir(parents=True, mode=0o700)
         self.deployment.backup = Mock()
@@ -70,6 +69,12 @@ class ApplyTests(unittest.TestCase):
 
     def apply(self):
         return apply_network.apply(*self.args())
+
+    def test_apply_packet_requires_private_owned_file_before_native_commands(self):
+        self.packet_path.chmod(0o644)
+        with patch.object(maintenance, 'tofu') as tofu:
+            with self.assertRaises(ValueError): self.apply()
+        tofu.assert_not_called()
 
     def verify(self):
         return apply_network.verify(*self.args())

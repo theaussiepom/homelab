@@ -40,6 +40,7 @@ class RuntimeTests(unittest.TestCase):
         self.pid = 123; self.started = '1000'; self.start_time = '2026-10-28 01:00:00+00'
         self.listening = '127.0.0.1,10.88.30.23'
         self.binary_version = 'postgres (PostgreSQL) 16.10 (Fixture)'
+        self.server_version = '16.10'; self.server_version_num = '160010'
         self.config_invalid = False; self.hba_invalid = False; self.restart_fails = False; self.keep_old_listener = False
 
     def put(self,path,text):
@@ -85,7 +86,7 @@ class RuntimeTests(unittest.TestCase):
             return b'127.0.0.1,10.88.31.23\n'
         self.assertEqual(argv[-1],runtime.SQL)
         if not self.running: raise subprocess.CalledProcessError(2,argv)
-        return json.dumps(dict(version='16.10',version_num='160010',config_file=str(self.paths['config']),
+        return json.dumps(dict(version=self.server_version,version_num=self.server_version_num,config_file=str(self.paths['config']),
             hba_file=str(self.paths['pg_hba.conf']),data_directory=str(self.paths['auto'].parent),port='5432',
             listen_addresses=self.listening,start_time=self.start_time,file_errors=[],hba=self.native_hba())).encode()
 
@@ -172,6 +173,26 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(any(argv[:2] == ['systemctl','restart'] for argv,_ in self.calls))
         self.assertTrue(all(not (call.args[1] & (os.O_RDWR|os.O_WRONLY|os.O_TRUNC|os.O_CREAT)) for call in opened.call_args_list))
         self.assertEqual({p:self.snapshot(p) for p in self.paths.values()},before); self.assert_data_unchanged()
+
+    def test_later_minor_update_verifies_but_pre_change_binary_drift_still_refuses(self):
+        packet = self.packet(); runtime.activate(packet,self.execute)
+        self.binary_version = 'postgres (PostgreSQL) 16.11 (Fixture)'
+        self.server_version = '16.11'; self.server_version_num = '160011'
+        self.assertEqual(runtime.verify(packet,self.execute)['status'],'passed')
+        self.assertEqual(self.restarts,1)
+        with self.assertRaises(ValueError): runtime.preflight(packet,self.execute)
+        with self.assertRaises(ValueError): runtime.activate(packet,self.execute)
+        self.assertEqual(self.restarts,1)
+
+    def test_later_major_update_or_cluster_path_drift_still_refuses(self):
+        packet = self.packet(); runtime.activate(packet,self.execute)
+        self.server_version = '17.1'; self.server_version_num = '170001'
+        with self.assertRaises(ValueError): runtime.verify(packet,self.execute)
+        self.server_version = '16.10'; self.server_version_num = '160010'
+        settings = self.inspected()['settings']; settings['data_directory'] = '/other-data'
+        with patch.object(runtime,'query',return_value=settings):
+            with self.assertRaises(ValueError): runtime.verify(packet,self.execute)
+        self.assertEqual(self.restarts,1)
 
     def test_changed_bound_candidate_or_extra_configuration_change_fails_before_writes(self):
         for mutate in (lambda p:p['candidate']['homelab.conf'].update(sha256='0'*64),

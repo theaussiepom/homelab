@@ -3,6 +3,7 @@ import copy
 import json
 from pathlib import Path
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import Mock, patch
@@ -53,6 +54,35 @@ class Tests(unittest.TestCase):
         validator.return_value = False
         with patch.object(worker.importlib, 'import_module', return_value=module), self.assertRaises(ValueError):
             worker.bind_runtime('identity', {}, self.context, Path('/adapter'), [211,202])
+
+    def test_pgadmin_resume_uses_the_exact_quiesce_phase_receipt(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp); receipt = directory / 'quiesce.json'
+            value = {'phase':'quiesce', 'role':'db-tools', 'result': {'status':'passed',
+                     'action':'quiesce', 'quiesced': {'request_sha256':'a'*64}}}
+            worker.maintenance.write_new(receipt, worker.encoded(value))
+            cfg = {'app':{'kind':'db-tools'}}; member = {'runtime_packet':{'original':'binding'}}
+            captured = []
+            def ansible(deployment, cfg, source, playbook, variables, output, action):
+                captured.append(variables)
+                worker.maintenance.write_new(Path(variables['database_network_result_path']),
+                                              b'{"status":"passed"}')
+            with patch.object(worker, 'ansible', side_effect=ansible):
+                worker.runtime(None, cfg, Path('/adapter'), 'db-tools', member, directory, 'activate', receipt)
+            self.assertEqual(captured[0]['database_network_request'],
+                {'original':'binding', 'quiesced':{'request_sha256':'a'*64}})
+            self.assertEqual(member, {'runtime_packet':{'original':'binding'}})
+            value['role'] = 'identity'; receipt.unlink()
+            worker.maintenance.write_new(receipt, worker.encoded(value))
+            with patch.object(worker, 'ansible') as remote, self.assertRaises(ValueError):
+                worker.runtime(None, cfg, Path('/adapter'), 'db-tools', member, directory, 'activate', receipt)
+            remote.assert_not_called()
+
+    def test_pgadmin_missing_quiesce_receipt_is_not_an_implicit_resume(self):
+        with patch.object(worker, 'ansible') as remote, self.assertRaises(ValueError):
+            worker.runtime(None, {'app':{}}, Path('/adapter'), 'db-tools',
+                           {'runtime_packet':{}}, Path('/private'), 'activate')
+        remote.assert_not_called()
 
 
 if __name__ == '__main__': unittest.main()
