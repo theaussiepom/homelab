@@ -90,7 +90,9 @@ def route_ready(route):
                 # browser hostname's certificate; DNS may still name the old proxy.
                 raw = socket.create_connection((route['frontend_address'], 443), timeout=3)
                 try:
-                    conn.sock = ssl.create_default_context().wrap_socket(raw, server_hostname=route['host'])
+                    context = ssl.create_default_context()
+                    context.minimum_version = ssl.TLSVersion.TLSv1_2
+                    conn.sock = context.wrap_socket(raw, server_hostname=route['host'])
                 except BaseException:
                     raw.close()
                     raise
