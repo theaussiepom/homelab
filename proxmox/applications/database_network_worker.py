@@ -19,8 +19,10 @@ import database_network_maintenance as maintenance
 from database_network_cutover import private_directory
 
 PLAYBOOKS = {'postgresql': 'postgresql-network.yml',
-             'identity': 'identity-database-network.yml', 'db-tools': 'pgadmin-database-network.yml'}
+             'identity': 'identity-database-network.yml', 'db-tools': 'pgadmin-database-network.yml',
+             'mariadb': 'database-server-network.yml', 'influxdb': 'database-server-network.yml'}
 UNITS = {'postgresql': 'postgresql@.service', 'identity': 'docker.service', 'db-tools': 'docker.service'}
+UNITS.update(mariadb='mariadb.service', influxdb='influxdb.service')
 STATE = Path('/var/lib/homelab-applications')
 INPUTS = Path('/var/lib/homelab-inputs')
 require, regular, encoded, digest = maintenance.require, maintenance.regular, maintenance.encoded, maintenance.digest
@@ -39,7 +41,7 @@ def save(path, raw):
 
 
 def site_path(role):
-    return INPUTS / ('postgresql.json' if role == 'postgresql' else 'foundation-' + role + '/site.json')
+    return INPUTS / (role + '.json' if role in {'postgresql', 'mariadb', 'influxdb'} else 'foundation-' + role + '/site.json')
 
 
 def identity_recovery(member, directory):
@@ -136,6 +138,9 @@ def runtime(deployment, cfg, adapter, role, member, directory, action, quiesce_r
     if role == 'postgresql':
         values = {'app': cfg['app'], 'postgres_runtime_mode': action,
                   'postgres_runtime_request': member['runtime_packet'], 'postgres_runtime_output': str(output)}
+    elif role in {'mariadb', 'influxdb'}:
+        values = {'app': cfg['app'], 'server_runtime_mode': action,
+                  'server_runtime_request': member['runtime_packet'], 'server_runtime_output': str(output)}
     ansible(deployment, cfg, adapter, PLAYBOOKS[role], values, directory, action)
     return json.loads(regular(output))
 
@@ -203,6 +208,18 @@ def execute(action, role, member, helper, installer, adapter, catalogue, operati
 
 def bind_runtime(role, packet, context, adapter, client_vmids):
     request = context['request']
+    if role in {'mariadb', 'influxdb'}:
+        import database_networks
+        from database_network_server import clients
+        catalogue = json.loads(context['catalogue_raw'])
+        require(request['engine'] == role and request['phase'] == 'cutover'
+                and sorted(request['client_vmids']) == sorted(client_vmids)
+                and packet.get('endpoint') == database_networks.endpoint(catalogue, role)
+                and packet.get('old_address') == request['legacy_server_address']
+                and packet.get('clients') == clients(catalogue, role, sorted(client_vmids))
+                and packet.get('before', {}).get('identity', {}).get('vmid') == context['cfg']['guest']['vmid'],
+                'The server runtime identity/listener/client set differs from its saved plan')
+        return
     require(request['engine'] == 'postgresql' and request['phase'] == 'cutover'
             and len(client_vmids) == len(set(client_vmids)) == 2
             and sorted(request['client_vmids']) == sorted(client_vmids),
@@ -240,7 +257,7 @@ def main():
     args = parser.parse_args(); os.umask(0o077)
     try:
         import re
-        require(re.fullmatch(r'postgresql-[a-z0-9][a-z0-9-]{0,63}', args.operation), 'Invalid operation identity')
+        require(re.fullmatch(r'(postgresql|mariadb|influxdb)-[a-z0-9][a-z0-9-]{0,63}', args.operation), 'Invalid operation identity')
         member = json.loads(regular(args.member))
         result = execute(args.action, args.role, member, Path(__file__).resolve().parents[2],
                          args.installer.resolve(), args.adapter.resolve(), args.catalogue, args.operation,
