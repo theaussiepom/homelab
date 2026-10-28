@@ -26,5 +26,6 @@ ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/ingress-network-startup.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-image.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-acme.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-browser.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/pgadmin-service-binding.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/pgadmin-service-verify.yml

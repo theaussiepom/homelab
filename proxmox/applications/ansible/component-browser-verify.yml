@@ -1,0 +1,31 @@
+---
+- name: Inspect the original installed browser helpers without modifying them
+  ansible.builtin.stat:
+    path: '/opt/homelab-app/ingress-browser/{{ item }}'
+    checksum_algorithm: sha256
+    follow: false
+  loop: [component_browser.py, ingress_browser.py, component_image.py]
+  register: browser_helpers
+
+- name: Require exact owned installed source before executing verification
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg
+      - item.stat.uid == 0
+      - item.stat.nlink == 1
+      - item.stat.mode == '0600'
+      - item.stat.checksum == lookup('ansible.builtin.file', playbook_dir + '/../' + item.item, rstrip=false) | hash('sha256')
+  loop: '{{ browser_helpers.results }}'
+  no_log: true
+
+- name: Read the original installed settings without changing them
+  ansible.builtin.slurp:
+    src: /opt/homelab-app/ingress-browser/settings.json
+  register: browser_existing_settings
+  no_log: true
+
+- name: Require the same route packet before verification
+  ansible.builtin.assert:
+    that:
+      - browser_existing_settings.content | b64decode | from_json == browser_settings
+  no_log: true
