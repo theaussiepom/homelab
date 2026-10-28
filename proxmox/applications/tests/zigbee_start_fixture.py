@@ -13,6 +13,7 @@ SOURCE=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(SOURCE))
 import restore
 from test_zigbee2mqtt import fixture,state
+from test_zigbee_first_start_approval import approval_for
 
 # GNU tar ACL restoration needs the ordinary writable layer, not /tmp tmpfs.
 with tempfile.TemporaryDirectory(dir='/var/tmp') as temporary:
@@ -29,10 +30,11 @@ with tempfile.TemporaryDirectory(dir='/var/tmp') as temporary:
     except ValueError as error:raise AssertionError(restored.with_suffix('.tar.stderr').read_text()) from error
     root=destination/'zigbee2mqtt';admission=base/'admission.json';settings=base/'zigbee.json'
     settings.write_text(json.dumps(cfg))
-    tasks=yaml.safe_load((SOURCE/'ansible/tasks/compose.yml').read_text())
+    tasks=yaml.safe_load((SOURCE/'ansible/tasks/compose.yml').read_text()) + yaml.safe_load((SOURCE/'ansible/tasks/zigbee-admission.yml').read_text())
     tasks=[copy.deepcopy(t) for t in tasks if t['name'] in {
         'Require the explicit start step and retired old writers',
         'Check first-start admission or preserve the admitted live Zigbee identity'}]
+    tasks=[t for i,t in enumerate(tasks) if t['name'].startswith('Require the explicit') or i==len(tasks)-1]
     assert len(tasks)==2 and tasks[0]['name'].startswith('Require the explicit')
     replacements={'/opt/homelab-app/zigbee2mqtt.py':str(SOURCE/'zigbee2mqtt.py'),
         '/opt/homelab-app/zigbee.json':str(settings),'/srv/homelab/data/zigbee2mqtt':str(root),
@@ -45,9 +47,12 @@ with tempfile.TemporaryDirectory(dir='/var/tmp') as temporary:
     playbook=base/'playbook.json';playbook.write_text(json.dumps([{
         'hosts':'all','connection':'local','gather_facts':False,'tasks':tasks}]))
     variables=base/'variables.json'
-    def run(start,writer=True,passes=True):
-        variables.write_text(json.dumps({'app':{'kind':'zigbee2mqtt','start_services':start,
-            'exclusive_writer_confirmed':writer,'capture':{'sha256':capture_hash}}}))
+    def run(start,writer=True,passes=True,approval=None,ordinary=False):
+        app={'kind':'zigbee2mqtt','start_services':start,'exclusive_writer_confirmed':writer,
+             'zigbee_first_start_approval':approval or {}}
+        if ordinary:app['zigbee_admission']={'capture_sha256':capture_hash,'selection_sha256':__import__('zigbee2mqtt').fingerprint(cfg)}
+        else:app['capture']={'sha256':capture_hash}
+        variables.write_text(json.dumps({'app':app,'ordinary_reconcile':ordinary}))
         result=subprocess.run(['ansible-playbook','-i','localhost,',str(playbook),
             '--extra-vars','@'+str(variables)],capture_output=True,text=True,timeout=40)
         if (result.returncode==0)!=passes:raise AssertionError(result.stdout+result.stderr)
@@ -55,7 +60,10 @@ with tempfile.TemporaryDirectory(dir='/var/tmp') as temporary:
     run(True,False,False);assert not admission.exists()
     (root/'database.db').write_bytes(b'altered before first start')
     run(True,passes=False);assert not admission.exists()
-    (root/'database.db').write_bytes(files['database.db']);run(True)
+    (root/'database.db').write_bytes(files['database.db'])
+    run(True,passes=False);assert not admission.exists()
+    approved=approval_for(cfg,capture_hash,restored)
+    run(True,approval=approved)
     sealed=admission.read_bytes()
     (root/'database.db').write_bytes(b'legitimate live database')
     (root/'coordinator_backup.json').write_bytes(b'{"counter":2}')
@@ -63,9 +71,12 @@ with tempfile.TemporaryDirectory(dir='/var/tmp') as temporary:
     (root/'configuration.yaml').write_text(yaml.safe_dump(value))
     live={p.name:p.read_bytes() for p in root.iterdir()}
     assert not restore.restore(capture,destination,restored,capture_hash)
-    run(True)
+    run(True);run(True,ordinary=True)
     assert live=={p.name:p.read_bytes() for p in root.iterdir()}
     assert admission.read_bytes()==sealed
     value['advanced']['pan_id']=4321;(root/'configuration.yaml').write_text(yaml.safe_dump(value))
     run(True,passes=False)
     print('Radio first-start tasks: exclusive-writer gate, exact initial hashes, private admission, mutable live repeat, restore no-replay and identity-drift refusal passed')
+
+# Exercise the separately owned ordinary preflight through the same CI fixture entry.
+subprocess.run([sys.executable,str(SOURCE/'tests/zigbee_ordinary_fixture.py')],check=True)

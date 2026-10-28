@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check a prepared Zigbee capture without converting it or opening the radio."""
 import argparse
+from datetime import datetime,timezone
 import hashlib
 import ipaddress
 import json
@@ -56,6 +57,28 @@ def validate(cfg):
             not re.fullmatch(r'[0-9a-f]{64}', str(value)) for value in hashes.values())):
         raise ValueError('Hash the prepared configuration, device database and coordinator backup')
     return cfg
+
+
+
+def mqtt_alias(stack):
+    """Map only the preserved broker hostname using central deployment addressing."""
+    value=stack.get('mqtt_host_alias')
+    if value is None:return {}
+    try:
+        hostname=urlsplit(stack['zigbee']['mqtt_server']).hostname
+        if (not isinstance(value,dict) or set(value)!={'hostname','address'} or
+                value['hostname']!=hostname or not isinstance(value['address'],str) or not isinstance(hostname,str) or
+                not re.fullmatch(r'[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?',hostname)):
+            raise ValueError
+        try:ipaddress.ip_address(hostname)
+        except ValueError:pass
+        else:raise ValueError
+        address=ipaddress.IPv4Address(value['address'])
+        if not address.is_private or address.is_loopback or address.is_link_local or address.is_multicast or address.is_unspecified:
+            raise ValueError
+    except (KeyError,TypeError,ValueError):
+        raise ValueError('Map only the preserved MQTT hostname to one reviewed private IPv4 address') from None
+    return {hostname:str(address)}
 
 
 def check_configuration(data, cfg):
@@ -187,7 +210,38 @@ def private_receipt(path):
     return json.loads(path.read_text())
 
 
-def check_start(root,cfg,receipt,restore_receipt,capture_sha256,admit=False):
+def first_start_approval(approval,cfg,capture_sha256,restore_receipt,now=None):
+    """Validate a separately reviewed, bounded first-start decision; never mint one."""
+    fields={'schema','approved','capture_sha256','selection_sha256',
+            'restore_receipt_sha256','exclusive_writer_window'}
+    if (not isinstance(approval,dict) or set(approval)!=fields or
+            type(approval['schema']) is not int or approval['schema']!=1 or
+            approval['approved'] is not True or
+            approval['capture_sha256']!=capture_sha256 or
+            approval['selection_sha256']!=fingerprint(cfg) or
+            approval['restore_receipt_sha256']!=hashlib.sha256(restore_receipt.read_bytes()).hexdigest()):
+        raise ValueError('First start needs explicit approval bound to this capture, selection and complete restore receipt')
+    window=approval['exclusive_writer_window']
+    if (not isinstance(window,dict) or set(window)!={'id','confirmed','not_before','expires_at'} or
+            window['confirmed'] is not True or not valid_window_id(window['id'])):
+        raise ValueError('Approve one explicit exclusive-writer window for first start')
+    try:
+        def utc(value):
+            if not isinstance(value,str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z',value):raise ValueError
+            return datetime.strptime(value,'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+        start=utc(window['not_before']);end=utc(window['expires_at'])
+        current=now or datetime.now(timezone.utc)
+        if not 0<(end-start).total_seconds()<=86400 or not start<=current<end:raise ValueError
+    except (ValueError,TypeError):
+        raise ValueError('The reviewed first-start writer window must be current and at most 24 hours') from None
+    return fingerprint(approval),window['id']
+
+
+def valid_window_id(value):
+    return isinstance(value,str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}',value) is not None
+
+
+def check_start(root,cfg,receipt,restore_receipt,capture_sha256,admit=False,approval=None,require_admission=False):
     """Admit exact first-start bytes once; never rewind mutable live state later."""
     root=Path(root);receipt=Path(receipt);restore_receipt=Path(restore_receipt)
     if not re.fullmatch(r'[0-9a-f]{64}',capture_sha256):raise ValueError('Bind the selected restore capture')
@@ -195,15 +249,24 @@ def check_start(root,cfg,receipt,restore_receipt,capture_sha256,admit=False):
     if restored!={'state':'complete','sha256':capture_sha256,'destination':str(root.parent)}:
         raise ValueError('The complete restore receipt must match this capture and data directory')
     files=directory_files(root,cfg)
-    expected={'schema':1,'capture_sha256':capture_sha256,'selection_sha256':fingerprint(cfg),
+    expected={'schema':2,'capture_sha256':capture_sha256,'selection_sha256':fingerprint(cfg),
               'network_identity_sha256':network_identity(files,cfg)}
     if receipt.is_symlink():raise ValueError('The startup admission receipt must not be a link')
     if receipt.exists():
-        if private_receipt(receipt)!=expected:
+        admitted=private_receipt(receipt)
+        if (not isinstance(admitted,dict) or
+                set(admitted)!=set(expected)|{'first_start_approval_sha256','writer_window_id'} or
+                any(admitted.get(k)!=v for k,v in expected.items()) or
+                not re.fullmatch(r'[0-9a-f]{64}',str(admitted.get('first_start_approval_sha256'))) or
+                not valid_window_id(admitted.get('writer_window_id'))):
             raise ValueError('Admitted network identity or selected capture facts changed; preserve live data and review')
         return False
     check_bytes(files,cfg)
-    if not admit:return False
+    if not admit:
+        if require_admission:raise ValueError('Start needs an existing admission or explicit first-start approval')
+        return False
+    approval_sha256,window_id=first_start_approval(approval,cfg,capture_sha256,restore_receipt)
+    expected.update(first_start_approval_sha256=approval_sha256,writer_window_id=window_id)
     # Written before Compose: a failed first attempt may already mutate state.
     # This admits initial bytes, not startup success; controller HOLD still applies.
     fd=os.open(receipt,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
@@ -223,15 +286,21 @@ def main():
     parser.add_argument('--restore-receipt', type=Path)
     parser.add_argument('--capture-sha256')
     parser.add_argument('--admit-first-start', action='store_true')
+    parser.add_argument('--require-admission', action='store_true')
+    parser.add_argument('--first-start-approval', default='{}')
+    parser.add_argument('--selection-sha256')
     args = parser.parse_args()
     cfg=json.loads(args.config.read_text());created=False
+    if args.selection_sha256 is not None and args.selection_sha256 != fingerprint(cfg):
+        raise ValueError('The installed Zigbee selection differs from the admitted ordinary input')
     if args.admission_receipt:
         if not args.restore_receipt or not args.capture_sha256:
             parser.error('Startup admission requires the selected restore receipt and capture SHA256')
         created=check_start(args.directory,cfg,args.admission_receipt,args.restore_receipt,
-                            args.capture_sha256,args.admit_first_start)
+                            args.capture_sha256,args.admit_first_start,
+                            json.loads(args.first_start_approval),args.require_admission)
     else:
-        if args.admit_first_start:parser.error('Select the private startup admission receipt')
+        if args.admit_first_start or args.require_admission:parser.error('Select the private startup admission receipt')
         check_directory(args.directory,cfg)
     print(json.dumps({'prepared_state': 'matched-or-admitted', 'configuration_changed': False,
                       'radio_opened': False,'admission_created':created}))

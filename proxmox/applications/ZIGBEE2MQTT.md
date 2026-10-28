@@ -41,8 +41,11 @@ the capture contains its reviewed configuration, device database and coordinator
 backup. Before the first startup attempt it checks the restored bytes again. A missing
 or different file stops initial deployment. It does not create a fresh Zigbee network to fill a gap.
 
-CD **does not rewrite Zigbee configuration**. Prepare any necessary MQTT endpoint
-or listener changes separately and review that copy before selecting its hashes.
+CD **does not rewrite Zigbee configuration**. Preserve the MQTT endpoint and
+listener in the captured application file. A narrow `mqtt_host_alias` in the
+stack maps that same broker hostname to its central deployment address. It
+changes container name resolution, not Zigbee YAML. Any unavoidable service
+configuration change needs separate reviewed SSH work; it is outside CD.
 The coordinator, network key, PAN identities, channel, device names and MQTT
 base topic must remain the intended existing ones. Credentials remain private.
 The checker accepts ordinary YAML and literal file-reference strings; custom
@@ -152,6 +155,42 @@ updates retain that device declaration. Drift is a hold: there is no
 needs a new operator decision; deleting state or old receipts is not a recovery
 procedure.
 
+## Explicit first-start approval
+
+The `start` step and `exclusive_writer_confirmed` do not themselves authorize a
+first radio startup. Supply a separately reviewed `app.zigbee_first_start_approval`
+record. It defaults to absent/denied and CD must never generate or approve it.
+The closed record contains:
+
+- `schema: 1` and literal `approved: true` after the human decision;
+- `capture_sha256`: the reviewed archive digest;
+- `selection_sha256`: the canonical SHA256 of the selected closed `zigbee` object;
+- `restore_receipt_sha256`: SHA256 of the exact complete private restore receipt;
+- `exclusive_writer_window`: `id`, literal `confirmed: true`, and UTC
+  `not_before`/`expires_at` values in `YYYY-MM-DDTHH:MM:SSZ` form.
+
+The window must be current and no longer than 24 hours. Its confirmation means
+the old writer has been retired for this selected startup. The existing writer
+assertion still runs first. Bind the final record into the reviewed private site
+input and saved plan; adding it after staging requires reviewing the changed
+input through the ordinary plan path. Never patch inputs behind a saved receipt.
+Missing, false, expired, future, malformed or mismatched approval refuses startup
+without creating an admission receipt. Staging can still check the initial
+bytes without admitting startup.
+
+The version2 admission receipt seals the approved record's digest and window ID
+alongside capture, selection and network identity. Once admitted, later reviewed
+starts need that same private receipt and identity; they do not reopen the first
+writer window or require reapproving legitimately mutable live database state.
+An older version1 or damaged receipt remains a hold requiring separate review.
+Do not delete or rewrite it to force a new first admission. Admission remains
+separate from startup success and does not clear controller HOLD evidence.
+
+Human security review must cover the new record and workflow selection, exact
+cluster API read exception/token scope, rendered backend listener and coordinator
+mapping. Synthetic fixtures do not authorize firewall activation, native USB
+access or a migration window. The inert private radio proposal remains disabled.
+
 ## What testing proves
 
 The offline suite checks rendering, preserved-state refusal, exact device
@@ -223,3 +262,45 @@ or selection, identity drift and changed referenced-key files remain holds.
 Deleting a receipt is not an admission or recovery procedure: unadmitted data
 must again match the initial capture hashes. Native runtime acceptance remains
 separate from the synthetic repeated-start fixture.
+
+## Permanent ordinary deployment after admission
+
+`zigbee_ordinary.py` supplies radio policy to the shared `ordinary_cd.py` engine.
+The shared engine owns locks, operation receipts, backups, failure holds and
+unchanged completion. The radio adapter has no parallel controller. Its two
+visible phases are infrastructure and application. It cannot restore a capture,
+attach/replace USB, approve first startup or clear an interrupted operation.
+
+Before a changed operation can plan/apply, the adapter requires the original
+runner state and USB preparation lineage, effective firewall readback and the
+unchanged exact device. A read-only Ansible preflight checks the previously
+accepted private checker, restore/admission receipt hashes, selected facts and
+live network identity before package or infrastructure changes. The same check
+runs before application reconciliation. Mutable database/counter changes remain
+valid. The ordinary input contains admission metadata, not a restore request or
+first-start permission. An already completed matching operation uses the shared
+unchanged/no-contact path.
+
+A missing radio or missing custody is an admission hold: the existing stopped
+creation, separately reviewed operator attachment and separately prepared data /
+first-start procedure must complete before ordinary radio CD is enabled. The
+permanent job survives that one-time migration. It never recreates a missing
+physical-radio guest or imports an unrelated state to make the job pass.
+
+The private called workflow is `.github/workflows/radio.yml`, with one job named
+Radio 209 and visible OpenTofu/Ansible steps. It remains explicitly disabled.
+Its actual dependency is automation200's MQTT service; it has no direct database
+bridge or dependency. Parent graph integration belongs to the shared source
+owner and must consume the disabled parent snippet once.
+
+Source dependency: the common owner must integrate `GUEST_ADAPTER_API = 1`,
+the small policy callbacks and the Zigbee task import into the existing ordinary
+engine/reconcile playbook. Until that reviewed interface is present in the
+pinned combined source, the adapter refuses execution. The first-start task file
+also needs that import; current legacy invocation refuses the newly required
+approval rather than implicitly admitting it. No human security or native
+acceptance is established by this source preparation.
+
+The selected broker alias is deployment addressing only. The checker still
+requires the captured MQTT URL, keys, PANs, channel, device names and topic. No
+source helper edits the application YAML or converts these settings.
