@@ -49,7 +49,7 @@
   ansible.builtin.set_fact:
     foundation_runtime_files: "{{ lookup('ansible.builtin.file', app.render_dir + '/runtime-files.json') | from_json }}"
   no_log: true
-  when: stack.foundation is defined and not ansible_check_mode
+  when: (stack.foundation is defined or app.kind == 'monitoring') and not ansible_check_mode
 
 - name: Prepare the private foundation runtime directory
   ansible.builtin.file:
@@ -58,7 +58,7 @@
     owner: root
     group: root
     mode: '0700'
-  when: stack.foundation is defined and not ansible_check_mode
+  when: (stack.foundation is defined or app.kind == 'monitoring') and not ansible_check_mode
 
 - name: Install only the selected service-readable foundation files
   ansible.builtin.copy:
@@ -69,13 +69,19 @@
     mode: "{{ item.mode }}"
   loop: "{{ foundation_runtime_files | default([]) }}"
   no_log: true
-  when: stack.foundation is defined and not ansible_check_mode
+  when: (stack.foundation is defined or app.kind == 'monitoring') and not ansible_check_mode
 
 - name: Prepare the directory for generated ingress routes
   ansible.builtin.file:
     path: /srv/homelab/data/traefik/dynamic
     state: directory
   when: app.kind == 'ingress' and stack.foundation is not defined and not ansible_check_mode
+
+- name: Validate the selected Proxmox CA before building its trust directory
+  ansible.builtin.command:
+    argv: [openssl, x509, -in, /opt/homelab-app/runtime/proxmox-ca.pem, -noout]
+  changed_when: false
+  when: app.kind == 'monitoring' and not ansible_check_mode
 
 - name: Install only the new ingress routes into the restored Traefik file directory
   ansible.builtin.copy:
@@ -148,7 +154,7 @@
   ansible.builtin.assert:
     that:
       - app.start_services | default(false) | bool
-      - app.exclusive_writer_confirmed | default(false) | bool
+      - app.exclusive_writer_confirmed | default(false) | bool or (app.kind == 'monitoring' and app.installation | default('') == 'clean')
     fail_msg: 'Data is staged. Start requires the selected cutover and exclusive-writer confirmation.'
   when: app.start_services | default(false) | bool and not ansible_check_mode
 
