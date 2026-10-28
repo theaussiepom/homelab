@@ -126,6 +126,13 @@ class EndpointTests(unittest.TestCase):
         self.assertFalse(self.connection.in_transaction)
         self.assertEqual('\n'.join(self.connection.iterdump()), before)
 
+    def test_runtime_scope_guard_failure_rolls_back_before_commit(self):
+        proposal=endpoint.plan(self.connection,SELECTOR,BEFORE,AFTER)
+        before='\n'.join(self.connection.iterdump())
+        def refuse(connection): raise ValueError('non-endpoint state changed')
+        with self.assertRaises(ValueError): endpoint.apply(self.connection,proposal,validate_update=refuse)
+        self.assertEqual('\n'.join(self.connection.iterdump()),before)
+
     def test_unknown_fields_and_bool_ids_cannot_expand_the_proposal(self):
         for selected in ({'server_id': True, 'user_id': 1}, dict(SELECTOR, table='user')):
             with self.assertRaises(ValueError): endpoint.plan(self.connection, selected, BEFORE, AFTER)

@@ -1,7 +1,7 @@
 # PostgreSQL network maintenance for an existing pgAdmin guest
 
-This is a component contract for the shared maintenance controller. It is not a
-new deployment, restore recipe or executable CD entry point. An existing pgAdmin
+This is a component contract and runtime playbook for the shared maintenance
+controller. It is not a new deployment, restore recipe or separate workflow. An existing pgAdmin
 profile must stay in place. Do not regenerate the commissioned guest's foundation
 inputs, change its source pin, or rewrite its install/plan/completion receipts to
 make a maintenance run look like the original installation.
@@ -80,48 +80,118 @@ Do not invent a private executor, infer that a source plan grants activation, or
 replace missing native evidence with synthetic results. No additional live read
 or action is requested by this document.
 
-## Saved connection adapter
+## Runtime caller API
 
-`pgadmin_endpoint.py` is a small SQLite adapter, with no file-opening code,
-CLI, service control, SSH, networking or receipt management. Root passes its
-already admitted SQLite connection; the adapter never creates a new profile.
+[pgadmin-database-network.yml](ansible/pgadmin-database-network.yml) is called by
+the common coordinator with `app` (the original app identity),
+`database_network_action`, `database_network_request` and
+`database_network_result_path` (a new private controller result file). Trusted
+source bytes from `pgadmin_database_runtime.py` and `pgadmin_endpoint.py` are sent
+with `python3 -c`; inspect/verify install no guest helper. No packet field can
+choose commands, source files, guest paths, SQL or a different image.
+
+The pure controller sequence is:
 
 ```python
 target = database_networks.endpoint(catalogue, 'postgresql')
-# selector and before come from a private observation of the existing profile.
-proposal = pgadmin_endpoint.plan(connection, selector, before, target)
-# Later, only under Root's reviewed maintenance transaction/lifecycle:
-changed = pgadmin_endpoint.apply(connection, proposal)
+request = pgadmin_database_runtime.prepare(target, inspected, selector, legacy_address)
+pgadmin_database_runtime.validate_binding(request, catalogue, client_vmids, legacy_address)
 ```
 
-The selector is exactly `{'server_id': <int>, 'user_id': <int>}`. `before` is
-exactly `{'host': <observed>, 'port': <int>}`. `target` is the shared endpoint
-shape `{'address': <IPv4>, 'port': 5432}`. These IDs and the current endpoint
-must be observed; do not select by display name, guess a user, create a server
-entry or bulk-rewrite matching hosts across profiles.
+This normalized-endpoint `prepare` is the equivalent of a catalogue-based
+compiler; `validate_binding` reuses the shared catalogue validator and checks
+membership/group, exact endpoints and every component-packet field. `inspected`
+is the complete structured inspect result, not a caller-invented profile row.
+`legacy_address` is the observed old network IP, independently of the saved
+hostname. Preserve the exact observed saved `before.host` literal without DNS
+resolution or an inferred substitution. The inspect request contains original
+`compose_sha256`, `identity_sha256`, `config_sha256`, immutable `image`, unchanged
+backend `http_address`, `selector` and the shared catalogue `target`.
 
-Planning reads only transport columns for the exact server/owner. Applying
-opens an immediate transaction, repeats those checks under the SQLite lock and
-compares the expected old host/port before changing only `server.host` and
-`server.port`. Stale/replayed proposals hold. An already-open caller transaction
-is refused rather than committed or rolled back. No usernames, credentials,
-maintenance database, TLS settings, users, groups, preferences or other rows are
-rewritten. Service-file transport, SSH tunnelling, shared registrations/copies,
-server update triggers or endpoint overrides in `connection_params` hold for
-separate review. An unfamiliar schema also holds; do not adapt a live database
-merely to make the adapter accept it. The relevant model is documented in the
-[pgAdmin server/profile source](https://github.com/pgadmin-org/pgadmin4/blob/REL-9_15/web/pgadmin/model/__init__.py).
+| Action | Behavior and result |
+| --- | --- |
+| `inspect` | Read only: match the commissioned identity, original Compose/config/image, exact container and retained mounts/policy. Return lifecycle identity, profile inode/owner/mode/xattr digest, coherent logical SQLite fingerprint, selected OAuth owner/server host/port and complete safe registration inventory. Bind a fresh-ID replacement proposal. No credentials or private rows are returned. |
+| `preflight` | Read only: validate the whole prepared request and current running state/profile before either client stops. Existing/failed component backup evidence is preserved. |
+| `quiesce` | Stop only the exact admitted container; require `unless-stopped`. Make a coherent SQLite backup using SQLite's backup API, including committed WAL, without checkpointing or restoring the source. Return `quiesced` with request/profile/backup hashes, profile metadata and stopped StartedAt/FinishedAt/restart-count bindings. A failure never implicitly resumes the app. |
+| `activate` | Add the returned receipt as `request.quiesced`. Require the same container stayed stopped across the provider cycle. Verify backup and all original bindings; atomically replace the bound registrations using the approved OAuth owner’s retained settings and a pre-commit whole-profile guard; start the same container ID without pulling, recreating or Compose-up. Check the existing HTTP listener. |
+| `verify` | Read only: same runtime/image/config, exact fresh registration and expected complete profile, metadata and HTTP liveness. Report SQL acceptance separately as described below. |
 
-Root's mechanism must bind this proposal to guest identity, the private catalogue
-hash, reviewed source and offline profile-backup hash. Before `apply`, it must
-quiesce the selected pgAdmin writer and active UI sessions, obtain a coherent
-SQLite backup including WAL state and preserve numeric ownership, modes, ACLs
-and xattrs. Use the admitted existing database in read/write-existing mode;
-never SQLite's default create-if-absent fallback. Root owns the exact stop/start
-action and its approval. This component performs none of those native actions.
-Do not import `servers.json`, recreate users, rotate secrets, change the master
-password policy or restore an old profile. Keep Authentik/provider/callback and
-HTTP/TLS routing configuration unchanged.
+Every successful action returns JSON `status: passed` and its `action`. That
+status means the selected phase passed, not that browser/SQL acceptance passed.
+The fixed guest backup location is derived from the prepared request hash;
+`backup_location(request)` exposes that pure location for common NAS custody.
+Backup files are root-private and never overwritten. No component approval,
+workflow, locks, state-owner, NAS, one-use or failed-hold manager is introduced.
+Those remain with the common coordinator. Original installation files/receipts
+and all pgAdmin users, OAuth configuration and file metadata stay unchanged.
+The registration replacement is explicit: bind the complete observed old
+server/owner/host/port inventory; create one fresh ID named `PostgreSQL` using the
+selected OAuth owner’s original row settings, except ID/name/host/port; delete
+exactly those old registrations. The selected database role, TLS policy, encrypted
+saved password and other connection settings remain byte-for-byte unchanged in
+SQLite. Query history for the removed registrations is cleared, matching pgAdmin’s
+server-delete behavior; the coherent backup retains it. Shared registrations,
+other foreign-key dependents and debugger state hold for separate review. A drifted
+inventory cannot silently expand the removal scope. The backup is copied into
+disposable memory to calculate the complete expected profile before any real
+write; the guard checks that exact fingerprint before committing all changes.
+
+The common order is both client preflights, quiesce211+202, saved provider plans
+for208/211/202, startup-gate updates, PostgreSQL activation, Authentik activation,
+pgAdmin activation and read-only verification. A provider-required guest restart
+is allowed only by the common exact packet. The component checks that pgAdmin
+retained its stopped timestamps/restart count across that cycle; Docker itself
+is never restarted by a component phase.
+
+### Same-profile SQL acceptance
+
+The pinned pgAdmin password handler can require an authenticated user's session
+or master-password unlock key. A new maintenance Python process does not inherit
+that context. The runtime result therefore reports `profile_verified: true`,
+`database_verified: false` and
+`database_verification_reason: existing_authenticated_profile_session_required`.
+It never decrypts/exports passwords, invents a login model, or opens an unrelated
+administrator connection and labels it same-profile proof.
+
+The common deployment may record the endpoint/config result separately, leaving
+human SQL acceptance unverified. From the actual authenticated browser profile,
+connect through the new registration under the same authenticated owner and run `SELECT 1`, the version/identity
+query below and `SELECT inet_client_addr()`. Bind that observation to the selected
+server/user and admitted endpoint. Until that happens, no successful same-profile
+SQL result is claimed.
+
+## Registration adapter
+
+`pgadmin_endpoint.py` has no file-opening code, CLI, service control, SSH,
+networking or receipt management. Root supplies an admitted SQLite connection.
+The runtime uses its explicit replacement API:
+
+```python
+target = database_networks.endpoint(catalogue, 'postgresql')
+proposal = pgadmin_endpoint.replacement_plan(connection, selector, before, target)
+# Only after common admission, writer quiescence and coherent backup:
+changed = pgadmin_endpoint.replacement_apply(connection, proposal,
+                                            validate_update=trusted_profile_guard)
+```
+
+`selector` is exactly `{'server_id': <int>, 'user_id': <int>}` and selects the
+approved existing OAuth user's settings template. `before` is exactly
+`{'host': <observed literal>, 'port': <int>}`; `target` is
+`{'address': <IPv4>, 'port': 5432}`. Never infer an owner from a display name.
+The safe proposal binds the complete old inventory, selected template, OAuth
+authentication source, fresh ID, name, target and a digest of registration/history
+settings. Credentials stay inside SQLite. The write transaction rechecks the
+proposal and rolls back every insert/delete if the expected-profile guard fails.
+Replay holds instead of deleting the new registration.
+
+The smaller `plan`/`apply` endpoint-only API remains available for callers whose
+explicit scope is only one row's host/port. It does not remove registrations; the
+runtime replacement phase does not silently fall back to it. Both APIs refuse
+service-file transport, SSH tunnelling, shared registrations/copies, selected
+endpoint overrides in `connection_params`, server triggers and unfamiliar schema.
+The pinned-image fixture exercises the actual pgAdmin schema, not an invented
+replacement profile. Retain the master-password policy and do not import a new
+`servers.json`, recreate users, rotate secrets or restore an old profile.
 
 ## Acceptance after Root integrates and admits the pair
 
@@ -131,7 +201,7 @@ selected private database network; there is no period of dual PostgreSQL network
 service. The clients retain their backend NICs for HTTP/OAuth, and replace their
 old SQL allowance and application endpoint with the new private path. Root must
 sequence the quiesced clients, exact network/rule changes, server acceptance and
-saved-endpoint edits before resuming clients. Do not leave a fallback SQL path or
+registration replacement before resuming clients. Do not leave a fallback SQL path or
 wait for unrelated application migrations.
 
 - Check the append-only NIC delta and exact firewall rule replacement; confirm
@@ -140,11 +210,11 @@ wait for unrelated application migrations.
   PostgreSQL query should observe the selected client's database-network IP.
   Also prove the former PostgreSQL backend endpoint is unreachable and no old
   TCP 5432 allowance remains; HTTP/OAuth on the client's backend must still work.
-- Verify all non-endpoint SQLite content and original file metadata against the
-  coherent backup, without exposing credentials. Verify the original install
+- Verify the exact approved registration delta and all remaining SQLite content
+  and original file metadata against the coherent backup, without exposing credentials. Verify the original install
   inputs/state/receipts remain unchanged; record maintenance separately.
 - From the existing browser profile, complete the retained HTTPS/Authentik login
-  and connect using the **same saved server entry** and retained role/TLS policy.
+  and connect using the **fresh registration under the same approved OAuth owner** and retained role/TLS policy.
   Run the [read-only acceptance queries](PGADMIN.md#native-acceptance-performed-by-the-deployment-owner),
   also checking `SELECT inet_client_addr();`. A TCP probe alone does not prove
   pgAdmin's saved-credential connection, and OAuth success does not prove DB access.
@@ -152,7 +222,15 @@ wait for unrelated application migrations.
   prove a future reboot; leave cold-start acceptance open until Root/Ben perform
   it. Preserve failed evidence/holds instead of replaying installation or restore.
 
-The unit tests use synthetic SQLite profiles. The pinned-image fixture changes
-one disposable saved endpoint while stopped and compares every other profile
+The unit tests use synthetic SQLite profiles and an exact Docker double. The pinned-image fixture replaces
+two synthetic registrations with one fresh OAuth-owned registration while stopped
+and compares retained connection settings and every non-registration profile
 value through the existing OAuth redirect test. Neither test proves a real
 PostgreSQL connection, native login, network attachment or startup behavior.
+The additional isolated Docker26.1.4 daemon/container-cycle fixture proves that
+an explicitly stopped `unless-stopped` workload retains its stopped identity and
+timestamps while a control restarts. It has a dedicated synthetic volume, no
+external network, no published ports, no host socket or private bind mounts.
+Its nested daemon needs test-only privilege. This is not a restart of the host
+Docker service, a native Proxmox test or complete qualification of the separately
+pinned Debian26.1.5 package/provider lifecycle.

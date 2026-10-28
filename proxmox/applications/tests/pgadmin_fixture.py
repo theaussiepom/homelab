@@ -121,20 +121,33 @@ def preserved_profile(container):
         '''import hashlib,json,sqlite3
 c=sqlite3.connect("file:/var/lib/pgadmin/pgadmin4.db?mode=ro",uri=True)
 servers=c.execute("SELECT id,name,host,username,port,user_id FROM server ORDER BY id").fetchall()
-assert len(servers)==1
+assert servers
 protected=[]
+table_hashes={}
+settings=None
+server_sequence=None
 for name, in c.execute("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name"):
     quoted='"'+name.replace('"','""')+'"'
     columns=[r[1] for r in c.execute('PRAGMA table_info('+quoted+')')]
     rows=[list(r) for r in c.execute('SELECT * FROM '+quoted)]
     if name=='server':
         for row in rows:
-            if row[columns.index('id')]==servers[0][0]:
-                row[columns.index('host')]=None
-                row[columns.index('port')]=None
-    protected.append((name,columns,sorted(rows,key=repr)))
+            if row[columns.index('user_id')]==2:
+                settings=list(row)
+                for field in ('id','name','host','port'): settings[columns.index(field)]=None
+        continue
+    if name=='sqlite_sequence':
+        for row in rows:
+            if row[columns.index('name')]=='server':
+                server_sequence=row[columns.index('seq')]
+                row[columns.index('seq')]=None
+    item=(name,columns,sorted(rows,key=repr))
+    table_hashes[name]=hashlib.sha256(repr(item).encode()).hexdigest()
+    protected.append(item)
 print(json.dumps({'users':c.execute('SELECT id,email FROM user ORDER BY id').fetchall(),
-    'servers':servers,'protected_sha256':hashlib.sha256(repr(protected).encode()).hexdigest()}))''',
+    'servers':servers,'protected_sha256':hashlib.sha256(repr(protected).encode()).hexdigest(),
+    'settings_sha256':hashlib.sha256(repr(settings).encode()).hexdigest(),
+    'table_hashes':table_hashes,'server_sequence':server_sequence}))''',
         capture_output=True, text=True)
     return json.loads(result.stdout)
 
@@ -193,6 +206,19 @@ def main():
                    '-e', 'PGADMIN_SERVER_JSON_FILE=/fixture/servers.json', IMAGE,
                    stdout=subprocess.DEVNULL)
             docker('exec', backend, 'python3', '/fixture.py', 'ready')
+            # Two synthetic registrations mirror the admitted removal scope:
+            # one local owner, one OAuth owner. Keep all real-image columns.
+            docker('exec',baseline,'/venv/bin/python3','-c', '''import sqlite3
+c=sqlite3.connect('/var/lib/pgadmin/pgadmin4.db')
+def clone(table,changes):
+    columns=[r[1] for r in c.execute('PRAGMA table_info("'+table+'")')]
+    values=list(c.execute('SELECT * FROM "'+table+'" LIMIT 1').fetchone())
+    for key,value in changes.items():
+        if key in columns: values[columns.index(key)]=value
+    c.execute('INSERT INTO "'+table+'" ('+','.join('"'+s+'"' for s in columns)+') VALUES ('+','.join('?' for _ in values)+')',values)
+clone('user',{'id':2,'email':'oauth@example.invalid','username':'oauth-fixture','auth_source':'oauth2'})
+clone('server',{'id':2,'user_id':2,'host':'postgresql','name':'OAuth synthetic server'})
+c.commit();c.close()''',stdout=subprocess.DEVNULL)
             before = preserved_profile(baseline)
             assert before['users'] and before['servers'][0][1] == 'Synthetic saved server', before
             docker('stop', '--time', '20', baseline, stdout=subprocess.DEVNULL)
@@ -200,7 +226,7 @@ def main():
             names.remove(baseline)
             # Exercise the adapter only on this disposable, stopped profile.
             # The real shared controller must own guest admission and quiescence.
-            selector = {'server_id': before['servers'][0][0], 'user_id': before['servers'][0][5]}
+            selector = {'server_id': 2, 'user_id': 2}
             docker('run', '--rm', '--platform', 'linux/amd64', '--network', 'none',
                    '--cap-drop', 'ALL', '--cap-add', 'NET_BIND_SERVICE',
                    '--security-opt', 'no-new-privileges', '--entrypoint', '/venv/bin/python3',
@@ -209,10 +235,14 @@ def main():
                    IMAGE, '-c',
                    'import sqlite3,sys;sys.path.insert(0,"/");import pgadmin_endpoint as p;'
                    'c=sqlite3.connect("file:/var/lib/pgadmin/pgadmin4.db?mode=rw",uri=True);'
-                   f's=p.plan(c,{selector!r},{{"host":"127.0.0.1","port":5432}},'
-                   '{"address":"198.18.31.23","port":5432});assert p.apply(c,s);c.close()',
+                   f's=p.replacement_plan(c,{selector!r},{{"host":"postgresql","port":5432}},'
+                   '{"address":"198.18.31.23","port":5432});assert p.replacement_apply(c,s);c.close()',
                    stdout=subprocess.DEVNULL)
-            before['servers'][0][2] = '198.18.31.23'
+            retained=before['servers'][1]
+            before['servers']=[[3,'PostgreSQL','198.18.31.23',retained[3],5432,2]]
+            # The actual model uses AUTOINCREMENT. A fresh registration must
+            # advance only the server sequence; do not ignore other sequences.
+            before['server_sequence']=3
             migrated = 'homelab-pgadmin-migrated-' + uuid.uuid4().hex[:10]
             names.append(migrated)
             docker(*common, '--name', migrated, *app,
@@ -221,9 +251,12 @@ def main():
                    '-v', f'{root / "oauth-client-secret"}:/run/secrets/oauth-client-secret:ro',
                    IMAGE, stdout=subprocess.DEVNULL)
             docker('exec', backend, 'python3', '/fixture.py', 'check')
-            assert preserved_profile(migrated) == before, 'Generated configuration changed saved users or servers'
-            print('Exact saved-server host updated; all other SQLite profile values and user/server '
-                  'identities remain unchanged through the endpoint and configuration migration.')
+            after=preserved_profile(migrated)
+            assert after == before, {'message':'Profile changed beyond the approved replacement',
+                                    'expected':before,'observed':after}
+            print('Both synthetic registrations replaced by one fresh OAuth-owned registration; '
+                  'retained role/TLS/encrypted settings and all non-registration profile values '
+                  'survive the replacement and OAuth configuration migration.')
         except Exception:
             for name in names:
                 subprocess.run(['docker', 'logs', '--tail', '60', name], check=False, timeout=20)
@@ -245,3 +278,5 @@ if __name__ == '__main__':
         check()
     else:
         main()
+        from pgadmin_restart_fixture import run as restart_policy_fixture
+        restart_policy_fixture()
