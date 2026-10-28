@@ -12,12 +12,24 @@
       - ansible_facts.distribution_major_version == '13'
       - ansible_facts.architecture == 'x86_64'
       - zabbix_agent.version == '1:7.0.32-1+debian13'
-      - zabbix_agent.psk_identity is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')
     fail_msg: 'Stop: agent identity, Debian package or individual PSK differs from the reviewed packet.'
+
+- name: Resolve the CD-owned per-guest credential
+  ansible.builtin.include_tasks: zabbix-credential.yml
+  when: zabbix_agent.credential_file is defined
+
+- name: Resolve legacy fixture inputs without creating a credential
+  ansible.builtin.set_fact:
+    agent_psk: "{{ lookup('ansible.builtin.file', zabbix_agent.psk_file) | trim }}"
+    agent_psk_identity: "{{ zabbix_agent.psk_identity }}"
+  when: zabbix_agent.credential_file is not defined
+  no_log: true
 
 - name: Require a valid individual PSK without logging its contents
   ansible.builtin.assert:
-    that: lookup('ansible.builtin.file', zabbix_agent.psk_file) | trim is match('^[0-9a-f]{64}$')
+    that:
+      - agent_psk is match('^[0-9a-f]{64}$')
+      - agent_psk_identity is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')
   no_log: true
 
 - name: Verify the exact upstream Agent 2 package on the controller
@@ -36,11 +48,15 @@
 - name: Render the closed active-only configuration before changing the target
   ansible.builtin.command:
     argv: [python3, "{{ playbook_dir }}/../monitoring.py", --agent-config, '-']
-    stdin: "{{ {'hostname': zabbix_agent.hostname, 'server_active': zabbix_agent.server_active, 'psk_identity': zabbix_agent.psk_identity, 'psk_path': '/etc/zabbix/agent.psk'} | to_json }}"
+    stdin: "{{ {'hostname': zabbix_agent.hostname, 'server_active': zabbix_agent.server_active, 'psk_identity': agent_psk_identity, 'psk_path': '/etc/zabbix/agent.psk', 'plugins': zabbix_agent.workloads | default({}) | length > 0} | to_json }}"
   delegate_to: localhost
   become: false
   changed_when: false
   register: agent_configuration
+
+- name: Preflight the selected local workload plugins before installing packages
+  ansible.builtin.include_tasks: zabbix-workloads.yml
+  when: zabbix_agent.workloads | default({}) | length > 0
 
 - name: Inspect an existing agent configuration
   ansible.builtin.stat:
@@ -73,7 +89,7 @@
 
 - name: Refuse a changed retained key before package changes
   ansible.builtin.assert:
-    that: (old_agent_key.content | b64decode | trim) == (lookup('ansible.builtin.file', zabbix_agent.psk_file) | trim)
+    that: (old_agent_key.content | b64decode | trim) == agent_psk
   no_log: true
   when: old_agent_psk.stat.exists
 
@@ -97,6 +113,10 @@
     group: root
     mode: '0600'
 
+- name: Provision local database monitoring accounts only within their owning guest CD
+  ansible.builtin.include_tasks: zabbix-database-account.yml
+  when: zabbix_agent.manage_database_accounts | default(false) | bool
+
 - name: Install Agent 2 without starting vendor defaults
   ansible.builtin.apt:
     deb: /var/tmp/homelab-zabbix-agent2.deb
@@ -116,7 +136,7 @@
 
 - name: Install the individual agent PSK
   ansible.builtin.copy:
-    content: "{{ lookup('ansible.builtin.file', zabbix_agent.psk_file) | trim }}\n"
+    content: "{{ agent_psk }}\n"
     dest: /etc/zabbix/agent.psk
     owner: zabbix
     group: zabbix
@@ -132,7 +152,7 @@
 
 - name: Refuse PSK drift or implicit rotation
   ansible.builtin.assert:
-    that: (installed_agent_psk.content | b64decode | trim) == (lookup('ansible.builtin.file', zabbix_agent.psk_file) | trim)
+    that: (installed_agent_psk.content | b64decode | trim) == agent_psk
   no_log: true
 
 - name: Install only the reviewed complete agent configuration
@@ -145,6 +165,43 @@
     backup: true
   register: agent_configured
 
+- name: Stage the pinned loadable PostgreSQL plugin on the owning guest
+  ansible.builtin.copy:
+    src: "{{ zabbix_agent.postgresql_package_file }}"
+    dest: /var/tmp/homelab-zabbix-postgresql.deb
+    owner: root
+    group: root
+    mode: '0600'
+  when: zabbix_agent.workloads.postgresql is defined
+
+- name: Install the matching loadable PostgreSQL monitoring plugin
+  ansible.builtin.apt:
+    deb: /var/tmp/homelab-zabbix-postgresql.deb
+    policy_rc_d: 101
+    allow_downgrade: false
+    fail_on_autoremove: true
+  when: zabbix_agent.workloads.postgresql is defined
+
+- name: Grant only this guest's approved Docker socket access to its agent
+  ansible.builtin.user:
+    name: zabbix
+    groups: docker
+    append: true
+  register: monitoring_docker_membership
+  when: zabbix_agent.workloads.docker is defined
+
+- name: Install the reviewed plugin configuration with guest-local DB credentials
+  ansible.builtin.copy:
+    content: "{{ agent_plugin_configuration }}"
+    dest: /etc/zabbix/homelab-monitoring.conf
+    owner: root
+    group: zabbix
+    mode: '0640'
+    force: false
+  register: monitoring_plugin_installed
+  when: zabbix_agent.workloads | default({}) | length > 0
+  no_log: true
+
 - name: Validate before starting the new agent
   ansible.builtin.command:
     argv: [/usr/sbin/zabbix_agent2, -T, -c, /etc/zabbix/zabbix_agent2.conf]
@@ -155,7 +212,7 @@
   ansible.builtin.systemd_service:
     name: zabbix-agent2
     enabled: true
-    state: started
+    state: "{{ 'restarted' if agent_configured.changed or monitoring_plugin_installed.changed | default(false) or monitoring_docker_membership.changed | default(false) else 'started' }}"
 
 - name: Verify that no passive Agent 2 port was opened
   ansible.builtin.command:

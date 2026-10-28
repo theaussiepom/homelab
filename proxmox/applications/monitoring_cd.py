@@ -16,8 +16,7 @@ import time
 import deploy
 from foundation_cd import regular, private_directory, write_new, encoded, sync
 
-PHASES = {'bootstrap': 'monitoring-bootstrap.yml', 'database': 'monitoring-database.yml',
-          'configure': 'monitoring-configure.yml', 'agents': 'monitoring-agents.yml'}
+PHASES = {'configure': 'monitoring-configure.yml'}
 
 
 def file_references(value):
@@ -39,9 +38,9 @@ def file_references(value):
 def run(packet, phase):
     if packet.get('enabled') is not True:
         return {'status': 'disabled', 'production_changed': False}
-    if packet.get('schema') != 'homelab-monitoring-cd-v1':
+    if packet.get('schema') != 'homelab-monitoring-cd-v2':
         raise ValueError('Use the reviewed monitoring CD packet')
-    if phase not in set(PHASES) | {'server', 'verify'}:
+    if phase not in set(PHASES) | {'bootstrap', 'server', 'verify'}:
         raise ValueError('Select a fixed monitoring CD phase')
     # Every input, including package/PSK/trust files and the inventories, must be
     # present with its exact reviewed digest before any native phase begins.
@@ -58,6 +57,13 @@ def run(packet, phase):
     variables = json.loads(regular(Path(packet['variables']), private=True))
     required.update(deploy.input_hashes(cfg))
     required.update(file_references(variables))
+    if phase == 'bootstrap' or 'access' in packet:
+        access = packet.get('access')
+        if not isinstance(access, dict) or not {'config', 'token', 'ca', 'state', 'backup'} <= set(access):
+            raise ValueError('Bootstrap needs the complete access packet')
+        if any(not isinstance(access[key], str) or not Path(access[key]).is_absolute()
+               for key in ('config', 'token', 'ca', 'state', 'backup')):
+            raise ValueError('Bootstrap needs the complete access packet with absolute paths')
     if 'access' in packet:
         required.update(packet['access'][key] for key in ('config', 'token', 'ca'))
     if not required <= set(packet['input_sha256']):
@@ -81,9 +87,8 @@ def run(packet, phase):
         # remains responsible for fresh metrics and browser-facing HTTPS checks.
         if done and phase != 'verify':
             return {'status': 'completed', 'phase': phase, 'replayed': False}
-        for dependency in {'database': ['bootstrap'], 'server': ['bootstrap', 'database'],
-                           'configure': ['server'], 'agents': ['configure'],
-                           'verify': ['agents']}.get(phase, []):
+        for dependency in {'server': ['bootstrap'],
+                           'configure': ['server'], 'verify': ['configure']}.get(phase, []):
             previous = work / ('monitoring-' + dependency + '.json')
             if not previous.exists() or json.loads(regular(previous, private=True))['packet_sha256'] != binding:
                 raise ValueError('Complete the matching monitoring dependency through CD first')
@@ -109,7 +114,7 @@ def run(packet, phase):
                           str(deploy.SOURCE / 'ansible' / PHASES[phase]), '-e', '@' + packet['variables']], environment, logfile)
         elif phase == 'server':
             deploy.execute('deploy', Path(packet['site_file']), packet['plan_sha256'])
-        else:
+        elif phase == 'verify':
             deploy.quiet(['ansible-playbook', '-i', packet['inventory'], str(deploy.SOURCE / 'ansible/monitoring-verify.yml'),
                           '-e', '@' + packet['variables']], environment, logfile)
         deploy.backup(cfg, work / 'terraform.tfstate', 'after-monitoring-' + phase)
@@ -125,7 +130,7 @@ def run(packet, phase):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--packet', required=True, type=Path)
-    parser.add_argument('--phase', required=True, choices=[*PHASES, 'server', 'verify'])
+    parser.add_argument('--phase', required=True, choices=[*PHASES, 'bootstrap', 'server', 'verify'])
     args = parser.parse_args()
     try:
         print(json.dumps(run(json.loads(args.packet.read_text()), args.phase)))

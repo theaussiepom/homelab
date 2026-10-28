@@ -25,6 +25,14 @@ jobs:
           docker run --rm --platform linux/amd64 -v "$PWD:/src:ro" \
             -v "$RUNNER_TEMP/zabbix-collections:/collections" homelab-app-test \
             python3 /src/proxmox/applications/monitoring/install-collections.py --output /collections
+      - name: Check monitoring playbooks with their pinned API collections
+        run: |
+          docker run --rm --platform linux/amd64 --network none -v "$PWD:/src:ro" \
+            -v "$RUNNER_TEMP/zabbix-collections:/collections:ro" -e ANSIBLE_COLLECTIONS_PATH=/collections \
+            -e ANSIBLE_LOCAL_TEMP=/tmp/ansible homelab-app-test sh -ec '
+              for play in monitoring-bootstrap monitoring-database monitoring-configure monitoring-verify guest-monitoring; do
+                ansible-playbook -i localhost, --syntax-check "/src/proxmox/applications/ansible/$play.yml"
+              done'
       - name: Test fresh schema, templates, idempotence and active PSK data
         run: |
           docker build --platform linux/amd64 -t homelab-zabbix-db-test:1 proxmox/applications/tests/monitoring-database
@@ -39,6 +47,14 @@ jobs:
           docker run --rm --platform linux/amd64 --network none -v "$PWD:/src:ro" \
             -v "$RUNNER_TEMP/zabbix-agent2.deb:/fixture-agent.deb:ro" homelab-app-test \
             python3 /src/proxmox/applications/tests/native_agent_fixture.py /fixture-agent.deb
+      - name: Test exact database plugins and restricted monitoring account SQL
+        run: |
+          curl --fail --silent --show-error --max-time 120 \
+            'https://repo.zabbix.com/zabbix/7.0/debian/pool/main/z/zabbix-agent2-plugin-postgresql/zabbix-agent2-plugin-postgresql_7.0.32-1%2Bdebian13_amd64.deb' \
+            --output "$RUNNER_TEMP/zabbix-agent2-plugin-postgresql.deb"
+          python3 proxmox/applications/tests/monitoring_workload_fixture.py \
+            --agent "$RUNNER_TEMP/zabbix-agent2.deb" \
+            --postgresql "$RUNNER_TEMP/zabbix-agent2-plugin-postgresql.deb"
   applications:
     name: Application source and restore fixtures (Docker)
     runs-on: ubuntu-24.04

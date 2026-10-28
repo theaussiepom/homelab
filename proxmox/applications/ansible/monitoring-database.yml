@@ -15,18 +15,34 @@
           - monitoring_database.backup_verified | bool
         fail_msg: 'Require the commissioned database identity and its fresh native backup verification.'
 
-    - name: Stage the bounded clean database helper
-      ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../monitoring_database.py"
-        dest: /var/tmp/homelab-monitoring-database.py
-        owner: root
-        group: root
-        mode: '0700'
+    - name: Refuse a retained helper from an earlier operation
+      ansible.builtin.stat:
+        path: /root/.homelab-monitoring-database.py
+      register: monitoring_database_helper
 
-    - name: Create only the new database, owner and reviewed HBA rules
-      ansible.builtin.command:
-        argv: [python3, /var/tmp/homelab-monitoring-database.py, --hba-sha256, "{{ monitoring_database.hba_sha256 }}", --address, "{{ monitoring_database.monitoring_address }}"]
-        stdin: "{{ lookup('ansible.builtin.file', monitoring_database.password_file) | trim }}"
-      register: database_prepared
-      changed_when: (database_prepared.stdout | from_json).created
-      no_log: true
+    - name: Keep unknown or interrupted helper state for investigation
+      ansible.builtin.assert:
+        that: not monitoring_database_helper.stat.exists
+
+    - name: Run the standalone database helper from a root-only location
+      block:
+        - name: Stage the bounded clean database helper
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../monitoring_database.py"
+            dest: /root/.homelab-monitoring-database.py
+            owner: root
+            group: root
+            mode: '0700'
+
+        - name: Create only the new database, owner and reviewed HBA rules
+          ansible.builtin.command:
+            argv: [python3, -I, /root/.homelab-monitoring-database.py, --hba-sha256, "{{ monitoring_database.hba_sha256 }}", --address, "{{ monitoring_database.monitoring_address }}"]
+            stdin: "{{ lookup('ansible.builtin.file', monitoring_database.password_file) | trim }}"
+          register: database_prepared
+          changed_when: (database_prepared.stdout | from_json).created
+          no_log: true
+      always:
+        - name: Remove this operation's staged helper after success or failure
+          ansible.builtin.file:
+            path: /root/.homelab-monitoring-database.py
+            state: absent

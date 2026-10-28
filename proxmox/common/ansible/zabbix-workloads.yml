@@ -1,0 +1,78 @@
+---
+- name: Require each database session to use this guest's own reviewed address
+  ansible.builtin.assert:
+    that: (item.value.uri | urlsplit('hostname')) in (ansible_facts.all_ipv4_addresses + ['127.0.0.1'])
+    fail_msg: 'Database plugins run locally in their owning guest; refuse remote endpoints.'
+  loop: "{{ zabbix_agent.workloads | dict2items }}"
+  when: item.key in ['postgresql', 'mysql']
+
+- name: Render only the selected built-in plugin configuration in memory
+  ansible.builtin.set_fact:
+    agent_plugin_configuration: "{{ zabbix_agent.workloads | homelab_monitoring_plugins }}"
+  no_log: true
+
+- name: Inspect the retained plugin configuration
+  ansible.builtin.stat:
+    path: /etc/zabbix/homelab-monitoring.conf
+  register: old_agent_plugins
+
+- name: Refuse unsafe retained plugin file ownership or permissions
+  ansible.builtin.assert:
+    that: not old_agent_plugins.stat.exists or (old_agent_plugins.stat.isreg | default(false) and old_agent_plugins.stat.uid == 0 and old_agent_plugins.stat.gr_name == 'zabbix' and old_agent_plugins.stat.mode == '0640')
+    fail_msg: 'Retained database credentials need reviewed ownership and permissions before reuse.'
+
+- name: Read retained plugin credentials only for drift detection
+  ansible.builtin.slurp:
+    src: /etc/zabbix/homelab-monitoring.conf
+  register: old_agent_plugin_content
+  when: old_agent_plugins.stat.exists
+  no_log: true
+
+- name: Refuse implicit plugin or database credential replacement
+  ansible.builtin.assert:
+    that: not old_agent_plugins.stat.exists or (old_agent_plugin_content.content | b64decode) == agent_plugin_configuration
+    fail_msg: 'Existing plugin state needs an explicitly reviewed maintenance operation.'
+  no_log: true
+
+- name: Inspect the selected Docker socket without changing its permissions
+  ansible.builtin.stat:
+    path: /var/run/docker.sock
+  register: monitoring_docker_socket
+  when: zabbix_agent.workloads.docker is defined
+
+- name: Require the approved root-owned Docker API socket
+  ansible.builtin.assert:
+    that:
+      - monitoring_docker_socket.stat.issock | default(false)
+      - monitoring_docker_socket.stat.uid == 0
+      - monitoring_docker_socket.stat.gr_name == 'docker'
+      - monitoring_docker_socket.stat.mode == '0660'
+      - zabbix_agent.workloads.docker.socket_access_approved | bool
+  when: zabbix_agent.workloads.docker is defined
+
+- name: Verify the pinned loadable PostgreSQL plugin package
+  ansible.builtin.stat:
+    path: "{{ zabbix_agent.postgresql_package_file }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: monitoring_postgresql_package
+  when: zabbix_agent.workloads.postgresql is defined
+
+- name: Require the matching PostgreSQL plugin archive
+  ansible.builtin.assert:
+    that: monitoring_postgresql_package.stat.checksum == '5d3d4ef1089c80cbefd52b4d8dc15aa9c4ab77b5678f8bf9952ca65f4c2983a2'
+  when: zabbix_agent.workloads.postgresql is defined
+
+- name: Inspect an existing PostgreSQL plugin before package changes
+  ansible.builtin.command:
+    argv: [dpkg-query, -W, '-f=${Version}', zabbix-agent2-plugin-postgresql]
+  register: monitoring_existing_pg_plugin
+  changed_when: false
+  failed_when: monitoring_existing_pg_plugin.rc not in [0, 1]
+  when: zabbix_agent.workloads.postgresql is defined
+
+- name: Refuse adoption or implicit upgrade of a PostgreSQL plugin
+  ansible.builtin.assert:
+    that: monitoring_existing_pg_plugin.rc == 1 or (old_agent_plugins.stat.exists and monitoring_existing_pg_plugin.stdout == '1:7.0.32-1+debian13')
+  when: zabbix_agent.workloads.postgresql is defined

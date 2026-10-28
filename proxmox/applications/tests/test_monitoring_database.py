@@ -12,6 +12,17 @@ import monitoring_database as database
 
 
 class MonitoringDatabaseTests(unittest.TestCase):
+    def test_password_uses_psql_client_encryption_without_secret_in_sql_or_argv(self):
+        password='synthetic-database-password-long-enough'
+        with patch.object(database.subprocess,'run') as run:
+            database.set_password(password)
+        args,kwargs=run.call_args
+        self.assertEqual(args[0][-2:],['-c',r'\password zabbix'])
+        self.assertNotIn(password,str(args[0]))
+        self.assertEqual(kwargs['input'],password+'\n'+password+'\n')
+        self.assertTrue(kwargs['check'])
+        self.assertTrue(kwargs['start_new_session'])
+
     @unittest.skipUnless(hasattr(os, 'listxattr'), 'Native HBA metadata uses Linux xattrs')
     def test_rejected_hba_or_failed_reload_restores_original_and_keeps_hold(self):
         for failure in ('parser', 'reload'):

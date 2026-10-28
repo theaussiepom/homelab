@@ -51,16 +51,34 @@ def client():
     root = Path('/fixture')
     assert wait_for(lambda: api('apiinfo.version', {}), 'Zabbix schema/API did not become ready') == monitoring.VERSIONS['version']
     password = (root / 'admin-password').read_text()
+    import monitoring_credentials
+    from unittest.mock import patch
+    from docker_api_mock import start
+    start()
+    for name in ('credential-local', 'credential-recovery'):
+        (root / name).mkdir(mode=0o700, exist_ok=True)
+    credentials = {}
+    # The synthetic fixture has disposable directories, not a native NAS mount.
+    # Native provisioning retains the real check_backup guard.
+    with patch.object(monitoring_credentials, 'check_backup'):
+        for hostname, machine, keyfile in [('fixture-linux', 'a' * 32, 'agent.psk'),
+                                           ('fixture-wrong', 'b' * 32, 'wrong-expected.psk')]:
+            config = {'schema': 'homelab-agent-secret-v1', 'hostname': hostname, 'machine_id': machine,
+                'store': str(root / 'credential-local'), 'recovery': str(root / 'credential-recovery'),
+                'backup_source': 'fixture.invalid:/synthetic', 'allow_create': True}
+            result = monitoring_credentials.provision(config)
+            record = monitoring_credentials.load(Path(result['credential_file']), hostname, machine)
+            (root / keyfile).write_text(record['psk'] + '\n')
+            assert not monitoring_credentials.provision(config)['created']
+            credentials[hostname] = dict(hostname=hostname, machine_id=machine, credential_file=result['credential_file'])
+
     inventory = {'monitoring_api': {'hosts': {'zabbix_web': {
         'ansible_host': 'zabbix_web', 'ansible_user': 'Admin',
         'ansible_httpapi_use_ssl': False, 'ansible_httpapi_port': 8080}}}}
     http_password = 'zabbix'
     variables = {'ansible_httpapi_use_ssl': False, 'monitoring_initial_password': True,
                  'monitoring_admin_password': "{{ lookup('ansible.builtin.env', 'FIXTURE_ADMIN_PASSWORD') }}",
-                 'monitoring_hosts': [{'hostname': 'fixture-linux', 'psk_identity': 'fixture-linux',
-                                       'psk': "{{ lookup('ansible.builtin.env', 'FIXTURE_AGENT_PSK') }}"},
-                                      {'hostname': 'fixture-wrong', 'psk_identity': 'fixture-wrong',
-                                       'psk': "{{ lookup('ansible.builtin.env', 'FIXTURE_EXPECTED_WRONG_HOST_PSK') }}"}],
+                 'monitoring_hosts': [dict(credentials['fixture-linux'], profiles=['docker']), credentials['fixture-wrong']],
                  'monitoring_proxmox': {'hostname': 'fixture-pve-api', 'address': 'pve.example.invalid',
                                         'token_id': 'fixture@pve!monitoring', 'token_secret': 'fixture-secret'}}
     def configure(pass_number):
@@ -73,7 +91,9 @@ def client():
                      FIXTURE_EXPECTED_WRONG_HOST_PSK=(root / 'wrong-expected.psk').read_text().strip()), capture_output=True, text=True)
         (root / f'api-pass-{pass_number}.log').write_text(result.stdout + result.stderr)
         if result.returncode:
-            print(result.stdout + result.stderr)
+            for line in result.stdout.splitlines():
+                if '[ERROR]' in line:
+                    print(line.split(' when sending ', 1)[0][:1500])
             raise RuntimeError('Upstream Zabbix configuration play failed')
         return result.stdout
     configure(1)
@@ -97,11 +117,18 @@ def client():
     # the source template or install a custom production polling item.
     item = api('item.get', {'hostids': [hostid], 'filter': {'key_': 'system.uptime'}, 'output': 'extend'}, token)[0]
     api('item.update', {'itemid': item['itemid'], 'delay': '1s'}, token)
+    docker_info = api('item.get', {'hostids': [hostid], 'filter': {'key_': 'docker.info'}, 'output': 'extend'}, token)[0]
+    assert docker_info['type'] == '7'
+    api('item.update', {'itemid': docker_info['itemid'], 'delay': '1s'}, token)
     (root / 'start-agent').write_text('ready')
     def samples():
         result = api('item.get', {'itemids': [item['itemid']], 'output': ['lastclock', 'lastvalue', 'state']}, token)
         return result[0] if int(result[0]['lastclock']) > 0 and float(result[0]['lastvalue']) > 0 else None
     sample = wait_for(samples, 'No authenticated active Agent 2 sample arrived')
+    def docker_samples():
+        rows = api('item.get', {'hostids': [hostid], 'filter': {'key_': 'docker.containers.running'}, 'output': ['lastclock', 'lastvalue', 'state']}, token)
+        return rows and rows[0]['state'] == '0' and int(rows[0]['lastclock']) > 0 and rows[0]['lastvalue'] == '1'
+    wait_for(docker_samples, 'No active Docker plugin metrics arrived through the PSK host')
     (root / 'test-wrong-key').write_text('ready')
     wait_for(lambda: (root / 'wrong-key-tested').exists(), 'Wrong-key test was not run', 90)
     assert 'unknown PSK identity' not in (root / 'wrong-agent.log').read_text()
@@ -114,7 +141,7 @@ def client():
     assert bad and all(int(row['lastclock']) == 0 for row in bad), bad
     result = {'version': monitoring.VERSIONS['version'], 'fresh_schema': True,
               'official_templates': True, 'second_configuration_changed': 0,
-              'active_psk_data': True, 'wrong_psk_rejected': True,
+              'active_psk_data': True, 'wrong_psk_rejected': True, 'cd_owned_credential': True, 'active_docker_data': True,
               'native_proxmox_verified': False, 'trusted_api_ca': True,
               'untrusted_ca_and_hostname_rejected': True}
     (root / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
@@ -187,8 +214,8 @@ def main(args):
     (root / 'admin-password').write_text(secrets.token_urlsafe(32))
     (root / 'agent.conf').write_text(monitoring.agent_config({
         'hostname': 'fixture-linux', 'server_active': 'zabbix-server:10051',
-        'psk_identity': 'fixture-linux', 'psk_path': '/etc/zabbix/agent.psk'}).replace('LogType=system', 'LogType=console').replace('/run/zabbix/agent.sock', '/tmp/agent.sock'))
-    (root / 'wrong.conf').write_text((root / 'agent.conf').read_text().replace('fixture-linux', 'fixture-wrong'))
+        'psk_identity': 'fixture-linux.' + 'a' * 32, 'psk_path': '/etc/zabbix/agent.psk'}).replace('LogType=system', 'LogType=console').replace('/run/zabbix/agent.sock', '/tmp/agent.sock') + 'Plugins.Docker.Endpoint=unix:///mock-docker/docker.sock\n')
+    (root / 'wrong.conf').write_text((root / 'agent.conf').read_text().replace('fixture-linux', 'fixture-wrong').replace('a' * 32, 'b' * 32))
     # Container users need read access only to synthetic fixture files.
     for file in root.iterdir():
         file.chmod(0o644)
@@ -197,6 +224,7 @@ def main(args):
     client_name = project + '-client'
     containers = [client_name, project + '-agent', project + '-wrong']
     try:
+        docker('volume', 'create', project + '-mock-docker', stdout=subprocess.DEVNULL)
         docker(*command, 'up', '-d', '--wait', '--wait-timeout', '180', stdout=subprocess.DEVNULL)
         docker(*command, 'exec', '-T', 'postgres', 'psql', '-U', 'postgres', '-d', 'zabbix', '-c', 'ANALYZE', stdout=subprocess.DEVNULL)
         # Read the exact image's generated server setting, then use its actual
@@ -215,7 +243,7 @@ def main(args):
             assert bad_tls.returncode == 60, bad_tls.stderr
         (root / 'tls-result.json').write_text(json.dumps({'trusted_ca': True, 'untrusted_ca_rejected': True, 'wrong_hostname_rejected': True}))
         docker('run', '-d', '--platform', 'linux/amd64', '--name', client_name,
-               '--network', project + '_default', '-v', f'{root}:/fixture',
+               '--network', project + '_default', '-v', f'{project}-mock-docker:/mock-docker', '-v', f'{root}:/fixture',
                '-v', f'{Path(__file__).resolve().parents[3]}:/src:ro',
                '-v', f'{args.collections.resolve()}:/collections:ro',
                '-e', 'ANSIBLE_COLLECTIONS_PATH=/collections', '-e', 'ANSIBLE_LOCAL_TEMP=/tmp/ansible',
@@ -227,14 +255,14 @@ def main(args):
         agent = monitoring.VERSIONS['fixture_agent']
         docker('run', '-d', '--platform', 'linux/amd64', '--name', project + '-agent',
                '--network', project + '_default', '-v', f'{root}/agent.conf:/etc/zabbix/zabbix_agent2.conf:ro',
-               '-v', f'{root}/agent.psk:/etc/zabbix/agent.psk:ro', '--entrypoint', '/usr/sbin/zabbix_agent2',
+               '-v', f'{root}/agent.psk:/etc/zabbix/agent.psk:ro', '-v', f'{project}-mock-docker:/mock-docker:ro', '--entrypoint', '/usr/sbin/zabbix_agent2',
                agent, '-f', '-c', '/etc/zabbix/zabbix_agent2.conf', stdout=subprocess.DEVNULL)
         wait_for(lambda: (root / 'test-wrong-key').exists(), 'Authenticated agent test did not complete')
         # Both identities were admitted together before positive data arrived,
         # so the rejection tests a wrong key rather than a new cache identity.
         docker('run', '-d', '--platform', 'linux/amd64', '--name', project + '-wrong',
                '--network', project + '_default', '-v', f'{root}/wrong.conf:/etc/zabbix/zabbix_agent2.conf:ro',
-               '-v', f'{root}/wrong.psk:/etc/zabbix/agent.psk:ro', '--entrypoint', '/usr/sbin/zabbix_agent2',
+               '-v', f'{root}/wrong.psk:/etc/zabbix/agent.psk:ro', '-v', f'{project}-mock-docker:/mock-docker:ro', '--entrypoint', '/usr/sbin/zabbix_agent2',
                agent, '-f', '-c', '/etc/zabbix/zabbix_agent2.conf', stdout=subprocess.DEVNULL)
         def rejected_key():
             log = docker('logs', project + '-wrong', capture_output=True, text=True)
@@ -256,6 +284,7 @@ def main(args):
         result = subprocess.run(['docker', *command, 'logs', '--no-color'], capture_output=True, text=True)
         (root / 'services.log').write_text(result.stdout + result.stderr)
         docker(*command, 'down', '--volumes', '--remove-orphans', stdout=subprocess.DEVNULL)
+        docker('volume', 'rm', project + '-mock-docker', stdout=subprocess.DEVNULL)
 
 
 if __name__ == '__main__':
