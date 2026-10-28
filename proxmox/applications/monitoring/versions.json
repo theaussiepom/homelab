@@ -1,0 +1,11 @@
+{
+  "version": "7.0.32",
+  "zabbix_server": "zabbix/zabbix-server-pgsql:ubuntu-7.0.32@sha256:bc0505eff209ab5ca9cfb6c7363f061b03b1a31ed529102274413febae54f002",
+  "zabbix_web": "zabbix/zabbix-web-nginx-pgsql:ubuntu-7.0.32@sha256:562b70986134a6083ba503ed5189afeda98b9b69c1960a5f0fb2faa13dfd5151",
+  "fixture_agent": "zabbix/zabbix-agent2:ubuntu-7.0.32@sha256:70008600d7f401f1d566a93e08408e88baf1366cb015a0d407b7eb41d4963eeb",
+  "fixture_postgresql": "postgres:16@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74",
+  "templates": {
+    "template_app_proxmox.yaml": "0cc620659d2c1cbb6d84555907a0fba27917edfe6f1a0de8ebd84a5e9a590344",
+    "template_os_linux_active.yaml": "ab9fc4e0e55ceec898cdd39de8601cf012922453a6f2871173d03da9b09cde6a"
+  }
+}

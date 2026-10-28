@@ -1,0 +1,32 @@
+{
+  "kind": "monitoring",
+  "guest_memory_mib": 2048,
+  "timezone": "Etc/UTC",
+  "services": {
+    "zabbix_server": {
+      "image": "zabbix/zabbix-server-pgsql:ubuntu-7.0.32@sha256:bc0505eff209ab5ca9cfb6c7363f061b03b1a31ed529102274413febae54f002",
+      "memory_mib": 768,
+      "cpus": 1,
+      "pids_limit": 128,
+      "restart": "no"
+    },
+    "zabbix_web": {
+      "image": "zabbix/zabbix-web-nginx-pgsql:ubuntu-7.0.32@sha256:562b70986134a6083ba503ed5189afeda98b9b69c1960a5f0fb2faa13dfd5151",
+      "memory_mib": 512,
+      "cpus": 1,
+      "pids_limit": 128,
+      "restart": "no"
+    }
+  },
+  "monitoring": {
+    "version": "7.0.32",
+    "bind_address": "198.18.30.50",
+    "postgresql_host": "198.18.30.23",
+    "postgresql_database": "zabbix",
+    "postgresql_user": "zabbix",
+    "secret_files": {
+      "database_password": "/var/lib/homelab-inputs/monitoring/database-password",
+      "proxmox_ca": "/var/lib/homelab-inputs/proxmox-ca.pem"
+    }
+  }
+}
