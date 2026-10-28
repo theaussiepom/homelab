@@ -185,6 +185,26 @@ class UsbOperatorTests(unittest.TestCase):
 
 
 class UsbRunnerTests(unittest.TestCase):
+    def test_firewall_preflight_uses_the_production_api_helper_with_one_exact_radio_exception(self):
+        import io
+        import deploy,zigbee_usb
+        from test_deploy import fixture as site_fixture
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);cfg=site_fixture(root)
+            cfg['app'].update(kind='zigbee2mqtt',usb_stage='prepare')
+            (root/'api').write_text('synthetic credential');(root/'ca').write_text('synthetic CA')
+            with patch.object(deploy.ssl,'create_default_context'),patch.object(deploy,'build_opener') as opener:
+                opener.return_value.open.return_value=io.BytesIO(b'{"data":{"enable":1}}')
+                zigbee_usb.verify_firewall(cfg,deploy.api_get)
+                request=opener.return_value.open.call_args.args[0]
+                self.assertEqual(request.full_url,'https://pve.example.invalid:8006/api2/json/cluster/firewall/options')
+                opener.reset_mock()
+                for path in ['/cluster/firewall/rules','/cluster/firewall/options/','/cluster/firewall/options?x=1','https://other.invalid/']:
+                    with self.subTest(path=path),self.assertRaises(ValueError):deploy.api_get(cfg,path)
+                cfg['app']['kind']='dns'
+                with self.assertRaises(ValueError):deploy.api_get(cfg,'/cluster/firewall/options')
+                opener.return_value.open.assert_not_called()
+
     def test_same_runner_state_moves_from_stopped_prepare_to_refreshed_attached_apply(self):
         import hashlib,io,tarfile
         import deploy,zigbee_usb

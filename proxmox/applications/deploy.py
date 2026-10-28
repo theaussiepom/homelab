@@ -179,8 +179,10 @@ def api_get(cfg, path):
     endpoint = urlparse(cfg['site']['api_endpoint'])
     if endpoint.scheme != 'https' or not endpoint.hostname or endpoint.port != 8006 or endpoint.username:
         raise ValueError('Guest discovery requires the trusted Proxmox HTTPS endpoint')
-    if not path.startswith('/nodes/'):
-        raise ValueError('Use the selected Proxmox node API')
+    radio_firewall = (cfg.get('app', {}).get('kind') == 'zigbee2mqtt' and
+                      path == '/cluster/firewall/options')
+    if not path.startswith('/nodes/') and not radio_firewall:
+        raise ValueError('Use the selected Proxmox node API or exact radio firewall options read')
     request = Request('https://' + endpoint.netloc + '/api2/json' + path,
                       headers={'Authorization': 'PVEAPIToken=' + Path(cfg['paths']['api_token']).read_text().strip()})
     context = ssl.create_default_context(cafile=cfg['paths']['ca_file'])

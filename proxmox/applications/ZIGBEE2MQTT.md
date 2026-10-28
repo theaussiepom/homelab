@@ -185,6 +185,10 @@ An active firewall daemon, per-NIC flag or saved rule declaration alone is not
 proof that cluster-level enforcement is enabled. Native acceptance must still
 verify the selected engine and effective packet path.
 
+The API helper permits this one exact cluster read for Zigbee only; other
+cluster paths and ordinary application kinds retain their existing restriction.
+The API allowlist change is a security control for explicit human source review.
+
 The private packet must include the runner's read permission for the cluster
 options endpoint. Proxmox requires `Sys.Audit` at `/`; prepare the minimum
 non-propagating read grant for separate common-infrastructure review. Do not
