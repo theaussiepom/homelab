@@ -35,8 +35,8 @@ def sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
-def command(argv):
-    return subprocess.run(argv, check=True, capture_output=True, timeout=30,
+def command(argv, timeout=30):
+    return subprocess.run(argv, check=True, capture_output=True, timeout=timeout,
         env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': '/root', 'LANG': 'C', 'LC_ALL': 'C'}).stdout.decode()
 
 
@@ -225,7 +225,7 @@ def run(action, value, execute=command):
             finally: os.close(directory)
         finally:
             if os.path.exists(temporary): os.unlink(temporary)
-        execute(['systemctl', 'restart', kind + '.service'])
+        execute(['systemctl', 'restart', kind + '.service'], timeout=180)
     else:
         require(action == 'verify', 'Unsupported action')
     if action != 'preflight':

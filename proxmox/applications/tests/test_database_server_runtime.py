@@ -40,6 +40,14 @@ def single(kind):
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_command_preserves_short_default_and_forwards_restart_timeout(self):
+        with patch.object(runtime.subprocess, 'run') as run:
+            run.return_value.stdout = b'ok'
+            self.assertEqual(runtime.command(['inspect']), 'ok')
+            self.assertEqual(run.call_args.kwargs['timeout'], 30)
+            self.assertEqual(runtime.command(['restart'], timeout=180), 'ok')
+            self.assertEqual(run.call_args.kwargs['timeout'], 180)
+
     def test_portable_candidate_exactly_matches_the_pure_renderer(self):
         for kind in SOURCES:
             value = request(kind); original = copy.deepcopy(value)
@@ -103,12 +111,12 @@ class RuntimeTests(unittest.TestCase):
                         patch.object(runtime, 'no_clients'), patch.object(runtime, 'process'), \
                         patch.object(runtime, 'sockets', return_value=[value['endpoint']['address'] + ':' + str(runtime.PORTS[kind])]), \
                         patch.object(runtime, 'health', return_value=value['before']['health']):
-                    result = runtime.run('activate', value, lambda argv: commands.append(argv))
+                    result = runtime.run('activate', value, lambda argv, **kwargs: commands.append((argv, kwargs)))
                     self.assertTrue(result['changed'])
                     self.assertEqual(path.read_text(), next(iter(value['files'].values())))
                     self.assertEqual(path.stat().st_uid, os.getuid())
                     self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-                    self.assertEqual(commands, [['systemctl', 'restart', kind + '.service']])
+                    self.assertEqual(commands, [(['systemctl', 'restart', kind + '.service'], {'timeout': 180})])
                     with self.assertRaises(ValueError): runtime.run('activate', value, lambda argv: self.fail('replay'))
 
     def test_restart_failure_retains_new_file_and_does_not_automatically_undo_it(self):
@@ -118,7 +126,7 @@ class RuntimeTests(unittest.TestCase):
             value['before']['config'] = runtime.read(path)
             with patch.dict(runtime.FILES, {'mariadb': path}), patch.object(runtime, 'guard'), \
                     patch.object(runtime, 'no_clients'), patch.object(runtime, 'process'):
-                def fail(argv): raise RuntimeError('synthetic restart failure')
+                def fail(argv, **kwargs): raise RuntimeError('synthetic restart failure')
                 with self.assertRaises(RuntimeError): runtime.run('activate', value, fail)
                 self.assertEqual(path.read_text(), next(iter(value['files'].values())))
                 with self.assertRaises(ValueError): runtime.run('activate', value, fail)
