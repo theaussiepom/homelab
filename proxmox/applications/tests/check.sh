@@ -30,3 +30,5 @@ ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-browser.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/pgadmin-service-binding.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/pgadmin-service-verify.yml
+
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-pegaprox-hostname.yml

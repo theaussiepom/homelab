@@ -95,3 +95,42 @@
     owner: root
     group: root
     mode: '0700'
+
+- name: Select the admitted clean-install TLS hostname
+  ansible.builtin.set_fact:
+    pegaprox_tls_hostname: '{{ app.pegaprox.tls_hostname | default(app.hostname) }}'
+
+- name: Require literal certificate identities before generation
+  ansible.builtin.assert:
+    that:
+      - pegaprox_tls_hostname is match('^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$')
+      - pegaprox_tls_hostname | length <= 253
+      - app.address is match('^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$')
+
+- name: Prepare fresh image-owned TLS storage
+  ansible.builtin.file:
+    path: /srv/homelab/data/pegaprox/config/ssl
+    state: directory
+    owner: '999'
+    group: '999'
+    mode: '0700'
+
+- name: Generate the fresh certificate with hostname and address SANs before first start
+  ansible.builtin.command:
+    argv: [openssl, req, -x509, -newkey, 'rsa:2048', -nodes, -sha256, -days, '365',
+           -keyout, /srv/homelab/data/pegaprox/config/ssl/key.pem,
+           -out, /srv/homelab/data/pegaprox/config/ssl/cert.pem,
+           -subj, '/CN={{ pegaprox_tls_hostname }}',
+           -addext, 'subjectAltName=DNS:{{ pegaprox_tls_hostname }},IP:{{ app.address }},IP:127.0.0.1',
+           -addext, 'basicConstraints=critical,CA:FALSE',
+           -addext, 'keyUsage=critical,digitalSignature,keyEncipherment',
+           -addext, 'extendedKeyUsage=serverAuth']
+  no_log: true
+
+- name: Protect the fresh TLS private key and public certificate for the image user
+  ansible.builtin.file:
+    path: '/srv/homelab/data/pegaprox/config/ssl/{{ item }}'
+    owner: '999'
+    group: '999'
+    mode: "{{ '0600' if item == 'key.pem' else '0644' }}"
+  loop: [key.pem, cert.pem]

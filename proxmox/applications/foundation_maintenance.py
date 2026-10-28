@@ -32,6 +32,9 @@ def packet(value):
     if isinstance(value, dict) and value.get('schema') == 'homelab-ingress-browser-update-v1':
         from ingress_browser import packet as browser_packet
         return browser_packet(value)
+    if isinstance(value, dict) and value.get('schema') == 'homelab-pegaprox-browser-update-v1':
+        from pegaprox_browser import packet as browser_packet
+        return browser_packet(value)
     common = {'schema', 'revision', 'vmid', 'plan_sha256'}
     require(isinstance(value, dict), 'Supply a closed maintenance packet')
     if value.get('schema') == 'homelab-ingress-image-update-v1':
@@ -272,7 +275,8 @@ def main():
         guest = 'ingress' if selected['schema'] in ('homelab-ingress-image-update-v1',
                                                    'homelab-ingress-acme-update-v1',
                                                    'homelab-ingress-acme-confirmation-v1',
-                                                   'homelab-ingress-browser-update-v1') else 'db-tools'
+                                                   'homelab-ingress-browser-update-v1',
+                                                   'homelab-pegaprox-browser-update-v1') else 'db-tools'
         site = INPUTS / ('foundation-' + guest) / 'site.json'
         cfg = json.loads(fc.regular(site, private=True))
         with tempfile.TemporaryDirectory(prefix='homelab-foundation-maintenance-') as temp:
@@ -285,6 +289,9 @@ def main():
             if selected['schema'] == 'homelab-ingress-browser-update-v1':
                 import ingress_browser_maintenance
                 result = ingress_browser_maintenance.run(deployment, fc, cfg, site, helper, selected, STATE)
+            elif selected['schema'] == 'homelab-pegaprox-browser-update-v1':
+                import ingress_browser_maintenance
+                result = ingress_browser_maintenance.run(deployment, fc, cfg, site, helper, selected, STATE, profile='pegaprox')
             elif selected['schema'] == 'homelab-ingress-acme-confirmation-v1':
                 import ingress_acme
                 result = ingress_acme.confirm(deployment,fc,cfg,site,helper,selected,STATE)
