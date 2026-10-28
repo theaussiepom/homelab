@@ -88,3 +88,4 @@ with tempfile.TemporaryDirectory(dir='/var/tmp') as temporary:
 
 # Exercise the separately owned ordinary preflight through the same CI fixture entry.
 subprocess.run([sys.executable,str(SOURCE/'tests/zigbee_ordinary_fixture.py')],check=True)
+subprocess.run([sys.executable,str(SOURCE/'tests/zigbee_staged_fixture.py')],check=True)

@@ -106,6 +106,9 @@ class LifecycleTests(unittest.TestCase):
     def test_automation_service_steps_follow_mqtt_then_ha_then_node_red(self):
         self.cfg['app']['kind']='automation'
         state=ordinary.deploy.sha(self.work/'terraform.tfstate')
+        # Service ordering is tested after the separately completed first infrastructure preparation.
+        ordinary.deploy.write(self.work/'ordinary-infrastructure-ready.json',
+            {'status':'infrastructure-ready','binding':self.expected,'state_sha256':state,'application_ready':False})
         with patch.object(ordinary,'infrastructure',return_value={'changed':False,'created':False,'state_sha256':state}), \
              patch.object(ordinary,'application',return_value={'status':'passed','changed':False}) as app:
             ordinary.run('infrastructure',self.site)

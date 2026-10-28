@@ -24,6 +24,53 @@ def packet():
 
 
 class AutomationConfigurationTests(unittest.TestCase):
+    def test_retained_bootstrap_keeps_existing_access_and_extends_its_current_owner(self):
+        import provider_access
+        foundation, value = packet()
+        retained = configuration.site_config.render(foundation)['bootstrap.json']
+        original_owner = provider_access.owner_sha256(provider_access.owner(retained))
+        retained['applications'].append({'vmid':2501,'hostname':'existing-app'})
+        retained['service_discovery']['guests'].append(2501)
+        retained['service_discovery_extension'] = {'owner_sha256':original_owner,'guests':[2501]}
+        retained['application_networks'] = [{'vmid':2501,'bridge':'vmbr30','vlan':None}]
+        before = copy.deepcopy(retained)
+        value['discovery_previous_guests'] = list(retained['service_discovery']['guests'])
+        result = configuration.compile_config(foundation, value, bootstrap=retained)['bootstrap.json']
+        self.assertEqual(retained, before)
+        self.assertEqual(result['applications'][:-1], retained['applications'])
+        self.assertEqual(result['application_networks'][:-1], retained['application_networks'])
+        self.assertEqual(result['service_discovery']['guests'], [*value['discovery_previous_guests'],200])
+        self.assertEqual(result['service_discovery_extension'], {
+            'owner_sha256':provider_access.owner_sha256(provider_access.owner(retained)), 'guests':[200]})
+
+    def test_retained_bootstrap_cannot_replace_foundation_identity_or_existing_allocations(self):
+        foundation, value = packet()
+        for change in (lambda b:b.update(endpoint='https://other.example.org:8006/'),
+                       lambda b:b['applications'].pop(0),
+                       lambda b:b['service_discovery']['guests'].reverse()):
+            retained = configuration.site_config.render(foundation)['bootstrap.json']
+            change(retained)
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                configuration.compile_config(foundation, value, bootstrap=retained)
+
+    def test_ordinary_binding_validation_does_not_replay_a_bootstrap_extension(self):
+        foundation, value = packet()
+        value['discovery_previous_guests'].append(2501)
+        # Runtime application validation retains the selected inputs without
+        # creating or authorizing the separately prepared bootstrap request.
+        configuration.validate_inputs(foundation, value)
+        with self.assertRaises(ValueError):
+            configuration.compile_config(foundation, value)
+
+    def test_dns_compilation_does_not_replay_the_historical_discovery_owner(self):
+        foundation, value = packet()
+        value['discovery_previous_guests'].append(2501)
+        value['site']['app'].update(mqtt_hostname='broker.mqtt', mqtt_previous_address=None)
+        original = copy.deepcopy(value)
+        dns = configuration.compile_dns(foundation, value)
+        self.assertEqual(dns['extra_records'], {'broker.mqtt':'10.88.25.21'})
+        self.assertEqual(value, original)
+
     def test_frontend_reply_gateway_cannot_drift_from_the_single_site_network(self):
         foundation,value=packet();network=foundation['networks']['frontend']
         nic=dict(bridge=network['bridge'],vlan=network['vlan'],ipv4='10.88.40.21/24',mac='02:88:00:c8:28:01')
@@ -52,14 +99,17 @@ class AutomationConfigurationTests(unittest.TestCase):
         self.assertEqual(dns['extra_records'], {'broker.mqtt':'10.88.25.21'})
 
     def test_disabled_preview_derives_only_the_same_guest_and_vlan_grants(self):
+        import provider_access
         foundation, value = packet(); original = copy.deepcopy(value)
+        previous = configuration.site_config.render(foundation)['bootstrap.json']
+        previous_owner = provider_access.owner_sha256(provider_access.owner(previous))
         boot = configuration.compile_config(foundation,value)['bootstrap.json']
         self.assertEqual(value, original)
         self.assertEqual(boot['applications'][-1],{'vmid':200,'hostname':'automation'})
         self.assertEqual(boot['application_networks'],[{'vmid':200,'bridge':foundation['networks']['management']['bridge'],
             'vlan':foundation['networks']['management']['vlan']}])
         self.assertEqual(boot['service_discovery_extension']['guests'], [value['site']['guest']['vmid']])
-        self.assertRegex(boot['service_discovery_extension']['owner_sha256'], '^[0-9a-f]{64}$')
+        self.assertEqual(boot['service_discovery_extension']['owner_sha256'], previous_owner)
         self.assertEqual(boot['service_discovery']['guests'][:-1],value['discovery_previous_guests'])
         self.assertEqual(boot['service_discovery']['guests'],[*value['discovery_previous_guests'],200])
 

@@ -21,6 +21,7 @@ def validate(cfg,stack):
     app=cfg['app'];guest=cfg['guest']
     files.require(app.get('kind')==KIND and stack.get('kind')==KIND and
         'capture' not in app and 'zigbee_first_start_approval' not in app and
+        'radio_cd_mode' not in app and 'radio_creation_approved' not in app and
         app.get('usb_stage')=='attached',
         'Ordinary radio deployment needs attached-stage inputs and no restore or first-start request')
     radio=zigbee2mqtt.validate(stack.get('zigbee'))

@@ -140,7 +140,7 @@ def run(phase, config, destination=INPUTS, environment=None, deployment=deploy, 
         return result
 
 
-def ordinary(phase, config, maintenance, foundation=None):
+def ordinary(phase, config, maintenance, foundation=None, infrastructure_only=False):
     """The permanent job uses common reconciliation; migration remains separate."""
     import copy
     import tempfile
@@ -151,22 +151,29 @@ def ordinary(phase, config, maintenance, foundation=None):
                   'Explicitly review and enable the prepared automation configuration')
     files.require(foundation is not None, 'Bind ordinary automation to its commissioned foundation configuration')
     import automation_configuration
-    automation_configuration.compile_config(automation_configuration.site_config.read(foundation), value)
+    automation_configuration.validate_inputs(automation_configuration.site_config.read(foundation), value)
     cfg, stack = copy.deepcopy(value['site']), copy.deepcopy(value['stack'])
     files.require(cfg['app']['kind'] == stack['kind'] == 'automation'
                   and cfg['app'].get('exclusive_writer_confirmed') is True,
                   'Confirm the exact automation writer window')
-    prerequisites(cfg, maintenance, stack.get('node_red_oidc'))
+    files.require(type(infrastructure_only) is bool and (not infrastructure_only or phase == 'guest'),
+                  'Only the guest step may prepare infrastructure without applications')
+    # Installation is separate from cross-guest configuration. The reviewed
+    # application_ready workflow input gates first startup after separate SSH
+    # checks; legacy whole-state prerequisite receipts are historical only.
+    # The shared engine still owns this guest's state, plan, locks and holds.
     # The selected capture remains migration provenance in the private source;
     # ordinary deployment neither reads it nor restores it.
     cfg['app'].pop('capture',None)
+    cfg['app'].pop('prerequisite_packet_sha256',None)
     identity = files.digest(files.encoded({'site':cfg,'stack':stack}))
     cfg['app']['stack_config'] = str(Path('/var/lib/homelab-inputs/ordinary/automation')/identity/'stack.json')
     packet = {'schema':'homelab-ordinary-deployment-v1','enabled':True,'kind':'automation','identity':identity,
               'files':{'site.json':files.encoded(cfg).decode(),'stack.json':files.encoded(stack).decode()}}
     with tempfile.TemporaryDirectory(prefix='automation-ordinary-') as temp:
         path=Path(temp)/'packet.json';files.write_new(path,files.encoded(packet))
-        return ordinary_cd.run('infrastructure' if phase == 'guest' else phase,path)
+        return ordinary_cd.run('infrastructure' if phase == 'guest' else phase,path,
+                               **({'infrastructure_only':True} if infrastructure_only else {}))
 
 
 if __name__ == '__main__':
@@ -175,10 +182,12 @@ if __name__ == '__main__':
     parser.add_argument('--config', required=True, type=Path)
     parser.add_argument('--maintenance',type=Path)
     parser.add_argument('--ordinary',action='store_true',help='Permanent no-restore deployment path')
+    parser.add_argument('--infrastructure-only',action='store_true',help='Complete only new Automation infrastructure preparation')
     parser.add_argument('--foundation',type=Path,help='Commissioned foundation inputs for ordinary automation')
     args = parser.parse_args()
     try:
-        print(json.dumps(ordinary(args.phase,args.config,args.maintenance,args.foundation) if args.ordinary else
+        files.require(not args.infrastructure_only or args.ordinary, 'Infrastructure preparation requires the ordinary path')
+        print(json.dumps(ordinary(args.phase,args.config,args.maintenance,args.foundation,args.infrastructure_only) if args.ordinary else
                          run(args.phase,args.config,maintenance=args.maintenance)))
     except deploy.InputNeeded as error:
         raise SystemExit(str(error)) from None

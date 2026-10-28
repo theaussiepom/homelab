@@ -11,6 +11,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import ssl
 import stat
 import time
@@ -419,6 +420,17 @@ def _execute_step(action, cfg_path, approved_plan=None):
         return {'step': action, 'vmid': vmid, 'status': 'passed'}
 
 
+def check_radio_capture(cfg):
+    """Reuse the exact original capture guard for direct and staged CD apply."""
+    capture = cfg['app'].get('capture', {})
+    path = Path(capture.get('path', ''))
+    if (capture.get('coherent') is not True or path.is_symlink() or not path.is_file()
+            or sha(path) != capture.get('sha256')):
+        raise InputNeeded('Verify the selected Zigbee capture before creating its guest')
+    stack = json.loads(Path(cfg['app']['stack_config']).read_text())
+    zigbee2mqtt.check_archive(path, stack['zigbee'])
+
+
 def execute(action, cfg_path, approved_plan=None):
     """Keep one approved rollout running through all phases, with no retries."""
     os.umask(0o077)
@@ -427,13 +439,7 @@ def execute(action, cfg_path, approved_plan=None):
     if cfg['app'].get('kind') == 'zigbee2mqtt' and action == 'deploy':
         raise InputNeeded('Zigbee uses two stages: plan/apply prepare, operator USB attachment, then plan/apply attached and stage/start/verify')
     if action == 'apply' and cfg['app'].get('kind') == 'zigbee2mqtt':
-        capture = cfg['app'].get('capture', {})
-        path = Path(capture.get('path', ''))
-        if (capture.get('coherent') is not True or path.is_symlink() or not path.is_file()
-                or sha(path) != capture.get('sha256')):
-            raise InputNeeded('Verify the selected Zigbee capture before creating its guest')
-        stack = json.loads(Path(cfg['app']['stack_config']).read_text())
-        zigbee2mqtt.check_archive(path, stack['zigbee'])
+        check_radio_capture(cfg)
     work = Path(cfg['paths']['state_root']) / str(vmid)
     work.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (work / 'workflow.lock').open('a') as lock:
@@ -443,6 +449,11 @@ def execute(action, cfg_path, approved_plan=None):
         hold = work / 'ROLLOUT-HOLD.json'
         if hold.exists():
             raise InputNeeded('An interrupted rollout is held; review its phase receipts before another job')
+        if action in {'radio-prepare', 'radio-attach', 'radio-start'}:
+            if cfg['app'].get('kind') != 'zigbee2mqtt':
+                raise InputNeeded('Initial radio phases belong only to the selected coordinator guest')
+            import zigbee_cd
+            return zigbee_cd.initial(action, cfg_path, cfg, work, engine=sys.modules[__name__])
         if action not in {'deploy', 'prepare'}:
             return _execute_step(action, cfg_path, approved_plan)
         if action == 'prepare' and cfg['app'].get('kind') != 'automation':

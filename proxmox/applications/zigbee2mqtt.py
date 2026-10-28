@@ -210,16 +210,17 @@ def private_receipt(path):
     return json.loads(path.read_text())
 
 
-def first_start_approval(approval,cfg,capture_sha256,restore_receipt,now=None):
+def approval_digest(approval,cfg,capture_sha256,restore_sha256,now=None):
     """Validate a separately reviewed, bounded first-start decision; never mint one."""
     fields={'schema','approved','capture_sha256','selection_sha256',
             'restore_receipt_sha256','exclusive_writer_window'}
-    if (not isinstance(approval,dict) or set(approval)!=fields or
+    if (not isinstance(restore_sha256,str) or not re.fullmatch(r'[0-9a-f]{64}',restore_sha256) or
+            not isinstance(approval,dict) or set(approval)!=fields or
             type(approval['schema']) is not int or approval['schema']!=1 or
             approval['approved'] is not True or
             approval['capture_sha256']!=capture_sha256 or
             approval['selection_sha256']!=fingerprint(cfg) or
-            approval['restore_receipt_sha256']!=hashlib.sha256(restore_receipt.read_bytes()).hexdigest()):
+            approval['restore_receipt_sha256']!=restore_sha256):
         raise ValueError('First start needs explicit approval bound to this capture, selection and complete restore receipt')
     window=approval['exclusive_writer_window']
     if (not isinstance(window,dict) or set(window)!={'id','confirmed','not_before','expires_at'} or
@@ -235,6 +236,12 @@ def first_start_approval(approval,cfg,capture_sha256,restore_receipt,now=None):
     except (ValueError,TypeError):
         raise ValueError('The reviewed first-start writer window must be current and at most 24 hours') from None
     return fingerprint(approval),window['id']
+
+
+def first_start_approval(approval,cfg,capture_sha256,restore_receipt,now=None):
+    """Bind selected approval to the actual private receipt at admission time."""
+    return approval_digest(approval,cfg,capture_sha256,
+        hashlib.sha256(restore_receipt.read_bytes()).hexdigest(),now)
 
 
 def valid_window_id(value):

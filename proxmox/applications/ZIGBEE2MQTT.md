@@ -303,3 +303,42 @@ acceptance remain separate from source preparation.
 The selected broker alias is deployment addressing only. The checker still
 requires the captured MQTT URL, keys, PANs, channel, device names and topic. No
 source helper edits the application YAML or converts these settings.
+
+## Initial creation and first start through the same permanent job
+
+The private merge-triggered Radio209 job selects one explicit mode. Its closed
+selection remains disabled until that mode's actual inputs and authority are
+reviewed. No manual Actions dispatch or workstation/host OpenTofu is involved.
+
+| Mode | Existing job steps | Admission needed |
+| --- | --- | --- |
+| `prepare` | `zigbee_cd.py --phase infrastructure`: existing installer plan/apply creates only a protected stopped guest without USB/autostart | Approved exact creation inputs and coherent capture; no USB, MQTT or first-start admission |
+| `attached` | Same infrastructure step refreshes the original runner backend, retains exact operator-attached `dev0`, boots only the new OS and pins SSH identity | Separately approved operator attachment and retired old writer |
+| `first-start` | Same infrastructure step, then `zigbee_cd.py --phase application`: existing installer stage/start/verify | Actual externally staged original data/restore receipt, current hash-bound first-start writer window and ready MQTT peer |
+| `ordinary` | Existing `zigbee_ordinary.py` infrastructure/application steps | Real accepted private admission; no capture, creation flag or first-start approval |
+
+The wrapper uses `deploy.execute` and its existing workflow/deployment locks,
+plan checks, state backups and failure holds. It records successful phase
+receipts without creating another backend or controller. Failures and uncertain
+outcomes retain the existing HOLD; no automatic continuation or replay exists.
+The stopped creation's plan and apply-window metadata are preserved privately
+before the attached update, allowing the existing `guest_identity.pin` to check
+the actual first OS boot against its original creation log. Terraform state
+never leaves the runner. A matching completed phase does not run target commands.
+
+The privileged USB operator remains a separate reviewed workstation action.
+Data/configuration is restored separately over the approved SSH route. Before
+radio installation touches packages, `zigbee-staged.yml` requires the exact
+existing root-owned0600 restore receipt bound to the original capture and data
+destination. Radio is excluded from the installer's extraction tasks. The
+existing admission task still checks actual state bytes, then the real private
+receipt and current writer window before first start. Neither ordinary mode nor
+an infrastructure-prepared receipt may mint or stand in for that admission.
+
+The parent declares both Bootstrap and Automation ordering edges. Initial
+preparation/attachment can tolerate an intentionally skipped application job
+when explicitly activated with the reviewed failure/cancellation-closed parent
+condition; first-start/ordinary require the selected broker readiness. The
+parent's selected mode must match the closed contract before credentials are
+bound. Current parent and child conditions and all native readiness flags are
+false; preparing these paths authorizes no live creation or startup.

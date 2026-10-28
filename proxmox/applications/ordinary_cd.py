@@ -47,7 +47,12 @@ def prepare(packet_path, inputs=Path('/var/lib/homelab-inputs/ordinary'), enviro
     files.require('site.json' in payload and all(re.fullmatch(r'[a-z][a-z0-9.-]{0,63}', n) for n in payload),
                   'Use bounded ordinary input file names')
     cfg = json.loads(payload['site.json'])
-    files.require(cfg['app']['kind'] == kind and 'capture' not in cfg['app']
+    initial_radio = False
+    if adapter is not None and kind == 'zigbee2mqtt':
+        import zigbee_cd
+        initial_radio = (adapter is zigbee_cd and zigbee_cd.INITIAL_CAPTURE is True
+                         and cfg['app'].get('radio_cd_mode') in zigbee_cd.MODES)
+    files.require(cfg['app']['kind'] == kind and ('capture' not in cfg['app'] or initial_radio)
                   and 'ha_http' not in cfg['app'], 'Ordinary deployment cannot migrate or restore data')
     files.require(adapter is None or 'stack.json' in payload, 'The radio adapter requires its reviewed stack')
     if 'stack.json' in payload:
@@ -185,13 +190,16 @@ def application(cfg, site, work, operation, expected, service=None, *, playbook=
     return {'status': 'passed', 'changed': any(int(n) for n in counts)}
 
 
-def run(phase, packet, *, inputs=Path('/var/lib/homelab-inputs/ordinary'), environment=None, adapter=None):
+def run(phase, packet, *, inputs=Path('/var/lib/homelab-inputs/ordinary'), environment=None, adapter=None, infrastructure_only=False):
     files.require(phase in ('infrastructure', 'application', *deploy.AUTOMATION_SERVICES), 'Select the visible OpenTofu or Ansible step')
     files.require(not any(p.exists() or p.is_symlink() for p in
                   (Path('/var/lib/homelab-bootstrap/CONFIGURING'), Path('/var/lib/homelab-bootstrap/BOOTSTRAP-CD-HOLD.json'))),
                   'Preserve bootstrap maintenance custody')
     cfg, site = prepare(packet, inputs, environment, **({"adapter": adapter} if adapter is not None else {}))
     vmid = deploy.validate(cfg)
+    files.require(type(infrastructure_only) is bool and (not infrastructure_only or
+                  cfg['app']['kind'] == 'automation' and phase == 'infrastructure' and adapter is None),
+                  'Infrastructure-only preparation belongs to the Automation guest step')
     phases = list(deploy.AUTOMATION_SERVICES) if cfg['app']['kind'] == 'automation' else ['application']
     files.require(phase == 'infrastructure' or phase in phases, 'Select this guest application step')
     state = Path(cfg['paths']['state_root']); files.private_directory(state)
@@ -212,21 +220,53 @@ def run(phase, packet, *, inputs=Path('/var/lib/homelab-inputs/ordinary'), envir
                       'Preserve a nested database operation hold')
         expected = binding(cfg, site); hold = work / 'ORDINARY-HOLD.json'
         complete = work / 'ordinary-complete.json'
+        prepared = work / 'ordinary-infrastructure-ready.json'
+        if infrastructure_only:
+            files.require(not complete.exists() and not complete.is_symlink(), 'Use normal application mode after a completed deployment')
+            if prepared.exists() or prepared.is_symlink():
+                ready = json.loads(files.regular(prepared, private=True))
+                if (ready.get('status') == 'infrastructure-ready' and ready.get('binding') == expected
+                        and ready.get('state_sha256') == deploy.sha(work/'terraform.tfstate')):
+                    files.require(not hold.exists() and not hold.is_symlink(), 'Preserve an interrupted preparation')
+                    return {'status':'passed','vmid':vmid,'readiness':'infrastructure-ready',
+                            'application_ready':False,'changed':False,'target_contacted':False}
         if complete.exists() or complete.is_symlink():
             old = json.loads(files.regular(complete, private=True))
             if old.get('status') == 'passed' and old.get('binding') == expected and old.get('state_sha256') == deploy.sha(work/'terraform.tfstate'):
                 files.require(not hold.exists() and not hold.is_symlink(), 'Preserve an interrupted ordinary operation')
                 return {'status': 'passed', 'vmid': vmid, 'changed': False, 'target_contacted': False}
+        if cfg['app']['kind'] == 'automation' and phase == 'infrastructure' and not infrastructure_only and not complete.exists():
+            ready = json.loads(files.regular(prepared, private=True))
+            files.require(ready.get('status') == 'infrastructure-ready'
+                          and ready.get('binding') == expected
+                          and ready.get('state_sha256') == deploy.sha(work/'terraform.tfstate'),
+                          'First application rollout needs the exact prepared infrastructure state')
         identity = '-'.join(os.environ.get(k, '') for k in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'))
         files.require(re.fullmatch(r'[1-9][0-9]*-[1-9][0-9]*', identity), 'Use the identified merge-triggered deployment run')
         operation = work / ('ordinary-' + identity)
         marker = {'binding': expected, 'operation': str(operation), 'automatic_retry': False}
+        if infrastructure_only: marker['infrastructure_only'] = True
         if phase == 'infrastructure':
             files.require(not hold.exists() and not hold.is_symlink() and not operation.exists(),
                           'An existing ordinary operation requires review; no replay')
             files.private_directory(operation, create=True); files.write_new(hold, encoded(marker))
             result = infrastructure(cfg, site, work, operation, expected, **({"adapter": adapter} if adapter is not None else {}))
             files.write_new(operation / 'infrastructure-complete.json', encoded({'binding': expected, **result}))
+            if infrastructure_only:
+                files.require(binding(cfg, site) == expected
+                              and result['state_sha256'] == deploy.sha(work/'terraform.tfstate')
+                              and files.regular(hold, private=True) == encoded(marker),
+                              'Preserve changed or interrupted infrastructure preparation')
+                receipt = {'status':'infrastructure-ready','binding':expected,
+                           'state_sha256':result['state_sha256'],'application_ready':False}
+                files.write_new(operation/'preparation-complete.json', encoded(receipt))
+                deploy.write(prepared, receipt)
+                # Only this fully successful preparation closes its own active
+                # transaction. Failure/unknown holds are never cleared here.
+                files.require(files.regular(hold, private=True) == encoded(marker), 'Preparation hold ownership changed')
+                hold.unlink(); files.sync(work)
+                return {'status':'passed','vmid':vmid,'readiness':'infrastructure-ready',
+                        'application_ready':False,**result}
             return {'status': 'passed', 'vmid': vmid, **result}
         files.require(files.regular(hold, private=True) == encoded(marker), 'Only the same run may complete its Ansible step')
         ready = json.loads(files.regular(operation / 'infrastructure-complete.json', private=True))
@@ -256,9 +296,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--phase', choices=('infrastructure', 'application', *deploy.AUTOMATION_SERVICES), required=True)
     parser.add_argument('--packet', type=Path, required=True)
+    parser.add_argument('--infrastructure-only', action='store_true')
     args = parser.parse_args()
     try:
         os.umask(0o077)
-        print(json.dumps(run(args.phase, args.packet)))
+        print(json.dumps(run(args.phase, args.packet, infrastructure_only=args.infrastructure_only)))
     except Exception:
         raise SystemExit('Ordinary deployment held; preserve private inputs/state and all operation evidence. No automatic replay or restore.') from None

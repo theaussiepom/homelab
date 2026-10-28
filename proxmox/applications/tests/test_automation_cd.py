@@ -18,7 +18,7 @@ class AutomationCDTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);config=root/'config.json'
             cfg={'app':{'kind':'automation','exclusive_writer_confirmed':True,'capture':{'path':'/historical/capture'},
-                        'stack_config':'/historical/stack.json'},'guest':{'vmid':200}}
+                        'stack_config':'/historical/stack.json','prerequisite_packet_sha256':'a'*64},'guest':{'vmid':200}}
             value={'schema':'homelab-automation-deployment-v1','enabled':True,'site':cfg,
                    'stack':{'kind':'automation'},'discovery_previous_guests':[202,211,212]}
             config.write_text(json.dumps(value))
@@ -26,16 +26,21 @@ class AutomationCDTests(unittest.TestCase):
             def run(phase,path):
                 packet=json.loads(path.read_text());site=json.loads(packet['files']['site.json'])
                 self.assertNotIn('capture',site['app'])
+                self.assertNotIn('prerequisite_packet_sha256',site['app'])
                 self.assertIn('/ordinary/automation/',site['app']['stack_config'])
                 observed.append((phase,packet))
                 return {'status':'passed'}
             with patch.object(automation_cd,'prerequisites') as prerequisites,patch.object(ordinary_cd,'run',side_effect=run), \
-                 patch('automation_configuration.compile_config') as compiler,patch('automation_configuration.site_config.read',return_value={}):
+                 patch('automation_configuration.compile_config') as compiler, \
+                 patch('automation_configuration.validate_inputs') as validator, \
+                 patch('automation_configuration.site_config.read',return_value={}):
                 automation_cd.ordinary('guest',config,None,root/'foundation.json')
                 automation_cd.ordinary('mqtt',config,None,root/'foundation.json')
             self.assertEqual([p for p,_ in observed],['infrastructure','mqtt'])
             self.assertEqual(observed[0][1],observed[1][1])
-            self.assertEqual(prerequisites.call_count,2)
+            prerequisites.assert_not_called()
+            self.assertEqual(validator.call_count,2)
+            compiler.assert_not_called()
             self.assertIn('capture',json.loads(config.read_text())['site']['app'])
 
 
