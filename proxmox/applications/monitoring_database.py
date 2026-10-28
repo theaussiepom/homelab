@@ -38,7 +38,7 @@ def set_password(password):
                         '-c', "SET password_encryption='scram-sha-256'",
                         '-c', r'\password zabbix'],
                        input=password + '\n' + password + '\n',
-                       capture_output=True, text=True, timeout=30, check=True)
+                       capture_output=True, text=True, timeout=30, check=True, start_new_session=True)
     except subprocess.CalledProcessError:
         raise ValueError('PostgreSQL monitoring password setup failed; preserve its hold') from None
 

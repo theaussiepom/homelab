@@ -108,7 +108,8 @@
 
 - name: Set the new PostgreSQL monitor password using client-side encryption
   ansible.builtin.command:
-    argv: [psql, -X, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SET password_encryption='scram-sha-256'", -c, '\password zbx_monitor']
+    # Detach any SSH controlling terminal so psql reads the private stdin pipe.
+    argv: [setsid, --wait, psql, -X, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SET password_encryption='scram-sha-256'", -c, '\password zbx_monitor']
     stdin: "{{ lookup('ansible.builtin.file', monitoring_db_config.password_file) | trim }}\n{{ lookup('ansible.builtin.file', monitoring_db_config.password_file) | trim }}\n"
   become_user: postgres
   when: monitoring_db_kind == 'postgresql' and not monitoring_db_state.results[0].stat.exists

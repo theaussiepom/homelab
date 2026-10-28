@@ -21,6 +21,7 @@ class MonitoringDatabaseTests(unittest.TestCase):
         self.assertNotIn(password,str(args[0]))
         self.assertEqual(kwargs['input'],password+'\n'+password+'\n')
         self.assertTrue(kwargs['check'])
+        self.assertTrue(kwargs['start_new_session'])
 
     @unittest.skipUnless(hasattr(os, 'listxattr'), 'Native HBA metadata uses Linux xattrs')
     def test_rejected_hba_or_failed_reload_restores_original_and_keeps_hold(self):

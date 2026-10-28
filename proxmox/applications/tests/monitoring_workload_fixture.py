@@ -107,7 +107,9 @@ def main(args):
                 container=prefix+('-pg' if kind=='postgresql' else '-mysql')
                 docker('exec','-i',container,*cmd,input=(root/(kind+'.sql')).read_text(),capture_output=True,text=True)
             password_command=json.loads((root/'postgresql-password-command.json').read_text())
-            docker('exec','-i',prefix+'-pg',password_command[0],'-U','postgres',*password_command[1:],
+            position=password_command.index('psql')+1
+            password_command[position:position]=['-U','postgres']
+            docker('exec','-i',prefix+'-pg',*password_command,
                 input=password+'\n'+password+'\n',capture_output=True,text=True)
             # Prove the monitor cannot create a role/database or read application rows.
             docker('exec',prefix+'-pg','psql','-U','postgres','-c','CREATE TABLE private_application(secret text);',capture_output=True)
