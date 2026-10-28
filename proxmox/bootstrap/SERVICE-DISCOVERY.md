@@ -84,10 +84,34 @@ reviewed host-settings change:
 ```
 
 Use `provider_access.owner_sha256()` on the current owner content to calculate
-this hash. Initially that content is `service-discovery/owner.json`; after an
+this hash. Initially, that content is `service-discovery/owner.json`; after an
 extension it is the `owner` in the last `scope-extensions/NNNN.json` receipt.
 This hash describes the existing node, address, token identity, role and full
 guest list. It contains no credential.
+
+On the runner, run this from the private repository checkout containing
+`public-source/`. It prints only the non-secret owner hash:
+
+```sh
+python3 - <<'PY'
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, 'public-source/proxmox/bootstrap')
+from provider_access import owner_sha256
+
+base = Path('/var/lib/homelab-bootstrap/service-discovery')
+receipts = sorted((base / 'scope-extensions').glob('*.json'))
+owner = (json.loads(receipts[-1].read_text())['owner'] if receipts
+         else json.loads((base / 'owner.json').read_text()))
+print(owner_sha256(owner))
+PY
+```
+
+Do not hash the stored file with `sha256sum`: its whitespace differs from the
+canonical JSON content checked by bootstrap. Normal bootstrap admission still
+checks the complete receipt chain and its NAS copies before changing access.
 
 Review and approve the exact added guest access before merging. Bootstrap adds
 only the declared read grants, without propagation. It verifies the retained
