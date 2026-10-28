@@ -58,6 +58,34 @@ class ScopeTests(unittest.TestCase):
         self.policy['rules'].append(dict(source='10.88.25.23',destination='10.88.25.35',port=22))
         with self.assertRaises(ValueError):firewall.candidate(self.guest,self.policy)
 
+    def native_defaults_plan(self):
+        self.policy['rules'].append(dict(source='10.88.25.23',destination='10.88.25.34',port=5000))
+        value=copy.deepcopy(self.plan)
+        before=value['resource_changes'][-1]['change']['before']
+        for index,row in enumerate(before['rule']):
+            row.update(pos=index,**{name:'' for name in ('sport','iface','macro','log','security_group')})
+        self.before[m.RULES]=copy.deepcopy(before)
+        fixture=Path(__file__).with_name('fixtures')/'ingress-egress-bpg-added-rules.json'
+        added=json.loads(fixture.read_text())
+        value['resource_changes'][-1]['change']['after']['rule']=copy.deepcopy(before['rule'])+added
+        return value
+
+    def test_native_bpg_null_added_defaults_match_the_ordinary_existing_rule_defaults(self):
+        # Captured BPG plan shape, with only deployment addresses substituted.
+        value=self.native_defaults_plan()
+        firewall.check_plan(value,'pve-test',self.guest,self.policy,self.before)
+
+    def test_native_shape_still_rejects_logging_interface_extra_fields_and_old_rule_changes(self):
+        original=self.native_defaults_plan()
+        for key,bad in [('log','info'),('log','nolog'),('iface','eth1'),('macro','SSH'),('sport','22'),
+                        ('security_group','broader'),('enabled',1),('unexpected',None),('pos',999),
+                        ('source','0.0.0.0/0'),('dest','0.0.0.0/0'),('dport','8080,5000')]:
+            value=copy.deepcopy(original);value['resource_changes'][-1]['change']['after']['rule'][-1][key]=bad
+            with self.subTest(key=key),self.assertRaises(ValueError):
+                firewall.check_plan(value,'pve-test',self.guest,self.policy,self.before)
+        value=copy.deepcopy(original);value['resource_changes'][-1]['change']['after']['rule'][0]['log']=None
+        with self.assertRaises(ValueError):firewall.check_plan(value,'pve-test',self.guest,self.policy,self.before)
+
     def test_scope_refuses_other_source_subnet_destination_or_fifth_nic(self):
         for key,bad in [('source','10.88.40.33'),('destination','10.88.31.35'),('destination','0.0.0.0'),('port',True)]:
             # The source must be on the installed backend interface, never the frontend.

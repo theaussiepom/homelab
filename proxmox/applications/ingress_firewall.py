@@ -116,7 +116,14 @@ def check_plan(value,node,guest,selected,accepted):
         for index,(actual,wanted) in enumerate(zip(after['rule'][len(before['rule']):],provider_rules(before['rule'],selected))):
             actual=copy.deepcopy(actual)
             if 'pos' in actual and actual['pos'] is None:actual['pos']=len(before['rule'])+index
-            require(actual==wanted,'Only the exact sources, targets, TCP ports and ordinary provider defaults')
+            # BPG plans represent these unset fields as null for additions and
+            # empty strings for existing rules. Compare only these observed
+            # defaults; old rules and all semantic fields remain raw-exact.
+            for name in ('sport','iface','macro','log','security_group'):
+                if name in actual and name in wanted and actual[name] in (None,'') and wanted[name] in (None,''):
+                    actual[name]=wanted[name]
+            require(actual.get('enabled') is True and actual==wanted,
+                    'Only the exact sources, targets, TCP ports and ordinary provider defaults')
     return observations
 
 
