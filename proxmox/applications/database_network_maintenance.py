@@ -71,19 +71,22 @@ def validate_existing_routes(guest, value, existing_cidrs=()):
 def candidate_guest(guest, value, engine, *, phase, client_vmids, legacy_server_address=None, existing_cidrs=()):
     """Pure exact guest overlay, preserving all unrelated installed inputs.
 
-    PG server replaces its one untagged vmbr30 NIC in place; selected clients
+    Each server replaces its one untagged vmbr30 NIC in place; selected PG clients
     retain vmbr30 for HTTP and append the new DB NIC. Old SQL allowances are
-    removed. Other engines remain additive. No guest/config is written here.
+    removed. Other-engine client moves remain separately owned. No guest/config is written here.
     """
     validate_existing_routes(guest,value,existing_cidrs)
     chosen = selected_catalogue(value, engine, client_vmids)
     net, member = networks.selected(chosen, engine, guest['vmid'])
     require(member['hostname'] == guest['hostname'], 'Catalogue and installed hostname differ')
-    require(phase == ('cutover' if engine == 'postgresql' else 'additive'),
-            'Only PostgreSQL cutover and other-engine additive planning are selected')
+    require(phase == 'cutover' or (phase == 'additive' and engine != 'postgresql'),
+            'Select an explicit cutover or existing non-PostgreSQL additive plan')
     if phase == 'additive':
         require(legacy_server_address is None, 'No legacy removal is selected for this engine')
         return networks.attach(guest, chosen, [engine])
+    require(engine == 'postgresql' or member == net['server'],
+            'Non-PostgreSQL cutover planning is server-only; clients keep their own CD')
+    require(isinstance(legacy_server_address, str), 'Bind the exact old server address')
     old = ipaddress.IPv4Address(legacy_server_address)
     legacy = [(i, nic) for i, nic in enumerate(guest['interfaces']) if nic['bridge'] == 'vmbr30']
     require(len(legacy) == 1, 'Require the one existing private backend NIC')

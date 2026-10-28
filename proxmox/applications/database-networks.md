@@ -124,3 +124,45 @@ must supply the exact current startup-file hashes. The playbook waits for the
 selected interfaces, updates the shared dependency and checks the running
 service process stayed unchanged. It does not restart Docker or the database.
 Application activation remains a separate, explicitly selected cutover step.
+
+## MariaDB and InfluxDB server-only cutovers
+
+An explicitly selected `homelab-database-server-cutover-v1` operation uses the
+same saved-plan checker, apply helper, durable coordinator and startup update.
+Its sole member is the existing MariaDB or InfluxDB server. Declaring catalogue
+clients does not create, start or migrate them. Each app retains its own CD and
+must prove authenticated access before it starts.
+
+The cutover replaces the server's old private NIC in place, retains management
+and its default route, removes only its exact old SQL rule and renders the
+selected client rules. It replaces the wildcard database listener with the
+catalogue server address. MariaDB keeps its local maintenance socket; InfluxDB
+keeps its existing Bolt/engine paths and refuses setup. No account, grant,
+password, organization, bucket, token or database restoration is performed.
+
+Before any change, the fixed server adapter requires its exact original private
+configuration/process/health inspection and no current TCP consumers (plus no
+other MariaDB session). The original configuration is bound in the coordinator
+request and retained through existing local/NAS custody before the claim.
+It updates the two startup dependencies before the provider NIC operation,
+then changes only the listener line, preserves file ownership/mode, restarts
+that one database service and verifies the effective new-only listener and
+health. MariaDB also checks the retained nonsecret account/schema census.
+The provider may cycle the guest, so native approval must cover that lifecycle.
+A cycle can briefly restart the original wildcard configuration before listener
+activation; source checks do not promise an atomic or interruption-free change.
+
+A failure keeps the exact claim, configuration and private evidence. There is
+no automatic rollback, restart of apps, retry under a new operation, database
+restore or hold clearing. A completed later run verifies the maintained overlay
+and listener; it does not repeat the restart or probe the retired address.
+The private original-application guard must recognize the single-server claim
+before integrating this selection, so the original installer cannot bypass it.
+
+Configured guest rules are not proof of filtering when the Proxmox global
+firewall is disabled. Do not enable it here. New-address-only listeners and an
+internal bridge remove the old SQL exposure, while actual MariaDB host grants
+and InfluxDB token authorization remain application controls. Unknown or dormant
+consumers still need an owner inventory: a zero-session snapshot alone cannot
+prove none exist. No future client receives a live acceptance claim from the
+server's local health check.

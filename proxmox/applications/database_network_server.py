@@ -5,7 +5,7 @@ performed. Keep commissioned inputs/receipts unchanged: a separately reviewed
 maintenance operation must bind these candidates to actual installed files.
 PostgreSQL has an explicit cutover phase, removing its previous remote listener
 and HBA paths. Only the operation's selected clients receive access. MariaDB and
-InfluxDB remain additive; their existing wildcard listeners need no change.
+InfluxDB also support explicit server-only cutovers to one private address.
 """
 import configparser
 import ipaddress
@@ -85,13 +85,15 @@ def render(value, engine, sources, *, phase='additive', client_vmids=None):
     specific listener to work around a transition problem.
     """
     net = networks.selected(value, engine)
-    require(phase == ('cutover' if engine == 'postgresql' else 'additive'),
-            'PostgreSQL requires explicit cutover; other database cutovers are not selected')
+    require(phase == 'cutover' or (phase == 'additive' and engine != 'postgresql'),
+            'Select explicit cutover; PostgreSQL cannot be additive')
     require(isinstance(sources, dict) and set(sources) == FILES[engine]
             and all(isinstance(text, str) and len(text.encode()) <= 131072 and '\x00' not in text
                     for text in sources.values()), 'Supply only the existing bounded server configuration texts')
     files, activation = dict(sources), 'none'
     selected = clients(value, engine, client_vmids) if client_vmids is not None else None
+    require(phase != 'cutover' or selected is not None,
+            'Cutover requires explicit selected catalogue client IDs')
     if engine == 'postgresql':
         require(selected is not None, 'PostgreSQL cutover requires explicit selected client IDs')
         files, activation = postgres(sources, net['server']['address'], selected)
@@ -99,7 +101,8 @@ def render(value, engine, sources, *, phase='additive', client_vmids=None):
         config = configparser.ConfigParser(interpolation=None, allow_no_value=True)
         try:
             config.read_string(sources['homelab.cnf'])
-            compatible = (config.get('mysqld', 'bind-address', raw=True) == '0.0.0.0'
+            address = config.get('mysqld', 'bind-address', raw=True)
+            compatible = (address in ({'0.0.0.0', net['server']['address']} if phase == 'cutover' else {'0.0.0.0'})
                           and not config.has_option('mysqld', 'bind_address')
                           and not config.has_option('mysqld', 'skip-networking')
                           and not config.has_option('mysqld', 'skip_networking')
@@ -107,8 +110,23 @@ def render(value, engine, sources, *, phase='additive', client_vmids=None):
         except configparser.Error:
             compatible = False
         require(compatible, 'Preserve the existing wildcard MariaDB listener; review other listener changes separately')
+        if phase == 'cutover':
+            matches = list(re.finditer(r'(?m)^([ \t]*bind-address[ \t]*=[ \t]*)([0-9.]+)([ \t]*)$', sources['homelab.cnf']))
+            require(config.sections() == ['mysqld'] and len(matches) == 1,
+                    'Review unsupported MariaDB sections or listener syntax')
+            match = matches[0]
+            files['homelab.cnf'] = sources['homelab.cnf'][:match.start(2)] + net['server']['address'] + sources['homelab.cnf'][match.end(2):]
+            activation = 'restart' if files != sources else 'none'
     else:
-        require(tomllib.loads(sources['config.toml']).get('http-bind-address') == ':' + str(networks.PORTS[engine]),
+        address = tomllib.loads(sources['config.toml']).get('http-bind-address')
+        new = net['server']['address'] + ':' + str(networks.PORTS[engine])
+        require(address in ({':' + str(networks.PORTS[engine]), new} if phase == 'cutover' else {':' + str(networks.PORTS[engine])}),
                 'Preserve the existing wildcard Influx listener; review other listener changes separately')
+        if phase == 'cutover':
+            matches = list(re.finditer(r'(?m)^([ \t]*http-bind-address[ \t]*=[ \t]*)"([^"\r\n]+)"([ \t]*)$', sources['config.toml']))
+            require(len(matches) == 1, 'Review unsupported Influx listener syntax')
+            match = matches[0]
+            files['config.toml'] = sources['config.toml'][:match.start(2)] + new + sources['config.toml'][match.end(2):]
+            activation = 'restart' if files != sources else 'none'
     return {'files': files, 'activation': activation, 'endpoint': networks.endpoint(value, engine),
             'phase': phase, 'client_vmids': [client['vmid'] for client in selected] if selected else None}
