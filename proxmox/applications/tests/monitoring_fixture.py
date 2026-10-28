@@ -78,7 +78,7 @@ def client():
     http_password = 'zabbix'
     variables = {'ansible_httpapi_use_ssl': False, 'monitoring_initial_password': True,
                  'monitoring_admin_password': "{{ lookup('ansible.builtin.env', 'FIXTURE_ADMIN_PASSWORD') }}",
-                 'monitoring_hosts': [dict(credentials['fixture-linux'], profiles=['linux', 'docker']), credentials['fixture-wrong']],
+                 'monitoring_hosts': [dict(credentials['fixture-linux'], profiles=['docker']), credentials['fixture-wrong']],
                  'monitoring_proxmox': {'hostname': 'fixture-pve-api', 'address': 'pve.example.invalid',
                                         'token_id': 'fixture@pve!monitoring', 'token_secret': 'fixture-secret'}}
     def configure(pass_number):

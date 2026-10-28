@@ -144,7 +144,9 @@ maintained inventories. Private integration must keep those inputs consistent.
 ## Workload profiles and credentials
 
 `monitoring_profiles.py` provides `linux`, `docker`, `postgresql`, `mysql` (also
-MariaDB), and `influxdb` selections. Agent connections initiate TCP 10051, omit
+MariaDB), and `influxdb` selections. Every admitted agent automatically retains
+the Linux baseline, including when its inventory selects only workload profiles;
+explicitly selecting `linux` does not duplicate it. Agent connections initiate TCP 10051, omit
 `Server`, open no passive 10050 listener, and deny `system.run`. OS-only config has
 no plugin include. Workloads add exactly one fixed config file, not arbitrary vendor
 include directories or custom commands.

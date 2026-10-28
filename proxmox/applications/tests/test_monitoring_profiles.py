@@ -22,6 +22,21 @@ class ProfileTests(unittest.TestCase):
         self.assertIn('Plugins.Docker.Endpoint=unix:///var/run/docker.sock',
                       profiles.plugin_config({'docker': {'socket_access_approved': True}}))
 
+    def test_every_admitted_agent_keeps_linux_and_requested_workloads_once(self):
+        linux = profiles.PROFILES['linux'][1]
+        for requested in (['docker'], ['postgresql'], ['mysql'], ['linux'],
+                          ['docker', 'linux'], ['postgresql', 'docker']):
+            with self.subTest(requested=requested):
+                original = requested.copy()
+                result = profiles.host_profile({'profiles': requested, 'settings': {}})
+                expected = requested if 'linux' in requested else ['linux', *requested]
+                self.assertEqual(result['link_templates'], profiles.templates(expected))
+                self.assertEqual(result['link_templates'].count(linux), 1)
+                self.assertEqual(requested, original)
+                self.assertEqual(result['profile_macros'], profiles.host_macros(requested))
+        with self.assertRaises(ValueError):
+            profiles.host_profile({'profiles': ['linux', 'linux'], 'settings': {}})
+
     def test_db_passwords_stay_in_local_named_sessions_not_server_macros(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'password'; path.write_text('synthetic-monitor-password-long-enough'); path.chmod(0o600)
@@ -44,6 +59,7 @@ class ProfileTests(unittest.TestCase):
             with self.assertRaises(ValueError): profiles.host_profile({'profiles':['influxdb'], 'settings':{'influxdb':{'url':'http://db.example.invalid', 'token_file':str(path)}}})
             result = profiles.host_profile({'profiles':['influxdb'], 'settings':{'influxdb':{'url':'https://db.example.invalid', 'token_file':str(path)}}})
             self.assertEqual(result['profile_macros'][-1]['type'], 'secret')
+            self.assertEqual(result['link_templates'].count(profiles.PROFILES['linux'][1]), 1)
             document = templates.prepared('template_db_influxdb_http.yaml')
             self.assertTrue(list(templates.http_agents(document)))
             self.assertTrue(all(item['verify_peer'] == item['verify_host'] == 'YES' for item in templates.http_agents(document)))

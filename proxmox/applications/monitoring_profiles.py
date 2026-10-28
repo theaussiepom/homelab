@@ -77,6 +77,10 @@ def host_profile(value):
     if set(value) != {'profiles', 'settings'}:
         raise ValueError('Use the closed server-side profile selection')
     profiles, settings = selected(value['profiles']), value['settings']
+    # Every admitted agent needs the Linux uptime baseline for acceptance.
+    # Workload selections add to it without mutating the caller's inventory.
+    if 'linux' not in profiles:
+        profiles = ['linux', *profiles]
     if not isinstance(settings, dict) or not set(settings) <= {'docker', 'influxdb'} or not set(settings) <= set(profiles):
         raise ValueError('Profile settings must match selected workloads')
     macros = host_macros(profiles)
