@@ -6,6 +6,9 @@ It explains which settings belong to bootstrap, database CD and each application
 [Proxmox guide](../README.md) · [Bootstrap](../bootstrap/README.md) ·
 [Databases](DATABASES.md) · [HTTPS and sign-in](FOUNDATION.md) · [pgAdmin](PGADMIN.md) · [PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
 
+[Bitwarden Lite migration](BITWARDEN.md) uses the same installer through a
+private-input adapter, with a separate database restore and explicit admission.
+
 For a fresh monitoring system without restoring old Zabbix history, see
 [Clean Zabbix monitoring](ZABBIX.md). It uses this same guest/CD path and can be
 prepared independently of the household application migration.

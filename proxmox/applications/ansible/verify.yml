@@ -32,3 +32,13 @@
       loop_control:
         label: "{{ item.name }}"
       no_log: true
+
+    - name: Read retained Bitwarden credentials privately for the guest database query
+      ansible.builtin.set_fact:
+        stack: "{{ lookup('ansible.builtin.file', app.stack_config) | from_json }}"
+      no_log: true
+      when: app.kind == 'bitwarden'
+
+    - name: Verify actual Bitwarden guest access to its restored database
+      ansible.builtin.include_tasks: tasks/bitwarden-database.yml
+      when: app.kind == 'bitwarden'
