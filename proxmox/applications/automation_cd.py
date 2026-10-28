@@ -58,7 +58,7 @@ def prepare_inputs(config, destination=INPUTS, environment=None):
     return cfg, destination / 'site.json'
 
 
-def prerequisites(cfg, packet_path):
+def prerequisites(cfg, packet_path, oidc=None):
     """The actual guest cannot be created or started by skipping its CD prerequisites."""
     expected=cfg['app'].get('prerequisite_packet_sha256')
     files.require(isinstance(expected,str) and len(expected) == 64 and packet_path is not None
@@ -66,6 +66,11 @@ def prerequisites(cfg, packet_path):
                   'Supply the exact reviewed automation prerequisite packet')
     import automation_maintenance
     packet=json.loads(files.regular(packet_path));automation_maintenance.validate(packet)
+    if oidc is not None:
+        selected=packet['identity']['oidc']
+        files.require(selected['client_id'] == oidc['client_id'] and selected['slug'] == oidc['provider_slug']
+                      and selected['callback'] == oidc['node_red_url'].rstrip('/') + '/auth/strategy/callback/',
+                      'The completed OIDC prerequisite must match the selected native client and routed callback')
     # Discovery already requires each origin to select an interface on this
     # guest. Its exact addresses and ports must also match this prerequisite.
     deploy.discovery.labels(cfg)
@@ -135,7 +140,7 @@ def run(phase, config, destination=INPUTS, environment=None, deployment=deploy, 
         return result
 
 
-def ordinary(phase, config, maintenance):
+def ordinary(phase, config, maintenance, foundation=None):
     """The permanent job uses common reconciliation; migration remains separate."""
     import copy
     import tempfile
@@ -144,11 +149,14 @@ def ordinary(phase, config, maintenance):
     files.require(set(value) == {'schema','enabled','site','stack','discovery_previous_guests'}
                   and value['schema'] == 'homelab-automation-deployment-v1' and value['enabled'] is True,
                   'Explicitly review and enable the prepared automation configuration')
+    files.require(foundation is not None, 'Bind ordinary automation to its commissioned foundation configuration')
+    import automation_configuration
+    automation_configuration.compile_config(automation_configuration.site_config.read(foundation), value)
     cfg, stack = copy.deepcopy(value['site']), copy.deepcopy(value['stack'])
     files.require(cfg['app']['kind'] == stack['kind'] == 'automation'
                   and cfg['app'].get('exclusive_writer_confirmed') is True,
                   'Confirm the exact automation writer window')
-    prerequisites(cfg, maintenance)
+    prerequisites(cfg, maintenance, stack.get('node_red_oidc'))
     # The selected capture remains migration provenance in the private source;
     # ordinary deployment neither reads it nor restores it.
     cfg['app'].pop('capture',None)
@@ -167,9 +175,10 @@ if __name__ == '__main__':
     parser.add_argument('--config', required=True, type=Path)
     parser.add_argument('--maintenance',type=Path)
     parser.add_argument('--ordinary',action='store_true',help='Permanent no-restore deployment path')
+    parser.add_argument('--foundation',type=Path,help='Commissioned foundation inputs for ordinary automation')
     args = parser.parse_args()
     try:
-        print(json.dumps(ordinary(args.phase,args.config,args.maintenance) if args.ordinary else
+        print(json.dumps(ordinary(args.phase,args.config,args.maintenance,args.foundation) if args.ordinary else
                          run(args.phase,args.config,maintenance=args.maintenance)))
     except deploy.InputNeeded as error:
         raise SystemExit(str(error)) from None

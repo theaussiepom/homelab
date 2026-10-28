@@ -21,6 +21,14 @@ def compile_config(foundation, automation):
     cfg, stack = automation['site'], automation['stack']
     vmid = deploy.validate(cfg, stack)
     render.compose(stack)
+    if 'node_red_oidc' in stack:
+        oidc=stack['node_red_oidc']
+        expected_identity='https://' + foundation['domains']['identity']
+        routes=[row for row in cfg['app'].get('discovery_routes',[]) if row.get('name') == 'node-red']
+        site_config.require(oidc['identity_url'].rstrip('/') == expected_identity
+                            and len(routes) == 1 and routes[0].get('login') == 'oidc'
+                            and oidc['node_red_url'].rstrip('/') == 'https://' + routes[0]['host'],
+                            'Native Node-RED OIDC must use the commissioned identity origin and routed Node-RED host')
     if 'frontend_routing' in cfg['app']:
         frontend=foundation['networks']['frontend']
         policy=cfg['app']['frontend_routing']

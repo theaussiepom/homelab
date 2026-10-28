@@ -29,9 +29,10 @@ class AutomationCDTests(unittest.TestCase):
                 self.assertIn('/ordinary/automation/',site['app']['stack_config'])
                 observed.append((phase,packet))
                 return {'status':'passed'}
-            with patch.object(automation_cd,'prerequisites') as prerequisites,patch.object(ordinary_cd,'run',side_effect=run):
-                automation_cd.ordinary('guest',config,None)
-                automation_cd.ordinary('mqtt',config,None)
+            with patch.object(automation_cd,'prerequisites') as prerequisites,patch.object(ordinary_cd,'run',side_effect=run), \
+                 patch('automation_configuration.compile_config') as compiler,patch('automation_configuration.site_config.read',return_value={}):
+                automation_cd.ordinary('guest',config,None,root/'foundation.json')
+                automation_cd.ordinary('mqtt',config,None,root/'foundation.json')
             self.assertEqual([p for p,_ in observed],['infrastructure','mqtt'])
             self.assertEqual(observed[0][1],observed[1][1])
             self.assertEqual(prerequisites.call_count,2)
@@ -63,6 +64,14 @@ class AutomationCDTests(unittest.TestCase):
                 foundation_cd.write_new(operation / 'complete.json', foundation_cd.encoded(receipt))
                 foundation_cd.write_new(target / 'automation-200-complete.json', foundation_cd.encoded(receipt))
             automation_cd.prerequisites(cfg, selected)
+            native=packet['identity']['oidc']
+            oidc={'client_id':native['client_id'],'provider_slug':native['slug'],
+                  'node_red_url':native['callback'].removesuffix('/auth/strategy/callback/')}
+            automation_cd.prerequisites(cfg,selected,oidc)
+            for key in ('client_id','provider_slug','node_red_url'):
+                wrong_oidc=dict(oidc);wrong_oidc[key]+='-other'
+                with self.subTest(oidc=key),self.assertRaisesRegex(ValueError,'native client and routed callback'):
+                    automation_cd.prerequisites(cfg,selected,wrong_oidc)
             wrong=json.loads(selected.read_text())
             wrong['ingress']['additions'][0]['destination']='10.88.30.99/32'
             changed=root/'other-packet.json';changed.write_text(json.dumps(wrong))

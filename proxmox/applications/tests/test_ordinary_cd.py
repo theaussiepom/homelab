@@ -127,6 +127,18 @@ class LifecycleTests(unittest.TestCase):
             app.assert_not_called()
         self.assertTrue((self.work/'ORDINARY-HOLD.json').exists())
 
+    def test_effective_catalogue_output_drift_between_steps_cannot_complete_old_plan(self):
+        state=ordinary.deploy.sha(self.work/'terraform.tfstate')
+        with patch.object(ordinary,'infrastructure',return_value={'changed':False,'created':False,'state_sha256':state}), \
+             patch.object(ordinary,'application') as app:
+            ordinary.run('infrastructure',self.site)
+            held=(self.work/'ORDINARY-HOLD.json').read_bytes()
+            # The materialised site includes the helper-derived NICs and rules.
+            self.expected['site_sha256']='b'*64
+            with self.assertRaises(ValueError):ordinary.run('application',self.site)
+            app.assert_not_called()
+            self.assertEqual((self.work/'ORDINARY-HOLD.json').read_bytes(),held)
+
     def test_original_and_group_holds_block_before_native_work(self):
         for directory,name in [(self.work,'ROLLOUT-HOLD.json'),(self.root/'database-network-cutover-old','HOLD.json')]:
             directory.mkdir(mode=0o700,exist_ok=True);hold=directory/name;hold.write_text('{}')

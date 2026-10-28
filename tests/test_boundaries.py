@@ -39,10 +39,12 @@ def test_public_checks_share_one_entry_and_independent_jobs_have_no_dependencies
                                     'cancel-in-progress':"${{ github.event_name == 'pull_request' }}"}
     assert {p.name for p in (core.ROOT/'.github/workflows').iterdir() if p.suffix in {'.yml','.yaml'}}=={'ci.yml'}
     jobs=workflow['jobs']
-    assert set(jobs)=={'changes','applications','iso-unit','validate','source-safety','dependency-review','analyze','build-and-boot'}
+    assert set(jobs)=={'changes','monitoring','applications','iso-unit','validate','source-safety','dependency-review','analyze','build-and-boot'}
     for name in ('applications','iso-unit','validate','source-safety'):
         assert jobs[name]['if']=="github.event_name == 'push' || github.event_name == 'pull_request'"
         assert 'needs' not in jobs[name]
+    assert 'needs' not in jobs['monitoring']
+    assert any('monitoring_fixture.py' in step.get('run','') for step in jobs['monitoring']['steps'])
     assert jobs['dependency-review']['if']=="github.event_name == 'pull_request'"
     assert jobs['analyze']['if']=="github.event_name != 'workflow_dispatch'"
     assert 'needs' not in jobs['analyze']

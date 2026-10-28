@@ -63,6 +63,22 @@ class AutomationConfigurationTests(unittest.TestCase):
         self.assertEqual(boot['service_discovery']['guests'][:-1],value['discovery_previous_guests'])
         self.assertEqual(boot['service_discovery']['guests'],[*value['discovery_previous_guests'],200])
 
+    def test_oidc_issuer_and_callback_must_match_the_commissioned_identity_and_route(self):
+        foundation,value=packet()
+        cfg=value['site']
+        cfg['app']['node_red_authentication']='authentik-oidc'
+        cfg['app']['discovery_routes']=[{'name':'homeassistant','host':'hass.lab.example.org',
+            'url':'http://10.88.25.21:8123','login':'own'},{'name':'node-red','host':'flows.lab.example.org',
+            'url':'http://10.88.25.21:1880','login':'oidc'}]
+        value['stack']['node_red_oidc']={'identity_url':'https://'+foundation['domains']['identity'],
+            'node_red_url':'https://flows.lab.example.org','client_id':'fixture','provider_slug':'node-red'}
+        value['stack']['services']['node_red'].update(command=['--settings','/runtime-settings.js'],
+            extra_mounts=[{'source':'/srv/homelab/data/node-red/runtime-settings.js','target':'/runtime-settings.js','read_only':True}])
+        configuration.compile_config(foundation,value)
+        for field in ('identity_url','node_red_url'):
+            bad=copy.deepcopy(value);bad['stack']['node_red_oidc'][field]='https://other.lab.example.org'
+            with self.subTest(field=field),self.assertRaises(ValueError):configuration.compile_config(foundation,bad)
+
     def test_foreign_host_paths_keys_budget_or_previous_scope_are_refused(self):
         foundation, value = packet()
         changes=[lambda p:p['site']['site'].update(node='other'),
