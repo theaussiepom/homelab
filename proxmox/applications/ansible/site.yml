@@ -52,9 +52,13 @@
       ansible.builtin.import_tasks: tasks/database.yml
       when: app.kind in ['mariadb', 'postgresql', 'influxdb']
 
+    - name: Prepare the clean PegaProx directories and database key
+      ansible.builtin.import_tasks: tasks/pegaprox.yml
+      when: app.kind == 'pegaprox'
+
     - name: Configure the application stack
       ansible.builtin.import_tasks: tasks/compose.yml
-      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'monitoring', 'zigbee2mqtt']
+      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'monitoring', 'pegaprox', 'zigbee2mqtt']
 
     - name: Adopt future commissioned guests through the same active agent tasks
       ansible.builtin.include_tasks: ../../common/ansible/zabbix-agent.yml
