@@ -88,43 +88,76 @@ allowance is removed with no period of dual PostgreSQL access or unrelated
 firewall cleanup. The backend interface remains for HTTP/OAuth, even though
 database traffic leaves it.
 
-## Available common source and the activation gap
+## Runtime interface for the common caller
 
-The common checkpoint exposes `database_network_maintenance.plan()` and
-`check_plan()`. Planning uses the original installed module, authoritative
-state/backend and workflow/deployment locks. It binds the contract and original
-installation evidence in a separate maintenance directory and holds failed or
-interrupted attempts. `plan()` contacts the pinned Proxmox API; it has not been
-called by this source work. The planner returns `apply_supported=false` and
-`lifecycle_effects_verified=false`, and has no apply entry point.
+`identity_database_runtime.py` supplies only the existing guest's finite service
+phases. `ansible/identity-database-network.yml` accepts the original `app`,
+`database_network_action`, `database_network_request` and
+`database_network_result_path`. The caller owns the authoritative packet,
+authorization, source pin, locks, saved plans, one-shot execution, private evidence
+and failure/interruption holds. This helper adds none of those mechanisms.
 
-The common `ansible/network-update.yml` startup playbook accepts the original
-`app` identity, `network_ready_interfaces` and exact current
-`network_ready_gate_sha256` / `network_ready_dependency_sha256`. Derive the
-interface names from all IPv4 NIC positions in the common candidate. Authentik
-uses the fixed `docker.service` dependency. Both existing startup files must
-match their admitted hashes and metadata. The playbook requires active IPv4
-interfaces, updates the shared gate/dependency and checks Docker's PID and
-activation timestamps stay unchanged. It does not recreate Authentik containers.
+The playbook executes the pinned Python source bytes with `python3 -c`; it does
+not install a helper on the guest. Requests cannot supply a command or source
+path. Results go to a fresh file beneath an existing private controller-owned
+`/var/lib/homelab-applications/<vmid>/database-network-*/` directory. Input/output
+and Docker diagnostics stay private. No Compose text or environment/secret values
+are emitted in the inspection or runtime packet.
 
-The remaining coordinated activation packet must supply:
+1. `inspect` accepts exactly `{'after': <contract-derived endpoint>}`. It reads
+   the existing private Compose and identity files, both Authentik containers,
+   local Redis, image defaults and bind sources. It derives the candidate locally
+   and returns before/after hashes, endpoints, container/configuration/image/data
+   fingerprints and states. It changes no guest files or services.
+2. On the controller, call
+   `prepare(catalogue, inspected, client_vmids, legacy_address, *, allow_guest_restart=True)`.
+   It returns the closed runtime packet. `validate_binding(packet, catalogue,
+   client_vmids, legacy_address)` returns `True` or raises. Both functions are
+   pure. The common caller must first validate and hash the entire catalogue.
+   These guards require exactly the selected two catalogue clients, this
+   Authentik VMID/hostname, the admitted literal old address on port 5432 and the
+   catalogue PostgreSQL address on port 5432. A hostname-based installed endpoint
+   supported by the pure candidate helper is deliberately held by this coordinated
+   runtime path until separately admitted.
+3. `preflight` checks the exact original Compose, image/configuration/data/secret
+   references, persistent `unless-stopped` policies, all three container health
+   states, both `ak healthcheck` probes and Redis PONG. Run both client preflights
+   before either client is stopped. This phase is read-only.
+4. `quiesce` stops exactly `server` and `worker` and confirms both original
+   containers remain stopped. It preserves Compose and Redis. For an explicitly
+   admitted provider-required guest restart between quiesce and activate, both
+   Authentik containers must remain stopped with their original `StartedAt`.
+   Redis may restart with the same container, image, configuration and data
+   bindings. `allow_guest_restart=False` also rejects Redis timestamp changes.
+5. `activate` requires the original two clients still stopped. It validates the
+   locally regenerated candidate, writes only both SQL HOST/PORT settings into
+   the existing Compose inode, then recreates exactly `server` and `worker` using
+   `--no-deps --no-build --force-recreate --pull never --wait`. It checks both
+   new container identities, unchanged image/configuration/data fingerprints,
+   health and unchanged Redis process during this phase. A failed or interrupted
+   activation stays in caller custody; there is no automatic retry or rollback.
+6. `verify` receives the same original runtime packet, checks the candidate hash,
+   both new client identities/endpoints and original stable bindings, and repeats
+   the health probes. It changes no files or services and supports later read-only
+   verification. The caller retains successful result identities for its receipt.
 
-- Real saved plans for all three commissioned guests, their exact hashes and
-  provider lifecycle effects, including whether the new client NIC is usable
-  without an unapproved guest restart. Keep original state, inputs and receipts.
-- Exact current startup-file hashes, runtime Compose/image/secret-reference
-  bindings, existing source/profile/installation receipts and current holds.
-- A reviewed common apply/activation path for those exact plans, PostgreSQL's
-  listener/HBA cutover and both Authentik modes, with failure custody and no
-  implicit retry or fallback SQL access. No such executor is added here.
-- New-network verification and the current verification-profile binding after
-  retiring the old database address; historic installation receipts must not
-  cause later CD to probe the retired SQL endpoint.
-- pgAdmin's exact saved-server/user selector and profile/runtime bindings from
-  its service owner, plus separate OAuth and authenticated database checks.
+The common worker also owns native saved-plan application, PostgreSQL listener/HBA
+cutover, startup gates and current verification profiles. The shared
+`ansible/network-update.yml` accepts original `app`, `network_ready_interfaces`
+and exact existing gate/dependency hashes. Derive interface names from the common
+candidate; Authentik uses the fixed `docker.service` dependency. Preserve original
+installation receipts and bind the current verification profile separately so
+later CD does not probe the retired SQL endpoint.
 
-The committed prepared selection is source preparation. Neither a green plan
-nor the startup playbook fills these activation gaps or admits a native target.
+The isolated Docker lifecycle fixture
+(`python3 proxmox/applications/tests/identity_lifecycle_fixture.py`, after
+preloading its two pinned images) proves the manual-stop policy with a synthetic
+three-container stack and disposable daemon. It needs permission to launch a
+resource-bounded privileged test container on a disposable Docker test host; it
+uses no host socket, network, deployment credentials or application data. It does not establish
+Debian/LXC/provider behavior. The common execution must admit actual saved plans,
+provider lifecycle effects, current runtime/startup/profile evidence and holds,
+then verify native readiness. Source tests alone grant no activation authority.
 
 ## Ordering and target evidence
 
@@ -143,8 +176,9 @@ other application clients. The selected order is:
 3. Generate the Authentik candidate from the bound Compose bytes and derived
    endpoint. Validate Compose privately. Apply both modes together through the
    common service-maintenance hook. Recreate only the affected server/worker
-   containers if needed; do not restart Docker, Redis or the guest or import a
-   database/capture as part of this service patch.
+   containers once. The service helper does not restart Docker, Redis or the
+   guest, or import a database/capture. An admitted provider-required restart is
+   performed only by the common caller while both clients remain quiesced.
 4. Verify the effective settings in both modes, local Redis, worker health,
    existing backend HTTP readiness and database reachability over the new NIC.
    A running container alone is insufficient. Confirm no other service was
@@ -153,7 +187,7 @@ other application clients. The selected order is:
    pgAdmin's saved PostgreSQL connection update/query. OAuth success alone does
    not prove the database path. Keep Node-RED forward-auth acceptance distinct.
 
-No live read, restart, native plan, apply or migration is performed by this
-source helper. The common planning/startup APIs are known; the finite native
-plan/lifecycle, binding and activation gaps above remain. Source tests do not
-establish native readiness.
+This source-preparation work performed no native inspection, plan, apply or
+migration. The runtime phases are executed only through the common caller under
+its admitted packet. Native lifecycle, SQL connectivity, HTTP/OAuth and physical
+service acceptance remain target-environment evidence.
