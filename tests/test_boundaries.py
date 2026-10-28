@@ -40,7 +40,7 @@ def test_public_checks_share_one_entry_and_independent_jobs_have_no_dependencies
     assert {p.name for p in (core.ROOT/'.github/workflows').iterdir() if p.suffix in {'.yml','.yaml'}}=={'ci.yml'}
     jobs=workflow['jobs']
     assert set(jobs)=={'changes','monitoring','applications','iso-unit','validate','source-safety','dependency-review','analyze','build-and-boot'}
-    for name in ('applications','iso-unit','validate','source-safety'):
+    for name in ('monitoring','applications','iso-unit','validate','source-safety'):
         assert jobs[name]['if']=="github.event_name == 'push' || github.event_name == 'pull_request'"
         assert 'needs' not in jobs[name]
     assert 'needs' not in jobs['monitoring']

@@ -213,26 +213,25 @@ Zigbee has no direct SQL or InfluxDB dependency. This flow preserves its existin
 vmbr30 MQTT/application path and requires no database-network change or bridge
 31/32/33 interface.
 
-## Firewall admission before radio work
+## Stored firewall policy and deferred enforcement
 
-The radio runner reads `/cluster/firewall/options` before each plan, apply,
-stage, start or verify. An unset/disabled cluster firewall or unreadable API
-response stops the step before OpenTofu or Ansible. In the attached stage it
-also requires the selected guest firewall to be enabled with DROP input and
-output policies. These checks do not enable a firewall or change permissions.
-An active firewall daemon, per-NIC flag or saved rule declaration alone is not
-proof that cluster-level enforcement is enabled. Native acceptance must still
-verify the selected engine and effective packet path.
+Ben selected preserving the current firewall posture for this migration and
+separately deferring global Proxmox firewall activation. The radio does not read
+cluster options, require a root `Sys.Audit` grant or activate any global firewall.
+The production API helper retains its existing `/nodes/` restriction for radio
+and every other application kind.
 
-The API helper permits this one exact cluster read for Zigbee only; other
-cluster paths and ordinary application kinds retain their existing restriction.
-The API allowlist change is a security control for explicit human source review.
+The stopped preparation keeps the selected NIC flags and DROP guest rules in
+its desired plan. In the attached stage, the runner reads only the selected
+guest's firewall options and refuses stored enable/DROP policy drift. These
+saved settings do not establish effective filtering: with global enforcement
+deferred, the stored rules are not accepted as enforced protection. Neither
+source tests nor an enabled guest/NIC flag prove packet-path isolation.
 
-The private packet must include the runner's read permission for the cluster
-options endpoint. Proxmox requires `Sys.Audit` at `/`; prepare the minimum
-non-propagating read grant for separate common-infrastructure review. Do not
-add a root credential, silently broaden a token or enable the host firewall
-from an application job. Existing guest-scoped access alone may return 403.
+The native review packet must state this deferred enforcement posture explicitly.
+It retains the exact USB/configuration readback, state custody, original data,
+exclusive-writer and first-start gates. A later global firewall decision remains
+separate work; it is not a prerequisite silently activated by an application job.
 
 Select both ends of the application traffic in private source: radio egress
 to one MQTT broker /32 and port, and that broker guest's matching ingress from
@@ -272,7 +271,7 @@ visible phases are infrastructure and application. It cannot restore a capture,
 attach/replace USB, approve first startup or clear an interrupted operation.
 
 Before a changed operation can plan/apply, the adapter requires the original
-runner state and USB preparation lineage, effective firewall readback and the
+runner state and USB preparation lineage, stored guest firewall policy and the
 unchanged exact device. A read-only Ansible preflight checks the previously
 accepted private checker, restore/admission receipt hashes, selected facts and
 live network identity before package or infrastructure changes. The same check

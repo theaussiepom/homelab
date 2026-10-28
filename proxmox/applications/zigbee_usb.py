@@ -93,16 +93,17 @@ def read_live(cfg,api_get):
 
 
 def verify_firewall(cfg,api_get):
-    """Refuse radio work when configured firewall rules cannot be enforced."""
-    cluster=api_get(cfg,'/cluster/firewall/options')
-    if cluster.get('enable') not in (1,True):
-        raise ValueError('Proxmox cluster firewall must be enabled through its separately reviewed infrastructure change')
+    """Check stored guest policy; global enforcement is explicitly deferred.
+
+    Do not read or activate cluster firewall settings or require a new root
+    audit grant. Enabled guest/NIC rules do not prove effective enforcement.
+    """
     if stage(cfg)=='attached':
         path='/nodes/'+quote(cfg['site']['node'],safe='')+'/lxc/'+str(cfg['guest']['vmid'])+'/firewall/options'
         guest=api_get(cfg,path)
         if (guest.get('enable') not in (1,True) or guest.get('policy_in')!='DROP' or
                 guest.get('policy_out')!='DROP'):
-            raise ValueError('Require enabled guest firewall and DROP input/output policies before radio configuration or startup')
+            raise ValueError('Preserve stored guest firewall enable and DROP input/output policies')
 
 
 def verify_live(cfg,api_get):

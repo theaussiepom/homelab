@@ -65,23 +65,25 @@ class UsbLifecycleTests(unittest.TestCase):
             with patch.object(usb,'read_live',return_value=(live,{'status':'stopped'})),self.assertRaises(ValueError):
                 usb.verify_live(cfg,lambda *_:None)
 
-    def test_firewall_preflight_requires_cluster_and_attached_guest_enforcement(self):
+    def test_firewall_preflight_preserves_posture_without_cluster_reads(self):
         import zigbee_usb as usb
-        cfg=self.cfg()
-        for value in ({}, {'enable':0}, {'enable':'1'}):
-            with self.subTest(cluster=value),self.assertRaises(ValueError):
-                usb.verify_firewall(cfg,lambda *_:value)
-        seen=[]
-        usb.verify_firewall(cfg,lambda _,path:seen.append(path) or {'enable':1})
-        self.assertEqual(seen,['/cluster/firewall/options'])
+        cfg=self.cfg();seen=[]
+        # A new guest is not yet readable; no global read/grant/activation.
+        usb.verify_firewall(cfg,lambda _,path:seen.append(path) or {'enable':0})
+        self.assertEqual(seen,[])
         cfg['app']['usb_stage']='attached'
         good={'enable':1,'policy_in':'DROP','policy_out':'DROP'}
+        path='/nodes/practice-pve/lxc/6101/firewall/options'
         for value in (good,dict(good,enable=0),dict(good,policy_in='ACCEPT'),dict(good,policy_out='ACCEPT'),{}):
-            def api(_,path):return {'enable':1} if path=='/cluster/firewall/options' else value
+            seen=[]
+            def api(_,url):
+                seen.append(url);self.assertEqual(url,path)
+                return value
             with self.subTest(guest=value):
                 if value==good:usb.verify_firewall(cfg,api)
                 else:
                     with self.assertRaises(ValueError):usb.verify_firewall(cfg,api)
+                self.assertEqual(seen,[path])
 
     def test_runner_state_lineage_cannot_be_replaced_between_stages(self):
         import zigbee_usb as usb
@@ -185,24 +187,24 @@ class UsbOperatorTests(unittest.TestCase):
 
 
 class UsbRunnerTests(unittest.TestCase):
-    def test_firewall_preflight_uses_the_production_api_helper_with_one_exact_radio_exception(self):
+    def test_production_api_retains_node_only_reads_even_for_radio(self):
         import io
         import deploy,zigbee_usb
         from test_deploy import fixture as site_fixture
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);cfg=site_fixture(root)
-            cfg['app'].update(kind='zigbee2mqtt',usb_stage='prepare')
+            cfg['app'].update(kind='zigbee2mqtt',usb_stage='attached')
             (root/'api').write_text('synthetic credential');(root/'ca').write_text('synthetic CA')
             with patch.object(deploy.ssl,'create_default_context'),patch.object(deploy,'build_opener') as opener:
-                opener.return_value.open.return_value=io.BytesIO(b'{"data":{"enable":1}}')
+                opener.return_value.open.return_value=io.BytesIO(b'{"data":{"enable":1,"policy_in":"DROP","policy_out":"DROP"}}')
                 zigbee_usb.verify_firewall(cfg,deploy.api_get)
                 request=opener.return_value.open.call_args.args[0]
-                self.assertEqual(request.full_url,'https://pve.example.invalid:8006/api2/json/cluster/firewall/options')
+                self.assertEqual(request.full_url,'https://pve.example.invalid:8006/api2/json/nodes/practice-pve/lxc/6101/firewall/options')
                 opener.reset_mock()
-                for path in ['/cluster/firewall/rules','/cluster/firewall/options/','/cluster/firewall/options?x=1','https://other.invalid/']:
-                    with self.subTest(path=path),self.assertRaises(ValueError):deploy.api_get(cfg,path)
-                cfg['app']['kind']='dns'
-                with self.assertRaises(ValueError):deploy.api_get(cfg,'/cluster/firewall/options')
+                for kind in ['zigbee2mqtt','dns']:
+                    cfg['app']['kind']=kind
+                    for path in ['/cluster/firewall/options','/cluster/firewall/rules','/cluster/firewall/options/','/cluster/firewall/options?x=1','https://other.invalid/']:
+                        with self.subTest(kind=kind,path=path),self.assertRaises(ValueError):deploy.api_get(cfg,path)
                 opener.return_value.open.assert_not_called()
 
     def test_same_runner_state_moves_from_stopped_prepare_to_refreshed_attached_apply(self):
@@ -239,22 +241,17 @@ class UsbRunnerTests(unittest.TestCase):
             with patch.object(deploy,'backup'),patch.object(deploy,'quiet',side_effect=quiet), \
                     patch.object(deploy.subprocess,'check_output',side_effect=lambda *_,**__:json.dumps(value).encode()), \
                     patch.object(deploy,'api_get') as api:
-                api.return_value={'enable':0}
-                with self.assertRaises(ValueError):deploy.execute('plan',site)
-                self.assertFalse((work/'tofu').exists())
-                api.return_value={'enable':1}
                 first=deploy.execute('plan',site)
                 variables=json.loads((work/'tofu/site.auto.tfvars.json').read_text())
                 self.assertIsNone(variables['guest']['serial_device']);self.assertFalse(variables['guest']['started'])
                 deploy.execute('apply',site,first['plan_sha256'])
-                self.assertTrue(all(call.args[1]=='/cluster/firewall/options' for call in api.call_args_list))
+                api.assert_not_called()
                 with self.assertRaises(ValueError):deploy.execute('stage',site)
                 with self.assertRaises(deploy.InputNeeded):deploy.execute('deploy',site,first['plan_sha256'])
                 cfg['app']['usb_stage']='attached';site.write_text(json.dumps(cfg))
                 live={'hostname':cfg['guest']['hostname'],'unprivileged':1,'protection':1,
                       'dev0':'path='+DEVICE+',uid=0,gid=20,mode=0660,deny-write=0'}
-                api.side_effect=lambda _cfg,url: ({'enable':1} if url=='/cluster/firewall/options' else
-                    {'enable':1,'policy_in':'DROP','policy_out':'DROP'} if url.endswith('/firewall/options') else
+                api.side_effect=lambda _cfg,url: ({'enable':1,'policy_in':'DROP','policy_out':'DROP'} if url.endswith('/firewall/options') else
                     {'status':'stopped'} if url.endswith('/status/current') else live)
                 for row in value['resource_changes']:
                     row['change']['actions']=['update'];row['change']['before']=copy.deepcopy(row['change']['after'])
@@ -265,5 +262,6 @@ class UsbRunnerTests(unittest.TestCase):
                 deploy.execute('apply',site,final['plan_sha256'])
                 self.assertEqual(json.loads((work/'terraform.tfstate').read_text())['lineage'],'same-runner')
                 self.assertEqual(final['usb_stage'],'attached')
+                self.assertTrue(all(call.args[1].startswith('/nodes/practice-pve/lxc/6101/') for call in api.call_args_list))
                 self.assertEqual(json.loads((work/'tofu/site.auto.tfvars.json').read_text())['guest']['serial_device'],{'path':DEVICE})
 

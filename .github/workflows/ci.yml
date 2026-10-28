@@ -27,6 +27,7 @@ jobs:
       - id: paths
         run: python3 .github/scripts/ci_changes.py >> "$GITHUB_OUTPUT"
   monitoring:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     name: Clean Zabbix schema and active PSK fixture (Docker)
     runs-on: ubuntu-24.04
     timeout-minutes: 20

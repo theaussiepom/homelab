@@ -202,7 +202,11 @@ def compose(cfg):
                 or not isinstance(oidc['provider_slug'], str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,62}', oidc['provider_slug'])):
             raise ValueError('Preserve the selected native Node-RED OIDC client and provider')
         for name in ('identity_url', 'node_red_url'):
-            parsed = urlsplit(oidc[name])
+            origin = oidc[name]
+            if (not isinstance(origin, str)
+                    or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in origin)):
+                raise ValueError('Node-RED OIDC requires literal HTTPS origins')
+            parsed = urlsplit(origin)
             if (parsed.scheme != 'https' or not dns_name(parsed.hostname) or parsed.port is not None
                     or parsed.username or parsed.password or parsed.path not in ('', '/') or parsed.query or parsed.fragment):
                 raise ValueError('Node-RED OIDC requires literal HTTPS origins')

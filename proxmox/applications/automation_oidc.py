@@ -62,8 +62,8 @@ def inside(cfg, verify=False):
         value=candidate(provider.redirect_uris,cfg,verify)
         if not verify:
             provider.redirect_uris=value
-            provider.save(update_fields=['redirect_uris'])
-            provider.refresh_from_db(fields=['redirect_uris'])
+            provider.save(update_fields=['_redirect_uris'])
+            provider.refresh_from_db(fields=['_redirect_uris'])
             candidate(provider.redirect_uris,cfg,True)
     return {'status':'passed','provider_id':cfg['provider_id'],'changed':not verify}
 

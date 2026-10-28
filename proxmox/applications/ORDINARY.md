@@ -17,14 +17,16 @@ controller, scheduler or recovery service.
 2. OpenTofu creates a missing guest with empty custody, or safely reconciles its
    current approved infrastructure. It never adopts or replaces a guest,
    recreates one whose installation evidence exists without state, destroys
-   data, changes its data volumes, or accepts unexpected provider drift.
+   data or changes its data volumes. A new plan rejects unexpected provider drift.
 3. Ansible reconciles approved packages/configuration and checks the service.
    Existing application data must already be prepared. This playbook has no
    restore task and does not import SQL, convert HA settings or alter saved
    pgAdmin database profiles.
 4. Retain a completed binding to the desired inputs, reusable source and backend
    state. Matching later runs return `changed: false` without target commands.
-   New approved inputs take the same OpenTofu/Ansible path.
+   This matching-receipt path does not detect out-of-band provider changes;
+   native drift is checked when a new plan runs. New approved inputs take the
+   same OpenTofu/Ansible path.
 
 The private site derives database attachments and narrow peer rules from its
 single canonical catalogue. A completed network move becomes the ordinary

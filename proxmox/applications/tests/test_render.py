@@ -48,9 +48,11 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(env['NODE_RED_IDENTITY_URL'], 'https://sso.example.invalid')
         self.assertEqual(env['NODE_RED_OIDC_CLIENT_ID'], 'retained-client')
         self.assertNotIn('NODE_RED_OIDC_CLIENT_SECRET', env)
-        for url in ('http://sso.example.invalid', 'https://user:secret@sso.example.invalid', 'https://sso.example.invalid/path'):
-            bad = copy.deepcopy(cfg); bad['node_red_oidc']['identity_url'] = url
-            with self.subTest(url=url), self.assertRaises(ValueError): render.compose(bad)
+        for url in ('http://sso.example.invalid', 'https://user:secret@sso.example.invalid', 'https://sso.example.invalid/path', 'https://sso.example.invalid\n', '\thttps://sso.example.invalid',
+                    'https://sso.example.invalid\x00', 'https://sso.example.invalid\x7f', None):
+            for origin in ('identity_url', 'node_red_url'):
+                bad = copy.deepcopy(cfg); bad['node_red_oidc'][origin] = url
+                with self.subTest(origin=origin, url=url), self.assertRaises(ValueError): render.compose(bad)
         cfg['services']['node_red']['command'] = ['--settings', '/config/settings.js']
         with self.assertRaisesRegex(ValueError, 'wrapper'): render.compose(cfg)
 
