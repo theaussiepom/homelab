@@ -1,4 +1,6 @@
 """Pinned in-memory source delivery must compile and install no guest helper."""
+import ast
+import inspect
 import json
 import os
 import shutil
@@ -14,22 +16,49 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def compile_bundle(program):
+    """Compile the rendered wrapper and its exact literal payloads without execution."""
+    compile(program,'<source-delivery>','exec')
+    payloads=[]
+    for node in ast.walk(ast.parse(program)):
+        if isinstance(node,ast.Call) and isinstance(node.func,ast.Name) and node.func.id=='compile':
+            assert len(node.args)==3 and not node.keywords, 'Use the pinned literal payload compilation'
+            payload,filename,mode=(ast.literal_eval(arg) for arg in node.args)
+            assert isinstance(payload,str) and mode=='exec', 'Compile only embedded source text'
+            compile(payload,filename,mode)
+            payloads.append(filename)
+    assert sorted(payloads)==['<pinned-identity-database>','<pinned-identity-runtime>'], \
+        'Compile exactly both pinned Python payloads'
+
+
 class DeliveryTests(unittest.TestCase):
-    def test_source_bundle_compiles_from_only_the_two_pinned_local_files(self):
+    def rendered_bundle(self, overrides=None):
         play = yaml.safe_load((ROOT/'ansible/identity-database-network.yml').read_text())[0]
         reads = []
         def lookup(plugin, path):
             self.assertEqual(plugin,'ansible.builtin.file')
             path = Path(path).resolve();self.assertIn(path,[ROOT/'identity_database.py',ROOT/'identity_database_runtime.py'])
-            reads.append(path);return path.read_text()
+            reads.append(path)
+            return overrides[path.name] if overrides and path.name in overrides else path.read_text()
         # This fixture renders Python source; HTML/XML templates still autoescape.
         env=Environment(autoescape=select_autoescape(default_for_string=False));env.filters['to_json']=json.dumps;env.globals['lookup']=lookup
         program=env.from_string(play['vars']['identity_runtime_program']).render(playbook_dir=str(ROOT/'ansible'))
-        compile(program,'<source-delivery>','exec')
+        return program,reads,play
+
+    def test_source_bundle_compiles_from_only_the_two_pinned_local_files(self):
+        program,reads,play=self.rendered_bundle()
+        compile_bundle(program)
         self.assertEqual(set(reads),{ROOT/'identity_database.py',ROOT/'identity_database_runtime.py'})
         commands=[task['ansible.builtin.command'] for task in play['tasks'] if 'ansible.builtin.command' in task]
         self.assertEqual(commands[-1]['argv'][:2],['/usr/bin/python3','-c'])
         self.assertIn('stdin',commands[-1])
+
+    def test_invalid_embedded_payload_is_rejected_after_rendering(self):
+        for name in ('identity_database.py','identity_database_runtime.py'):
+            with self.subTest(payload=name):
+                program,_,_=self.rendered_bundle({name:'def synthetic_invalid_payload(:\n'})
+                with self.assertRaises(SyntaxError):
+                    compile_bundle(program)
 
     @unittest.skipUnless(shutil.which('ansible-playbook'), 'Pinned Linux tools contain Ansible')
     def test_real_ansible_renders_the_bundle_without_double_templating_source(self):
@@ -41,7 +70,8 @@ class DeliveryTests(unittest.TestCase):
                 'vars':{'identity_adapter_dir':str(ROOT/'ansible'),'identity_runtime_program':program},
                 'tasks':[{'name':'Compile only, do not execute runtime operations',
                     'ansible.builtin.command':{'argv':['/usr/bin/python3','-c',
-                        'import sys; compile(sys.argv[1], "<delivered-runtime>", "exec"); print("source_bundle_compiled")',
+                        'import ast, sys\n'+inspect.getsource(compile_bundle)+
+                        '\ncompile_bundle(sys.argv[1]); print("source_bundle_compiled")',
                         '{{ identity_runtime_program }}']},'register':'compiled','changed_when':False},
                     {'ansible.builtin.assert':{'that':'compiled.stdout == "source_bundle_compiled"'}}]}]))
             inherited_home=Path(directory)/'inherited-home'
