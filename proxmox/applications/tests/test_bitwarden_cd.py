@@ -169,13 +169,40 @@ def setup(root):
 
 
 class CDTests(unittest.TestCase):
+    def test_shared_installer_cannot_skip_admission_when_stack_path_is_missing(self):
+        with tempfile.TemporaryDirectory() as d:
+            config, _, _, _, _ = setup(Path(d))
+            cfg = config["site"]
+            cfg["app"].pop("stack_config")
+            with patch.object(
+                deploy, "api_get", side_effect=AssertionError("no target access")
+            ) as api:
+                with self.assertRaisesRegex(deploy.InputNeeded, "stack"):
+                    deploy.validate(cfg)
+                api.assert_not_called()
+
+    def test_shared_installer_checks_render_budget_before_any_native_planning(self):
+        with tempfile.TemporaryDirectory() as d:
+            _, path, dest, environment, _ = setup(Path(d))
+            cfg, _ = bitwarden_cd.prepare_inputs(path, dest, environment)
+            stack_path = dest / "stack.json"
+            stack = json.loads(stack_path.read_text())
+            stack["services"]["bitwarden"]["memory_mib"] = cfg["app"]["memory_mib"]
+            private(stack_path, bitwarden_migration.encoded(stack))
+            with patch.object(
+                deploy, "api_get", side_effect=AssertionError("no target access")
+            ) as api:
+                with self.assertRaisesRegex(ValueError, "256 MiB"):
+                    deploy.validate(cfg)
+                api.assert_not_called()
+
     def test_persisted_stack_render_must_match_the_preflight_before_native_work(self):
         with tempfile.TemporaryDirectory() as d:
             _, path, dest, environment, _ = setup(Path(d))
             with patch.object(
                 bitwarden_cd.render,
                 "compose",
-                side_effect=[{"synthetic": 1}, {"synthetic": 2}],
+                side_effect=[{"synthetic": 1}, {"synthetic": 1}, {"synthetic": 2}],
             ):
                 with self.assertRaisesRegex(
                     ValueError, "Persisted stack render differs"

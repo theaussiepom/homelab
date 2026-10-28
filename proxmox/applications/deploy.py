@@ -80,6 +80,10 @@ def write(path, value):
 def validate(cfg, stack_override=None):
     if cfg.get('app', {}).get('kind') == 'bitwarden' and 'bitwarden' not in cfg['app']:
         raise InputNeeded('Bitwarden is preparation only; review restore, private inputs and native admission first')
+    if cfg.get('app', {}).get('kind') == 'bitwarden':
+        stack_path = cfg['app'].get('stack_config')
+        if not isinstance(stack_path, str) or not Path(stack_path).is_absolute():
+            raise InputNeeded('Bitwarden requires its absolute private stack configuration before planning')
     if cfg.get('app', {}).get('kind') == 'pegaprox':
         import pegaprox
         try:
@@ -131,6 +135,8 @@ def validate(cfg, stack_override=None):
         stack = stack_override if stack_override is not None else json.loads(Path(app['stack_config']).read_text())
         if app.get('kind') == 'bitwarden':
             bitwarden_migration.validate_admission(cfg, stack)
+            import render
+            render.compose(stack)
         selected = foundation.validate(stack)
         if selected and app.get('kind') == 'ingress' and len(cfg['guest']['interfaces']) > 1:
             if 'frontend_routing' not in app or ingress_routing.validate(app['frontend_routing'])[0] != selected['bind_address']:
