@@ -15,7 +15,7 @@ from ingress_browser import dns, require
 
 EVIDENCE_ROOT=Path('/var/lib/homelab-applications')
 SCHEMA='homelab-pegaprox-browser-v1'
-FIELDS={'schema','host','backend','proxy_address','frontend_address','backend_certificate_pem','backend_certificate_sha256','backend_spki_sha256'}
+FIELDS={'source_cidrs','schema','host','backend','proxy_address','frontend_address','backend_certificate_pem','backend_certificate_sha256','backend_spki_sha256'}
 PRIVATE=[ipaddress.IPv4Network(n) for n in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16','198.18.0.0/15')]
 
 
@@ -39,6 +39,13 @@ def validate(value):
     require(peer.scheme=='https' and peer.port==5000 and peer.path=='' and not peer.query and not peer.fragment and peer.username is None and peer.password is None,'Keep the existing HTTPS backend on port5000')
     backend=address(peer.hostname);proxy=address(value['proxy_address']);address(value['frontend_address'])
     require(proxy!=backend and proxy in ipaddress.IPv4Network(str(backend)+'/24',strict=False),'Use the distinct existing management-side proxy address')
+    cidrs=value['source_cidrs']
+    require(isinstance(cidrs,list) and 1<=len(cidrs)<=8,'Declare the explicit finite browser client restriction')
+    networks=[]
+    for cidr in cidrs:
+        net=ipaddress.IPv4Network(cidr,strict=True)
+        require(str(net)==cidr and net.prefixlen>=24 and any(net.subnet_of(n) for n in PRIVATE) and net not in networks,'Use unique selected private browser clients from /24 to /32')
+        networks.append(net)
     pem=value['backend_certificate_pem']
     require(isinstance(pem,str) and len(pem)<=8192 and pem.count('-----BEGIN CERTIFICATE-----')==1 and pem.count('-----END CERTIFICATE-----')==1 and 'PRIVATE KEY' not in pem,'Supply only the reviewed public backend certificate')
     require(re.fullmatch('[0-9a-f]{64}',value['backend_certificate_sha256']) and hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest()==value['backend_certificate_sha256'],'The backend certificate differs')
@@ -54,7 +61,7 @@ def validate(value):
 
 def objects(settings):
     v=validate(settings)
-    return {'http':{'routers':{'pegaprox-browser':{'rule':f"Host(`{v['host']}`)",'entryPoints':['websecure'],'tls':{'certResolver':'letsencrypt'},'service':'pegaprox-private','middlewares':['security-headers']}},'services':{'pegaprox-private':{'loadBalancer':{'servers':[{'url':v['backend']}],'passHostHeader':True,'serversTransport':'pegaprox-verified@file'}}},'serversTransports':{'pegaprox-verified':{'serverName':v['host'],'rootCAs':[v['backend_certificate_pem']]}}}}
+    return {'http':{'middlewares':{'pegaprox-local':{'ipAllowList':{'sourceRange':list(v['source_cidrs'])}}},'routers':{'pegaprox-browser':{'rule':f"Host(`{v['host']}`)",'entryPoints':['websecure'],'tls':{'certResolver':'letsencrypt'},'service':'pegaprox-private','middlewares':['pegaprox-local','security-headers']}},'services':{'pegaprox-private':{'loadBalancer':{'servers':[{'url':v['backend']}],'passHostHeader':True,'serversTransport':'pegaprox-verified@file'}}},'serversTransports':{'pegaprox-verified':{'serverName':v['host'],'rootCAs':[v['backend_certificate_pem']]}}}}
 
 
 def merge(original,settings):
@@ -101,4 +108,4 @@ def packet(value):
 def admission(settings,network,policy):
     packet(settings)
     require(network.get("schema")=="homelab-database-network-overlay-v1" and network.get("status")=="network_overlay_verified" and network.get("vmid")==settings["vmid"] and network.get("state_sha256")==settings["state_sha256"],"Use the current completed ingress network overlay")
-    require(set(policy)=={"schema","vmid","route_sha256","native_login_retained","authentik_deferred","network_enforcement_deferred"} and policy["schema"]=="homelab-pegaprox-browser-policy-evidence-v1" and policy["vmid"]==settings["vmid"] and policy["route_sha256"]==hashlib.sha256((json.dumps(settings["route"],sort_keys=True,indent=2)+"\n").encode()).hexdigest() and all(policy[k] is True for k in ("native_login_retained","authentik_deferred","network_enforcement_deferred")),"Require the exact reviewed temporary local-login policy")
+    require(set(policy)=={"schema","vmid","route_sha256","native_login_retained","authentik_deferred","guest_firewall_enforcement_deferred","direct_peer_allowlist_approved"} and policy["schema"]=="homelab-pegaprox-browser-policy-evidence-v1" and policy["vmid"]==settings["vmid"] and policy["route_sha256"]==hashlib.sha256((json.dumps(settings["route"],sort_keys=True,indent=2)+"\n").encode()).hexdigest() and all(policy[k] is True for k in ("native_login_retained","authentik_deferred","guest_firewall_enforcement_deferred","direct_peer_allowlist_approved")),"Require the exact reviewed temporary local-login policy")

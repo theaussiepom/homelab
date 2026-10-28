@@ -26,12 +26,12 @@ class BrowserTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):cls.tmp.cleanup()
 
-    def settings(self):return {'schema':browser.SCHEMA,'host':'prox.example.invalid','backend':'https://198.18.25.34:5000','proxy_address':'198.18.25.33','frontend_address':'198.18.40.33','backend_certificate_pem':self.pem,'backend_certificate_sha256':self.fingerprint,'backend_spki_sha256':self.spki}
+    def settings(self):return {'source_cidrs':['198.18.100.0/24'],'schema':browser.SCHEMA,'host':'prox.example.invalid','backend':'https://198.18.25.34:5000','proxy_address':'198.18.25.33','frontend_address':'198.18.40.33','backend_certificate_pem':self.pem,'backend_certificate_sha256':self.fingerprint,'backend_spki_sha256':self.spki}
 
     def test_verified_https_transport_native_login_and_no_discovery(self):
         http=browser.objects(self.settings())['http']
         self.assertEqual(http['routers']['pegaprox-browser']['rule'],'Host(`prox.example.invalid`)')
-        self.assertEqual(http['routers']['pegaprox-browser']['middlewares'],['security-headers'])
+        self.assertEqual(http['routers']['pegaprox-browser']['middlewares'],['pegaprox-local','security-headers'])
         self.assertEqual(http['routers']['pegaprox-browser']['tls'],{'certResolver':'letsencrypt'})
         service=http['services']['pegaprox-private']['loadBalancer']
         self.assertEqual(service['servers'],[{'url':'https://198.18.25.34:5000'}])
@@ -40,7 +40,16 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(transport['serverName'],'prox.example.invalid')
         self.assertEqual(transport['rootCAs'],[self.pem])
         self.assertNotIn('insecureSkipVerify',transport)
-        self.assertNotIn('middlewares',http)
+        self.assertEqual(http['middlewares'],{'pegaprox-local':{'ipAllowList':{'sourceRange':['198.18.100.0/24']}}})
+
+    def test_empty_broad_or_proxy_header_based_client_policy_is_refused(self):
+        for value in ([],['0.0.0.0/0'],['10.0.0.0/8'],['198.18.100.0/24']*2):
+            cfg=self.settings();cfg['source_cidrs']=value
+            with self.subTest(value=value),self.assertRaises(ValueError):browser.validate(cfg)
+        cfg=self.settings();cfg.pop('source_cidrs')
+        with self.assertRaises(ValueError):browser.validate(cfg)
+        cfg=self.settings();cfg['ipStrategy']={'depth':1}
+        with self.assertRaises(ValueError):browser.validate(cfg)
 
     def test_existing_influx_overlay_is_preserved_and_input_is_not_mutated(self):
         from ingress_browser import objects

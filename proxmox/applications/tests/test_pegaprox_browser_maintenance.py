@@ -30,7 +30,7 @@ class MaintenanceTests(unittest.TestCase):
         evidence=self.work/'admission';evidence.mkdir(mode=0o700)
         self.policy={'schema':'homelab-pegaprox-browser-policy-evidence-v1','vmid':702,
             'route_sha256':fc.digest(fc.encoded(self.selected['route'])),'native_login_retained':True,
-            'authentik_deferred':True,'network_enforcement_deferred':True}
+            'authentik_deferred':True,'guest_firewall_enforcement_deferred':True,'direct_peer_allowlist_approved':True}
         for name,value in [('network_evidence',{'schema':'homelab-database-network-overlay-v1','status':'network_overlay_verified','vmid':702,'state_sha256':self.selected['state_sha256']}),('policy_evidence',self.policy)]:
             p=evidence/(name+'.json');fc.write_new(p,fc.encoded(value));self.selected[name]={'path':str(p),'sha256':fc.digest(p.read_bytes())}
         p=patch.object(browser,'EVIDENCE_ROOT',self.state);p.start();self.addCleanup(p.stop)

@@ -32,11 +32,15 @@ def request(route,host,path,frontend=False):
         conn.sock=context.wrap_socket(raw,server_hostname=host)
         conn.request('GET',path);reply=conn.getresponse();body=reply.read(65537)
         browser.require(len(body)<=65536,'Oversized readiness response')
-        return reply.status,json.loads(body)
+        return reply.status,body if frontend and reply.status==403 else json.loads(body)
     finally:conn.close();raw.close()
 
 
 def readiness(route,frontend=False):
+    if frontend:
+        # The controller's own frontend address is not an admitted browser client.
+        browser.require(request(route,route['host'],'/api/health',True)[0]==403,'The unadmitted frontend probe must be denied')
+        return
     health=request(route,route['host'],'/api/health',frontend)
     auth=request(route,route['host'],'/api/auth/check',frontend)
     browser.require(health==(200,{'status':'ok','version':'1.4.1'}),'PegaProx HTTPS health differs')
@@ -93,7 +97,7 @@ def run(selected,verify_only=False):
     route_ready(settings['route'])
     browser.require(base.guard(settings)==runtime,'Ingress changed/restarted during readiness')
     shared.save(operation/'complete.json',b'{"status":"passed"}\n');(operation/'HOLD.json').unlink();shared.sync(operation)
-    return {'status':'passed','changed':True,'login_reconfigured':False,'ingress_restarted':False}
+    return {'status':'passed','changed':True,'login_reconfigured':False,'ingress_restarted':False,'unadmitted_frontend_denied':True,'browser_login_verified':False}
 
 
 if __name__=='__main__':

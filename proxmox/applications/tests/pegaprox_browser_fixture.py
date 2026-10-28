@@ -37,7 +37,7 @@ def main():
             for stem in ('peer','wrong'):
                 subprocess.run(['openssl','req','-new','-x509','-newkey','rsa:2048','-nodes','-sha256','-days','2','-config',str(conf),'-keyout',str(root/(stem+'.key')),'-out',str(root/(stem+'.pem'))],check=True,capture_output=True)
             pem=(root/'peer.pem').read_text()
-            cfg={'schema':browser.SCHEMA,'host':'prox.example.invalid','backend':'https://198.18.25.34:5000','proxy_address':'198.18.25.33','frontend_address':'198.18.25.33','backend_certificate_pem':pem,'backend_certificate_sha256':__import__('hashlib').sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest(),'backend_spki_sha256':browser.spki(pem)}
+            cfg={'source_cidrs':['198.18.25.34/32'],'schema':browser.SCHEMA,'host':'prox.example.invalid','backend':'https://198.18.25.34:5000','proxy_address':'198.18.25.33','frontend_address':'198.18.25.33','backend_certificate_pem':pem,'backend_certificate_sha256':__import__('hashlib').sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest(),'backend_spki_sha256':browser.spki(pem)}
             original={'tls':{'certificates':[{'certFile':'/fixture/peer.pem','keyFile':'/fixture/peer.key'}]},'http':{'middlewares':{'security-headers':{'headers':{'contentTypeNosniff':True}}}}}
             dynamic=browser.merge(original,cfg);shared=root/'shared.yml';shared.write_text(json.dumps(dynamic))
             static={'entryPoints':{'websecure':{'address':':8443'}},'providers':{'file':{'filename':'/fixture/shared.yml','watch':True}},'certificatesResolvers':{'letsencrypt':{'acme':{'email':'fixture@example.invalid','storage':'/tmp/acme.json','caServer':'https://127.0.0.1:1/directory','httpChallenge':{'entryPoint':'websecure'}}}},'log':{'level':'ERROR'}}
@@ -61,6 +61,11 @@ def main():
                 raise RuntimeError('The expected TLS proxy result did not become ready: '+repr(locals().get('value'))+'; logs='+docker('logs','--tail','8',proxy)[-1200:])
             initial=wait(200);assert json.loads(initial['body'])=={'status':'ok','version':'1.4.1'}
             result['inline_leaf_trust_and_exact_sni']=True
+            dynamic['http']['middlewares']['pegaprox-local']['ipAllowList']['sourceRange']=['198.18.100.0/24'];shared.write_text(json.dumps(dynamic));wait(403)
+            spoofed=client.replace("c.request('GET','/api/health')","c.request('GET','/api/health',headers={'X-Forwarded-For':'198.18.100.2','CF-Connecting-IP':'198.18.100.2'})")
+            assert json.loads(docker('exec',backend,'python3','-c',spoofed))['status']==403
+            result['unadmitted_peer_and_spoofed_headers_rejected']=True
+            dynamic['http']['middlewares']['pegaprox-local']['ipAllowList']['sourceRange']=cfg['source_cidrs'];shared.write_text(json.dumps(dynamic));wait(200)
             dynamic['http']['serversTransports']['pegaprox-verified']['serverName']='wrong.example.invalid';shared.write_text(json.dumps(dynamic));wait(500);logs=docker('logs','--tail','12',proxy);assert 'not wrong.example.invalid' in logs;result['wrong_sni_rejected']=True
             dynamic['http']['serversTransports']['pegaprox-verified']['serverName']=cfg['host'];shared.write_text(json.dumps(dynamic));wait(200)
             dynamic['http']['serversTransports']['pegaprox-verified']['rootCAs']=[(root/'wrong.pem').read_text()];shared.write_text(json.dumps(dynamic));wait(500);logs=docker('logs','--tail','12',proxy);assert 'certificate signed by unknown authority' in logs;result['wrong_trust_anchor_rejected']=True

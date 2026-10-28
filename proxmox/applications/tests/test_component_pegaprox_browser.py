@@ -40,3 +40,10 @@ class ComponentTests(unittest.TestCase):
     def test_unbound_packet_stops_before_guest_or_backend_access(self):
         with patch.object(component.base,'guard',side_effect=AssertionError('No native read')):
             with self.assertRaisesRegex(ValueError,'closed'):component.run({})
+
+    def test_unadmitted_frontend_probe_requires_denial_not_an_acl_exception(self):
+        route=fixtures.BrowserTests().settings()
+        with patch.object(component,'request',return_value=(403,b'Forbidden')) as request:
+            component.readiness(route,frontend=True)
+        request.assert_called_once_with(route,route['host'],'/api/health',True)
+        with patch.object(component,'request',return_value=(200,{})),self.assertRaises(ValueError):component.readiness(route,frontend=True)

@@ -11,7 +11,10 @@ address on TCP 5000.
 the existing Influx objects and rejecting collisions. The transport supplies the
 exact hostname as SNI and trusts the selected public certificate inline. That
 avoids a certificate mount or Traefik restart. Hostname and trust verification
-remain enabled; no new authentication or network-enforcement policy is added.
+remain enabled. An explicit finite client allowlist uses the actual socket peer;
+no forwarded-header/IP-strategy trust or Authentik middleware is introduced.
+The client restriction needs its exact separate admission before activation.
+Guest firewall testing remains separately deferred.
 
 The selected certificate must contain the browser DNS name and backend IP SANs.
 Normal clean installation now generates SANs before first start, using optional
@@ -37,10 +40,12 @@ helpers. No new ongoing native check job or schedule is introduced.
 Before activation, bind the exact resulting canonical ingress state and network
 acceptance after the separately approved access plan. A historical state hash
 cannot stand in for that result. Bind a policy receipt to the exact route,
-retained native login and the agreed Authentik/network-enforcement deferrals.
+retained native login, explicitly approved direct-peer client list and the agreed
+Authentik/guest-firewall deferrals.
 Backend readiness verifies the certificate/SNI from the exact management-side
-source before any route write. Frontend readiness verifies normal HTTPS and
-initialized local authentication. It does not claim a human browser login.
+source before any route write. Frontend readiness verifies normal HTTPS and denial of the controller, which is
+not an admitted browser client. It does not add a probe exception. A selected
+client must separately verify the actual page and native login.
 
 The component reuses the established inode-preserving watched-file writer.
 It protects static configuration, Compose, image, all four NICs and the accepted
@@ -57,7 +62,8 @@ collisions, Influx preservation and failure holds. The clean-install Ansible
 fixture checks actual generated SANs and refusal to regenerate existing state.
 The pinned PegaProx/Traefik fixture uses an internal Docker network and no host
 ports. It proves inline trust, rejects wrong SNI and a wrong trust anchor, and
-checks initialized native authentication through the proxy.
+checks initialized native authentication through the proxy, plus rejection of an
+unadmitted peer even when it forges forwarded/Cloudflare client-IP headers.
 
 Primary references: [Traefik ServersTransport](https://doc.traefik.io/traefik/reference/routing-configuration/http/load-balancing/serverstransport/),
 [typed RootCAs](https://github.com/traefik/traefik/blob/v3.6/pkg/config/dynamic/http_config.go),
