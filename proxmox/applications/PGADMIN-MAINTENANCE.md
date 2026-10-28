@@ -320,6 +320,25 @@ The CLI JSON envelopes are respectively `{app, request}` and `{app, binding}`.
 and `pgadmin_service_result_path`. `ansible/pgadmin-service-verify.yml` accepts
 `app`, `pgadmin_service_binding` and the same result-path variable. Both retain
 the original Debian/LXC/namespace/host identity guards, execute fixed source via
-JSON stdin without installing guest files, and write only a new private0600
-controller result under existing caller-owned0700 custody. Builder errors and
+JSON stdin without installing guest files, and write only a new private `0600`
+controller result under existing caller-owned `0700` custody. Builder errors and
 normal-verification errors hold without automatic recovery or rebinding.
+
+
+## Ordinary CD after the PostgreSQL move
+
+Once the server and its clients have been accepted, each guest has its own
+read-only Actions job. `postgres_service_verify.py` checks the original
+completion records on the runner and NAS, that guest's applied network and
+startup dependency, and its current service. It has no cutover, resume, restore
+or restart option. Failed checks retain a separate hold for review.
+
+For pgAdmin, the expected saved connection is derived from the original backup
+and the reviewed replacement. The current profile is checked against that
+connection without freezing unrelated query history or preferences. A successful
+routine check means the service and saved registration still match; it does not
+claim a new browser login or SQL query. Keep the original acceptance separately.
+
+The original cutover implementation remains available at its historical source
+revision. It is no longer selected by normal CD. Historical installation inputs,
+network state, original configuration and failed-attempt records are retained.
