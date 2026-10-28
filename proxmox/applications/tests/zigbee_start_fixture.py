@@ -30,12 +30,20 @@ with tempfile.TemporaryDirectory(dir='/var/tmp') as temporary:
     except ValueError as error:raise AssertionError(restored.with_suffix('.tar.stderr').read_text()) from error
     root=destination/'zigbee2mqtt';admission=base/'admission.json';settings=base/'zigbee.json'
     settings.write_text(json.dumps(cfg))
-    tasks=yaml.safe_load((SOURCE/'ansible/tasks/compose.yml').read_text()) + yaml.safe_load((SOURCE/'ansible/tasks/zigbee-admission.yml').read_text())
-    tasks=[copy.deepcopy(t) for t in tasks if t['name'] in {
-        'Require the explicit start step and retired old writers',
-        'Check first-start admission or preserve the admitted live Zigbee identity'}]
-    tasks=[t for i,t in enumerate(tasks) if t['name'].startswith('Require the explicit') or i==len(tasks)-1]
-    assert len(tasks)==2 and tasks[0]['name'].startswith('Require the explicit')
+    plays=yaml.safe_load((SOURCE/'ansible/site.yml').read_text())
+    assert sum(t.get('ansible.builtin.import_tasks')=='tasks/compose.yml'
+               for play in plays for t in play.get('tasks',[]))==1
+    production=yaml.safe_load((SOURCE/'ansible/tasks/compose.yml').read_text())
+    imported=[i for i,t in enumerate(production) if t.get('ansible.builtin.import_tasks')=='zigbee-admission.yml']
+    assert len(imported)==1, 'Production Compose must import the one reviewed radio admission task'
+    writer=next(i for i,t in enumerate(production) if t.get('name')=='Require the explicit start step and retired old writers')
+    start=next(i for i,t in enumerate(production) if t.get('name')=='Start exactly this guest stack')
+    assert writer<imported[0]<start, 'Admission must run after writer approval and before Compose'
+    assert not any(t.get('name')=='Check first-start admission or preserve the admitted live Zigbee identity' for t in production), 'No legacy inline checker may bypass the imported flow'
+    admission_tasks=yaml.safe_load((SOURCE/'ansible/tasks'/production[imported[0]]['ansible.builtin.import_tasks']).read_text())
+    checker=[t for t in admission_tasks if t.get('name')=='Check first-start admission or preserve the admitted live Zigbee identity']
+    assert len(checker)==1
+    tasks=copy.deepcopy([production[writer],checker[0]])
     replacements={'/opt/homelab-app/zigbee2mqtt.py':str(SOURCE/'zigbee2mqtt.py'),
         '/opt/homelab-app/zigbee.json':str(settings),'/srv/homelab/data/zigbee2mqtt':str(root),
         '/opt/homelab-app/zigbee-admission.json':str(admission),'/opt/homelab-app/restore.json':str(restored)}

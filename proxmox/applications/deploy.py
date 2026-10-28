@@ -468,9 +468,6 @@ def execute(action, cfg_path, approved_plan=None):
             if capture.get('coherent') is not True or not path.is_file() or sha(path) != capture['sha256']:
                 raise InputNeeded('Finish and verify the selected coherent data capture before creating a guest')
             validate_archive(path)
-            if cfg['app'].get('kind') == 'zigbee2mqtt':
-                stack = json.loads(Path(cfg['app']['stack_config']).read_text())
-                zigbee2mqtt.check_archive(path, stack['zigbee'])
         hosts = Path(cfg['paths']['known_hosts'])
         instruction = 'Supply the deployment account private known_hosts file (regular file, mode 0600) before Deploy'
         try:

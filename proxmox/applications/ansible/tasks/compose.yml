@@ -137,25 +137,6 @@
     backup: true
   when: app.kind == 'automation' and stack.services.homeassistant.environment.HOMELAB_HA_IPV4 is defined
 
-- name: Install the read-only Zigbee state checker
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../zigbee2mqtt.py"
-    dest: /opt/homelab-app/zigbee2mqtt.py
-    owner: root
-    group: root
-    mode: '0700'
-  when: app.kind == 'zigbee2mqtt'
-
-- name: Install only the selected Zigbee validation facts
-  ansible.builtin.copy:
-    content: "{{ stack.zigbee | to_nice_json }}"
-    dest: /opt/homelab-app/zigbee.json
-    owner: root
-    group: root
-    mode: '0600'
-  no_log: true
-  when: app.kind == 'zigbee2mqtt'
-
 - name: Require the explicit start step and retired old writers
   ansible.builtin.assert:
     that:
@@ -164,13 +145,9 @@
     fail_msg: 'Data is staged. Start requires the selected cutover and exclusive-writer confirmation.'
   when: app.start_services | default(false) | bool and not ansible_check_mode
 
-- name: Check first-start admission or preserve the admitted live Zigbee identity
-  ansible.builtin.command:
-    argv: "{{ ['python3', '/opt/homelab-app/zigbee2mqtt.py', '--config', '/opt/homelab-app/zigbee.json', '--directory', '/srv/homelab/data/zigbee2mqtt', '--admission-receipt', '/opt/homelab-app/zigbee-admission.json', '--restore-receipt', '/opt/homelab-app/restore.json', '--capture-sha256', app.capture.sha256] + (['--admit-first-start'] if app.start_services | default(false) | bool else []) }}"
-  register: zigbee_admission
-  changed_when: zigbee_admission.rc == 0 and (zigbee_admission.stdout | from_json).admission_created
-  no_log: true
-  when: app.kind == 'zigbee2mqtt' and not ansible_check_mode
+- name: Run the reviewed Zigbee admission flow
+  ansible.builtin.import_tasks: zigbee-admission.yml
+  when: app.kind == 'zigbee2mqtt'
 
 - name: Start exactly this guest stack
   ansible.builtin.command:
