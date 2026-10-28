@@ -153,6 +153,28 @@ def route_ready(route):
     raise ValueError('The TLS-verified browser authentication redirect did not become ready')
 
 
+def write_contents(stream,raw):
+    stream.seek(0)
+    offset=0
+    while offset<len(raw):
+        count=stream.write(raw[offset:])
+        require(count is not None and count>0,'Watched file write made no progress')
+        offset+=count
+    stream.truncate()
+    stream.flush()
+    os.fsync(stream.fileno())
+
+
+def replace_watched(stream,updated,original):
+    try:
+        write_contents(stream,updated)
+    except BaseException:
+        # Retain the bind-mounted inode and restore unrelated routes before
+        # propagating the failure. The operation hold still prevents replay.
+        write_contents(stream,original)
+        raise
+
+
 def run(selected, verify_only=False):
     settings = packet(selected)
     require(os.geteuid() == 0, 'Use the selected guest maintenance playbook')
@@ -196,11 +218,11 @@ def run(selected, verify_only=False):
                 and mode in (0o400, 0o600) and anchor.read() == original, 'Watched file changed before activation')
         os.fchmod(anchor.fileno(), 0o600)
         try:
-            with os.fdopen(os.open(CONFIG, os.O_RDWR | os.O_NOFOLLOW), 'r+b') as stream:
+            with os.fdopen(os.open(CONFIG, os.O_RDWR | os.O_NOFOLLOW), 'r+b', buffering=0) as stream:
                 current = os.fstat(stream.fileno())
                 require((current.st_dev, current.st_ino) == (info.st_dev, info.st_ino) and stream.read() == original,
                         'Watched file identity changed during admission')
-                stream.seek(0); stream.write(updated); stream.truncate(); stream.flush(); os.fsync(stream.fileno())
+                replace_watched(stream,updated,original)
         finally:
             os.fchmod(anchor.fileno(), mode); os.fsync(anchor.fileno())
     require(read_config(CONFIG) == updated and shared.read(shared.COMPOSE) == compose_before

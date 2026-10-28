@@ -3,6 +3,7 @@ import copy
 import hashlib
 import json
 import os
+import io
 from pathlib import Path
 import tempfile
 import sys
@@ -39,6 +40,51 @@ class PacketTests(unittest.TestCase):
                          ('policy_evidence', {'path': '/var/lib/homelab-applications/999/admission/a', 'sha256': '2'*64})]:
             with self.subTest(key=key), self.assertRaises(ValueError): browser.packet({**value, key: bad})
         with self.assertRaises(ValueError): browser.packet({**value, 'allow_restart': True})
+
+
+class WatchedWriteTests(unittest.TestCase):
+    def test_short_writes_are_completed_and_zero_progress_is_refused(self):
+        class Short(io.BytesIO):
+            def write(self,raw):return super().write(raw[:3])
+        stream=Short()
+        with patch.object(component.os,'fsync'):
+            stream.fileno=lambda:123
+            component.write_contents(stream,b'complete candidate')
+        self.assertEqual(stream.getvalue(),b'complete candidate')
+        with patch.object(stream,'write',return_value=0),self.assertRaises(ValueError):
+            component.write_contents(stream,b'no progress')
+
+    def test_each_partial_write_failure_restores_the_same_file(self):
+        original=b'original routes and unrelated objects'
+        for stage in ('write','truncate','flush','fsync'):
+            with self.subTest(stage=stage),tempfile.TemporaryFile('w+b',buffering=0) as stream:
+                stream.write(original);stream.seek(0)
+                before=os.fstat(stream.fileno())
+                class Fault:
+                    failed=False
+                    def fileno(self):return stream.fileno()
+                    def seek(self,*args):return stream.seek(*args)
+                    def write(self,raw):
+                        if stage=='write' and not self.failed:
+                            self.failed=True;stream.write(raw[:4]);raise OSError('write failed after bytes changed')
+                        return stream.write(raw)
+                    def truncate(self):
+                        if stage=='truncate' and not self.failed:
+                            self.failed=True;raise OSError('truncate failed')
+                        return stream.truncate()
+                    def flush(self):
+                        if stage=='flush' and not self.failed:
+                            self.failed=True;raise OSError('flush failed')
+                        return stream.flush()
+                fault=Fault();real_sync=os.fsync
+                def sync(fd):
+                    if stage=='fsync' and not fault.failed:
+                        fault.failed=True;raise OSError('fsync failed')
+                    return real_sync(fd)
+                with patch.object(component.os,'fsync',side_effect=sync),self.assertRaises(OSError):
+                    component.replace_watched(fault,b'new and longer candidate with extra routes',original)
+                stream.seek(0);self.assertEqual(stream.read(),original)
+                self.assertEqual(os.fstat(stream.fileno()).st_ino,before.st_ino)
 
 
 @unittest.skipUnless(os.geteuid() == 0, 'Actual ownership checks run in the isolated Linux fixture')
@@ -110,6 +156,22 @@ class ComponentTests(unittest.TestCase):
         altered = {**self.selected, 'revision': 'f'*40}
         with self.assertRaises(FileExistsError): component.run(altered)
         with self.assertRaises(OSError): component.run(self.selected, True)
+
+    def test_partial_write_restores_original_and_retains_hold_without_replay(self):
+        before=self.config.stat();write=component.write_contents
+        calls=[]
+        def partial(stream,raw):
+            calls.append(raw)
+            if len(calls)==1:
+                stream.seek(0);stream.write(raw[:11]);raise OSError('partial write')
+            return write(stream,raw)
+        with patch.object(component,'write_contents',side_effect=partial),self.assertRaises(OSError):
+            component.run(self.selected)
+        self.assertEqual(self.config.read_bytes(),self.original)
+        after=self.config.stat()
+        self.assertEqual((before.st_ino,before.st_mode),(after.st_ino,after.st_mode))
+        self.assertTrue((component.STATE/'influx-browser-v1/HOLD.json').is_file())
+        with self.assertRaises(FileExistsError):component.run(self.selected)
 
     def test_healthy_but_restarted_container_is_not_accepted(self):
         with patch.object(component, 'route_ready', side_effect=lambda route: setattr(self, 'started', 'different')):
