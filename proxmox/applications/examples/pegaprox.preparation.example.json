@@ -1,0 +1,11 @@
+{
+  "kind": "pegaprox",
+  "enabled": false,
+  "deployable": false,
+  "image": "ghcr.io/pegaprox/pegaprox@sha256:8d295a524a52f0b923616a3eb415ff6422fe62beba5bb441f35c75d8985f1add",
+  "bind_address": "198.18.25.34",
+  "guest_memory_mib": 2048,
+  "container_memory_mib": 1536,
+  "cpus": 2,
+  "pids_limit": 256
+}

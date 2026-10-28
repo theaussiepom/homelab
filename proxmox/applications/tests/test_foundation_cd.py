@@ -16,6 +16,7 @@ SITE = {'node': 'pve-lab', 'api_endpoint': 'https://10.88.25.10:8006/'}
 
 
 class Deployment:
+    hold_name = 'FOUNDATION-HOLD.json'
     def __init__(self):
         self.calls, self.checked = [], []
         self.source = 'a' * 64
@@ -48,7 +49,7 @@ class Deployment:
         cfg = json.loads(site.read_text())
         vmid = cfg['guest']['vmid']
         work = Path(cfg['paths']['state_root']) / str(vmid)
-        marker = json.loads((work / 'FOUNDATION-HOLD.json').read_text())
+        marker = json.loads((work / self.hold_name).read_text())
         if marker['step'] != action:
             raise AssertionError('Adapter hold must precede the shared operation')
         if self.fail == action:

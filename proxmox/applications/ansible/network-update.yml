@@ -1,0 +1,196 @@
+---
+- name: Update an approved existing guest network startup dependency
+  hosts: application
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Refuse a Proxmox host target
+      ansible.builtin.stat:
+        path: /etc/pve
+      register: pve_directory
+
+    - name: Require one selected Debian application LXC and exact previous file hashes
+      ansible.builtin.assert:
+        that:
+          - groups['application'] | length == 1
+          - app.kind in ['identity', 'db-tools', 'postgresql', 'mariadb', 'influxdb']
+          - app.vmid | type_debug == 'int'
+          - app.vmid >= 100
+          - app.vmid not in [900, 4914, 4915, 4920]
+          - app.hostname == ansible_facts.hostname
+          - app.address in ansible_facts.all_ipv4_addresses
+          - app.mac | lower in (ansible_facts.interfaces | map('extract', ansible_facts) | selectattr('macaddress', 'defined') | map(attribute='macaddress') | map('lower') | list)
+          - ansible_facts.virtualization_type == 'lxc'
+          - ansible_facts.distribution == 'Debian'
+          - not pve_directory.stat.exists
+          - network_ready_gate_sha256 is match('^[0-9a-f]{64}$')
+          - network_ready_dependency_sha256 is match('^[0-9a-f]{64}$')
+          - network_ready_interfaces is sequence and network_ready_interfaces is not string
+          - network_ready_interfaces | length > 0
+          - network_ready_interfaces | length <= 16
+          - network_ready_interfaces | unique | length == network_ready_interfaces | length
+          - network_ready_interfaces | select('match', '^eth([0-9]|1[0-5])$') | list | length == network_ready_interfaces | length
+          - network_ready_activate | default(true) | type_debug == 'bool'
+          - network_ready_activate | default(true)
+          - app.kind != 'postgresql' or postgresql_cluster_unit is match('^postgresql@[0-9]+-[a-z][a-z0-9_]*\.service$')
+        fail_msg: 'Supply one existing Debian application LXC, its selected interfaces and both reviewed startup-file SHA256s.'
+
+    - name: Read the root user namespace mapping without changing it
+      ansible.builtin.slurp:
+        src: /proc/self/uid_map
+      register: network_update_uid_map
+
+    - name: Refuse a privileged or host-root-mapped container
+      ansible.builtin.assert:
+        that:
+          - (network_update_uid_map.content | b64decode) is search('(?m)^\s*0\s+[1-9][0-9]*\s+[1-9][0-9]*\s*$')
+          - (network_update_uid_map.content | b64decode) is not search('(?m)^\s*[0-9]+\s+0\s+[1-9][0-9]*\s*$')
+        fail_msg: 'The selected application must run in an unprivileged user namespace.'
+
+    - name: Read the installed application identity file metadata
+      ansible.builtin.stat:
+        path: /etc/homelab-application.json
+        follow: false
+      register: network_update_identity_file
+
+    - name: Require the existing private root-owned application identity
+      ansible.builtin.assert:
+        that:
+          - network_update_identity_file.stat.isreg | default(false)
+          - not network_update_identity_file.stat.islnk | default(false)
+          - network_update_identity_file.stat.uid == 0
+          - network_update_identity_file.stat.mode == '0600'
+
+    - name: Read the existing application identity
+      ansible.builtin.slurp:
+        src: /etc/homelab-application.json
+      register: network_update_identity
+
+    - name: Match the commissioned guest before editing its startup files
+      ansible.builtin.assert:
+        that:
+          - (network_update_identity.content | b64decode | from_json).vmid == app.vmid
+          - (network_update_identity.content | b64decode | from_json).hostname == app.hostname
+          - (network_update_identity.content | b64decode | from_json).kind == app.kind
+          - (network_update_identity.content | b64decode | from_json).address == app.address
+
+    - name: Select only the fixed application service and process unit
+      ansible.builtin.set_fact:
+        network_update_unit: "{{ {'identity':'docker.service', 'db-tools':'docker.service', 'postgresql':'postgresql@.service', 'mariadb':'mariadb.service', 'influxdb':'influxdb.service'}[app.kind] }}"
+        network_update_process_unit: "{{ postgresql_cluster_unit if app.kind == 'postgresql' else {'identity':'docker.service', 'db-tools':'docker.service', 'mariadb':'mariadb.service', 'influxdb':'influxdb.service'}[app.kind] }}"
+
+    - name: Refuse an override of the selected service dependency
+      ansible.builtin.assert:
+        that:
+          - network_update_unit == {'identity':'docker.service', 'db-tools':'docker.service', 'postgresql':'postgresql@.service', 'mariadb':'mariadb.service', 'influxdb':'influxdb.service'}[app.kind]
+          - network_update_process_unit == (postgresql_cluster_unit if app.kind == 'postgresql' else network_update_unit)
+          - network_ready_unit | default(network_update_unit) == network_update_unit
+
+    - name: Inspect both existing startup files and the selected override directory
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+        checksum_algorithm: sha256
+      loop:
+        - /etc/systemd/system/homelab-network-ready.service
+        - "/etc/systemd/system/{{ network_update_unit }}.d/homelab-network-ready.conf"
+        - "/etc/systemd/system/{{ network_update_unit }}.d"
+      register: network_update_before_files
+
+    - name: Require both reviewed regular startup files before any copy
+      ansible.builtin.assert:
+        that:
+          - network_update_before_files.results[0].stat.isreg | default(false)
+          - not network_update_before_files.results[0].stat.islnk | default(false)
+          - network_update_before_files.results[0].stat.uid == 0
+          - network_update_before_files.results[0].stat.gid == 0
+          - network_update_before_files.results[0].stat.mode == '0644'
+          - network_update_before_files.results[0].stat.checksum | default('') == network_ready_gate_sha256
+          - network_update_before_files.results[1].stat.isreg | default(false)
+          - not network_update_before_files.results[1].stat.islnk | default(false)
+          - network_update_before_files.results[1].stat.uid == 0
+          - network_update_before_files.results[1].stat.gid == 0
+          - network_update_before_files.results[1].stat.mode == '0644'
+          - network_update_before_files.results[1].stat.checksum | default('') == network_ready_dependency_sha256
+          - network_update_before_files.results[2].stat.isdir | default(false)
+          - not network_update_before_files.results[2].stat.islnk | default(false)
+          - network_update_before_files.results[2].stat.uid == 0
+          - network_update_before_files.results[2].stat.gid == 0
+          - network_update_before_files.results[2].stat.mode == '0755'
+        fail_msg: 'An existing startup file is missing or differs from the approved packet; preserve it for review.'
+
+    - name: Require an actual active IPv4 address on every selected interface
+      ansible.builtin.assert:
+        that:
+          - item in ansible_facts.interfaces
+          - ansible_facts.get(item, {}).get('active', false)
+          - ansible_facts.get(item, {}).get('ipv4', {}).get('address', '') | length > 0
+          - ansible_facts.get(item, {}).get('ipv4', {}).get('address', '') in ansible_facts.all_ipv4_addresses
+      loop: "{{ network_ready_interfaces }}"
+
+    - name: Record the active application process before the update
+      ansible.builtin.command:
+        argv: [systemctl, show, "{{ network_update_process_unit }}", '--property=MainPID,ActiveEnterTimestamp,ActiveEnterTimestampMonotonic,ActiveState']
+      register: network_update_process_before
+      changed_when: false
+      failed_when: >-
+        'ActiveState=active' not in network_update_process_before.stdout_lines or
+        network_update_process_before.stdout is not search('(?m)^MainPID=[1-9][0-9]*$') or
+        network_update_process_before.stdout is not search('(?m)^ActiveEnterTimestamp=.+$') or
+        network_update_process_before.stdout is not search('(?m)^ActiveEnterTimestampMonotonic=[1-9][0-9]*$')
+
+    - name: Require the installed networkd readiness executable
+      ansible.builtin.stat:
+        path: /usr/lib/systemd/systemd-networkd-wait-online
+        follow: false
+      register: network_update_wait_helper
+
+    - name: Refuse a missing network readiness executable
+      ansible.builtin.assert:
+        that:
+          - network_update_wait_helper.stat.isreg | default(false)
+          - network_update_wait_helper.stat.executable | default(false)
+
+    - name: Wait at most thirty seconds for all selected IPv4 interfaces
+      ansible.builtin.command:
+        argv: "{{ ['/usr/lib/systemd/systemd-networkd-wait-online', '--ipv4', '--timeout=30'] + ('--interface=' ~ (network_ready_interfaces | join(':routable --interface=')) ~ ':routable').split(' ') }}"
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Recheck the approved startup-file hashes immediately before the update
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+        checksum_algorithm: sha256
+      loop:
+        - /etc/systemd/system/homelab-network-ready.service
+        - "/etc/systemd/system/{{ network_update_unit }}.d/homelab-network-ready.conf"
+      register: network_update_admission_files
+
+    - name: Refuse drift during network readiness admission
+      ansible.builtin.assert:
+        that:
+          - network_update_admission_files.results[0].stat.checksum | default('') == network_ready_gate_sha256
+          - network_update_admission_files.results[1].stat.checksum | default('') == network_ready_dependency_sha256
+
+    - name: Update only the common network gate and selected application dependency
+      ansible.builtin.import_tasks: ../../common/ansible/network-ready.yml
+      vars:
+        network_ready_unit: "{{ network_update_unit }}"
+        network_ready_activate: true
+
+    - name: Verify the application process and activation timestamps are unchanged
+      ansible.builtin.command:
+        argv: [systemctl, show, "{{ network_update_process_unit }}", '--property=MainPID,ActiveEnterTimestamp,ActiveEnterTimestampMonotonic,ActiveState']
+      register: network_update_process_after
+      changed_when: false
+      failed_when: network_update_process_after.stdout != network_update_process_before.stdout
+
+    - name: Verify the effective application dependency and ordering
+      ansible.builtin.command:
+        argv: [systemctl, show, "{{ network_update_process_unit }}", '--property={{ item }}', --value]
+      loop: [Requires, After]
+      register: network_update_relation
+      changed_when: false
+      failed_when: "'homelab-network-ready.service' not in network_update_relation.stdout.split()"
