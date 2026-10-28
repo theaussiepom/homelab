@@ -4,6 +4,7 @@ import copy
 import io
 import hashlib
 import json
+import shutil
 from pathlib import Path
 import sys
 import tempfile
@@ -444,6 +445,15 @@ class DiscoveryTests(unittest.TestCase):
         receipt.write_text('{}'); receipt.chmod(0o600)
         self.api.writes.clear()
         with self.assertRaises(ValueError): self.run_cd()
+        self.assertEqual(self.api.writes, [])
+
+    def test_missing_nas_extension_directory_stops_without_api_writes(self):
+        self.prepare_extension()
+        self.run_cd()
+        shutil.rmtree(self.nas / 'service-discovery/scope-extensions')
+        self.api.writes.clear()
+        with self.assertRaisesRegex(ValueError, 'NAS custody is missing'):
+            self.run_cd()
         self.assertEqual(self.api.writes, [])
 
     def test_extension_does_not_adopt_live_acl_or_broader_privilege_drift(self):
