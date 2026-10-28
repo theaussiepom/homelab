@@ -26,7 +26,7 @@ SCHEMAS = {
                  {'oauth_display_name', 'provider_slug'}, {'oauth_client_secret'}, set()),
     'ingress': ({'bind_address', 'proxmox_url', 'proxmox_token_id', 'acme_email', 'pve_ca_file',
                  'acme_dns_resolvers'},
-                {'browser_route'}, {'proxmox_token', 'cloudflare_dns_token'}, set()),
+                {'authentik_url', 'browser_route'}, {'proxmox_token', 'cloudflare_dns_token'}, set()),
 }
 
 
@@ -132,6 +132,8 @@ def validate(cfg):
             browser_validate(selected['browser_route'])
         address(selected['bind_address'])
         dns_resolvers(selected['acme_dns_resolvers'])
+        if 'authentik_url' in selected:
+            private_authentik_origin(selected['authentik_url'])
         origin(selected['proxmox_url'], 'proxmox_url')
         file_path(selected['pve_ca_file'])
         if not re.fullmatch(r'[^\s!]+@[^\s!]+![A-Za-z0-9_.-]+', selected['proxmox_token_id']):
@@ -141,6 +143,30 @@ def validate(cfg):
         if services.get('traefik', {}).get('environment') or services.get('traefik', {}).get('extra_mounts'):
             raise ValueError('Foundation Traefik uses only its generated provider and TLS configuration')
     return selected
+
+
+def private_authentik_origin(value):
+    """Forward auth reaches only the selected embedded outpost on backend9000."""
+    parsed = urlsplit(text(value, 'authentik_url'))
+    try:
+        ip = ipaddress.IPv4Address(parsed.hostname)
+        valid = parsed.port == 9000 and any(ip in ipaddress.IPv4Network(network)
+                   for network in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
+    except (ValueError, TypeError):
+        valid = False
+    if (not valid or parsed.scheme != 'http' or parsed.username is not None or parsed.password is not None
+            or parsed.path not in ('', '/') or '?' in value or '#' in value
+            or any(char.isspace() for char in value) or '\\' in value):
+        raise ValueError('Select the private Authentik backend HTTP origin on port9000')
+    return value.rstrip('/')
+
+
+def authentik_middleware(origin):
+    """Shared by legacy routes and Notes discovery; the caller validates origin."""
+    return {'forwardAuth': {'address': origin.rstrip('/') + '/outpost.goauthentik.io/auth/traefik',
+            'trustForwardHeader': False,
+            'authResponseHeaders': ['X-authentik-username', 'X-authentik-groups', 'X-authentik-email',
+                                    'X-authentik-name', 'X-authentik-uid']}}
 
 
 def source_files(cfg):
@@ -280,6 +306,8 @@ def files(cfg):
                   'log': {'level': 'INFO'}, 'accessLog': {}}
         shared = {'tls': {'options': {'default': {'minVersion': 'VersionTLS12'}}},
                   'http': {'middlewares': {'security-headers': {'headers': {'contentTypeNosniff': True}}}}}
+        if 'authentik_url' in selected:
+            shared['http']['middlewares']['authentik'] = authentik_middleware(selected['authentik_url'])
         add('traefik.yml', json.dumps(static, indent=2) + '\n')
         if 'browser_route' in selected:
             from ingress_browser import merge

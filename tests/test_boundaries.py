@@ -18,12 +18,42 @@ def test_public_ci_cannot_choose_private_runner_or_privileged_pr_context():
     workflow=yaml.load((core.ROOT/'.github/workflows/ci.yml').read_text(),Loader=yaml.BaseLoader)
     assert 'pull_request_target' not in workflow['on']
     assert workflow['permissions']=={'contents':'read'}
-    assert workflow['jobs']['validate']['runs-on']=='ubuntu-24.04'
-    for step in workflow['jobs']['validate']['steps']:
-        if 'uses' in step:
-            assert len(step['uses'].split('@')[1])==40
-        assert '${{ secrets.' not in json.dumps(step)
+    for job_name, job in workflow['jobs'].items():
+        assert job['runs-on']=='ubuntu-24.04'
+        assert job.get('permissions', {}) == ({'contents':'read','security-events':'write'} if job_name=='analyze' else {})
+        for step in job['steps']:
+            if 'uses' in step:
+                assert re.fullmatch('[0-9a-f]{40}',step['uses'].split('@')[1])
+            assert '${{ secrets.' not in json.dumps(step)
     assert ' bin/homelab ' in (core.ROOT/'.github/workflows/ci.yml').read_text()
+
+
+def test_public_checks_share_one_entry_and_independent_jobs_have_no_dependencies():
+    workflow=yaml.load((core.ROOT/'.github/workflows/ci.yml').read_text(),Loader=yaml.BaseLoader)
+    assert workflow['name']=='Validate HomeLab'
+    assert set(workflow['on'])=={'pull_request','push','schedule','workflow_dispatch'}
+    assert workflow['on']['push']['branches']==['main']
+    assert workflow['on']['schedule']==[{'cron':'21 5 * * 1'}]
+    # PRs supersede older PR checks; every main push still gets its own safety scan.
+    assert workflow['concurrency']=={'group':'validation-${{ github.event.pull_request.number || github.run_id }}',
+                                    'cancel-in-progress':"${{ github.event_name == 'pull_request' }}"}
+    assert {p.name for p in (core.ROOT/'.github/workflows').iterdir() if p.suffix in {'.yml','.yaml'}}=={'ci.yml'}
+    jobs=workflow['jobs']
+    assert set(jobs)=={'changes','monitoring','applications','iso-unit','validate','source-safety','dependency-review','analyze','build-and-boot'}
+    for name in ('applications','iso-unit','validate','source-safety'):
+        assert jobs[name]['if']=="github.event_name == 'push' || github.event_name == 'pull_request'"
+        assert 'needs' not in jobs[name]
+    assert 'needs' not in jobs['monitoring']
+    assert any('monitoring_fixture.py' in step.get('run','') for step in jobs['monitoring']['steps'])
+    assert jobs['dependency-review']['if']=="github.event_name == 'pull_request'"
+    assert jobs['analyze']['if']=="github.event_name != 'workflow_dispatch'"
+    assert 'needs' not in jobs['analyze']
+    assert jobs['changes']['outputs']=={'iso':'${{ steps.paths.outputs.iso }}'}
+    checkout=jobs['changes']['steps'][0]
+    assert checkout['with']=={'fetch-depth':'0','persist-credentials':'false'}
+    assert jobs['changes']['steps'][1]['run']=='python3 .github/scripts/ci_changes.py >> "$GITHUB_OUTPUT"'
+    assert jobs['build-and-boot']['needs']=='changes'
+    assert jobs['build-and-boot']['if']=="needs.changes.outputs.iso == 'true'"
 
 
 def test_iso_ci_reuses_docker_commands_and_reports_only_bounded_test_evidence(tmp_path):
@@ -32,12 +62,9 @@ def test_iso_ci_reuses_docker_commands_and_reports_only_bounded_test_evidence(tm
     assert unit['runs-on']=='ubuntu-24.04'
     assert unit['defaults']['run']['working-directory']=='proxmox/iso'
     assert any(step.get('run')=='make tools init unit' for step in unit['steps'])
-    qualification=yaml.load((core.ROOT/'.github/workflows/proxmox-iso.yml').read_text(),Loader=yaml.BaseLoader)
+    qualification=ci
     assert qualification['permissions']=={'contents':'read'}
-    assert set(qualification['on'])=={'pull_request','push','workflow_dispatch'}
-    for event in ('pull_request','push'):
-        assert 'proxmox/iso/**' in qualification['on'][event]['paths']
-        assert '.github/workflows/proxmox-iso.yml' in qualification['on'][event]['paths']
+    assert 'workflow_dispatch' in qualification['on']
     job=qualification['jobs']['build-and-boot']
     assert job['runs-on']=='ubuntu-24.04'
     assert job['strategy']['matrix']['profile']==['fixture','integration']
@@ -73,7 +100,7 @@ def test_iso_ci_reuses_docker_commands_and_reports_only_bounded_test_evidence(tm
     assert 'RECEIPT_FIXTURE' in reported.stdout and 'CONSOLE_FIXTURE' in reported.stdout
     assert 'DO_NOT_LOG_' not in reported.stdout
     assert 'root-recovery-password.hash' not in reported.stdout
-    for workflow in (ci,qualification):
+    for workflow in (ci,):
         assert 'pull_request_target' not in workflow['on']
         assert '${{ secrets.' not in json.dumps(workflow)
         for candidate in workflow['jobs'].values():

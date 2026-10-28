@@ -293,13 +293,13 @@ Its actual dependency is automation200's MQTT service; it has no direct database
 bridge or dependency. Parent graph integration belongs to the shared source
 owner and must consume the disabled parent snippet once.
 
-Source dependency: the common owner must integrate `GUEST_ADAPTER_API = 1`,
-the small policy callbacks and the Zigbee task import into the existing ordinary
-engine/reconcile playbook. Until that reviewed interface is present in the
-pinned combined source, the adapter refuses execution. The first-start task file
-also needs that import; current legacy invocation refuses the newly required
-approval rather than implicitly admitting it. No human security or native
-acceptance is established by this source preparation.
+The combined source includes the reviewed shared ordinary implementation from
+HomeLab #24, preserving commit `388db5876811fc2780f07b41235967e5ce8d158b`, and
+its owner's `GUEST_ADAPTER_API = 1` extension. The production Compose flow imports
+the dedicated admission tasks exactly once, after writer approval and before
+startup; the fixture follows that real import. The radio adapter refuses a
+source without this reviewed interface. Human security review and native
+acceptance remain separate from source preparation.
 
 The selected broker alias is deployment addressing only. The checker still
 requires the captured MQTT URL, keys, PANs, channel, device names and topic. No

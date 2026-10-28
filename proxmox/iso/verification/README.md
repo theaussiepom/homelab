@@ -33,7 +33,7 @@ to its exact source and image hashes. [The source manifest](source-manifest.json
 records a later source snapshot. They are historical records, not manifests to
 silently regenerate after a documentation edit or proof that every later checkout
 was boot-tested. Current PR build/boot results appear in
-[GitHub Actions](https://github.com/theaussiepom/homelab/actions/workflows/proxmox-iso.yml).
+[GitHub Actions](https://github.com/theaussiepom/homelab/actions/workflows/ci.yml).
 
 ## Later physical installation: 25 October 2026
 

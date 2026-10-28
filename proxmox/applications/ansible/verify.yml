@@ -20,7 +20,7 @@
       ansible.builtin.command:
         argv: [python3, /opt/homelab-app/ingress-routing.py, --config, /opt/homelab-app/frontend-routing.json]
       changed_when: false
-      when: app.kind == 'ingress' and app.frontend_routing is defined
+      when: app.kind in ['ingress', 'automation'] and app.frontend_routing is defined
 
     - name: Run private service-specific read-only probes
       ansible.builtin.command:

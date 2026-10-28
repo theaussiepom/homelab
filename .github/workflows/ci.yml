@@ -1,14 +1,31 @@
-name: Public synthetic validation
+name: Validate HomeLab
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '21 5 * * 1'
 permissions:
   contents: read
 concurrency:
-  group: validation-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: validation-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  changes:
+    name: Select ISO checks
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      iso: ${{ steps.paths.outputs.iso }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: paths
+        run: python3 .github/scripts/ci_changes.py >> "$GITHUB_OUTPUT"
   monitoring:
     name: Clean Zabbix schema and active PSK fixture (Docker)
     runs-on: ubuntu-24.04
@@ -40,6 +57,7 @@ jobs:
             -v "$RUNNER_TEMP/zabbix-agent2.deb:/fixture-agent.deb:ro" homelab-app-test \
             python3 /src/proxmox/applications/tests/native_agent_fixture.py /fixture-agent.deb
   applications:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     name: Application source and restore fixtures (Docker)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -49,6 +67,8 @@ jobs:
           persist-credentials: false
       - name: Build pinned source tools
         run: docker build --platform linux/amd64 -t homelab-app-test -f proxmox/bootstrap/docker/Dockerfile proxmox/bootstrap/docker
+      - name: Check preserved Node-RED native login settings
+        run: node --test proxmox/applications/tests/node-red-*.test.cjs
       - name: Test without network, host devices or deployment credentials
         run: |
           docker run --rm --platform linux/amd64 --network none --cpus 2 --memory 2g \
@@ -139,6 +159,7 @@ jobs:
               print(path.read_text()[:6000], flush=True)
           PY
   iso-unit:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     name: ISO source tests (Docker)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -161,6 +182,7 @@ jobs:
               print(receipt.read_text(), flush=True)
           PY
   validate:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     name: Repository validation
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -196,3 +218,144 @@ jobs:
           ansible-playbook -i localhost, --syntax-check playbooks/discover.yml
           ansible-playbook -i localhost, --syntax-check playbooks/prepare.yml
           ansible-playbook -i localhost, --syntax-check playbooks/verify.yml
+  source-safety:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    name: Source safety
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install verified scanner
+        run: python .github/scripts/install_gitleaks.py "$RUNNER_TEMP/source-tools"
+      - name: Exercise staged and history guards
+        env:
+          GITLEAKS_BIN: ${{ runner.temp }}/source-tools/gitleaks
+        run: |
+          python -B -m unittest discover -s .githooks -p 'test_*.py'
+          python -B -m unittest discover -s .github/scripts -p 'test_safety.py'
+      - name: Check conditional ISO selection
+        run: python3 -B -m unittest discover -s .github/scripts -p 'test_ci_changes.py' -v
+      - name: Scan complete trees, introduced history and maintainer identity
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python .github/scripts/source_safety.py --head "$HEAD_SHA" --base "$BASE_SHA" --scanner "$RUNNER_TEMP/source-tools/gitleaks"
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: never
+  analyze:
+    if: github.event_name != 'workflow_dispatch'
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-extended
+      - uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee
+        with:
+          category: /language:${{ matrix.language }}
+  build-and-boot:
+    needs: changes
+    if: needs.changes.outputs.iso == 'true'
+    name: ISO ${{ matrix.profile }} (Docker)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [fixture, integration]
+    defaults:
+      run:
+        working-directory: proxmox/iso
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Build Docker tools
+        run: make tools
+      - name: Run source tests
+        run: make unit
+      - name: Create invented integration inputs
+        if: matrix.profile == 'integration'
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          local = Path('.local')
+          local.mkdir(mode=0o700, exist_ok=True)
+          if any(local.iterdir()):
+              raise SystemExit('CI integration inputs require a fresh empty .local directory')
+          hardware = json.loads(Path('config/fixture-hardware.json').read_text())
+          for field in ('schema', 'environment', 'runtime_sha256'):
+              hardware.pop(field)
+          hardware['machine_uuid'] = '44444444-4444-4444-8444-444444444444'
+          for index, disk in enumerate(hardware['disk_members'] + hardware['protected_disks']):
+              disk['disk_serial'] = 'CI-' + str(index)
+              disk['disk_by_id'] = '/dev/disk/by-id/nvme-CI-' + str(index) + '_1'
+          site = json.loads(Path('config/fixture-site.json').read_text())
+          site['fqdn'] = 'pve.ci.example.org'
+          site['mailto'] = 'operator@ci.example.org'
+          approval = {'approved_by': 'CI invented-input build only', 'scope': 'build-and-prepare-removable-media-only', 'production_boot_or_erase_authorized': False}
+          files = {name: (json.dumps(value, indent=2) + '\n').encode() for name, value in {'hardware.json': hardware, 'site.json': site, 'media-approval.json': approval}.items()}
+          files['root-ssh.pub'] = Path('config/fixture-ssh.pub').read_bytes()
+          files['root-recovery-password.hash'] = ('$6$synthetic$' + 'A' * 86 + '\n').encode()
+          for name, data in files.items():
+              fd = os.open(local / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+              with os.fdopen(fd, 'wb') as stream:
+                  stream.write(data)
+          PY
+      - name: Build practice image and run five guarded VM cases
+        if: matrix.profile == 'fixture'
+        run: make fetch fixture test-boot
+      - name: Build invented-input integration image and check wrong-machine refusal
+        if: matrix.profile == 'integration'
+        run: make fetch build test-profile
+      - name: Show build and boot evidence
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          patterns = (
+              'evidence/source-tests*.json',
+              'evidence/final-metadata-verification.json',
+              'evidence/latest-build-command-failure.json',
+              'build/single-usb-*/build-receipt.json',
+              'build/single-usb-*/native-validation.txt',
+              'build/single-usb-*/boot-record.txt',
+              'build/vm-tests/*/receipt.json',
+              'build/vm-tests/*/argv.json',
+              'build/vm-tests/*/console.log',
+          )
+          for pattern in patterns:
+              for path in sorted(Path('.').glob(pattern)):
+                  print('Evidence:', path, flush=True)
+                  print(path.read_text(errors='replace'), flush=True)
+          PY
