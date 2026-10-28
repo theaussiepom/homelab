@@ -127,6 +127,48 @@ def observed_appended_rule_plan(original):
 
 
 class PureTests(unittest.TestCase):
+    def test_explicit_existing_site_cidrs_use_the_same_pure_overlap_guard(self):
+        for cidr in ('10.88.31.0/24','10.88.32.0/24','10.88.0.0/16'):
+            with self.subTest(cidr=cidr), self.assertRaises(ValueError):
+                maintenance.candidate_guest(cfg(211)['guest'],contract(),'postgresql',existing_cidrs=[cidr],**OP)
+        maintenance.candidate_guest(cfg(211)['guest'],contract(),'postgresql',existing_cidrs=['10.88.40.0/24'],**OP)
+
+    def test_catalogue_overlap_with_installed_management_or_other_routes_is_held(self):
+        variants = []
+        original = cfg(211); original['guest']['interfaces'][0]['ipv4'] = '10.88.31.99/24'; variants.append(original)
+        original = cfg(211); original['guest']['interfaces'].append(dict(bridge='vmbr9',vlan=None,
+            mac='02:09:00:00:00:01',ipv4='10.88.32.99/16',ipv6='manual')); variants.append(original)
+        for original in variants:
+            for entrypoint in ('candidate','saved-plan'):
+                with self.subTest(interfaces=original['guest']['interfaces'],entrypoint=entrypoint), self.assertRaises(ValueError):
+                    if entrypoint == 'candidate':
+                        maintenance.candidate_guest(original['guest'],contract(),'postgresql',**OP)
+                    else:
+                        maintenance.check_plan(saved_plan(original),original,contract(),'postgresql',**OP)
+
+    def test_an_exact_existing_other_database_attachment_is_preserved_for_a_multi_db_client(self):
+        value = contract(); guest = cfg()['guest']; guest.update(vmid=200,hostname='automation')
+        guest['interfaces'].append(maintenance.networks.interface(value,'mariadb',200))
+        original = copy.deepcopy(guest)
+        candidate = maintenance.candidate_guest(guest,value,'influxdb',phase='additive',client_vmids=[200])
+        self.assertEqual(candidate['interfaces'][:-1],original['interfaces'])
+        self.assertEqual(candidate['interfaces'][-1],maintenance.networks.interface(value,'influxdb',200))
+        self.assertEqual(guest,original)
+        for field,bad in [('bridge','vmbr9'),('mac','02:99:00:00:00:01'),('ipv4','10.88.32.99/24'),
+                          ('ipv4','10.88.32.21/16'),('vlan',32),('gateway','10.88.32.1')]:
+            changed = copy.deepcopy(guest); changed['interfaces'][-1][field] = bad
+            with self.subTest(field=field,bad=bad), self.assertRaises(ValueError):
+                maintenance.candidate_guest(changed,value,'influxdb',phase='additive',client_vmids=[200])
+        guest['interfaces'].append(copy.deepcopy(guest['interfaces'][-1]))
+        with self.assertRaises(ValueError):
+            maintenance.candidate_guest(guest,value,'influxdb',phase='additive',client_vmids=[200])
+
+    def test_unknown_dynamic_route_cidrs_are_not_invented_by_offline_admission(self):
+        for address in ('dhcp','manual'):
+            guest = cfg(211)['guest']; guest['interfaces'][0]['ipv4'] = address
+            maintenance.candidate_guest(guest,contract(),'postgresql',**OP)
+
+
     def test_new_appended_sql_rule_accepts_only_fixed_omitted_provider_defaults(self):
         value = observed_appended_rule_plan(cfg()); saved = copy.deepcopy(value)
         self.assertEqual(maintenance.check_plan(value,cfg(),contract(),'postgresql',**OP)['candidate_guest'],desired(cfg()))
@@ -379,6 +421,15 @@ class ReadOnlyPlannerTests(unittest.TestCase):
         self.assertEqual(result['original']['state_lineage'], 'original-lineage')
         self.assertEqual(result['original']['state_serial'], 7)
         with self.assertRaises(ValueError): self.invoke()  # One evidence directory is never replayed.
+
+    def test_installed_route_overlap_refuses_before_planning_or_writing_evidence(self):
+        self.cfg['guest']['interfaces'][0]['ipv4'] = '10.88.31.99/24'
+        self.site.write_bytes(maintenance.encoded(self.cfg))
+        with patch.object(maintenance,'tofu') as tofu:
+            with self.assertRaisesRegex(ValueError,'overlaps an installed route'):
+                self.invoke()
+        tofu.assert_not_called(); self.deployment.execute.assert_not_called()
+        self.assertFalse(self.evidence.exists())
 
     def test_holds_or_original_source_input_receipt_drift_refuse_before_commands(self):
         for name in ('HOLD.json', 'ROLLOUT-HOLD.json', 'FOUNDATION-HOLD.json'):

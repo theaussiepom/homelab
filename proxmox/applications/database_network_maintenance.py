@@ -43,13 +43,39 @@ def selected_catalogue(value, engine, client_vmids):
     return selected
 
 
-def candidate_guest(guest, value, engine, *, phase, client_vmids, legacy_server_address=None):
+def validate_existing_routes(guest, value, existing_cidrs=()):
+    """Reject every DB subnet overlapping a commissioned static route.
+
+    An exact existing attachment to this guest's declared database membership
+    is the sole exemption. DHCP/manual addresses supply no subnet evidence;
+    this pure check does not discover their runtime routes.
+    """
+    networks.validate(value,existing_cidrs)
+    attached = set()
+    for nic in guest['interfaces']:
+        if nic['ipv4'] in {'dhcp','manual'}:
+            continue
+        subnet = ipaddress.IPv4Interface(nic['ipv4']).network
+        for engine,net in value['networks'].items():
+            if not subnet.overlaps(ipaddress.IPv4Network(net['cidr'])):
+                continue
+            members = [m for m in [net['server'],*net['clients']] if m['vmid'] == guest['vmid']]
+            require(len(members) == 1 and members[0]['hostname'] == guest['hostname']
+                    and nic['bridge'] == net['bridge'] and nic['mac'] == members[0]['mac']
+                    and nic['ipv4'] == members[0]['address'] + '/24'
+                    and nic.get('vlan') is None and not nic.get('gateway') and engine not in attached,
+                    'Database catalogue overlaps an installed route without an exact existing attachment')
+            attached.add(engine)
+
+
+def candidate_guest(guest, value, engine, *, phase, client_vmids, legacy_server_address=None, existing_cidrs=()):
     """Pure exact guest overlay, preserving all unrelated installed inputs.
 
     PG server replaces its one untagged vmbr30 NIC in place; selected clients
     retain vmbr30 for HTTP and append the new DB NIC. Old SQL allowances are
     removed. Other engines remain additive. No guest/config is written here.
     """
+    validate_existing_routes(guest,value,existing_cidrs)
     chosen = selected_catalogue(value, engine, client_vmids)
     net, member = networks.selected(chosen, engine, guest['vmid'])
     require(member['hostname'] == guest['hostname'], 'Catalogue and installed hostname differ')

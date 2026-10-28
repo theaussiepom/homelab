@@ -74,6 +74,9 @@ its new connection. Record those results after the approved CD run.
 [database_network_maintenance.py](database_network_maintenance.py) prepares a
 read-only plan with the original installer and its existing state/backend and
 locks. It records the contract and original installation bindings separately.
+Before planning, every database subnet is checked against the guest's commissioned
+static interface networks. Only an exact existing catalogue attachment is exempt.
+DHCP/manual interface subnets remain unknown; this check does not discover routes.
 For PostgreSQL, the checker permits only the selected database NIC replacement
 and SQL-rule changes. It keeps management, storage and other settings intact.
 It rejects resource creation, replacement, deletion, unrelated changes and
