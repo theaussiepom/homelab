@@ -152,6 +152,9 @@ def verify(role, value, request, helper, installer, source, catalogue, *, state=
         from database_network_cutover import private_directory
         private_directory(work)
         with verification_hold(worker, work, value):
+            # The helper imports its pure catalogue reader first. Do not let
+            # that module substitute for an installed foundation source.
+            sys.modules.pop('site_config', None)
             sys.path.insert(0, str(installer / 'proxmox/applications'))
             deployment = importlib.import_module('deploy')
             require(Path(deployment.__file__).resolve() == installer / 'proxmox/applications/deploy.py',
@@ -199,6 +202,7 @@ def verify(role, value, request, helper, installer, source, catalogue, *, state=
 
 
 def main():
+    os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('selection', 'packet', 'catalogue', 'desired-catalogue', 'acceptance'):
         parser.add_argument('--' + name, type=Path, required=True)
