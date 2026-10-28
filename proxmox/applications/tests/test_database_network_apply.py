@@ -262,6 +262,20 @@ class ApplyTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'observation summary'): self.apply()
         tofu.assert_not_called()
 
+    def test_fresh_overlay_read_cannot_omit_a_firewall_position(self):
+        def missing_position(command,environment,log,output=None):
+            self.fake_native(command,environment,log,output)
+            if output and command[-1] != str(self.evidence / 'guest.tfplan'):
+                value = json.loads(output.read_bytes())
+                row = next(r for r in value['resource_changes'] if r['address'] == maintenance.RULES)
+                for phase in ('before','after'):
+                    for index,rule in enumerate(row['change'][phase]['rule']): rule['pos'] = index
+                    row['change'][phase]['rule'][-1]['pos'] = None
+                output.write_bytes(maintenance.encoded(value))
+        with patch.object(maintenance,'tofu',side_effect=missing_position):
+            with self.assertRaisesRegex(ValueError,'positions'): self.apply()
+        self.assertTrue((self.work / 'HOLD.json').exists())
+
 
 class NasCustodyTests(unittest.TestCase):
     def test_active_nfs_row_is_selected_without_treating_automount_as_a_second_share(self):

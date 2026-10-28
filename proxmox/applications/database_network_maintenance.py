@@ -106,6 +106,19 @@ def omitted(value):
     return None if value == '' else value
 
 
+def validate_rule_positions(value, *, allow_omitted=()):
+    """Bind provider positions to list order; fresh reads allow no unset pos.
+
+    Older synthetic/no-position shapes stay raw-equal. A saved plan may omit
+    position only at explicitly selected new indices beyond its old rule list.
+    """
+    rows = value.get('rule',[])
+    if any('pos' in row for row in rows):
+        require(all((type(row.get('pos')) is int and row['pos'] == index)
+                    or (index in allow_omitted and 'pos' in row and row['pos'] is None)
+                    for index,row in enumerate(rows)), 'Firewall rule positions differ from their ordered list')
+
+
 def provider_projection(address, value):
     """BPG0.117 comparison only; never rewrite the retained provider evidence.
 
@@ -135,9 +148,18 @@ def provider_projection(address, value):
                     for block in config.get(family,[]):
                         block['gateway'] = omitted(block.get('gateway'))
     elif address == RULES:
-        for row in result.get('rule',[]):
+        rows = result.get('rule',[])
+        # Null pos is plan metadata for a newly allocated rule. Callers bind
+        # admissible planned indices separately; fresh reads use strict checks.
+        validate_rule_positions(result,allow_omitted=range(len(rows)))
+        for index,row in enumerate(rows):
             for name in ('source','dest'):
                 row[name] = omitted(row.get(name))
+            for name in ('iface','log','macro','security_group','sport'):
+                if name in row:
+                    row[name] = omitted(row[name])
+            if 'pos' in row and row['pos'] is None:
+                row['pos'] = index
     return result
 
 
@@ -232,8 +254,7 @@ def expected_rules(before, original, candidate, engine):
     result = copy.deepcopy(before)
     rows = before.get('rule', [])
     positions = any('pos' in row for row in rows)
-    require(not positions or all(type(row.get('pos')) is int and row['pos'] == index
-                                for index,row in enumerate(rows)), 'Installed firewall rule positions differ')
+    validate_rule_positions(before)
     require([rule_projection(r) for r in rows] == [normal_rule(r) for r in original['rules']],
             'Installed firewall rules differ from commissioned inputs')
     templates = [row for row in rows if row.get('proto') == 'tcp' and row.get('dport') == str(networks.PORTS[engine])]
@@ -283,6 +304,7 @@ def check_plan(value, original_cfg, catalogue, engine, *, phase, client_vmids, l
             expected = expected_container(before, guest, candidate)
         elif row['address'] == RULES:
             expected = expected_rules(before, guest, candidate, engine)
+            validate_rule_positions(after,allow_omitted=range(len(before.get('rule',[])),len(after.get('rule',[]))))
         else:
             expected = before
         require(provider_values_equal(row['address'],after,expected)

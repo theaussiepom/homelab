@@ -114,7 +114,58 @@ def observed_provider_plan(original):
     return value
 
 
+def observed_appended_rule_plan(original):
+    """The new BPG rule beyond the old list has unset optional defaults/pos."""
+    value = observed_provider_plan(original); value['resource_drift'] = []
+    change = value['resource_changes'][2]['change']
+    for side in ('before','after'):
+        for row in change[side]['rule']:
+            row.update({name:'' for name in ('iface','log','macro','security_group','sport')})
+    change['after']['rule'][-1].update({name:None for name in
+        ('iface','log','macro','security_group','sport','pos')})
+    return value
+
+
 class PureTests(unittest.TestCase):
+    def test_new_appended_sql_rule_accepts_only_fixed_omitted_provider_defaults(self):
+        value = observed_appended_rule_plan(cfg()); saved = copy.deepcopy(value)
+        self.assertEqual(maintenance.check_plan(value,cfg(),contract(),'postgresql',**OP)['candidate_guest'],desired(cfg()))
+        self.assertEqual(value,saved)
+
+    def test_new_sql_rule_omissions_do_not_admit_nonempty_fields_or_different_ports(self):
+        for field,bad in [('iface','eth1'),('log','info'),('macro','SSH'),('security_group','new-group'),
+                          ('sport','12345'),('source','0.0.0.0/0'),('dest','0.0.0.0/0'),('dport','5432,443')]:
+            value = observed_appended_rule_plan(cfg()); value['resource_changes'][2]['change']['after']['rule'][-1][field] = bad
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                maintenance.check_plan(value,cfg(),contract(),'postgresql',**OP)
+
+    def test_only_the_rule_beyond_the_old_list_may_omit_its_planned_position(self):
+        for side,index,pos in [('before',0,None),('after',0,None),('after',2,None),('after',3,99),('after',3,True)]:
+            value = observed_appended_rule_plan(cfg()); value['resource_changes'][2]['change'][side]['rule'][index]['pos'] = pos
+            with self.subTest(side=side,index=index,pos=pos), self.assertRaises(ValueError):
+                maintenance.check_plan(value,cfg(),contract(),'postgresql',**OP)
+        value = observed_appended_rule_plan(cfg())
+        rows = value['resource_changes'][2]['change']['after']['rule']; rows[2],rows[3] = rows[3],rows[2]
+        for index,row in enumerate(rows): row['pos'] = index
+        with self.assertRaises(ValueError): maintenance.check_plan(value,cfg(),contract(),'postgresql',**OP)
+
+    def test_later_read_requires_known_positions_while_comparing_to_the_saved_plan(self):
+        planned = observed_appended_rule_plan(cfg())['resource_changes'][2]['change']['after']
+        actual = copy.deepcopy(planned)
+        for index,row in enumerate(actual['rule']):
+            row['pos'] = index
+            for name in ('iface','log','macro','security_group','sport'):
+                row[name] = row[name] or ''
+        maintenance.validate_rule_positions(actual)
+        self.assertTrue(maintenance.provider_values_equal(maintenance.RULES,actual,planned))
+        with self.assertRaises(ValueError): maintenance.validate_rule_positions(planned)
+        for pos in (99,True):
+            bad = copy.deepcopy(actual); bad['rule'][-1]['pos'] = pos
+            with self.subTest(pos=pos), self.assertRaises(ValueError):
+                maintenance.validate_rule_positions(bad)
+            with self.subTest(pos=pos), self.assertRaises(ValueError):
+                maintenance.provider_values_equal(maintenance.RULES,bad,planned)
+
     def test_observed_empty_refresh_and_computed_address_maps_preserve_exact_nic_sql_scope(self):
         for vmid in (208,211,202):
             original = cfg(vmid); value = observed_provider_plan(original); saved = copy.deepcopy(value)

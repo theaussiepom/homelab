@@ -225,6 +225,9 @@ def readonly_overlay(context, directory):
             'Review applied network drift, unknown resources or planning errors')
     for row in rows:
         change = row['change']
+        if row['address'] == maintenance.RULES:
+            maintenance.validate_rule_positions(change.get('before'))
+            maintenance.validate_rule_positions(change.get('after'))
         require(change.get('actions') == ['no-op']
                 and maintenance.provider_values_equal(row['address'],change.get('before'),change.get('after'))
                 and maintenance.provider_values_equal(row['address'],change.get('after'),expected[row['address']])
