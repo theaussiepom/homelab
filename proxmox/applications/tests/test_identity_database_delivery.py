@@ -44,16 +44,29 @@ class DeliveryTests(unittest.TestCase):
                         'import sys; compile(sys.argv[1], "<delivered-runtime>", "exec"); print("source_bundle_compiled")',
                         '{{ identity_runtime_program }}']},'register':'compiled','changed_when':False},
                     {'ansible.builtin.assert':{'that':'compiled.stdout == "source_bundle_compiled"'}}]}]))
-            with patch.dict(os.environ,{'ANSIBLE_CONFIG':str(Path(directory)/'inherited-invalid.cfg'),
+            inherited_home=Path(directory)/'inherited-home'
+            callback=inherited_home/'.ansible/plugins/callback/synthetic_inherited.py'
+            callback.parent.mkdir(parents=True)
+            marker=Path(directory)/'inherited-callback-loaded'
+            callback.write_text('from pathlib import Path\nPath('+repr(str(marker))+').touch()\n'
+                'from ansible.plugins.callback import CallbackBase\n'
+                'class CallbackModule(CallbackBase):\n'
+                ' CALLBACK_VERSION=2.0\n CALLBACK_TYPE="aggregate"\n'
+                ' CALLBACK_NAME="synthetic_inherited"\n CALLBACK_NEEDS_ENABLED=False\n')
+            with patch.dict(os.environ,{'HOME':str(inherited_home),
+                                        'ANSIBLE_CONFIG':str(Path(directory)/'inherited-invalid.cfg'),
                                         'ANSIBLE_STDOUT_CALLBACK':'must-not-load-inherited-callback'}):
                 config=Path(directory)/'ansible.cfg'
                 config.write_text('[defaults]\nretry_files_enabled = False\n')
                 environment={k:v for k,v in os.environ.items() if not k.startswith('ANSIBLE_')}
-                environment.update(ANSIBLE_CONFIG=str(config),
+                home=Path(directory)/'home';home.mkdir(mode=0o700)
+                ansible_home=Path(directory)/'ansible-home';ansible_home.mkdir(mode=0o700)
+                environment.update(HOME=str(home),ANSIBLE_HOME=str(ansible_home),ANSIBLE_CONFIG=str(config),
                     ANSIBLE_LOCAL_TEMP=str(Path(directory)/'ansible-local'))
                 result=subprocess.run(['ansible-playbook','-i','localhost,',str(target)],capture_output=True,text=True,
                     timeout=45,env=environment)
             self.assertEqual(result.returncode,0,result.stdout[-2500:]+result.stderr[-1000:])
+            self.assertFalse(marker.exists(),'An inherited-home callback was loaded')
 
     def test_inspect_and_verify_install_no_guest_files_or_service_state(self):
         play=yaml.safe_load((ROOT/'ansible/identity-database-network.yml').read_text())[0]
