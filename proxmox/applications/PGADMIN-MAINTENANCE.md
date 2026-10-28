@@ -255,3 +255,90 @@ effective context; it requires the exact local root-owned socket and matching
 daemon hostname. Every outer command then uses that fixed endpoint and isolated
 CLI config, including cleanup and image streaming. It is default-deny outside
 that admission and must not be run against a shared or production daemon.
+
+## Normal verification after accepted maintenance
+
+The original migration phases retain their exact whole-profile guards. Their
+`verify` phase proves the mutation against the quiesced replacement projection;
+it is not perpetual service health verification. Normal Query Tool history and
+preferences legitimately change that profile afterward.
+
+Two separate single-purpose entry points support a caller-admitted accepted
+baseline. Neither accepts a phase/action selector, starts a service, updates a
+profile, restores data or refreshes expected settings from current live state.
+Original installer, migration request, source pins, receipts, failures and SQL
+acceptance remain immutable. The caller must bind successful acceptance,
+local/NAS custody and absence of holds, source identities and the qualified final
+network/member projection before selecting the normal path.
+
+`pgadmin_service_binding.build_binding(app, request)` takes the original runtime
+request plus its original `quiesced` receipt. It independently validates the
+private coherent backup and projects the exact replacement in SQLite memory.
+It returns `status=passed`, `kind=pgadmin-accepted-binding`, a closed `binding`,
+and `derived_from` containing `runtime_request_sha256`, `quiesce_backup_sha256`
+and `quiesce_profile_sha256`. These are metadata/digests only. The builder does
+not inspect the live profile, Docker or HTTP and does not prove acceptance by
+itself. The caller binds this deterministic metadata into its reviewed baseline;
+it must never adopt a hash from whatever happens to be live.
+
+The binding schema is `homelab-pgadmin-accepted-service-v1`. Its exact fields are
+`schema`, `identity`, `compose_sha256`, `identity_sha256`, `config_sha256`, `image`,
+`image_id`, `container_id`, `http_address`, `profile_identity`, `selector`,
+`target`, `server_schema_sha256`, `server_row_sha256` and `owner_auth_source`.
+Identity, deployment and exact profile device/inode/owner/mode/xattrs come from
+the original bound runtime. The selector uses the fresh registration ID and its
+approved existing OAuth owner; the target is the accepted direct PostgreSQL
+endpoint. The schema digest covers ordered `PRAGMA table_info(server)` cells.
+The row digest covers ordered column names and the complete selected server row.
+Both use sorted compact JSON of typed SQLite values: null, integer decimal,
+finite real hex, text and blob hex. No row, encrypted value or plaintext secret
+is exported, decrypted or logged.
+
+`pgadmin_service_verify.verify_accepted_service(app, binding)` checks the exact
+accepted deployment/container/image/config/profile identity and a currently
+running healthy container. It checks the selected row, OAuth owner, direct
+endpoint and existing transport/override refusals in one read-only SQLite
+transaction, compares both connection digests, and checks the retained HTTP
+listener. Normal same-container restart timestamps/counts may change. Container
+recreation, upgrades, profile replacement or selected connection changes require
+a reviewed baseline update; they are never adopted automatically.
+
+The complete selected server row deliberately includes any display fields stored
+on that row. Changing those also requires a reviewed baseline update. Unrelated
+query history, user/account preferences, per-database schema visibility and other
+registrations/accounts may evolve. Normal verification does not claim that every
+profile cell still equals the historical cutover snapshot.
+
+The normal result is exactly `status=passed`, `kind=pgadmin-accepted-service`,
+`changed=false`, `deployment_verified=true`, `registration_verified=true`,
+`http_verified=true`, `current_sql_tested=false`. Historical authenticated SQL
+acceptance remains separately bound by the caller; profile/HTTP checks are not
+a new credentialed SQL or browser OAuth test.
+
+The CLI JSON envelopes are respectively `{app, request}` and `{app, binding}`.
+`ansible/pgadmin-service-binding.yml` accepts `app`, `pgadmin_service_request`
+and `pgadmin_service_result_path`. `ansible/pgadmin-service-verify.yml` accepts
+`app`, `pgadmin_service_binding` and the same result-path variable. Both retain
+the original Debian/LXC/namespace/host identity guards, execute fixed source via
+JSON stdin without installing guest files, and write only a new private `0600`
+controller result under existing caller-owned `0700` custody. Builder errors and
+normal-verification errors hold without automatic recovery or rebinding.
+
+
+## Ordinary CD after the PostgreSQL move
+
+Once the server and its clients have been accepted, each guest has its own
+read-only Actions job. `postgres_service_verify.py` checks the original
+completion records on the runner and NAS, that guest's applied network and
+startup dependency, and its current service. It has no cutover, resume, restore
+or restart option. Failed checks retain a separate hold for review.
+
+For pgAdmin, the expected saved connection is derived from the original backup
+and the reviewed replacement. The current profile is checked against that
+connection without freezing unrelated query history or preferences. A successful
+routine check means the service and saved registration still match; it does not
+claim a new browser login or SQL query. Keep the original acceptance separately.
+
+The original cutover implementation remains available at its historical source
+revision. It is no longer selected by normal CD. Historical installation inputs,
+network state, original configuration and failed-attempt records are retained.
