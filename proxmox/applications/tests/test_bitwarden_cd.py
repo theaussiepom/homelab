@@ -524,6 +524,16 @@ class CDTests(unittest.TestCase):
             )
             self.assertTrue((work / "bitwarden-complete.json").is_file())
             self.assertFalse((work / "BITWARDEN-CD-HOLD.json").exists())
+            for approval in (None, "e" * 64):
+                config["approved_plan_sha256"] = approval
+                path.write_bytes(bitwarden_migration.encoded(config))
+                for phase in ("verify", "deploy"):
+                    engine.execute.reset_mock()
+                    with self.subTest(approval=approval, phase=phase):
+                        with self.assertRaises(ValueError):
+                            bitwarden_cd.run(phase, path, dest, environment, engine)
+                        engine.execute.assert_not_called()
+                        self.assertFalse((work / "BITWARDEN-CD-HOLD.json").exists())
 
 
 if __name__ == "__main__":

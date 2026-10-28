@@ -156,6 +156,7 @@ def run(
             files.require(
                 files.regular(recovery, private=True) == raw
                 and receipt["binding"] == binding
+                and receipt["plan_sha256"] == approved
                 and receipt["state_sha256"]
                 == deployment.sha(work / "terraform.tfstate")
                 and receipt["rollout_sha256"]
