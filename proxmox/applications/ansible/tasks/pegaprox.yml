@@ -1,0 +1,97 @@
+---
+- name: Require a clean installation without restored PegaProx state
+  ansible.builtin.assert:
+    that:
+      - app.clean_install_confirmed | default(false) | bool
+      - app.capture is not defined
+
+- name: Inspect existing application directory identities
+  ansible.builtin.stat:
+    path: "/srv/homelab/data/pegaprox/{{ item }}"
+    follow: false
+  loop: [config, logs]
+  register: pegaprox_directories
+
+- name: Refuse symlinks and foreign directory ownership
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isdir | default(false) and not item.stat.islnk | default(false))
+      - not item.stat.exists or (item.stat.uid == 999 and item.stat.gid == 999 and item.stat.mode == '0700')
+  loop: "{{ pegaprox_directories.results }}"
+
+- name: Inspect the two selected application directories
+  ansible.builtin.find:
+    paths: "/srv/homelab/data/pegaprox/{{ item }}"
+    recurse: true
+    hidden: true
+    file_type: any
+  loop: [config, logs]
+  register: pegaprox_existing
+
+- name: Refuse existing application state instead of adopting or overwriting it
+  ansible.builtin.assert:
+    that: item.matched | int == 0
+  loop: "{{ pegaprox_existing.results }}"
+
+- name: Prepare image-owned configuration and logs
+  ansible.builtin.file:
+    path: "/srv/homelab/data/pegaprox/{{ item }}"
+    state: directory
+    owner: '999'
+    group: '999'
+    mode: '0700'
+  loop: [config, logs]
+
+- name: Prepare the protected key directory
+  ansible.builtin.file:
+    path: /opt/homelab-app/runtime
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Inspect the selected controller database key
+  ansible.builtin.stat:
+    path: "{{ app.pegaprox.key_source }}"
+    checksum_algorithm: sha256
+    follow: false
+  delegate_to: localhost
+  become: false
+  register: pegaprox_source_key
+  no_log: true
+
+- name: Inspect an existing runtime database key without following links
+  ansible.builtin.stat:
+    path: /opt/homelab-app/runtime/pegaprox-db-key
+    checksum_algorithm: sha256
+    follow: false
+  register: pegaprox_runtime_key
+  no_log: true
+
+- name: Hold on runtime key or metadata drift instead of rotating it
+  ansible.builtin.assert:
+    that:
+      - pegaprox_source_key.stat.isreg | default(false)
+      - not pegaprox_source_key.stat.islnk | default(false)
+      - not pegaprox_runtime_key.stat.exists or (pegaprox_runtime_key.stat.isreg | default(false) and not pegaprox_runtime_key.stat.islnk | default(false))
+      - not pegaprox_runtime_key.stat.exists or pegaprox_runtime_key.stat.checksum == pegaprox_source_key.stat.checksum
+      - not pegaprox_runtime_key.stat.exists or (pegaprox_runtime_key.stat.uid == 999 and pegaprox_runtime_key.stat.gid == 999 and pegaprox_runtime_key.stat.mode == '0600')
+  no_log: true
+
+- name: Install the retained separately recoverable database key
+  ansible.builtin.copy:
+    src: "{{ app.pegaprox.key_source }}"
+    dest: /opt/homelab-app/runtime/pegaprox-db-key
+    owner: '999'
+    group: '999'
+    mode: '0600'
+    force: false
+  no_log: true
+
+- name: Install the local-only bootstrap and readiness helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../pegaprox_setup.py"
+    dest: /opt/homelab-app/pegaprox-setup.py
+    owner: root
+    group: root
+    mode: '0700'

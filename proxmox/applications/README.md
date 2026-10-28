@@ -1,7 +1,14 @@
 # After bootstrap: bring home automation across one guest at a time
 
+For separate database networks, see the [private database network guide](database-networks.md).
+It explains which settings belong to bootstrap, database CD and each application.
+
 [Proxmox guide](../README.md) · [Bootstrap](../bootstrap/README.md) ·
 [Databases](DATABASES.md) · [HTTPS and sign-in](FOUNDATION.md) · [pgAdmin](PGADMIN.md) · [PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
+
+For a fresh monitoring system without restoring old Zabbix history, see
+[Clean Zabbix monitoring](ZABBIX.md). It uses this same guest/CD path and can be
+prepared independently of the household application migration.
 
 The deployment guest receives GitHub jobs. These scripts are the next step:
 **OpenTofu creates one application guest; Ansible installs its applications and
