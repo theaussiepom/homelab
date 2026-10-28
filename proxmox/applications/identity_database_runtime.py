@@ -179,6 +179,7 @@ def binding(name, row):
         endpoint = endpoint_env(env)
         env.pop(identity.HOST,None); env.pop(identity.PORT,None)
         normalized['Labels'].pop('com.docker.compose.config-hash',None)
+        normalized['Labels'].pop('com.docker.compose.replace',None)
     normalized['Env'] = env
     mounts = sorted(row['Mounts'],key=lambda m:m['Destination'])
     require(len({m['Destination'] for m in mounts}) == len(mounts), 'Ambiguous Authentik mounts')
@@ -314,6 +315,12 @@ def match_runtime(current,expected,endpoint,*,recreated=False,lifecycle=False):
             require(actual['started_at'] == old['started_at'], 'An unapproved container lifecycle occurred')
 
 
+def replacement_history(rows,previous):
+    for name in ('server','worker'):
+        require(rows[name]['Config']['Labels'].get('com.docker.compose.replace') == previous[name]['id'],
+                'The recreated client does not name its exact original container')
+
+
 def health(rows,states):
     require(all(states[n] == {'running':True,'status':'running','health':'healthy'} for n in SERVICES),
             'All three runtime health checks must pass')
@@ -349,6 +356,7 @@ def run(action,app,request):
     match_runtime(observed,request['runtime'],request['after'] if action == 'verify' else request['before'],
                   recreated=action == 'verify',lifecycle=action in {'activate','verify'} and request['allow_guest_restart'])
     if action in {'preflight','verify'}:
+        if action == 'verify': replacement_history(rows,request['runtime'])
         health(rows,states)
         return {'status':'passed','action':action,'changed':False,'compose_sha256':sha(current_raw),
                 'runtime':observed,'states':states}
@@ -373,7 +381,9 @@ def run(action,app,request):
     after,after_states,after_rows = observe(parsed(wanted) if action == 'activate' else document)
     match_runtime(after,observed,request['after'] if action == 'activate' else request['before'],
                   recreated=action == 'activate')
-    if action == 'activate': health(after_rows,after_states)
+    if action == 'activate':
+        replacement_history(after_rows,observed)
+        health(after_rows,after_states)
     else:
         require(all(after_states[n] == states[n] for n in ('redis',))
                 and all(after_states[n]['running'] is False and after_states[n]['status'] == 'exited'

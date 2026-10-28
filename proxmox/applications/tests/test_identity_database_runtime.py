@@ -86,7 +86,8 @@ class RuntimeTests(unittest.TestCase):
             if self.fail_up: raise runtime.CommandFailed('synthetic private start failure')
             self.assertEqual(argv[-2:],['server','worker'])
             for i,name in enumerate(('server','worker'),10):
-                row=self.rows[name];row['Id']=format(i,'064x');row['Config']['Hostname']=row['Id'][:12]
+                row=self.rows[name];row['Config']['Labels']['com.docker.compose.replace']=row['Id']
+                row['Id']=format(i,'064x');row['Config']['Hostname']=row['Id'][:12]
                 env=runtime.environment(row['Config']['Env']);env.update(AUTHENTIK_POSTGRESQL__HOST=AFTER['address'],AUTHENTIK_POSTGRESQL__PORT='5432')
                 row['Config']['Env']=[k+'='+v for k,v in env.items()]
                 row['Config']['Labels']['com.docker.compose.config-hash']='updated'
@@ -137,6 +138,18 @@ class RuntimeTests(unittest.TestCase):
         mutations=list(self.mutation_commands())
         with self.assertRaises(ValueError):runtime.run('activate',APP,self.request)
         self.assertEqual(self.mutation_commands(),mutations)
+
+    def test_generated_replacement_history_must_name_exact_original_clients(self):
+        runtime.run('quiesce',APP,self.request);runtime.run('activate',APP,self.request)
+        for name in ('server','worker'):
+            self.assertEqual(self.rows[name]['Config']['Labels']['com.docker.compose.replace'],
+                             self.request['runtime'][name]['id'])
+        before=list(self.mutation_commands())
+        for replacement in (None,'f'*64,self.rows['worker']['Id']):
+            self.rows['worker']['Config']['Labels']['com.docker.compose.replace']=replacement
+            with self.subTest(replacement=replacement),self.assertRaises(ValueError):
+                runtime.run('verify',APP,self.request)
+        self.assertEqual(self.mutation_commands(),before)
 
     def test_unstopped_client_or_wrong_policy_is_held_without_file_write(self):
         with self.assertRaises(ValueError):runtime.run('activate',APP,self.request)

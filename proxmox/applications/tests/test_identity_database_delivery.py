@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from jinja2 import Environment
 import yaml
@@ -42,8 +43,15 @@ class DeliveryTests(unittest.TestCase):
                         'import sys; compile(sys.argv[1], "<delivered-runtime>", "exec"); print("source_bundle_compiled")',
                         '{{ identity_runtime_program }}']},'register':'compiled','changed_when':False},
                     {'ansible.builtin.assert':{'that':'compiled.stdout == "source_bundle_compiled"'}}]}]))
-            result=subprocess.run(['ansible-playbook','-i','localhost,',str(target)],capture_output=True,text=True,
-                timeout=45,env=dict(os.environ,ANSIBLE_LOCAL_TEMP=str(Path(directory)/'ansible-local')))
+            with patch.dict(os.environ,{'ANSIBLE_CONFIG':str(Path(directory)/'inherited-invalid.cfg'),
+                                        'ANSIBLE_STDOUT_CALLBACK':'must-not-load-inherited-callback'}):
+                config=Path(directory)/'ansible.cfg'
+                config.write_text('[defaults]\nretry_files_enabled = False\n')
+                environment={k:v for k,v in os.environ.items() if not k.startswith('ANSIBLE_')}
+                environment.update(ANSIBLE_CONFIG=str(config),
+                    ANSIBLE_LOCAL_TEMP=str(Path(directory)/'ansible-local'))
+                result=subprocess.run(['ansible-playbook','-i','localhost,',str(target)],capture_output=True,text=True,
+                    timeout=45,env=environment)
             self.assertEqual(result.returncode,0,result.stdout[-2500:]+result.stderr[-1000:])
 
     def test_inspect_and_verify_install_no_guest_files_or_service_state(self):

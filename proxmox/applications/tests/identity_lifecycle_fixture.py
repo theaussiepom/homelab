@@ -69,11 +69,12 @@ def main():
               '--force-recreate','--pull','never','--wait','--wait-timeout','30','server','worker')
         for n in ('server','worker'):
             row=inspect(n);assert row['Id']!=before[n]['Id'] and row['State']['Running']
+            assert row['Config']['Labels']['com.docker.compose.replace']==before[n]['Id']
         assert inspect('redis')['Id']==after['redis']['Id']
         assert inspect('redis')['State']['StartedAt']==after['redis']['State']['StartedAt']
         print(json.dumps({'status':'passed','daemon':'26.1.4','manually_stopped_clients_survived_daemon_cycle':True,
             'redis_restarted_with_same_container_and_synthetic_state':True,
-            'only_two_clients_recreated_after_cycle':True,'native_lxc_verified':False},indent=2))
+            'only_two_clients_recreated_after_cycle':True,'replacement_history_names_original_clients':True,'native_lxc_verified':False},indent=2))
     except Exception:
         print(docker('logs','--tail','50',name).decode(errors='replace'))
         raise

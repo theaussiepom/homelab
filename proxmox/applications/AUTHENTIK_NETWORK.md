@@ -95,7 +95,15 @@ phases. `ansible/identity-database-network.yml` accepts the original `app`,
 `database_network_action`, `database_network_request` and
 `database_network_result_path`. The caller owns the authoritative packet,
 authorization, source pin, locks, saved plans, one-shot execution, private evidence
-and failure/interruption holds. This helper adds none of those mechanisms.
+and failure/interruption holds. Before quiescing either client, the caller must
+retain a private copy of the exact original Compose bytes and verify its SHA256
+against `compose_sha256`. Hold activation if that recovery material is absent or
+differs; a hash alone cannot recover the file. This helper adds none of those mechanisms.
+
+The first native `inspect` must pass the commissioned hostname, IPv4 and interface
+MAC fact checks on the selected Debian LXC. CI source-delivery compilation does
+not validate that target fact shape; the common owner retains this native result
+before preparing or admitting the packet.
 
 The playbook executes the pinned Python source bytes with `python3 -c`; it does
 not install a helper on the guest. Requests cannot supply a command or source
@@ -136,9 +144,15 @@ are emitted in the inspection or runtime packet.
    new container identities, unchanged image/configuration/data fingerprints,
    health and unchanged Redis process during this phase. A failed or interrupted
    activation stays in caller custody; there is no automatic retry or rollback.
+   For manual recovery, keep the clients stopped and use the caller-held,
+   hash-verified original bytes to rewrite the existing private Compose inode.
+   Recheck ownership, mode and hash, then follow the common recovery procedure
+   for network/service state; restoring the file alone does not admit startup.
 6. `verify` receives the same original runtime packet, checks the candidate hash,
    both new client identities/endpoints and original stable bindings, and repeats
-   the health probes. It changes no files or services and supports later read-only
+   the health probes. Generated hostnames, endpoint config hashes and replacement
+   history are checked separately from application configuration fingerprints.
+   It changes no files or services and supports later read-only
    verification. The caller retains successful result identities for its receipt.
 
 The common worker also owns native saved-plan application, PostgreSQL listener/HBA
