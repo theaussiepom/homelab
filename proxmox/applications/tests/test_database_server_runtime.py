@@ -133,6 +133,17 @@ class RuntimeTests(unittest.TestCase):
 
 
 class CoordinationTests(unittest.TestCase):
+    def test_source_validation_binds_runtime_vmid_before_any_native_phase(self):
+        for kind in SOURCES:
+            value = single(kind)
+            member = value['members'][kind]
+            member['runtime_packet']['before']['identity']['vmid'] = member['vmid'] + 1
+            with tempfile.TemporaryDirectory() as temp:
+                state = Path(temp); state.chmod(0o700); driver = Driver()
+                with self.assertRaises(ValueError): cutover.run(value, state, driver)
+                self.assertEqual(driver.calls, [])
+                self.assertEqual(list(state.iterdir()), [])
+
     def test_single_server_uses_existing_custody_and_sequence_without_activating_apps(self):
         for kind in SOURCES:
             with tempfile.TemporaryDirectory() as temp:
