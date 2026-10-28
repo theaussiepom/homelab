@@ -279,7 +279,7 @@ def expected_container(before, original, candidate):
     return result
 
 
-def expected_rules(before, original, candidate, engine):
+def expected_rules(before, original, candidate, engine, *, new_ingress_influx=False):
     result = copy.deepcopy(before)
     rows = before.get('rule', [])
     positions = any('pos' in row for row in rows)
@@ -287,6 +287,13 @@ def expected_rules(before, original, candidate, engine):
     require([rule_projection(r) for r in rows] == [normal_rule(r) for r in original['rules']],
             'Installed firewall rules differ from commissioned inputs')
     templates = [row for row in rows if row.get('proto') == 'tcp' and row.get('dport') == str(networks.PORTS[engine])]
+    if new_ingress_influx:
+        from ingress_network_baseline import new_rule_template
+        require(engine == 'influxdb' and original['vmid'] == 212 and not templates
+                and candidate['rules'][:-1] == original['rules']
+                and len(candidate['rules']) == len(original['rules']) + 1,
+                'Only one new outbound Influx rule belongs to the accepted ingress overlay')
+        templates = [new_rule_template(rows)]
     require(len(templates) == 1, 'Require one exact existing SQL rule template')
     expected = []
     for rule in candidate['rules']:
@@ -303,7 +310,8 @@ def expected_rules(before, original, candidate, engine):
     return result
 
 
-def check_plan(value, original_cfg, catalogue, engine, *, phase, client_vmids, legacy_server_address=None):
+def check_plan(value, original_cfg, catalogue, engine, *, phase, client_vmids, legacy_server_address=None,
+               ingress_acme_baseline=None):
     """Accept only exact NIC/IP/SQL-rule changes on an existing known guest.
 
     Other configuration remains raw-equal apart from fixed empty provider
@@ -311,6 +319,10 @@ def check_plan(value, original_cfg, catalogue, engine, *, phase, client_vmids, l
     unknowns, material drift, replacements and other surprises remain holds.
     """
     guest = original_cfg['guest']; vmid = guest['vmid']; node = original_cfg['site']['node']
+    if ingress_acme_baseline is not None:
+        import ingress_network_baseline as baseline
+        baseline.scope(original_cfg,engine,phase,client_vmids,legacy_server_address)
+        guest = baseline.load(original_cfg,STATE/str(vmid),ingress_acme_baseline)['guest']
     require(type(vmid) is int and vmid >= 100 and vmid not in {900, 4914, 4915, 4920}, 'Invalid maintenance guest')
     candidate = candidate_guest(guest, catalogue, engine, phase=phase, client_vmids=client_vmids,
                                 legacy_server_address=legacy_server_address)
@@ -332,7 +344,8 @@ def check_plan(value, original_cfg, catalogue, engine, *, phase, client_vmids, l
         if row['address'] == CONTAINER:
             expected = expected_container(before, guest, candidate)
         elif row['address'] == RULES:
-            expected = expected_rules(before, guest, candidate, engine)
+            expected = expected_rules(before, guest, candidate, engine,
+                                      new_ingress_influx=ingress_acme_baseline is not None)
             validate_rule_positions(after,allow_omitted=range(len(before.get('rule',[])),len(after.get('rule',[]))))
         else:
             expected = before
@@ -441,7 +454,7 @@ def tofu(command, environment, log, output=None):
 
 
 def plan(deployment, installed_config_path, catalogue_path, evidence, engine, *, phase,
-         client_vmids, legacy_server_address=None):
+         client_vmids, legacy_server_address=None, ingress_acme_baseline=None):
     """Prepare a private read-only plan using the ORIGINAL deployment module.
 
     Calling this contacts the existing pinned PVE API for planning. Source tests
@@ -458,21 +471,32 @@ def plan(deployment, installed_config_path, catalogue_path, evidence, engine, *,
     info = work.lstat()
     require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == 0o700,
             'Use the existing private guest state directory')
-    candidate = candidate_guest(cfg['guest'], catalogue, engine, phase=phase, client_vmids=client_vmids,
-                                legacy_server_address=legacy_server_address)
+    candidate = candidate_guest(cfg['guest'],catalogue,engine,phase=phase,client_vmids=client_vmids,
+        legacy_server_address=legacy_server_address) if ingress_acme_baseline is None else None
     with ExitStack() as stack:
         for name in ('workflow.lock', 'deployment.lock'):
             lock = stack.enter_context(os.fdopen(os.open(work / name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600), 'a+'))
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         no_holds(work)
         original, variables = bindings(deployment, cfg, site, work)
+        guest = cfg['guest']; accepted = None
+        helpers = [Path(__file__),Path(networks.__file__),Path(__file__).with_name('database_network_server.py')]
+        if ingress_acme_baseline is not None:
+            import ingress_network_baseline as baseline
+            baseline.scope(cfg,engine,phase,client_vmids,legacy_server_address)
+            accepted = baseline.load(cfg,work,ingress_acme_baseline,current=True)
+            guest = accepted['guest']; helpers += baseline.helper_files()
+            candidate = candidate_guest(guest,catalogue,engine,phase=phase,client_vmids=client_vmids,
+                                        legacy_server_address=legacy_server_address)
         evidence.mkdir(mode=0o700)
         request = {'schema': SCHEMA, 'engine': engine, 'phase': phase, 'vmid': cfg['guest']['vmid'],
                    'client_vmids': sorted(client_vmids), 'legacy_server_address': legacy_server_address,
                    'catalogue_sha256': digest(catalogue_raw), 'original': original,
-                   'helper_sha256': {p.name: digest(p.read_bytes()) for p in [Path(__file__),
-                       Path(networks.__file__), Path(__file__).with_name('database_network_server.py')]},
+                   'helper_sha256': {p.name: digest(p.read_bytes()) for p in helpers},
                    'apply_supported': False, 'lifecycle_effects_verified': False}
+        if accepted is not None:
+            request['ingress_acme_baseline'] = ingress_acme_baseline
+            write_new(evidence/'ingress-acme-baseline.json',accepted['manifest_raw'])
         write_new(evidence / 'request.json', encoded(request))
         try:
             source = Path(deployment.SOURCE) / 'tofu'
@@ -492,7 +516,8 @@ def plan(deployment, installed_config_path, catalogue_path, evidence, engine, *,
             tofu(command + ['show', '-json', str(evidence / 'guest.tfplan')], environment, log, evidence / 'guest.tfplan.json')
             saved = regular(evidence / 'guest.tfplan'); shown = regular(evidence / 'guest.tfplan.json')
             checked = check_plan(json.loads(shown), cfg, catalogue, engine, phase=phase,
-                                 client_vmids=client_vmids, legacy_server_address=legacy_server_address)
+                                 client_vmids=client_vmids, legacy_server_address=legacy_server_address,
+                                 ingress_acme_baseline=ingress_acme_baseline)
             no_holds(work, current_plan=evidence)
             require(bindings(deployment, cfg, site, work)[0] == original and regular(catalogue_path, private=False) == catalogue_raw,
                     'State, original inputs or catalogue drifted during planning')
@@ -517,6 +542,8 @@ def main():
     parser.add_argument('--phase', choices=('additive', 'cutover'), required=True)
     parser.add_argument('--client-vmid', type=int, action='append', required=True)
     parser.add_argument('--legacy-server-address')
+    parser.add_argument('--ingress-acme-baseline',type=Path)
+    parser.add_argument('--ingress-acme-baseline-sha256')
     args = parser.parse_args(); os.umask(0o077)
     try:
         # Load the original installer only now, after this helper's imports have
@@ -529,8 +556,12 @@ def main():
         deployment = importlib.import_module('deploy')
         require(Path(deployment.__file__).resolve() == args.source.resolve() / 'proxmox/applications/deploy.py',
                 'The loaded installer differs from the selected original checkout')
+        require(bool(args.ingress_acme_baseline) == bool(args.ingress_acme_baseline_sha256),
+                'Bind both the explicit ingress baseline path and digest')
+        reference = {'path':str(args.ingress_acme_baseline),'sha256':args.ingress_acme_baseline_sha256} if args.ingress_acme_baseline else None
         result = plan(deployment, args.config, args.catalogue, args.evidence, args.engine,
-                      phase=args.phase, client_vmids=args.client_vmid, legacy_server_address=args.legacy_server_address)
+                      phase=args.phase, client_vmids=args.client_vmid, legacy_server_address=args.legacy_server_address,
+                      ingress_acme_baseline=reference)
         print(json.dumps({k: result[k] for k in ('status', 'vmid', 'engine', 'phase', 'plan_sha256', 'apply_supported')}))
     except Exception as error:
         raise SystemExit('Maintenance plan held (' + type(error).__name__ + '); inspect private evidence') from None

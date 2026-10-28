@@ -1,5 +1,8 @@
 # Private networks for database guests
 
+For the opt-in accepted ingress ACME baseline and additive Influx client path, see
+[Ingress network baseline](INGRESS-NETWORK-BASELINE.md).
+
 [Proxmox guide](../README.md) · [Application deployment](README.md) · [Bootstrap](../bootstrap/README.md)
 
 Each database gets its own small network inside Proxmox. Only that database
