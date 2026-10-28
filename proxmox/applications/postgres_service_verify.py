@@ -117,9 +117,13 @@ def completed(worker, request, value, cfg, state):
 @contextmanager
 def verification_hold(worker, work, value):
     """Keep failed verification durable without modifying cutover history."""
-    path = work / 'SERVICE-VERIFY-HOLD.json'
+    path = work / 'SERVICE-VERIFYING.json'
+    failure = work / 'SERVICE-VERIFY-HOLD.json'
     marker = encoded({'request_sha256': value['request_sha256'], 'automatic_retry': False,
                       'phase': 'normal-service-verification'})
+    require(not failure.exists() and not failure.is_symlink(), 'Preserve the failed normal service check')
+    # An in-progress claim is not a failure. The pinned network verifier
+    # correctly refuses *HOLD.json, including a failure from this normal check.
     worker.maintenance.write_new(path, marker)
     worker.network_apply.sync(work)
     try:
@@ -128,7 +132,9 @@ def verification_hold(worker, work, value):
         path.unlink()
         worker.network_apply.sync(work)
     except BaseException:
-        # No clearing, rollback, continuation or automatic retry path.
+        worker.maintenance.write_new(failure, marker)
+        worker.network_apply.sync(work)
+        # Keep the claim too: an interrupted or failed check cannot replay.
         raise
 
 

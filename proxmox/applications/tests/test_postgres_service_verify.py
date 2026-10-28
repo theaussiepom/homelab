@@ -124,15 +124,32 @@ class MemberTests(unittest.TestCase):
                 self.assertEqual(self.events[3:], ['pgadmin-service-binding.yml', 'pgadmin-service-verify.yml'])
             else: self.assertEqual(self.events[3:], ['runtime-' + role])
             self.assertFalse((self.state / str(self.packet['members'][role]['vmid']) / 'SERVICE-VERIFY-HOLD.json').exists())
+            self.assertFalse((self.state / str(self.packet['members'][role]['vmid']) / 'SERVICE-VERIFYING.json').exists())
 
     def test_runtime_failure_remains_held_and_next_attempt_cannot_contact_guest(self):
         self.worker.runtime = lambda *a: (_ for _ in ()).throw(ValueError('not healthy'))
         with self.assertRaises(ValueError): self.run_role('postgresql')
         hold = self.state / '110/SERVICE-VERIFY-HOLD.json'
         self.assertTrue(hold.exists()); before = list(self.events)
-        with self.assertRaises(FileExistsError): self.run_role('postgresql')
+        with self.assertRaises(ValueError): self.run_role('postgresql')
         self.assertEqual(before, self.events)
         self.assertFalse(json.loads(hold.read_text())['automatic_retry'])
+
+    def test_in_progress_claim_is_compatible_with_pinned_network_failure_gate(self):
+        import database_network_maintenance as maintenance
+        work = self.state / '110'
+        with patch.object(maintenance, 'BOOTSTRAP_HOLD', self.root / 'bootstrap-CONFIGURING'):
+            with service.verification_hold(self.worker, work, {'request_sha256': 'd'*64}):
+                maintenance.no_holds(work)
+                self.assertTrue((work / 'SERVICE-VERIFYING.json').exists())
+            # A failed normal check is still rejected by that same old gate.
+            (work / 'SERVICE-VERIFY-HOLD.json').write_text('{}')
+            with self.assertRaises(ValueError): maintenance.no_holds(work)
+
+    def test_interrupted_claim_refuses_new_verification_before_network_contact(self):
+        (self.state / '110/SERVICE-VERIFYING.json').write_text('{}')
+        with self.assertRaises(FileExistsError): self.run_role('postgresql')
+        self.assertEqual(self.events, [])
 
 
 class CustodyTests(unittest.TestCase):
