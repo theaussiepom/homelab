@@ -101,6 +101,9 @@ jobs:
         run: |
           docker pull --platform linux/amd64 dpage/pgadmin4@sha256:cefc4cc6b7d9d71a9e81e76fb9d7e14038ab5661b539a190eea1b63fa612589a
           python3 proxmox/applications/tests/pgadmin_fixture.py
+      - name: Admit the disposable hosted runner for the isolated privileged restart-policy fixture
+        if: runner.environment == 'github-hosted' && runner.os == 'Linux'
+        run: python3 proxmox/applications/tests/pgadmin_restart_fixture.py --allow-disposable-github-runner
       - name: Exercise the selected DNS updates with synthetic offline records
         run: |
           docker pull --platform linux/amd64 pihole/pihole@sha256:70a9c11171ded2eee735d88c127996da209284a329d50f5ae59c06b861d401b3

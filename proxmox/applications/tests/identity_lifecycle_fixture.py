@@ -49,10 +49,15 @@ def main():
         document = {'name':'homelab-identity','services':{service:{'image':image,
             'command':['sleep','3600'],'restart':'unless-stopped','network_mode':'none',
             'volumes':['state:/state']} for service in ('server','worker','redis')},'volumes':{'state':{}}}
+        document['services']['redis']['healthcheck']={'test':['CMD','true'],'interval':'1s','timeout':'1s','retries':5}
+        for service in ('server','worker'):
+            document['services'][service]['depends_on']={'redis':{'condition':'service_healthy'}}
         docker('exec','-i',name,'sh','-c','cat > /tmp/identity-compose.json',data=json.dumps(document).encode())
         inner('compose','-f','/tmp/identity-compose.json','up','-d','--pull','never')
         inner('exec',inspect('redis')['Id'],'sh','-c','printf synthetic-state > /state/marker')
         before = {n:inspect(n) for n in ('server','worker','redis')}
+        for n in ('server','worker'):
+            assert before[n]['Config']['Labels']['com.docker.compose.depends_on']=='redis:service_healthy:false'
         inner('compose','-f','/tmp/identity-compose.json','stop','--timeout','10','server','worker')
         for n in ('server','worker'):
             row=inspect(n);assert not row['State']['Running'] and row['State']['Status']=='exited'
@@ -70,6 +75,7 @@ def main():
         for n in ('server','worker'):
             row=inspect(n);assert row['Id']!=before[n]['Id'] and row['State']['Running']
             assert row['Config']['Labels']['com.docker.compose.replace']==before[n]['Id']
+            assert row['Config']['Labels']['com.docker.compose.depends_on']==''
         assert inspect('redis')['Id']==after['redis']['Id']
         assert inspect('redis')['State']['StartedAt']==after['redis']['State']['StartedAt']
         print(json.dumps({'status':'passed','daemon':'26.1.4','manually_stopped_clients_survived_daemon_cycle':True,

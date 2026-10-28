@@ -50,8 +50,11 @@ class RuntimeTests(unittest.TestCase):
                       'Labels':{'com.docker.compose.project':'homelab-identity',
                                 'com.docker.compose.service':name,'com.docker.compose.config-hash':'original'},
                       'Cmd':[name] if name != 'redis' else ['redis-server'], 'User':service.get('user','')}
+            if name != 'redis':
+                config['Labels']['com.docker.compose.depends_on'] = 'redis:service_healthy:false'
             self.rows[name] = {'Id':ident,'Image':'sha256:'+format(101 if name in ('server','worker') else 103,'064x'), 'Config':config,
-                'HostConfig':{'RestartPolicy':{'Name':'unless-stopped'},'Memory':256*1024*1024},
+                'HostConfig':{'RestartPolicy':{'Name':'unless-stopped'},'Memory':256*1024*1024,
+                              'Dns':[], 'DnsOptions':[], 'DnsSearch':[]},
                 'Mounts':mounts, 'State':{'Running':True,'Status':'running','StartedAt':START,
                     'Health':{'Status':'healthy'}}}
         self.original = (json.dumps(self.document,indent=2)+'\n').encode()
@@ -91,6 +94,8 @@ class RuntimeTests(unittest.TestCase):
                 env=runtime.environment(row['Config']['Env']);env.update(AUTHENTIK_POSTGRESQL__HOST=AFTER['address'],AUTHENTIK_POSTGRESQL__PORT='5432')
                 row['Config']['Env']=[k+'='+v for k,v in env.items()]
                 row['Config']['Labels']['com.docker.compose.config-hash']='updated'
+                row['Config']['Labels']['com.docker.compose.depends_on']=''
+                row['HostConfig'].update(Dns=None,DnsOptions=None,DnsSearch=None)
                 row['State'].update(Running=True,Status='running',StartedAt='2026-10-27T02:00:00.000000000Z')
         return b''
 
@@ -150,6 +155,103 @@ class RuntimeTests(unittest.TestCase):
             with self.subTest(replacement=replacement),self.assertRaises(ValueError):
                 runtime.run('verify',APP,self.request)
         self.assertEqual(self.mutation_commands(),before)
+
+    def test_generated_client_metadata_keeps_original_packet_and_hashes(self):
+        original_packet=copy.deepcopy(self.request)
+        original_redis=copy.deepcopy(self.rows['redis'])
+        for name in ('server','worker'):
+            # The retained packet uses the original full raw HostConfig hash.
+            self.assertEqual(self.request['runtime'][name]['host_config_sha256'],
+                             runtime.sha(runtime.encoded(self.rows[name]['HostConfig'])))
+        runtime.run('quiesce',APP,self.request)
+        runtime.run('activate',APP,self.request)
+        for name in ('server','worker'):
+            row=self.rows[name]
+            self.assertEqual(row['Config']['Labels']['com.docker.compose.depends_on'],'')
+            self.assertTrue(all(row['HostConfig'][key] is None for key in ('Dns','DnsOptions','DnsSearch')))
+            self.assertNotEqual(runtime.sha(runtime.encoded(row['HostConfig'])),
+                                self.request['runtime'][name]['host_config_sha256'])
+        self.assertEqual(runtime.run('verify',APP,self.request)['status'],'passed')
+        self.assertEqual(self.request,original_packet)
+        self.assertEqual(self.rows['redis'],original_redis)
+
+    def test_real_or_missing_dns_fields_are_not_normalized_away(self):
+        original=copy.deepcopy(self.rows)
+        for name in ('server','worker'):
+            for key,value in (('Dns',['192.0.2.53']),('DnsOptions',['ndots:1']),
+                              ('DnsSearch',['example.invalid'])):
+                self.rows=copy.deepcopy(original)
+                self.rows[name]['HostConfig'][key]=value
+                with self.subTest(service=name,key=key),self.assertRaises(ValueError):
+                    runtime.run('preflight',APP,self.request)
+                self.assertEqual(self.mutation_commands(),[])
+            self.rows=copy.deepcopy(original)
+            del self.rows[name]['HostConfig']['Dns']
+            with self.assertRaises(ValueError):runtime.run('preflight',APP,self.request)
+
+    def test_joint_empty_dns_representation_change_is_read_only(self):
+        original=copy.deepcopy(self.rows)
+        for name in ('server','worker'):
+            self.rows[name]['HostConfig'].update(Dns=None,DnsOptions=None,DnsSearch=None)
+        metadata=copy.deepcopy(self.rows)
+        self.assertEqual(runtime.run('preflight',APP,self.request)['status'],'passed')
+        self.assertEqual(self.rows,metadata)
+        self.assertEqual(self.mutation_commands(),[])
+        self.assertEqual(self.compose.read_bytes(),self.original)
+        self.assertEqual(self.rows['redis'],original['redis'])
+
+    def test_generated_dependency_label_alone_preserves_other_config_guards(self):
+        for name in ('server','worker'):
+            self.rows[name]['Config']['Labels']['com.docker.compose.depends_on']=''
+        self.assertEqual(runtime.run('preflight',APP,self.request)['status'],'passed')
+        original=copy.deepcopy(self.rows)
+        for key,value in (('User','9999'),('WorkingDir','/unexpected')):
+            self.rows=copy.deepcopy(original)
+            self.rows['worker']['Config'][key]=value
+            with self.subTest(field=key),self.assertRaises(ValueError):
+                runtime.run('preflight',APP,self.request)
+        self.rows=copy.deepcopy(original)
+        self.rows['worker']['Config']['Labels']['unrelated']='drift'
+        with self.assertRaises(ValueError):runtime.run('preflight',APP,self.request)
+        self.assertEqual(self.mutation_commands(),[])
+
+    def test_dependency_normalization_requires_exact_source_and_generated_label(self):
+        original=copy.deepcopy(self.rows)
+        for label in (None,'redis:service_started:false','redis:service_healthy:true',
+                      'other:service_healthy:false'):
+            self.rows=copy.deepcopy(original)
+            self.rows['server']['Config']['Labels']['com.docker.compose.depends_on']=label
+            with self.subTest(label=label),self.assertRaises(ValueError):
+                runtime.run('preflight',APP,self.request)
+        for dependencies in ({},{'redis':{'condition':'service_started'}},
+                             {'other':{'condition':'service_healthy'}}):
+            service=copy.deepcopy(self.document['services']['server'])
+            service['depends_on']=dependencies
+            with self.subTest(dependencies=dependencies),self.assertRaises(ValueError):
+                runtime.binding('server',original['server'],service)
+        self.assertEqual(self.mutation_commands(),[])
+
+    def test_unrelated_host_config_and_mount_drift_still_hold(self):
+        original=copy.deepcopy(self.rows)
+        for key,value in (('Memory',512*1024*1024),('Privileged',True),
+                          ('CapAdd',['SYS_ADMIN']),('NetworkMode','host')):
+            self.rows=copy.deepcopy(original)
+            self.rows['worker']['HostConfig'][key]=value
+            with self.subTest(field=key),self.assertRaises(ValueError):
+                runtime.run('preflight',APP,self.request)
+        self.rows=copy.deepcopy(original)
+        self.rows['worker']['Mounts'][0]['RW']=False
+        with self.assertRaises(ValueError):runtime.run('preflight',APP,self.request)
+        self.assertEqual(self.mutation_commands(),[])
+
+    def test_redis_retains_exact_host_config_and_label_hash_guards(self):
+        original=copy.deepcopy(self.rows['redis'])
+        self.rows['redis']['HostConfig']['Dns']=None
+        with self.assertRaises(ValueError):runtime.run('preflight',APP,self.request)
+        self.rows['redis']=copy.deepcopy(original)
+        self.rows['redis']['Config']['Labels']['com.docker.compose.depends_on']=''
+        with self.assertRaises(ValueError):runtime.run('preflight',APP,self.request)
+        self.assertEqual(self.mutation_commands(),[])
 
     def test_unstopped_client_or_wrong_policy_is_held_without_file_write(self):
         with self.assertRaises(ValueError):runtime.run('activate',APP,self.request)
