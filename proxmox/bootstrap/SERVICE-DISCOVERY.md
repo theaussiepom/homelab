@@ -64,11 +64,42 @@ connect and discover its routes. It should use explicit backend `server.url`
 labels so a multi-interface guest uses the intended application network.
 
 A repeat verifies the saved credential and makes no further changes. The
-workflow refuses to adopt an existing token, rotate a token, expand its guest
-list, rewrite changed privileges, or move an existing firewall rule. A partial
+workflow refuses to adopt an existing token, rotate a token, silently expand its
+guest list, rewrite changed privileges, or move an existing firewall rule. A partial
 failure leaves the normal bootstrap hold and maintenance marker. Preserve the
 private receipts and review the actual outcome before authorising a correction;
 do not delete files or repeatedly rerun the workflow.
+
+## Add another application later
+
+Keep the existing token. Append the new guest to `applications` and to the end
+of `service_discovery.guests`, then include an explicit extension in the same
+reviewed host-settings change:
+
+```json
+"service_discovery_extension": {
+  "owner_sha256": "<SHA256 of the current non-secret discovery owner>",
+  "guests": [215]
+}
+```
+
+Use `provider_access.owner_sha256()` on the current owner content to calculate
+this hash. Initially that content is `service-discovery/owner.json`; after an
+extension it is the `owner` in the last `scope-extensions/NNNN.json` receipt.
+This hash describes the existing node, address, token identity, role and full
+guest list. It contains no credential.
+
+Review and approve the exact added guest access before merging. Bootstrap adds
+only the declared read grants, without propagation. It verifies the retained
+credential, role and all previous grants first. A changed address, removed or
+reordered old guest, extra privilege or missing NAS copy stops the operation.
+
+The original owner and token files remain unchanged. Each successful extension
+adds one numbered receipt in `service-discovery/scope-extensions/` on the runner
+and NAS. Later runs use that complete chain to check the effective scope and
+make no further changes. A partial extension stays under the normal bootstrap
+hold; it cannot be adopted or automatically retried. After success the optional
+extension request may be removed, retaining the full desired guest list.
 
 Omit `service_discovery` when this provider is not part of your deployment. The
 original host prerequisite workflow keeps its existing behaviour.

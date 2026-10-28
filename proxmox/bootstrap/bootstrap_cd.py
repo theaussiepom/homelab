@@ -36,7 +36,7 @@ def save(path, value):
 def validate(c):
     fields = {'schema', 'endpoint', 'node', 'deploy', 'bridge', 'applications',
               'existing_grants', 'backup_source'}
-    require(fields <= set(c) <= fields | {'service_discovery', 'private_bridges'},
+    require(fields <= set(c) <= fields | {'service_discovery', 'private_bridges', 'service_discovery_extension'},
             'Use the closed bootstrap CD configuration')
     require(c['schema'] == 'homelab-bootstrap-cd-v1', 'Unsupported bootstrap CD schema')
     endpoint = urlsplit(c['endpoint'])
@@ -80,6 +80,8 @@ def validate(c):
     require(isinstance(c['backup_source'], str) and ':' in c['backup_source'], 'Declare the existing NAS backup source')
     if 'service_discovery' in c:
         provider_access.validate(c)
+    require('service_discovery_extension' not in c or 'service_discovery' in c,
+            'A discovery extension requires the declared discovery configuration')
 
 
 def rows(items):

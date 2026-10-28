@@ -373,6 +373,123 @@ class DiscoveryTests(unittest.TestCase):
             self.run_cd()
         self.assertEqual(self.api.writes, [])
 
+    def prepare_extension(self):
+        self.run_cd()
+        original = json.loads((self.root / 'service-discovery/owner.json').read_bytes())
+        self.c['applications'].append({'vmid': 215, 'hostname': 'bitwarden'})
+        self.c['service_discovery']['guests'].append(215)
+        self.c['service_discovery_extension'] = {
+            'owner_sha256': hashlib.sha256(json.dumps(original, sort_keys=True,
+                separators=(',', ':')).encode()).hexdigest(), 'guests': [215]}
+        self.api.writes.clear()
+
+    def test_explicit_extension_adds_only_new_guest_and_preserves_original_custody(self):
+        self.prepare_extension()
+        originals = {name: (self.root / 'service-discovery' / name).read_bytes()
+                     for name in ('owner.json', 'token.json', 'READY.json')}
+        rules = copy.deepcopy(self.api.rules)
+        result = self.run_cd()['service_discovery']
+        self.assertFalse(result['created'])
+        self.assertEqual(result['new_acl_rows'], 1)
+        self.assertEqual(len(self.api.writes), 2)  # Deployment and discovery, each guest215 only.
+        self.assertTrue(all(path == '/access/acl' and values['path'] == '/vms/215'
+                            for path, _, values in self.api.writes))
+        self.assertEqual(self.api.rules, rules)
+        for name, raw in originals.items():
+            self.assertEqual((self.root / 'service-discovery' / name).read_bytes(), raw)
+            self.assertEqual((self.nas / 'service-discovery' / name).read_bytes(), raw)
+        receipt = self.root / 'service-discovery/scope-extensions/0001.json'
+        self.assertEqual(receipt.read_bytes(),
+                         (self.nas / 'service-discovery/scope-extensions/0001.json').read_bytes())
+        self.assertNotIn(SECRET, receipt.read_text())
+        writes = copy.deepcopy(self.api.writes)
+        self.assertEqual(self.run_cd()['service_discovery']['new_acl_rows'], 0)
+        self.c.pop('service_discovery_extension')
+        self.assertEqual(self.run_cd()['service_discovery']['new_acl_rows'], 0)
+        self.assertEqual(self.api.writes, writes)
+
+    def test_extension_requires_exact_current_owner_and_append_only_guest_list(self):
+        for drift in ('hash', 'removal', 'extra_guest', 'address', 'missing_packet'):
+            with self.subTest(drift=drift), tempfile.TemporaryDirectory() as directory:
+                self.root = Path(directory)/'state'; self.root.mkdir()
+                self.nas = Path(directory)/'nas'; self.nas.mkdir()
+                self.api = ProviderAPI()
+                original_c = copy.deepcopy(self.c)
+                self.prepare_extension()
+                if drift == 'hash': self.c['service_discovery_extension']['owner_sha256'] = '0'*64
+                elif drift == 'removal': self.c['service_discovery']['guests'].remove(202)
+                elif drift == 'extra_guest': self.c['service_discovery_extension']['guests'].append(211)
+                elif drift == 'address': self.c['service_discovery']['address'] = '10.77.25.34'
+                else: self.c.pop('service_discovery_extension')
+                with self.assertRaises(ValueError): self.run_cd()
+                self.assertEqual(self.api.writes, [])
+                self.c = original_c
+
+    def test_extension_failure_retains_hold_and_never_replays(self):
+        self.prepare_extension()
+        owner_raw = (self.root / 'service-discovery/owner.json').read_bytes()
+        self.api.fail_provider_acl = True
+        with self.assertRaisesRegex(ValueError, 'ACL failure'): self.run_cd()
+        self.assertEqual((self.root / 'service-discovery/owner.json').read_bytes(), owner_raw)
+        self.assertTrue((self.root / 'BOOTSTRAP-CD-HOLD.json').exists())
+        self.assertTrue(list(self.nas.glob('cd-*/failure.json')))
+        writes = copy.deepcopy(self.api.writes)
+        with self.assertRaisesRegex(ValueError, 'hold'): self.run_cd()
+        self.assertEqual(self.api.writes, writes)
+
+    def test_extension_receipt_drift_or_missing_nas_is_not_adopted(self):
+        self.prepare_extension()
+        self.run_cd()
+        receipt = self.nas / 'service-discovery/scope-extensions/0001.json'
+        receipt.write_text('{}'); receipt.chmod(0o600)
+        self.api.writes.clear()
+        with self.assertRaises(ValueError): self.run_cd()
+        self.assertEqual(self.api.writes, [])
+
+    def test_extension_does_not_adopt_live_acl_or_broader_privilege_drift(self):
+        self.prepare_extension()
+        self.api.acls.append({'path': '/vms/215', 'roleid': 'HomelabTraefikRead212',
+                             'propagate': 0, 'ugid': 'root@pam!homelab-traefik-212', 'type': 'token'})
+        with self.assertRaisesRegex(ValueError, 'scope differs'): self.run_cd()
+        self.assertEqual(self.api.writes, [])
+
+    def test_later_extension_chains_from_current_scope_without_rewriting_history(self):
+        self.prepare_extension()
+        self.run_cd()
+        first = self.root / 'service-discovery/scope-extensions/0001.json'
+        original = first.read_bytes()
+        current = json.loads(original)['owner']
+        self.c['applications'].append({'vmid': 216, 'hostname': 'another-app'})
+        self.c['service_discovery']['guests'].append(216)
+        self.c['service_discovery_extension'] = {
+            'owner_sha256': discovery.owner_sha256(current), 'guests': [216]}
+        self.api.writes.clear()
+        self.assertEqual(self.run_cd()['service_discovery']['new_acl_rows'], 1)
+        self.assertEqual(first.read_bytes(), original)
+        self.assertTrue((self.nas / 'service-discovery/scope-extensions/0002.json').exists())
+        self.assertEqual(discovery.retained(self.c, self.root, self.nas), self.api.valid_secret)
+
+    def test_extension_receipt_write_failure_holds_actual_added_acl_without_replay(self):
+        self.prepare_extension()
+        save = discovery.save_new
+        def fail_nas(path, value):
+            if path.parent == self.nas / 'service-discovery/scope-extensions':
+                raise OSError('Synthetic NAS receipt failure')
+            return save(path, value)
+        with patch.object(discovery, 'save_new', side_effect=fail_nas):
+            with self.assertRaisesRegex(OSError, 'NAS receipt'): self.run_cd()
+        self.assertTrue(any(r['path'] == '/vms/215' and r['ugid'] == 'root@pam!homelab-traefik-212'
+                            for r in self.api.acls))
+        self.assertTrue((self.root / 'BOOTSTRAP-CD-HOLD.json').exists())
+        writes = copy.deepcopy(self.api.writes)
+        with self.assertRaisesRegex(ValueError, 'hold'): self.run_cd()
+        self.assertEqual(self.api.writes, writes)
+
+    def test_extension_cannot_create_or_rotate_an_unowned_token(self):
+        self.c['service_discovery_extension'] = {'owner_sha256': '0'*64, 'guests': [211]}
+        with self.assertRaisesRegex(ValueError, 'existing owned access'): self.run_cd()
+        self.assertEqual(self.api.writes, [])
+
     def test_firewall_readback_failure_keeps_hold_and_preserves_failed_evidence(self):
         self.api.lose_rule = True
         with self.assertRaisesRegex(ValueError, 'readback'):
