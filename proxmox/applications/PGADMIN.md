@@ -1,5 +1,9 @@
 # pgAdmin in the db-tools guest
 
+For a commissioned guest changing PostgreSQL networks, use the
+[maintenance contract](PGADMIN-MAINTENANCE.md). Do not replay this installation
+or restore path to change its saved connection.
+
 The `db-tools` application kind runs one pinned pgAdmin container through the
 existing guest module, capture restore, Ansible and CD steps. PostgreSQL remains
 in its own native database guest. The deployment runner stays dedicated to CD.
