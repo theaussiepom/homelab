@@ -115,6 +115,21 @@ class PegaProxCDTests(unittest.TestCase):
             self.assertEqual(implementation.calls, calls)
             self.assertEqual((inputs / 'pegaprox/db-key').read_bytes(), before)
 
+    def test_finite_private_management_subnet_is_admitted_but_ssh_stays_individual(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundles, inputs, state = self.profile(Path(tmp))
+            cfg = json.loads((bundles / 'pegaprox/site.json').read_text())
+            stack = json.loads((bundles / 'pegaprox/stack.json').read_text())
+            client = next(r for r in cfg['guest']['rules'] if r.get('port') == '5000')
+            client['source'] = '192.168.100.0/24'
+            pegaprox.validate_deployment(cfg, stack)
+            for bad in ('192.168.0.0/16', '0.0.0.0/0', '8.8.8.0/24'):
+                client['source'] = bad
+                with self.assertRaises(ValueError): pegaprox.validate_deployment(cfg, stack)
+            client['source'] = '192.168.100.0/24'
+            next(r for r in cfg['guest']['rules'] if r.get('port') == '22')['source'] = '192.168.100.0/24'
+            with self.assertRaises(ValueError): pegaprox.validate_deployment(cfg, stack)
+
     def test_missing_mac_or_client_allowance_refuses_before_secret_reads(self):
         class NoSecrets(dict):
             def get(self, *args):

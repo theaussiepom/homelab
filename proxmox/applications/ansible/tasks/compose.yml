@@ -45,6 +45,15 @@
   no_log: true
   when: not ansible_check_mode
 
+- name: Install PegaProx's first-start stack without a host listener
+  ansible.builtin.copy:
+    src: "{{ app.render_dir }}/compose-bootstrap.yml"
+    dest: /opt/homelab-app/compose-bootstrap.yml
+    owner: root
+    group: root
+    mode: '0600'
+  when: app.kind == 'pegaprox' and not ansible_check_mode
+
 - name: Read the generated foundation runtime file list
   ansible.builtin.set_fact:
     foundation_runtime_files: "{{ lookup('ansible.builtin.file', app.render_dir + '/runtime-files.json') | from_json }}"
@@ -134,7 +143,7 @@
 
 - name: Start exactly this guest stack
   ansible.builtin.command:
-    argv: [docker, compose, -f, /opt/homelab-app/compose.yml, up, -d, --wait, --wait-timeout, '180', --remove-orphans=false]
+    argv: [docker, compose, -f, "{{ '/opt/homelab-app/compose-bootstrap.yml' if app.kind == 'pegaprox' else '/opt/homelab-app/compose.yml' }}", up, -d, --wait, --wait-timeout, '180', --remove-orphans=false]
   register: compose_start
   changed_when: "'Started' in compose_start.stderr or 'Created' in compose_start.stderr or 'Recreated' in compose_start.stderr"
   no_log: true

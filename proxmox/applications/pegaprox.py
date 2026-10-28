@@ -59,6 +59,13 @@ def compose(cfg):
     }}}
 
 
+def bootstrap_compose(cfg):
+    """Create the initial account with no published host port."""
+    document = compose(cfg)
+    document['services']['pegaprox'].pop('ports')
+    return document
+
+
 def main():
     """Print only the non-secret preview from an explicitly selected JSON file."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -103,8 +110,10 @@ def validate_deployment(cfg, stack=None):
         if rule.get('proto') != 'tcp' or rule.get('port') not in {'22', '5000'}:
             raise ValueError('Initial PegaProx ingress admits only runner SSH and management HTTPS')
         source = ipaddress.IPv4Network(rule.get('source', ''), strict=True)
-        if source.prefixlen != 32:
-            raise ValueError('Name individual approved SSH/HTTPS clients')
+        if rule['port'] == '22' and source.prefixlen != 32:
+            raise ValueError('Name the individual deployment SSH client')
+        if rule['port'] == '5000' and (source.prefixlen < 24 or not (source.is_private or source.subnet_of(ipaddress.IPv4Network('198.18.0.0/15')))):
+            raise ValueError('Use an explicit private management client subnet between /24 and /32')
         if rule['port'] == '5000':
             if rule.get('destination') != stack['bind_address'] + '/32':
                 raise ValueError('Bind client allowances to this management listener')

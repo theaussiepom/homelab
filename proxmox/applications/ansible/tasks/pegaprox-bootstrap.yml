@@ -38,3 +38,17 @@
         state: absent
       when: pegaprox_password_file.path is defined
       no_log: true
+
+- name: Publish the selected PegaProx listener only after successful account bootstrap
+  ansible.builtin.command:
+    argv: [docker, compose, -f, /opt/homelab-app/compose.yml, up, -d, --wait, --wait-timeout, '180', --remove-orphans=false]
+  changed_when: true
+  when: app.start_services | default(false) | bool and not ansible_check_mode
+  no_log: true
+
+- name: Verify the persisted account after publishing the selected listener
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/pegaprox-setup.py, verify]
+  changed_when: false
+  when: app.start_services | default(false) | bool and not ansible_check_mode
+  no_log: true

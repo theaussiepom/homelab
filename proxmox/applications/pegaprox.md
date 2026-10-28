@@ -113,9 +113,10 @@ returns 401 without a valid session/token. Public health or optional metrics
 access does not remove the UI login. Use its native account for this release;
 review a future upstream anonymous mode or Authentik integration separately.
 
-Only the selected management client should reach the **first-run setup wizard**.
-There is no default web administrator. Complete setup, configure 2FA and verify
-TLS before opening access further. Initial TLS is self-signed; select a trusted
+No management client can reach the **first-run setup wizard** during CD.
+The bootstrap stack publishes no host ports; CD creates the administrator and
+proves login before publishing TCP5000 to the selected clients. Sign in with
+the configured initial credentials and verify TLS before opening access further. Initial TLS is self-signed; select a trusted
 certificate/CA plan before native use, rather than disabling browser validation.
 
 ## Configuration, key and updates
@@ -173,7 +174,8 @@ Completed runs only verify the original installation.
 The initial username is a private setting. Supply its password through the
 GitHub Environment secret **`PEGAPROX_ADMIN_PASSWORD`**. Do not put its value in
 site JSON, a stack environment variable, commands, a capture or Git.
-Supply the separate 32-byte encryption key through **`PEGAPROX_DB_KEY`**.
+Supply **`PEGAPROX_DB_KEY`** as a base64-encoded value that decodes to exactly
+32 random bytes. Retain it separately for recovery.
 
 The profile requires the password before the first rollout, but does not write
 it into the runner's permanent input bundle, manifest or saved-plan inputs.
@@ -185,6 +187,10 @@ fixed result, never a password or session token. Ansible removes the temporary
 file in its `always` block. A killed job retains its normal failure hold; any
 unconfirmed remote cleanup must be reviewed before continuation.
 
+First startup uses `compose-bootstrap.yml`, which publishes no host ports.
+Only after account creation and successful login does Ansible recreate the same
+service with the selected management listener, then verify the persisted account.
+A failed bootstrap leaves remote access closed and retains its failure hold.
 The helper polls health for up to 65 seconds before reading authentication state
 or sending credentials. It verifies TLS using only `/app/config/ssl/cert.pem` as
 its local trust anchor. Hostname matching is omitted because the generated
@@ -233,6 +239,6 @@ Fetch the image explicitly first; every fixture run uses `--pull=never`.
 These are synthetic checks. Native unprivileged LXC/Docker, package availability,
 real API trust/permissions, browser login and coherent backup/restore still need
 qualification. Review the unused ID/address, MAC, resources, exact Debian
-packages/template, individual client allowance, scoped runner grant and separate
+packages/template, approved client allowance, scoped runner grant and separate
 key custody. CD does not yet connect PegaProx to a Proxmox cluster or grant it
 API/SSH authority; that follows the separately reviewed runtime-access decision.

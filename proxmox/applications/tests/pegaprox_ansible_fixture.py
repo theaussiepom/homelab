@@ -50,21 +50,27 @@ def main():
         # Exercise the actual Ansible always block with a local stand-in for the
         # Docker/API helper. The real image/API is covered separately.
         receipt = root / 'temporary-path'
+        published = root / 'published'
+        docker = root / 'docker'
+        docker.write_text('#!/bin/sh\nprintf published > ' + str(published) + '\n')
+        docker.chmod(0o700)
         helper = Path('/opt/homelab-app/pegaprox-setup.py')
-        helper.write_text("import pathlib,sys,stat; p=pathlib.Path(sys.argv[sys.argv.index('--password-file')+1]); assert p.stat().st_mode & 0o777 == 0o600; assert p.read_text(); pathlib.Path(" + repr(str(receipt)) + ").write_text(str(p)); sys.exit(1 if sys.argv[-1]=='fail-account' else 0)")
+        helper.write_text("import pathlib,sys,stat; sys.exit(0) if sys.argv[1]=='verify' else None; p=pathlib.Path(sys.argv[sys.argv.index('--password-file')+1]); assert p.stat().st_mode & 0o777 == 0o600; assert p.read_text(); pathlib.Path(" + repr(str(receipt)) + ").write_text(str(p)); sys.exit(1 if sys.argv[-1]=='fail-account' else 0)")
         bootstrap = root / 'ansible/bootstrap-fixture.yml'
         fixture_password = 'Fixture-' + secrets.token_urlsafe(16) + '7'
         for success in (True, False):
+            published.unlink(missing_ok=True)
             bootstrap.write_text(json.dumps([{'hosts': 'localhost', 'gather_facts': False,
                 'vars': {'app': {'start_services': True, 'pegaprox': {
                     'admin_username': 'practice-admin' if success else 'fail-account'}}},
                 'tasks': [{'ansible.builtin.import_tasks': 'tasks/pegaprox-bootstrap.yml'}]}]))
             result = subprocess.run(['ansible-playbook', '-i', 'localhost,', '-c', 'local', str(bootstrap)],
-                env=dict(env, PEGAPROX_ADMIN_PASSWORD=fixture_password),
+                env=dict(env, PATH=str(root) + os.pathsep + env.get('PATH', ''), PEGAPROX_ADMIN_PASSWORD=fixture_password),
                 capture_output=True, text=True, timeout=60)
             assert (result.returncode == 0) == success
             assert not Path(receipt.read_text()).exists()
-        print('PegaProx bootstrap Ansible: temporary password removed on success and failure')
+            assert published.exists() == success
+        print('PegaProx bootstrap Ansible: temporary password removed on success/failure; listener published only on success')
         shutil.rmtree('/srv/homelab')
         shutil.rmtree('/opt/homelab-app')
         print('PegaProx Ansible: fresh/repeat metadata, key drift and existing-state refusal passed')

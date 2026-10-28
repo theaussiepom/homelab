@@ -31,6 +31,15 @@ class PegaProxTests(unittest.TestCase):
         self.assertNotIn('PEGAPROX_DB_KEY', service['environment'])
         self.assertEqual(len(service['volumes']), 3)
 
+    def test_bootstrap_has_no_host_listener_and_retains_the_final_stack(self):
+        cfg = {k: v for k, v in self.cfg.items() if k not in {'enabled', 'deployable'}}
+        bootstrap = pegaprox.bootstrap_compose(cfg)
+        self.assertEqual(bootstrap['services']['pegaprox'].get('ports', []), [])
+        self.assertEqual(pegaprox.compose(cfg)['services']['pegaprox']['ports'],
+                         ['198.18.25.34:5000:5000/tcp'])
+        self.assertEqual(bootstrap['services']['pegaprox']['volumes'],
+                         pegaprox.compose(cfg)['services']['pegaprox']['volumes'])
+
     def test_preview_refuses_activation_unpinned_images_and_extra_inputs(self):
         for key, value in [('enabled', True), ('deployable', True),
                            ('image', 'ghcr.io/pegaprox/pegaprox:latest'),
