@@ -52,9 +52,16 @@ class FakeAPI:
             elif method == 'PUT' and path.endswith('/network'):
                 if self.fail_reload:
                     raise ValueError('Synthetic interrupted reload')
-                self.network[-1]['active'] = 1
+                for interface in self.network:
+                    interface['active'] = 1
                 self.pending = ''
                 return {'data': 'UPID:pve:synthetic'}
+            elif method == 'PUT' and '/network/' in path:
+                if values.get('type') != 'bridge':
+                    raise ValueError('Network interface type is required by the Proxmox update schema')
+                row = next(r for r in self.network if r['iface'] == path.rsplit('/', 1)[1])
+                row.update(values)
+                self.pending = 'bridge purpose update'
             elif path == '/access/acl':
                 self.acls.append({'path': values['path'], 'roleid': values['roles'],
                                   'propagate': values['propagate'], 'ugid': values['tokens'], 'type': 'token'})
@@ -111,6 +118,53 @@ class BootstrapCDTests(unittest.TestCase):
         request = next(values for _, method, values in self.api.writes if method == 'POST')
         # Proxmox 9.2's network create schema has no bridge_stp/bridge_fd parameters.
         self.assertEqual(set(request), {'iface', 'type', 'autostart', 'comments'})
+
+    def add_database_bridges(self):
+        self.c['private_bridges'] = [{'name': 'vmbr' + str(i),
+            'description': purpose + ' server and approved clients only; no physical uplink'}
+            for i, purpose in [(31, 'PostgreSQL'), (32, 'MariaDB'), (33, 'InfluxDB')]]
+
+    def test_multiple_private_bridges_have_purposes_one_reload_and_idempotent_grants(self):
+        self.add_database_bridges()
+        original = copy.deepcopy(self.api.network[0])
+        self.run_cd()
+        self.assertEqual(len([w for w in self.api.writes if w[0].endswith('/network') and w[1] == 'PUT']), 1)
+        for selected in self.c['private_bridges']:
+            row = next(r for r in self.api.network if r['iface'] == selected['name'])
+            self.assertEqual(row['comments'], selected['description'])
+            cd.isolated(row, active=True)
+            self.assertIn(('/sdn/zones/localnetwork/' + selected['name'], 'PVESDNUser', 0), cd.desired(self.c))
+        count = len(self.api.writes)
+        self.run_cd()
+        self.assertEqual(len(self.api.writes), count)
+        self.assertEqual(self.api.network[0], original)
+
+    def test_only_the_declared_bridge_comment_can_be_updated(self):
+        self.run_cd()
+        self.add_database_bridges()
+        self.api.network.extend([dict(iface=b['name'], type='bridge', autostart=1, active=1,
+            method='manual', method6='manual', bridge_stp='off', bridge_fd='0', bridge_ports='',
+            comments='Old purpose') for b in self.c['private_bridges']])
+        before = copy.deepcopy(self.api.network)
+        self.api.writes.clear()
+        self.run_cd()
+        edits = [w for w in self.api.writes if '/network/' in w[0]]
+        self.assertEqual(len(edits), 3)
+        self.assertTrue(all(set(w[2]) == {'type', 'comments'} and w[2]['type'] == 'bridge' for w in edits))
+        self.assertEqual(self.api.network[:2], before[:2])
+
+    def test_unsafe_additional_bridge_refuses_before_any_write(self):
+        for update in [dict(name='vmbr1'), dict(name='vmbr0'), dict(name=self.c['bridge']),
+                       dict(description='bad\ncomment')]:
+            self.add_database_bridges()
+            self.c['private_bridges'][0].update(update)
+            with self.subTest(update=update), self.assertRaises(ValueError): self.run_cd()
+            self.assertEqual(self.api.writes, [])
+
+    def test_extra_bridge_does_not_allow_unrelated_pending_or_physical_changes(self):
+        self.add_database_bridges(); self.api.extra_pending = True
+        with self.assertRaisesRegex(ValueError, 'delta'): self.run_cd()
+        self.assertEqual([w[1] for w in self.api.writes], ['POST'])
 
     def test_empty_bridge_omits_ports_and_reads_back_no_uplink(self):
         self.run_cd()

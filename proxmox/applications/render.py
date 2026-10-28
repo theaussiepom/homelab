@@ -13,6 +13,9 @@ from urllib.parse import urlsplit
 _bitwarden_spec = importlib.util.spec_from_file_location('homelab_bitwarden', Path(__file__).with_name('bitwarden.py'))
 bitwarden = importlib.util.module_from_spec(_bitwarden_spec)
 _bitwarden_spec.loader.exec_module(bitwarden)
+_monitoring_spec = importlib.util.spec_from_file_location('homelab_monitoring', Path(__file__).with_name('monitoring.py'))
+monitoring = importlib.util.module_from_spec(_monitoring_spec)
+_monitoring_spec.loader.exec_module(monitoring)
 _foundation_spec = importlib.util.spec_from_file_location('homelab_foundation', Path(__file__).with_name('foundation.py'))
 foundation = importlib.util.module_from_spec(_foundation_spec)
 _foundation_spec.loader.exec_module(foundation)
@@ -83,7 +86,12 @@ def pgadmin_environment(value):
 
 def compose(cfg):
     """Keep placement fixed; site-specific images, restored data and routes are inputs."""
+    if cfg.get('kind') == 'monitoring':
+        return monitoring.compose(cfg)
     kind = cfg.get('kind')
+    if kind == 'pegaprox':
+        import pegaprox
+        return pegaprox.compose(cfg)
     if kind not in KINDS:
         raise ValueError('Choose dns, identity, ingress, automation, db-tools or bitwarden; databases are native')
     inputs = cfg.get('services', {})
@@ -297,6 +305,9 @@ def main():
     args = parser.parse_args()
     cfg = json.loads(args.config.read_text())
     documents = {'compose.yml': compose(cfg)}
+    if cfg['kind'] == 'pegaprox':
+        import pegaprox
+        documents['compose-bootstrap.yml'] = pegaprox.bootstrap_compose(cfg)
     if cfg['kind'] == 'ingress' and 'foundation' not in cfg:
         documents['routes.yml'] = ingress(cfg)
     args.output.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -307,9 +318,9 @@ def main():
         with os.fdopen(fd, 'w') as stream:
             json.dump(document, stream, indent=2)
             stream.write('\n')
-    if 'foundation' in cfg:
+    if 'foundation' in cfg or cfg['kind'] == 'monitoring':
         manifest = []
-        for artifact in foundation_files(cfg):
+        for artifact in (monitoring.files(cfg) if cfg['kind'] == 'monitoring' else foundation_files(cfg)):
             path = args.output / artifact['path']
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
             os.fchmod(fd, 0o600)

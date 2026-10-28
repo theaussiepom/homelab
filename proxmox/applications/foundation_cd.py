@@ -29,6 +29,8 @@ REQUIRED = {'identity': {'secret_key', 'postgresql_password'}, 'db-tools': {'oau
             'ingress': {'cloudflare_dns_token', 'proxmox_token'}}
 HOLDS = ('HOLD.json', 'ROLLOUT-HOLD.json', 'CONTINUATION-HOLD.json', 'FOUNDATION-HOLD.json')
 SCHEMA = 'homelab-foundation-rollout-v1'
+HOLD_NAME = 'FOUNDATION-HOLD.json'
+COMPLETE_NAME = 'foundation-complete.json'
 
 
 def require(condition, message):
@@ -204,9 +206,11 @@ def prepare(name, deployment, bundles, inputs=INPUTS, state=STATE, provider=PROV
     return cfg, directory / 'site.json', work, manifest
 
 
-def run(name, deployment, bundles, inputs=INPUTS, state=STATE, provider=PROVIDER, environment=None):
-    guests, host = bindings(bundles)
-    cfg, _, _, _, work = definition(name, bundles, inputs, state)
+def run(name, deployment, bundles, inputs=INPUTS, state=STATE, provider=PROVIDER, environment=None, profile=None):
+    # Profiles supply closed input preparation, not another plan/apply engine.
+    profile = sys.modules[__name__] if profile is None else profile
+    guests, host = profile.bindings(bundles)
+    cfg, _, _, _, work = profile.definition(name, bundles, inputs, state)
     private_directory(state)
     if not work.exists():
         private_directory(work, create=True)
@@ -215,9 +219,9 @@ def run(name, deployment, bundles, inputs=INPUTS, state=STATE, provider=PROVIDER
     lock_fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     with os.fdopen(lock_fd, 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        cfg, site, work, manifest = prepare(name, deployment, bundles, inputs, state, provider, environment)
-        hold, complete = work / 'FOUNDATION-HOLD.json', work / 'foundation-complete.json'
-        binding = {'schema': SCHEMA, 'guest': name, 'vmid': guests[name][0],
+        cfg, site, work, manifest = profile.prepare(name, deployment, bundles, inputs, state, provider, environment)
+        hold, complete = work / profile.HOLD_NAME, work / profile.COMPLETE_NAME
+        binding = {'schema': profile.SCHEMA, 'guest': name, 'vmid': guests[name][0],
                    'prepared_sha256': digest(encoded(manifest)), 'source_sha256': deployment.source_hash(),
                    'input_hashes': deployment.input_hashes(cfg)}
         if complete.exists() or complete.is_symlink():
@@ -238,7 +242,7 @@ def run(name, deployment, bundles, inputs=INPUTS, state=STATE, provider=PROVIDER
             return result
         require(not any((work / filename).exists() or (work / filename).is_symlink() for filename in
                         ('applied.json', 'started.json', 'rollout-complete.json', 'terraform.tfstate', 'plan.json',
-                         'guest.tfplan', 'guest.tfplan.json', 'FOUNDATION-HOLD.json.pending')),
+                         'guest.tfplan', 'guest.tfplan.json', profile.HOLD_NAME + '.pending')),
                 'Existing foundation phase receipts need review; no adoption or continuation')
         marker = dict(binding, step='plan', automatic_retry=False)
         write_marker(hold, marker)

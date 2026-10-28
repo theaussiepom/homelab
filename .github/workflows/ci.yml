@@ -9,6 +9,36 @@ concurrency:
   group: validation-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
+  monitoring:
+    name: Clean Zabbix schema and active PSK fixture (Docker)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Build the existing pinned application test tools
+        run: docker build --platform linux/amd64 -t homelab-app-test -f proxmox/bootstrap/docker/Dockerfile proxmox/bootstrap/docker
+      - name: Install only verified upstream Zabbix API collections
+        run: |
+          mkdir -p "$RUNNER_TEMP/zabbix-collections"
+          docker run --rm --platform linux/amd64 -v "$PWD:/src:ro" \
+            -v "$RUNNER_TEMP/zabbix-collections:/collections" homelab-app-test \
+            python3 /src/proxmox/applications/monitoring/install-collections.py --output /collections
+      - name: Test fresh schema, templates, idempotence and active PSK data
+        run: |
+          docker build --platform linux/amd64 -t homelab-zabbix-db-test:1 proxmox/applications/tests/monitoring-database
+          python3 proxmox/applications/tests/monitoring_database_fixture.py
+          python3 proxmox/applications/tests/monitoring_fixture.py \
+            --collections "$RUNNER_TEMP/zabbix-collections" --output "$RUNNER_TEMP/zabbix-evidence"
+      - name: Test the exact Debian13 Agent2 binary without network access
+        run: |
+          curl --fail --silent --show-error --max-time 120 \
+            'https://repo.zabbix.com/zabbix/7.0/debian/pool/main/z/zabbix/zabbix-agent2_7.0.32-1%2Bdebian13_amd64.deb' \
+            --output "$RUNNER_TEMP/zabbix-agent2.deb"
+          docker run --rm --platform linux/amd64 --network none -v "$PWD:/src:ro" \
+            -v "$RUNNER_TEMP/zabbix-agent2.deb:/fixture-agent.deb:ro" homelab-app-test \
+            python3 /src/proxmox/applications/tests/native_agent_fixture.py /fixture-agent.deb
   applications:
     name: Application source and restore fixtures (Docker)
     runs-on: ubuntu-24.04
@@ -25,6 +55,10 @@ jobs:
             --tmpfs /tmp:rw,exec,nosuid,nodev,size=768m,mode=1777 \
             -v "$PWD:/src:ro" -e HOME=/tmp homelab-app-test \
             sh /src/proxmox/applications/tests/check.sh
+      - name: Fetch the pinned PegaProx image explicitly
+        run: docker pull --platform linux/amd64 ghcr.io/pegaprox/pegaprox@sha256:8d295a524a52f0b923616a3eb415ff6422fe62beba5bb441f35c75d8985f1add
+      - name: Prove clean PegaProx login and password-free CD verification without network
+        run: python3 proxmox/applications/tests/pegaprox_fixture.py
       - name: Rehearse the bootstrap with synthetic provider and runner fixtures
         run: |
           docker run --rm --platform linux/amd64 --network none --read-only \
@@ -67,6 +101,9 @@ jobs:
         run: |
           docker pull --platform linux/amd64 dpage/pgadmin4@sha256:cefc4cc6b7d9d71a9e81e76fb9d7e14038ab5661b539a190eea1b63fa612589a
           python3 proxmox/applications/tests/pgadmin_fixture.py
+      - name: Admit the disposable hosted runner for the isolated privileged restart-policy fixture
+        if: runner.environment == 'github-hosted' && runner.os == 'Linux'
+        run: python3 proxmox/applications/tests/pgadmin_restart_fixture.py --allow-disposable-github-runner
       - name: Exercise the selected DNS updates with synthetic offline records
         run: |
           docker pull --platform linux/amd64 pihole/pihole@sha256:70a9c11171ded2eee735d88c127996da209284a329d50f5ae59c06b861d401b3

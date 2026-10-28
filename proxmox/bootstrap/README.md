@@ -377,6 +377,11 @@ Keep this runner dedicated to deployment: PegaProx is planned in its own LXC.
 
 ## 9. Let GitHub maintain the host prerequisites
 
+For multiple internal database bridges and their purpose descriptions, see the
+[database network guide](../applications/database-networks.md). Each declared
+bridge stays isolated: no physical uplink, host address or gateway.
+
+
 Once guest900 and its NAS backup are working, GitHub can prepare the private
 backend network and access for your next guests. You do not need to reinstall
 Proxmox, refresh the installation USB or recreate the deployment guest.
