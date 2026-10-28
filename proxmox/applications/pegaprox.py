@@ -80,6 +80,19 @@ def health_checks():
              'expect': 'PegaProx verification passed'}]
 
 
+def tls_names(app):
+    """Select SANs for a fresh installation; never modify an existing service."""
+    import re
+    name = app['pegaprox'].get('tls_hostname', app['hostname'])
+    if (not isinstance(name, str) or len(name)>253 or not all(
+            re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', label) for label in name.split('.'))):
+        raise ValueError('Select a literal TLS hostname')
+    address = ipaddress.IPv4Address(app['address'])
+    if not address.is_private or address.is_loopback or address.is_unspecified:
+        raise ValueError('Select the application private TLS address')
+    return name, 'DNS:' + name + ',IP:' + str(address) + ',IP:127.0.0.1'
+
+
 def validate_deployment(cfg, stack=None):
     """Admit only a clean new installation with fixed secret/probe boundaries."""
     import re
@@ -90,11 +103,12 @@ def validate_deployment(cfg, stack=None):
             or app.get('exclusive_writer_confirmed') is not True):
         raise ValueError('PegaProx clean CD has no capture, shared volumes or discovery routes')
     selected = app.get('pegaprox', {})
-    if (set(selected) != {'key_source', 'admin_username'}
+    if (not {'key_source', 'admin_username'} <= set(selected) <= {'key_source', 'admin_username', 'tls_hostname'}
             or not Path(selected['key_source']).is_absolute()
             or not re.fullmatch(r'[a-z][a-z0-9_-]{1,31}', selected['admin_username'])
             or selected['admin_username'] == 'pegaprox'):
         raise ValueError('Select the database-key file and initial local account')
+    tls_names(app)
     stack = json.loads(Path(app['stack_config']).read_text()) if stack is None else stack
     compose(stack)
     guest = cfg['guest']

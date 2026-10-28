@@ -1,0 +1,156 @@
+---
+- name: Maintain only the reviewed PegaProx hostname overlay
+  hosts: application
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Refuse a Proxmox host
+      ansible.builtin.stat:
+        path: /etc/pve
+      register: hostname_pve
+
+    - name: Require the single admitted existing ingress guest
+      ansible.builtin.assert:
+        that:
+          - groups['application'] | length == 1
+          - app.kind == 'ingress'
+          - app.vmid | int == browser_settings.vmid | int
+          - app.hostname == ansible_facts.hostname
+          - app.address in ansible_facts.all_ipv4_addresses
+          - ansible_facts.virtualization_type == 'lxc'
+          - ansible_facts.distribution == 'Debian'
+          - not hostname_pve.stat.exists
+
+    - name: Check the namespaced helper directory without following links
+      ansible.builtin.stat:
+        path: /opt/homelab-app/pegaprox-hostname
+        follow: false
+      register: hostname_helper_directory
+
+    - name: Refuse adoption of an existing unclaimed helper directory
+      ansible.builtin.assert:
+        that: not hostname_helper_directory.stat.exists
+      when: not browser_verify_only
+
+    - name: Require the exact completed helper directory for verification
+      ansible.builtin.assert:
+        that:
+          - hostname_helper_directory.stat.isdir | default(false)
+          - not hostname_helper_directory.stat.islnk | default(false)
+          - hostname_helper_directory.stat.uid == 0
+          - hostname_helper_directory.stat.mode == '0700'
+      when: browser_verify_only
+
+    - name: Read the watched-route original
+      ansible.builtin.slurp:
+        src: /opt/homelab-app/runtime/shared.yml
+      register: hostname_original
+      no_log: true
+      when: not browser_verify_only
+
+    - name: Verify the exact original before custody or native writes
+      ansible.builtin.assert:
+        that:
+          - hostname_original.content | b64decode | hash('sha256') == browser_settings.shared_before_sha256
+      no_log: true
+      when: not browser_verify_only
+
+    - name: Check the controller-created protected NAS operation directory
+      ansible.builtin.stat:
+        path: '{{ browser_archive | dirname }}'
+        follow: false
+      delegate_to: localhost
+      become: false
+      register: browser_archive_parent
+      when: not browser_verify_only
+
+    - name: Require the admitted controller NAS directory metadata
+      ansible.builtin.assert:
+        that:
+          - browser_archive_parent.stat.isdir | default(false)
+          - not browser_archive_parent.stat.islnk | default(false)
+          - browser_archive_parent.stat.uid == lookup('ansible.builtin.pipe', 'id -u') | int
+          - browser_archive_parent.stat.mode == '0700'
+      when: not browser_verify_only
+
+    - name: Retain the selected original without overwriting prior custody
+      ansible.builtin.copy:
+        content: '{{ hostname_original.content | b64decode }}'
+        dest: '{{ browser_archive }}'
+        mode: '0600'
+        force: false
+      delegate_to: localhost
+      become: false
+      no_log: true
+      when: not browser_verify_only
+
+    - name: Read back the retained original before native activation
+      ansible.builtin.slurp:
+        src: '{{ browser_archive }}'
+      delegate_to: localhost
+      become: false
+      register: hostname_retained
+      no_log: true
+      when: not browser_verify_only
+
+    - name: Require exact original recovery custody
+      ansible.builtin.assert:
+        that: hostname_retained.content == hostname_original.content
+      no_log: true
+      when: not browser_verify_only
+
+    - name: Prepare the namespaced helper directory
+      ansible.builtin.file:
+        path: /opt/homelab-app/pegaprox-hostname
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      when: not browser_verify_only
+
+    - name: Install the immutable-source hostname helpers
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../{{ item }}'
+        dest: '/opt/homelab-app/pegaprox-hostname/{{ item }}'
+        owner: root
+        group: root
+        mode: '0600'
+      loop: [pegaprox_browser.py, component_pegaprox_browser.py, component_browser.py, component_image.py, ingress_browser.py]
+      when: not browser_verify_only
+
+    - name: Bind the exact selected maintenance packet
+      ansible.builtin.copy:
+        content: '{{ browser_settings | to_json }}'
+        dest: /opt/homelab-app/pegaprox-hostname/settings.json
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+      when: not browser_verify_only
+
+    - name: Hash the retained helper sources before verification
+      ansible.builtin.stat:
+        path: '/opt/homelab-app/pegaprox-hostname/{{ item }}'
+        follow: false
+        checksum_algorithm: sha256
+      loop: [pegaprox_browser.py, component_pegaprox_browser.py, component_browser.py, component_image.py, ingress_browser.py]
+      register: hostname_installed_helpers
+      when: browser_verify_only
+
+    - name: Verify exact source bytes and protected helper metadata
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg | default(false)
+          - not item.stat.islnk | default(false)
+          - item.stat.uid == 0 and item.stat.gid == 0 and item.stat.nlink == 1
+          - item.stat.mode == '0600'
+          - item.stat.checksum == (lookup('ansible.builtin.file', playbook_dir + '/../' + item.item, rstrip=false) | hash('sha256'))
+      loop: '{{ hostname_installed_helpers.results }}'
+      when: browser_verify_only
+
+    - name: Run the watched-file component
+      ansible.builtin.command:
+        argv: "{{ ['python3', '/opt/homelab-app/pegaprox-hostname/' + 'component_pegaprox_browser.py', '--settings', '/opt/homelab-app/pegaprox-hostname/settings.json'] + (['--verify-only'] if browser_verify_only else []) }}"
+      changed_when: not browser_verify_only
+      no_log: true

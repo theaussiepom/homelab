@@ -9,9 +9,16 @@ import time
 from ingress_browser import admission, packet, require
 
 
-def run(deployment, fc, cfg, site, source, selected, state_root):
+def run(deployment, fc, cfg, site, source, selected, state_root, profile="influx"):
     import foundation_maintenance as maintenance
-    settings = packet(selected)
+    require(profile in ('influx','pegaprox'), 'Use a fixed browser installation profile')
+    if profile == 'pegaprox':
+        from pegaprox_browser import packet as selected_packet, admission as selected_admission
+    else:
+        selected_packet, selected_admission = packet, admission
+    settings = selected_packet(selected)
+    prefix = profile + '-browser'
+    playbook = 'component-pegaprox-hostname.yml' if profile == 'pegaprox' else 'component-browser.yml'
     work = state_root / str(settings['vmid'])
     require(cfg['app']['kind'] == 'ingress', 'Browser maintenance belongs to ingress')
     with (work / 'deployment.lock').open('a') as lock:
@@ -44,8 +51,8 @@ def run(deployment, fc, cfg, site, source, selected, state_root):
             require(fc.digest(raw) == settings[name]['sha256'],
                     'Network completion or exact access/SSO review differs')
             prerequisites[name] = json.loads(raw)
-        admission(settings, prerequisites['network_evidence'], prerequisites['policy_evidence'])
-        operation = work / 'influx-browser-route'
+        selected_admission(settings, prerequisites['network_evidence'], prerequisites['policy_evidence'])
+        operation = work / (prefix + '-route')
         if not operation.exists(): operation.mkdir(mode=0o700)
         fc.private_directory(operation)
         claim, done = operation / 'claim.json', operation / 'complete.json'
@@ -53,19 +60,19 @@ def run(deployment, fc, cfg, site, source, selected, state_root):
         completed = done.exists() or done.is_symlink()
         if completed:
             require(fc.regular(claim, private=True) == fc.regular(done, private=True) == fc.encoded(settings)
-                    and fc.regular(nas / 'influx-browser-claim.json', private=True) == fc.encoded(settings)
-                    and fc.regular(nas / 'influx-browser-complete.json', private=True) == fc.encoded(settings)
-                    and fc.digest(fc.regular(nas / 'influx-browser-shared-before.json', private=True)) == settings['shared_before_sha256'],
+                    and fc.regular(nas / (prefix + '-claim.json'), private=True) == fc.encoded(settings)
+                    and fc.regular(nas / (prefix + '-complete.json'), private=True) == fc.encoded(settings)
+                    and fc.digest(fc.regular(nas / (prefix + '-shared-before.json'), private=True)) == settings['shared_before_sha256'],
                     'Completed route custody differs')
         else:
-            archive = nas / 'influx-browser-shared-before.json'
+            archive = nas / (prefix + '-shared-before.json')
             require(not archive.exists() and not archive.is_symlink(), 'Preserve pre-existing route original custody')
             fc.write_new(claim, fc.encoded(settings))  # Failed/interrupted claims never replay.
         marker = work / 'CONTINUATION-HOLD.json'
         fc.write_new(marker, fc.encoded(settings))
         if not completed:
-            deployment.backup(cfg, work / 'terraform.tfstate', 'before-influx-browser-route')
-            fc.write_new(nas / 'influx-browser-claim.json', fc.encoded(settings))
+            deployment.backup(cfg, work / 'terraform.tfstate', 'before-' + prefix + '-route')
+            fc.write_new(nas / (prefix + '-claim.json'), fc.encoded(settings))
         evidence = operation / ('verify-' + str(time.time_ns()) if completed else 'attempt')
         evidence.mkdir(mode=0o700)
         address = deployment.application_address(cfg)
@@ -74,7 +81,7 @@ def run(deployment, fc, cfg, site, source, selected, state_root):
         fc.write_new(evidence / 'inventory.json', fc.encoded({'application': {'hosts': {cfg['app']['hostname']: {
             'ansible_host': address, 'ansible_user': 'root'}}}}))
         fc.write_new(evidence / 'variables.json', fc.encoded({'app': cfg['app'], 'browser_settings': settings,
-            'browser_verify_only': completed, 'browser_archive': str(nas / 'influx-browser-shared-before.json')}))
+            'browser_verify_only': completed, 'browser_archive': str(nas / (prefix + '-shared-before.json'))}))
         env = os.environ.copy()
         env.update(LC_ALL='C.UTF-8', LANG='C.UTF-8', ANSIBLE_CONFIG=str(source / 'ansible/ansible.cfg'),
             ANSIBLE_HOST_KEY_CHECKING='True', ANSIBLE_SSH_ARGS=
@@ -82,15 +89,15 @@ def run(deployment, fc, cfg, site, source, selected, state_root):
             '-o GlobalKnownHostsFile=/dev/null -o VerifyHostKeyDNS=no -o UpdateHostKeys=no -o IdentitiesOnly=yes '
             '-o UserKnownHostsFile=' + shlex.quote(cfg['paths']['known_hosts']))
         deployment.quiet(['ansible-playbook', '-i', str(evidence / 'inventory.json'), '--private-key', cfg['paths']['private_key'],
-            str(source / 'ansible/component-browser.yml'), '--extra-vars', '@' + str(evidence / 'variables.json')],
+            str(source / 'ansible' / playbook), '--extra-vars', '@' + str(evidence / 'variables.json')],
             env, evidence / 'ansible.log')
         require(deployment.sha(work / 'terraform.tfstate') == settings['state_sha256']
-                and fc.digest(fc.regular(nas / 'influx-browser-shared-before.json', private=True)) == settings['shared_before_sha256'],
+                and fc.digest(fc.regular(nas / (prefix + '-shared-before.json'), private=True)) == settings['shared_before_sha256'],
                 'Canonical state or retained watched-file original changed')
         if not completed:
-            deployment.backup(cfg, work / 'terraform.tfstate', 'after-influx-browser-route')
+            deployment.backup(cfg, work / 'terraform.tfstate', 'after-' + prefix + '-route')
             fc.write_new(done, fc.encoded(settings))
-            fc.write_new(nas / 'influx-browser-complete.json', fc.encoded(settings))
+            fc.write_new(nas / (prefix + '-complete.json'), fc.encoded(settings))
         require(fc.regular(marker, private=True) == fc.encoded(settings), 'Route hold ownership changed')
         marker.unlink(); fc.sync(work)
         return {'status': 'passed', 'changed': not completed, 'browser_login_verified': False}

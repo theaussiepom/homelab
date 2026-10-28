@@ -63,6 +63,15 @@ class PegaProxTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 pegaprox.compose_preview(cfg)
 
+    def test_fresh_install_tls_names_cover_configured_browser_and_address(self):
+        app={'hostname':'pegaprox','address':'198.18.25.34','pegaprox':{}}
+        self.assertEqual(pegaprox.tls_names(app),('pegaprox','DNS:pegaprox,IP:198.18.25.34,IP:127.0.0.1'))
+        app['pegaprox']['tls_hostname']='prox.example.invalid'
+        self.assertEqual(pegaprox.tls_names(app)[1],'DNS:prox.example.invalid,IP:198.18.25.34,IP:127.0.0.1')
+        for bad in ('*.example.invalid','prox.example.invalid/other','x,IP:1.2.3.4','https://prox.example.invalid','bad..invalid'):
+            app['pegaprox']['tls_hostname']=bad
+            with self.subTest(bad=bad),self.assertRaises(ValueError):pegaprox.tls_names(app)
+
     def test_existing_deployer_refuses_before_target_or_private_file_reads(self):
         with patch.object(deploy, 'api_get', side_effect=AssertionError('no target contact')), \
                 patch.object(Path, 'read_text', side_effect=AssertionError('no private reads')):
