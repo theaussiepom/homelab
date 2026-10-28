@@ -23,6 +23,9 @@ def update_packet(original=b'{"http":{}}', vmid=712):
             'shared_before_sha256': hashlib.sha256(original).hexdigest(),
             'shared_after_sha256': hashlib.sha256(browser.candidate(original, route)).hexdigest(),
             'image': 'traefik@sha256:' + '1'*64, 'route': route,
+            'startup': {'gate_sha256':'4'*64,'docker_dependency_sha256':'5'*64,
+                        'routing_unit_sha256':'6'*64,'routing_dependency_sha256':'7'*64,
+                        'interfaces':['eth0','eth1','eth2','eth3']},
             'network_evidence': {'path': f'/var/lib/homelab-applications/{vmid}/admission/network.json', 'sha256': '2'*64},
             'policy_evidence': {'path': f'/var/lib/homelab-applications/{vmid}/admission/policy.json', 'sha256': '3'*64}}
 
@@ -60,7 +63,12 @@ class ComponentTests(unittest.TestCase):
         self.selected.update(compose_sha256=component.digest(self.compose.read_bytes()),
                              runtime_sha256=component.digest(self.static.read_bytes()))
         self.commands = []; self.started = 'same-start'
+        self.units={name:root/name for name in ('gate','docker_dependency','routing_unit','routing_dependency')}
+        for name,path in self.units.items():
+            path.write_text('fixture '+name);path.chmod(0o644)
+            self.selected['startup'][name+'_sha256']=component.digest(path.read_bytes())
         for p in (patch.multiple(component, CONFIG=self.config, STATIC=self.static, STATE=root/'state'),
+                  patch.object(component,'STARTUP_FILES',self.units),
                   patch.multiple(shared, COMPOSE=self.compose, IDENTITY=self.identity, command=self.command),
                   patch.object(component, 'backend_ready'), patch.object(component, 'route_ready')):
             obj = p.start(); self.addCleanup(p.stop)
@@ -71,6 +79,11 @@ class ComponentTests(unittest.TestCase):
         if 'ps' in argv: return ('a'*64 + '\n').encode()
         if 'inspect' in argv: return json.dumps({'State': {'Running': True, 'StartedAt': self.started},
                                                'Config': {'Image': self.selected['image']}}).encode()
+        if argv[:2]==['systemctl','show']:
+            value='Requires=homelab-network-ready.service\nAfter=homelab-network-ready.service\nActiveState=active\nNeedDaemonReload=no\nMainPID=123\nActiveEnterTimestampMonotonic=456\n'
+            if argv[2]=='homelab-network-ready.service':
+                value+='ExecStart={ argv[]=/usr/lib/systemd/systemd-networkd-wait-online --ipv4 --timeout=30 --interface=eth0:routable --interface=eth1:routable --interface=eth2:routable --interface=eth3:routable ; }\n'
+            return value.encode()
         raise AssertionError('No mutating subprocess may be issued')
 
     def test_install_preserves_inode_metadata_and_other_configs_then_verifies_only(self):
@@ -114,6 +127,20 @@ class ComponentTests(unittest.TestCase):
             with self.assertRaises(ValueError): component.run(self.selected)
         self.assertEqual(self.config.read_bytes(), self.original)
         self.assertTrue((component.STATE/'influx-browser-v1/HOLD.json').is_file())
+
+    def test_prior_three_interface_startup_gate_refuses_before_route_write(self):
+        original=self.command
+        def prior_gate(argv):return original(argv).replace(b' --interface=eth3:routable',b'')
+        with patch.object(shared,'command',side_effect=prior_gate):
+            with self.assertRaises(ValueError):component.run(self.selected)
+        self.assertEqual(self.config.read_bytes(),self.original)
+        self.assertFalse(component.STATE.exists())
+
+    def test_startup_file_drift_is_not_repaired_by_route_installation(self):
+        path=self.units['gate'];path.write_text('unreviewed gate')
+        with self.assertRaises(ValueError):component.run(self.selected)
+        self.assertEqual(path.read_text(),'unreviewed gate')
+        self.assertEqual(self.config.read_bytes(),self.original)
 
 
 if __name__ == '__main__': unittest.main()

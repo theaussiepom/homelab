@@ -107,5 +107,15 @@ class MaintenanceTests(unittest.TestCase):
         path.write_bytes(fc.encoded(value)); self.selected['policy_evidence']['sha256'] = fc.digest(path.read_bytes())
         self.assertTrue(self.run_update()['changed'])
 
+    def test_wildcard_route_cannot_use_same_origin_policy_even_with_new_hashes(self):
+        self.selected['route']['cors_allow_origin'] = '*'
+        self.selected['shared_after_sha256'] = fc.digest(browser.candidate(self.original, self.selected['route']))
+        path = Path(self.selected['policy_evidence']['path']); value = json.loads(path.read_bytes())
+        value.update(route_sha256=fc.digest(fc.encoded(self.selected['route'])), cors_wildcard_approved=True)
+        path.write_bytes(fc.encoded(value)); self.selected['policy_evidence']['sha256'] = fc.digest(path.read_bytes())
+        with self.assertRaises(ValueError): self.run_update()
+        self.deployment.quiet.assert_not_called()
+        self.assertFalse((self.work/'influx-browser-route').exists())
+
 
 if __name__ == '__main__': unittest.main()

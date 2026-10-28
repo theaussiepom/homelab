@@ -140,7 +140,7 @@ def packet(value):
     """Bind one exact route installation; absence of a packet grants no action."""
     fields = {'schema', 'revision', 'vmid', 'plan_sha256', 'state_sha256', 'foundation_complete_sha256',
               'compose_sha256', 'runtime_sha256', 'shared_before_sha256', 'shared_after_sha256',
-              'image', 'route', 'network_evidence', 'policy_evidence'}
+              'image', 'route', 'network_evidence', 'policy_evidence', 'startup'}
     require(isinstance(value, dict) and set(value) == fields
             and value['schema'] == 'homelab-ingress-browser-update-v1', 'Use the closed route maintenance packet')
     require(type(value['vmid']) is int and value['vmid'] >= 100 and value['vmid'] not in {900,4914,4915,4920},
@@ -153,6 +153,12 @@ def packet(value):
             require(isinstance(value[key], str) and re.fullmatch('[0-9a-f]{64}', value[key]), 'Bind every exact file digest')
     require(value['shared_before_sha256'] != value['shared_after_sha256'], 'Select an actual route addition')
     validate(value['route'])
+    startup = value['startup']
+    require(isinstance(startup, dict) and set(startup) == {'interfaces', 'gate_sha256',
+            'docker_dependency_sha256', 'routing_unit_sha256', 'routing_dependency_sha256'}
+            and startup['interfaces'] == ['eth0','eth1','eth2','eth3']
+            and all(isinstance(startup[k],str) and re.fullmatch('[0-9a-f]{64}',startup[k])
+                    for k in startup if k != 'interfaces'), 'Bind the reviewed permanent four-interface startup files')
     for key in ('network_evidence', 'policy_evidence'):
         row = value[key]
         require(isinstance(row, dict) and set(row) == {'path', 'sha256'} and isinstance(row['path'], str)

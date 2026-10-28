@@ -31,6 +31,14 @@ A route packet binds the immutable helper revision, original plan/completion,
 current post-network state, unchanged Compose/static/image, exact shared-file
 before/after hashes and two separately admitted evidence files. Both evidence
 files must be private owned regular files beneath the selected guest's state.
+The packet's `startup` object binds exactly `eth0` through `eth3` and the SHA256s
+of the established network gate, Docker dependency, ingress routing unit and its
+dependency. Route installation only reads these files. It requires loaded,
+active unit definitions, both effective gate dependencies, and the four-interface
+wait command. It then checks current routability and binds Influx health requests
+to the admitted proxy address on eth3. Existing-service migration adjustments,
+including the initial gate change, belong to the separately authorized SSH phase.
+There is no startup patch, outpost correction or service restart in this route CD.
 
 * Network evidence is the existing `homelab-database-network-overlay-v1`
   completion, with the same guest and current state hash. The CD caller must
@@ -67,7 +75,9 @@ select the maintained state and its exact verification path.
 
 ## Accepted network baseline prerequisite
 
-This route helper does not plan or apply a network. An ingress that already
+This route helper does not plan or apply a network. The separately reviewed
+opt-in [ingress network baseline](INGRESS-NETWORK-BASELINE.md) composes its exact
+accepted ACME operation into the infrastructure planner/apply path. An ingress that already
 has an accepted ACME firewall overlay cannot use the generic planner's original
 guest baseline: that would refuse the existing DNS rules or propose removing
 them. Before admitting its additive database NIC, the network source needs a
@@ -85,8 +95,10 @@ overlay verification. It must:
 5. Retire old image/resolver/original-install verification paths from the
    selected network-overlay CD branch so they cannot reintroduce old state.
 
-Until that composition path and its regression tests are qualified, the private
-selector remains prepared/null and admits no native network or route phase.
+The infrastructure release and the later permanent route release are separate.
+Retire the accepted one-use network execution selectors/jobs, preserving their
+history and desired topology, before a route-only CD push. The route selector
+remains prepared/null until actual network and SSH service/startup acceptance.
 Do not substitute current TCP silence or whole-ingress inactivity for route
 absence. A future consumer admission needs a fresh scoped mounted-file and
 discovery-rule inventory plus current connection evidence; the ingress remains

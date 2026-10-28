@@ -5,6 +5,7 @@ import http.client
 import json
 import os
 import re
+import shlex
 from pathlib import Path
 import ssl
 import socket
@@ -18,6 +19,11 @@ from ingress_browser import candidate, packet, require
 CONFIG = Path('/opt/homelab-app/runtime/shared.yml')
 STATIC = Path('/opt/homelab-app/runtime/traefik.yml')
 STATE = Path('/var/lib/homelab-browser-routes')
+STARTUP_FILES = {name:Path('/etc/systemd/system')/path for name,path in {
+    'gate':'homelab-network-ready.service',
+    'docker_dependency':'docker.service.d/homelab-network-ready.conf',
+    'routing_unit':'homelab-ingress-routing.service',
+    'routing_dependency':'homelab-ingress-routing.service.d/homelab-network-ready.conf'}.items()}
 
 
 def read_config(path):
@@ -31,6 +37,37 @@ def read_config(path):
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def startup_guard(settings):
+    """Verify the migration's established gate; this path cannot repair it."""
+    snapshot=[]
+    for name,path in STARTUP_FILES.items():
+        with os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK),'rb') as stream:
+            info=os.fstat(stream.fileno())
+            require(stat.S_ISREG(info.st_mode) and info.st_uid == info.st_gid == 0 and info.st_nlink == 1
+                    and stat.S_IMODE(info.st_mode) == 0o644 and info.st_size <= 65536,
+                    'Expected the reviewed installed startup files')
+            raw=stream.read(65537)
+        require(digest(raw) == settings['startup'][name+'_sha256'], 'The established ingress startup files drifted')
+        snapshot.append(raw)
+    for unit in ('homelab-network-ready.service','docker.service','homelab-ingress-routing.service'):
+        raw=shared.command(['systemctl','show',unit,
+            '--property=ExecStart,Requires,After,ActiveState,NeedDaemonReload,MainPID,ActiveEnterTimestampMonotonic'])
+        values=dict(row.split('=',1) for row in raw.decode().splitlines() if '=' in row)
+        require(values.get('ActiveState') == 'active' and values.get('NeedDaemonReload') == 'no',
+                'The selected startup definitions must already be loaded and active')
+        if unit == 'homelab-network-ready.service':
+            match=re.search(r'argv\[\]=(.*?)\s*;',values.get('ExecStart',''))
+            wanted=['/usr/lib/systemd/systemd-networkd-wait-online','--ipv4','--timeout=30']+[
+                '--interface='+name+':routable' for name in settings['startup']['interfaces']]
+            require(match is not None and shlex.split(match.group(1)) == wanted,
+                    'The permanent startup gate must include the selected eth3 network')
+        else:
+            require(all('homelab-network-ready.service' in values.get(key,'').split() for key in ('Requires','After')),
+                    'Preserve both Docker and routing dependencies on the network gate')
+        snapshot.append(raw)
+    return tuple(snapshot)
 
 
 def guard(settings):
@@ -56,14 +93,18 @@ def guard(settings):
     require(len(ids) == 1 and re.fullmatch('[0-9a-f]{12,64}', ids[0]), 'Expected one existing Traefik container')
     row = json.loads(shared.command(['docker', 'inspect', '--format', '{{json .}}', ids[0]]))
     require(row['State']['Running'] is True and row['Config']['Image'] == settings['image'], 'Running ingress image differs')
-    return compose_raw, static_raw, (ids[0], row['State']['StartedAt'])
+    return compose_raw, static_raw, (ids[0], row['State']['StartedAt'], startup_guard(settings))
 
 
 def backend_ready(route):
     """Check only health/setup and the exact source address, never user data."""
     rows = json.loads(shared.command(['ip', '-json', 'address', 'show']))
-    addresses = {n.get('local') for row in rows for n in row.get('addr_info', []) if n.get('family') == 'inet'}
-    require(route['proxy_address'] in addresses, 'The approved Influx client address is not attached')
+    addresses = {row['ifname'].split('@')[0]:{n.get('local') for n in row.get('addr_info', [])
+                 if n.get('family') == 'inet'} for row in rows}
+    require(all(addresses.get(name) for name in ('eth0','eth1','eth2','eth3'))
+            and route['proxy_address'] in addresses['eth3'], 'The approved Influx client address must be on eth3')
+    shared.command(['/usr/lib/systemd/systemd-networkd-wait-online','--ipv4','--timeout=30']+[
+        '--interface=eth'+str(index)+':routable' for index in range(4)],timeout=40)
     backend = urlsplit(route['backend'])
     for path in ('/health', '/api/v2/setup'):
         conn = http.client.HTTPConnection(backend.hostname, backend.port, timeout=5,
