@@ -11,7 +11,7 @@ import foundation_cd as files
 
 INPUTS = Path('/var/lib/homelab-inputs/automation')
 SERVICES = deploy.AUTOMATION_SERVICES
-HOLDS = ('HOLD.json', 'ROLLOUT-HOLD.json', 'CONTINUATION-HOLD.json', 'AUTOMATION-CD-HOLD.json')
+HOLDS = ('HOLD.json', 'ROLLOUT-HOLD.json', 'CONTINUATION-HOLD.json', 'AUTOMATION-CD-HOLD.json', 'ORDINARY-HOLD.json')
 
 
 def prepare_inputs(config, destination=INPUTS, environment=None):

@@ -532,7 +532,8 @@ def automation_service(cfg_path, service, lock_timeout=300):
                     raise InputNeeded('Another guest job still owns the lock; no application action was started') from None
                 time.sleep(1)
         if any((work / name).exists() or (work / name).is_symlink() for name in
-               ('HOLD.json', 'ROLLOUT-HOLD.json', 'CONTINUATION-HOLD.json','AUTOMATION-CD-HOLD.json')):
+               ('HOLD.json', 'ROLLOUT-HOLD.json', 'CONTINUATION-HOLD.json','AUTOMATION-CD-HOLD.json',
+                'ORDINARY-HOLD.json')):
             raise InputNeeded('An interrupted automation operation is held; no automatic replay')
         binding = automation_binding(cfg, cfg_path, work)
         if service != 'mqtt':

@@ -31,6 +31,18 @@ class AutomationJobTests(unittest.TestCase):
                 deploy.automation_service(site,'mqtt')
             native.assert_not_called()
 
+    def test_legacy_service_entry_refuses_ordinary_custody_before_any_playbook(self):
+        for symlink in (False,True):
+            with self.subTest(symlink=symlink),tempfile.TemporaryDirectory() as tmp:
+                _,site,work,_,_=self.prepare_guest(Path(tmp))
+                hold=work/'ORDINARY-HOLD.json'
+                if symlink:hold.symlink_to(work/'absent-evidence')
+                else:hold.write_text('ordinary operation retains ownership')
+                with patch.object(deploy,'_automation_service_step') as native, self.assertRaisesRegex(deploy.InputNeeded,'held'):
+                    deploy.automation_service(site,'mqtt')
+                native.assert_not_called()
+                self.assertTrue(hold.exists() or hold.is_symlink())
+
     def prepare_guest(self, root):
         cfg, site, work, plan = prepared(root)
         def step(action, *args):
