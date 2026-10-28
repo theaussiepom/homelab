@@ -252,8 +252,15 @@ def bindings(deployment, cfg, site, work):
     """Read original custody only; never adopt, rewrite or refresh a receipt."""
     paths = {'site': site, **{name: work / name for name in (
         'plan.json', 'applied.json', 'started.json', 'rollout-complete.json',
-        'guest.tfplan', 'guest.tfplan.json', 'terraform.tfstate', 'ssh-trust.json')},
+        'guest.tfplan', 'terraform.tfstate', 'ssh-trust.json')},
         'tfvars': work / 'tofu/site.auto.tfvars.json'}
+    receipt = json.loads(regular(paths['plan.json']))
+    if 'plan_json_sha256' in receipt:
+        paths['guest.tfplan.json'] = work / 'guest.tfplan.json'
+    else:
+        # The original database installer retained its binary plan only. Do
+        # not manufacture a historical JSON receipt or relax modern custody.
+        require(not hasattr(deployment, 'discovery'), 'The original JSON plan binding is missing')
     if (work / 'foundation-complete.json').exists():
         paths['foundation-complete.json'] = work / 'foundation-complete.json'
     raw = {key: regular(path) for key, path in paths.items()}
@@ -263,7 +270,7 @@ def bindings(deployment, cfg, site, work):
             and receipt.get('source_sha256') == deployment.source_hash()
             and receipt.get('input_hashes') == deployment.input_hashes(cfg)
             and receipt.get('plan_sha256') == digest(raw['guest.tfplan'])
-            and receipt.get('plan_json_sha256') == digest(raw['guest.tfplan.json'])
+            and ('guest.tfplan.json' not in raw or receipt.get('plan_json_sha256') == digest(raw['guest.tfplan.json']))
             and json.loads(raw['applied.json']) == json.loads(raw['started.json']) == receipt
             and complete.get('status') == 'passed' and complete.get('vmid') == cfg['guest']['vmid']
             and complete.get('plan_sha256') == receipt['plan_sha256'],

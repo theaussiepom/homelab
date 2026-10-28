@@ -316,12 +316,24 @@ class ReadOnlyPlannerTests(unittest.TestCase):
         path = self.work / 'tofu/site.auto.tfvars.json'
         variables = json.loads(path.read_bytes()); variables['guest'].pop('routing_labels')
         path.write_bytes(maintenance.encoded(variables))
+        (self.work / 'guest.tfplan.json').unlink()
+        for name in ('plan.json','applied.json','started.json'):
+            receipt = json.loads((self.work / name).read_bytes()); receipt.pop('plan_json_sha256')
+            (self.work / name).write_bytes(maintenance.encoded(receipt))
         before = path.read_bytes()
         with patch.object(maintenance, 'tofu', side_effect=self.fake_tofu):
             self.assertEqual(self.invoke()['status'], 'review_required')
         candidate = json.loads((self.evidence / 'tofu/site.auto.tfvars.json').read_bytes())
         self.assertNotIn('routing_labels', candidate['guest'])
         self.assertEqual(path.read_bytes(), before)
+
+    def test_modern_installer_cannot_drop_its_json_receipt_binding(self):
+        for name in ('plan.json','applied.json','started.json'):
+            receipt = json.loads((self.work / name).read_bytes()); receipt.pop('plan_json_sha256')
+            (self.work / name).write_bytes(maintenance.encoded(receipt))
+        with patch.object(maintenance, 'tofu') as tofu:
+            with self.assertRaisesRegex(ValueError,'JSON plan binding'): self.invoke()
+        tofu.assert_not_called()
 
 
 if __name__ == '__main__':
