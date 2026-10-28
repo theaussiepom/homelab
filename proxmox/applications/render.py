@@ -10,6 +10,9 @@ import os
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
+_bitwarden_spec = importlib.util.spec_from_file_location('homelab_bitwarden', Path(__file__).with_name('bitwarden.py'))
+bitwarden = importlib.util.module_from_spec(_bitwarden_spec)
+_bitwarden_spec.loader.exec_module(bitwarden)
 _monitoring_spec = importlib.util.spec_from_file_location('homelab_monitoring', Path(__file__).with_name('monitoring.py'))
 monitoring = importlib.util.module_from_spec(_monitoring_spec)
 _monitoring_spec.loader.exec_module(monitoring)
@@ -27,7 +30,7 @@ _zigbee_spec.loader.exec_module(zigbee2mqtt)
 KINDS = {'automation': {'homeassistant', 'node_red', 'mqtt'},
          'identity': {'server', 'worker', 'redis'},
          'dns': {'pihole', 'unbound'}, 'ingress': {'traefik'},
-         'db-tools': {'pgadmin'}, 'zigbee2mqtt': {'zigbee2mqtt'}}
+         'db-tools': {'pgadmin'}, 'bitwarden': {'bitwarden'}, 'zigbee2mqtt': {'zigbee2mqtt'}}
 
 
 def positive(value, name, minimum=1):
@@ -114,12 +117,17 @@ def compose(cfg):
     if total + 256 > budget:
         raise ValueError('Leave at least 256 MiB for the guest OS outside container limits')
     foundation.validate(cfg)
+    if kind == 'bitwarden':
+        bitwarden.validate(cfg)
     if kind == 'db-tools' and 'foundation' not in cfg:
         pgadmin_environment(inputs['pgadmin'])
     result = {'name': f'homelab-{kind}', 'services': {}}
     for name, value in inputs.items():
         image = value.get('image', '')
-        if re.fullmatch(r'sha256:[0-9a-f]{64}', image):
+        if kind == 'bitwarden' and image == 'ghcr.io/bitwarden/lite:latest':
+            # Explicit service policy: the operator selected latest, without a version pin.
+            policy = 'always'
+        elif re.fullmatch(r'sha256:[0-9a-f]{64}', image):
             if not str(value.get('archive', '')).startswith('/') or not re.fullmatch(r'[0-9a-f]{64}', value.get('archive_sha256', '')):
                 raise ValueError('A local image needs its SHA256-verified image archive')
             policy = 'never'
@@ -148,7 +156,8 @@ def compose(cfg):
                   'unbound': [('unbound', '/opt/unbound/etc/unbound')],
                   'traefik': [('traefik', '/etc/traefik')],
                   'pgadmin': [('pgadmin', '/var/lib/pgadmin')],
-                  'zigbee2mqtt': [('zigbee2mqtt', '/app/data')]}[name]
+                  'zigbee2mqtt': [('zigbee2mqtt', '/app/data')],
+                  'bitwarden': [('bitwarden/data', '/etc/bitwarden'), ('bitwarden/logs', '/var/log/bitwarden')]}[name]
         service['volumes'] = [f'{root}/{src}:{target}' for src, target in mounts]
         for mount in value.get('extra_mounts', []):
             src, target = mount.get('source', ''), mount.get('target', '')
@@ -223,6 +232,8 @@ def compose(cfg):
         service['devices'] = [f"{radio['serial_device']}:/dev/ttyACM0:rw"]
         service['volumes'] = [{'type': 'bind', 'source': f'{root}/zigbee2mqtt',
             'target': '/app/data', 'bind': {'create_host_path': False}}]
+    if kind == 'bitwarden':
+        return bitwarden.configure(cfg, result)
     return foundation.configure_compose(cfg, result)
 
 

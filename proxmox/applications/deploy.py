@@ -24,6 +24,7 @@ import foundation
 import ingress_routing
 import zigbee2mqtt
 import zigbee_usb
+import bitwarden_migration
 import monitoring
 
 check_merge_create_plan = discovery.check_merge_create_plan
@@ -78,7 +79,13 @@ def write(path, value):
     sync_directory(path.parent)
 
 
-def validate(cfg):
+def validate(cfg, stack_override=None):
+    if cfg.get('app', {}).get('kind') == 'bitwarden' and 'bitwarden' not in cfg['app']:
+        raise InputNeeded('Bitwarden is preparation only; review restore, private inputs and native admission first')
+    if cfg.get('app', {}).get('kind') == 'bitwarden':
+        stack_path = cfg['app'].get('stack_config')
+        if not isinstance(stack_path, str) or not Path(stack_path).is_absolute():
+            raise InputNeeded('Bitwarden requires its absolute private stack configuration before planning')
     if cfg.get('app', {}).get('kind') == 'pegaprox':
         import pegaprox
         try:
@@ -139,7 +146,11 @@ def validate(cfg):
         if address and address not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
             raise ValueError('HA discovery must select an address assigned to this guest')
     if 'stack_config' in app:
-        stack = json.loads(Path(app['stack_config']).read_text())
+        stack = stack_override if stack_override is not None else json.loads(Path(app['stack_config']).read_text())
+        if app.get('kind') == 'bitwarden':
+            bitwarden_migration.validate_admission(cfg, stack)
+            import render
+            render.compose(stack)
         selected = foundation.validate(stack)
         if selected and app.get('kind') == 'ingress' and len(cfg['guest']['interfaces']) > 1:
             if 'frontend_routing' not in app or ingress_routing.validate(app['frontend_routing'])[0] != selected['bind_address']:
@@ -171,6 +182,11 @@ def input_hashes(cfg):
         paths.append(app['stack_config'])
         stack = json.loads(Path(app['stack_config']).read_text())
         paths.extend(foundation.source_files(stack))
+        if app.get('kind') == 'bitwarden':
+            if 'network_contract' in app:
+                paths.append(app['network_contract']['path'])
+            for key in ('restore_receipt', 'prerequisites_receipt'):
+                paths.extend((app['bitwarden'][key]['path'], str(bitwarden_migration.nas_receipt(cfg, key))))
         if app.get('kind') == 'monitoring':
             paths.extend(monitoring.source_files(stack))
     if app.get('kind') == 'pegaprox':
@@ -494,6 +510,10 @@ def main():
     parser.add_argument('--plan-sha256')
     args = parser.parse_args()
     try:
+        site = json.loads(args.site.read_text())
+        if (isinstance(site, dict) and isinstance(site.get('app'), dict)
+                and site['app'].get('kind') == 'bitwarden'):
+            raise InputNeeded('Bitwarden operations must use bitwarden_cd.py so adapter holds and completion custody are preserved')
         print(json.dumps(execute(args.action, args.site, args.plan_sha256)))
     except InputNeeded as error:
         raise SystemExit(str(error)) from None

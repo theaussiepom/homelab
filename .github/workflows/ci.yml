@@ -81,6 +81,10 @@ jobs:
         run: |
           docker pull --platform linux/amd64 traefik@sha256:6b9cbca6fac42ab0075f5437d8dc1685cfd188626d8d515839ea94f8b6271c42
           python3 proxmox/applications/tests/ingress_fixture.py
+      - name: Prove the watched Influx browser overlay and native login headers
+        run: |
+          docker pull --platform linux/amd64 traefik@sha256:1336e85aaed293bd63d005086e0dd013b04078b26aaeb1c18b26a2f928af7e65
+          python3 proxmox/applications/tests/ingress_browser_fixture.py
       - name: Fetch the exact service discovery fixture source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -101,6 +105,9 @@ jobs:
         run: |
           docker pull --platform linux/amd64 dpage/pgadmin4@sha256:cefc4cc6b7d9d71a9e81e76fb9d7e14038ab5661b539a190eea1b63fa612589a
           python3 proxmox/applications/tests/pgadmin_fixture.py
+      - name: Admit the disposable hosted runner for the isolated privileged restart-policy fixture
+        if: runner.environment == 'github-hosted' && runner.os == 'Linux'
+        run: python3 proxmox/applications/tests/pgadmin_restart_fixture.py --allow-disposable-github-runner
       - name: Exercise the selected DNS updates with synthetic offline records
         run: |
           docker pull --platform linux/amd64 pihole/pihole@sha256:70a9c11171ded2eee735d88c127996da209284a329d50f5ae59c06b861d401b3
@@ -113,6 +120,11 @@ jobs:
           docker pull --platform linux/amd64 redis@sha256:6cbef353e480a8a6e7f10ec545f13d7d3fa85a212cdcc5ffaf5a1c818b9d3798
           docker pull --platform linux/amd64 postgres@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
           python3 proxmox/applications/tests/identity_fixture.py
+      - name: Exercise official Bitwarden Lite latest (intentionally floating) with synthetic MariaDB
+        run: |
+          docker pull --platform linux/amd64 ghcr.io/bitwarden/lite:latest
+          docker pull --platform linux/amd64 mariadb@sha256:805c8e104bd563d5bfa24fadd3f31cd419ea859cb5277f32b5dbf2db714f9ed1
+          python3 proxmox/applications/tests/bitwarden_fixture.py
       - name: Prove the selected PostgreSQL clean SQL adapter with synthetic databases
         run: |
           docker pull --platform linux/amd64 postgres@sha256:9d4951e6dc70422022512ff05ac86e0ae360da051c563accbed85d6f654c3357

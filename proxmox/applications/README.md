@@ -1,7 +1,13 @@
 # After bootstrap: bring home automation across one guest at a time
 
+For separate database networks, see the [private database network guide](database-networks.md).
+It explains which settings belong to bootstrap, database CD and each application.
+
 [Proxmox guide](../README.md) · [Bootstrap](../bootstrap/README.md) ·
 [Databases](DATABASES.md) · [HTTPS and sign-in](FOUNDATION.md) · [pgAdmin](PGADMIN.md) · [Zigbee2MQTT](ZIGBEE2MQTT.md) · [PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
+
+[Bitwarden Lite migration](BITWARDEN.md) uses the same installer through a
+private-input adapter, with a separate database restore and explicit admission.
 
 For a fresh monitoring system without restoring old Zabbix history, see
 [Clean Zabbix monitoring](ZABBIX.md). It uses this same guest/CD path and can be

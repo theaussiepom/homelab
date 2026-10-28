@@ -1,0 +1,80 @@
+{
+  "schema": "homelab-database-networks-v1",
+  "networks": {
+    "postgresql": {
+      "bridge": "vmbr31",
+      "description": "postgresql server and approved clients only; no physical uplink, host IP or gateway",
+      "cidr": "10.88.31.0/24",
+      "server": {
+        "vmid": 208,
+        "hostname": "postgresql",
+        "address": "10.88.31.23",
+        "mac": "02:77:00:d0:1f:01"
+      },
+      "clients": [
+        {
+          "vmid": 211,
+          "hostname": "authentik",
+          "address": "10.88.31.20",
+          "mac": "02:77:00:d3:1f:01"
+        },
+        {
+          "vmid": 202,
+          "hostname": "pgadmin",
+          "address": "10.88.31.32",
+          "mac": "02:77:00:ca:1f:01"
+        },
+        {
+          "vmid": 213,
+          "hostname": "zabbix",
+          "address": "10.88.31.27",
+          "mac": "02:77:00:d5:1f:01"
+        }
+      ]
+    },
+    "mariadb": {
+      "bridge": "vmbr32",
+      "description": "mariadb server and approved clients only; no physical uplink, host IP or gateway",
+      "cidr": "10.88.32.0/24",
+      "server": {
+        "vmid": 206,
+        "hostname": "mariadb",
+        "address": "10.88.32.24",
+        "mac": "02:77:00:ce:20:01"
+      },
+      "clients": [
+        {
+          "vmid": 200,
+          "hostname": "automation",
+          "address": "10.88.32.21",
+          "mac": "02:77:00:c8:20:01"
+        },
+        {
+          "vmid": 215,
+          "hostname": "bitwarden",
+          "address": "10.88.32.35",
+          "mac": "02:77:00:d7:20:01"
+        }
+      ]
+    },
+    "influxdb": {
+      "bridge": "vmbr33",
+      "description": "influxdb server and approved clients only; no physical uplink, host IP or gateway",
+      "cidr": "10.88.33.0/24",
+      "server": {
+        "vmid": 204,
+        "hostname": "influxdb",
+        "address": "10.88.33.26",
+        "mac": "02:77:00:cc:21:01"
+      },
+      "clients": [
+        {
+          "vmid": 200,
+          "hostname": "automation",
+          "address": "10.88.33.21",
+          "mac": "02:77:00:c8:21:01"
+        }
+      ]
+    }
+  }
+}

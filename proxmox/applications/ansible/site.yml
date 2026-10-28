@@ -42,11 +42,11 @@
         owner: root
         group: root
         mode: '0700'
-      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'zigbee2mqtt']
+      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'bitwarden', 'zigbee2mqtt']
 
     - name: Restore frozen application data before starting services
       ansible.builtin.import_tasks: tasks/restore.yml
-      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'zigbee2mqtt']
+      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'bitwarden', 'zigbee2mqtt']
 
     - name: Configure the native database guest
       ansible.builtin.import_tasks: tasks/database.yml
@@ -58,7 +58,7 @@
 
     - name: Configure the application stack
       ansible.builtin.import_tasks: tasks/compose.yml
-      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'monitoring', 'pegaprox', 'zigbee2mqtt']
+      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'monitoring', 'pegaprox', 'bitwarden', 'zigbee2mqtt']
 
     - name: Adopt future commissioned guests through the same active agent tasks
       ansible.builtin.include_tasks: ../../common/ansible/zabbix-agent.yml

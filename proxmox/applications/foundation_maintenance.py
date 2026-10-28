@@ -29,6 +29,9 @@ def require(value, message):
 
 
 def packet(value):
+    if isinstance(value, dict) and value.get('schema') == 'homelab-ingress-browser-update-v1':
+        from ingress_browser import packet as browser_packet
+        return browser_packet(value)
     common = {'schema', 'revision', 'vmid', 'plan_sha256'}
     require(isinstance(value, dict), 'Supply a closed maintenance packet')
     if value.get('schema') == 'homelab-ingress-image-update-v1':
@@ -268,7 +271,8 @@ def main():
         deployment, fc, config = (importlib.import_module(name) for name in ('deploy', 'foundation_cd', 'site_config'))
         guest = 'ingress' if selected['schema'] in ('homelab-ingress-image-update-v1',
                                                    'homelab-ingress-acme-update-v1',
-                                                   'homelab-ingress-acme-confirmation-v1') else 'db-tools'
+                                                   'homelab-ingress-acme-confirmation-v1',
+                                                   'homelab-ingress-browser-update-v1') else 'db-tools'
         site = INPUTS / ('foundation-' + guest) / 'site.json'
         cfg = json.loads(fc.regular(site, private=True))
         with tempfile.TemporaryDirectory(prefix='homelab-foundation-maintenance-') as temp:
@@ -278,7 +282,10 @@ def main():
             require(rendered == cfg and directory == site.parent and work == STATE / str(selected['vmid'])
                     and all(fc.regular(directory / name, private=True) == value for name, value in files.items()),
                     'Committed foundation configuration differs from the original private inputs')
-            if selected['schema'] == 'homelab-ingress-acme-confirmation-v1':
+            if selected['schema'] == 'homelab-ingress-browser-update-v1':
+                import ingress_browser_maintenance
+                result = ingress_browser_maintenance.run(deployment, fc, cfg, site, helper, selected, STATE)
+            elif selected['schema'] == 'homelab-ingress-acme-confirmation-v1':
                 import ingress_acme
                 result = ingress_acme.confirm(deployment,fc,cfg,site,helper,selected,STATE)
             elif selected['schema'] == 'homelab-ingress-acme-update-v1':
