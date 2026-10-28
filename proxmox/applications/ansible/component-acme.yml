@@ -66,6 +66,20 @@
         mode: '0600'
       when: not acme_verify_only and acme_confirmation is not defined
 
+    - name: Read the unchanged installed resolver packet before verification
+      ansible.builtin.slurp:
+        src: /opt/homelab-app/acme-settings.json
+      register: acme_existing_settings
+      no_log: true
+      when: acme_verify_only
+
+    - name: Bind verification to the selected accepted resolver packet
+      ansible.builtin.assert:
+        that:
+          - acme_existing_settings.content | b64decode | from_json == acme_settings
+      no_log: true
+      when: acme_verify_only
+
     - name: Update or verify only the declared certificate resolver list
       ansible.builtin.command:
         argv: "{{ ['python3', '/opt/homelab-app/component_acme.py', '--settings', '/opt/homelab-app/acme-settings.json'] + (['--verify-only'] if acme_verify_only else []) + (['--confirmation', '/opt/homelab-app/acme-confirmation.json'] if acme_confirmation is defined else []) }}"
