@@ -78,6 +78,20 @@ class RuntimeTests(unittest.TestCase):
                 with self.assertRaises(ValueError): runtime.run('activate', value, lambda argv: self.fail('native command'))
                 create.assert_not_called()
 
+    def test_running_proxy_declaration_cannot_bypass_selected_ids_or_current_connection_hold(self):
+        value = request('influxdb')
+        value['clients'].append({'vmid': 212, 'hostname': 'ingress',
+            'address': '10.88.33.33', 'mac': '02:77:00:d4:21:01'})
+        with self.assertRaises(ValueError): runtime.validate(value)
+        value['inactive_client_vmids'].append(212)
+        runtime.validate(value)
+        with patch.object(runtime, 'guard'), patch.object(runtime, 'read', return_value=value['before']['config']), \
+                patch.object(runtime, 'no_clients', side_effect=ValueError('new connection')), \
+                patch.object(runtime.tempfile, 'mkstemp') as create:
+            with self.assertRaises(ValueError):
+                runtime.run('activate', value, lambda argv, **kwargs: self.fail('native or proxy command'))
+            create.assert_not_called()
+
     def test_listener_parser_uses_the_actual_tcp_only_ss_columns(self):
         self.assertEqual(runtime.sockets('mariadb', lambda argv: 'LISTEN 0 70 0.0.0.0:3306 0.0.0.0:*\n'), ['0.0.0.0:3306'])
         self.assertEqual(runtime.sockets('influxdb', lambda argv: 'LISTEN 0 4096 *:8086 *:*\n'), ['*:8086'])

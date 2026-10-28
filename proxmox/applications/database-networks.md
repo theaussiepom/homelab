@@ -140,6 +140,22 @@ catalogue server address. MariaDB keeps its local maintenance socket; InfluxDB
 keeps its existing Bolt/engine paths and refuses setup. No account, grant,
 password, organization, bucket, token or database restoration is performed.
 
+The `inactive_client_vmids` declaration is scoped to consumers of the selected
+database endpoint, not whole-guest status. An existing ingress proxy can keep
+serving unrelated routes while its Influx consumer route is unconfigured. Every
+selected client ID must still be declared; there is no proxy exemption from
+that equality or the server's mandatory current-connection checks.
+
+Before selecting such an Influx operation, the exact final review/approval
+packet must bind separately retained current writer absence/no-writer evidence
+and proxy mounted-file/discovery route-absence plus no-current-Influx-connection
+evidence, with source identity, byte hashes and limitations explicit. A zero
+session count alone is not route-absence proof. Keep the proxy's Influx path
+inactive until database verification and its owner's separate route activation;
+do not stop its unrelated applications to manufacture inactivity. The human
+native approval must explicitly cover this endpoint-specific policy. Source
+checks or the declaration alone do not admit it.
+
 Before any change, the fixed server adapter requires its exact original private
 configuration/process/health inspection and no current TCP consumers (plus no
 other MariaDB session). The original configuration is bound in the coordinator
