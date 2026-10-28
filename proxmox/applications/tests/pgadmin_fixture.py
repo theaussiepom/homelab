@@ -116,46 +116,49 @@ def docker(*args, **kwargs):
     return subprocess.run(['docker', *args], check=True, timeout=180, **kwargs)
 
 
-def preserved_profile(container):
+def preserved_profile(container, *, expected_replacement=False):
+    # The expected snapshot is an independent, explicit fixture projection.
+    # Compare every table/cell, including references and sequence values: no
+    # fields are masked or omitted from the complete profile digest.
     result = docker('exec', container, '/venv/bin/python3', '-c',
-        '''import hashlib,json,sqlite3
+        '''import hashlib,json,sqlite3,sys
+expected=sys.argv[1]=='expected'
 c=sqlite3.connect("file:/var/lib/pgadmin/pgadmin4.db?mode=ro",uri=True)
+c.execute('PRAGMA query_only=ON');c.execute('BEGIN')
 servers=c.execute("SELECT id,name,host,username,port,user_id FROM server ORDER BY id").fetchall()
 assert servers
-protected=[]
+if expected:
+    assert [s[0] for s in servers]==[1,2] and servers[1][5]==2
+profile=[]
 table_hashes={}
-settings=None
-server_sequence=None
-database_bindings=[]
 for name, in c.execute("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name"):
     quoted='"'+name.replace('"','""')+'"'
     columns=[r[1] for r in c.execute('PRAGMA table_info('+quoted+')')]
     rows=[list(r) for r in c.execute('SELECT * FROM '+quoted)]
+    if expected:
+        if name=='server':
+            rows=[r for r in rows if r[columns.index('id')]==2]
+            assert len(rows)==1 and rows[0][columns.index('user_id')]==2
+            for field,value in {'id':3,'name':'PostgreSQL','host':'198.18.31.23','port':5432}.items():
+                rows[0][columns.index(field)]=value
+        elif name=='database':
+            assert len(rows)==1 and rows[0][columns.index('server')]==2
+            rows[0][columns.index('server')]=3
+        elif name=='sqlite_sequence':
+            for row in rows:
+                if row[columns.index('name')]=='server':
+                    assert row[columns.index('seq')]==2
+                    row[columns.index('seq')]=3
+        elif name=='query_history':
+            rows=[r for r in rows if r[columns.index('sid')] not in (1,2)]
     if name=='server':
-        for row in rows:
-            if row[columns.index('user_id')]==2:
-                settings=list(row)
-                for field in ('id','name','host','port'): settings[columns.index(field)]=None
-        continue
-    if name=='sqlite_sequence':
-        for row in rows:
-            if row[columns.index('name')]=='server':
-                server_sequence=row[columns.index('seq')]
-                row[columns.index('seq')]=None
-    if name=='database':
-        selected_ids=[s[0] for s in servers if s[5]==2]
-        for row in rows:
-            if row[columns.index('server')] in selected_ids:
-                database_bindings.append(row[columns.index('server')])
-                row[columns.index('server')]=None
+        servers=[[r[columns.index(k)] for k in ('id','name','host','username','port','user_id')] for r in rows]
     item=(name,columns,sorted(rows,key=repr))
     table_hashes[name]=hashlib.sha256(repr(item).encode()).hexdigest()
-    protected.append(item)
+    profile.append(item)
 print(json.dumps({'users':c.execute('SELECT id,email FROM user ORDER BY id').fetchall(),
-    'servers':servers,'protected_sha256':hashlib.sha256(repr(protected).encode()).hexdigest(),
-    'settings_sha256':hashlib.sha256(repr(settings).encode()).hexdigest(),
-    'table_hashes':table_hashes,'server_sequence':server_sequence,
-    'database_bindings':database_bindings}))''',
+    'servers':servers,'profile_sha256':hashlib.sha256(repr(profile).encode()).hexdigest(),
+    'table_hashes':table_hashes}))''', 'expected' if expected_replacement else 'actual',
         capture_output=True, text=True)
     return json.loads(result.stdout)
 
@@ -231,6 +234,7 @@ c.execute('INSERT INTO "database"(id,server,schema_res) VALUES(?,?,?)',
 c.commit();c.close()''',stdout=subprocess.DEVNULL)
             before = preserved_profile(baseline)
             assert before['users'] and before['servers'][0][1] == 'Synthetic saved server', before
+            expected = preserved_profile(baseline, expected_replacement=True)
             docker('stop', '--time', '20', baseline, stdout=subprocess.DEVNULL)
             docker('rm', baseline, stdout=subprocess.DEVNULL)
             names.remove(baseline)
@@ -248,12 +252,6 @@ c.commit();c.close()''',stdout=subprocess.DEVNULL)
                    f's=p.replacement_plan(c,{selector!r},{{"host":"postgresql","port":5432}},'
                    '{"address":"198.18.31.23","port":5432});assert p.replacement_apply(c,s);c.close()',
                    stdout=subprocess.DEVNULL)
-            retained=before['servers'][1]
-            before['servers']=[[3,'PostgreSQL','198.18.31.23',retained[3],5432,2]]
-            # The actual model uses AUTOINCREMENT. A fresh registration must
-            # advance only the server sequence; do not ignore other sequences.
-            before['server_sequence']=3
-            before['database_bindings']=[3]
             migrated = 'homelab-pgadmin-migrated-' + uuid.uuid4().hex[:10]
             names.append(migrated)
             docker(*common, '--name', migrated, *app,
@@ -263,8 +261,8 @@ c.commit();c.close()''',stdout=subprocess.DEVNULL)
                    IMAGE, stdout=subprocess.DEVNULL)
             docker('exec', backend, 'python3', '/fixture.py', 'check')
             after=preserved_profile(migrated)
-            assert after == before, {'message':'Profile changed beyond the approved replacement',
-                                    'expected':before,'observed':after}
+            assert after == expected, {'message':'Profile changed beyond the approved replacement',
+                                      'expected':expected,'observed':after}
             print('Both synthetic registrations replaced by one fresh OAuth-owned registration; '
                   'retained role/TLS/encrypted settings and per-database schema restrictions '
                   'survive with only the database registration reference updated; all unrelated '

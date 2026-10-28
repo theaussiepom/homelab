@@ -162,10 +162,16 @@ administrator connection and labels it same-profile proof.
 
 The common deployment may record the endpoint/config result separately, leaving
 human SQL acceptance unverified. From the actual authenticated browser profile,
-connect through the new registration under the same authenticated owner and run `SELECT 1`, the version/identity
-query below and `SELECT inet_client_addr()`. Bind that observation to the selected
-server/user and admitted endpoint. Until that happens, no successful same-profile
-SQL result is claimed.
+connect through the new registration under the same authenticated owner and run:
+
+```sql
+SELECT 1;
+SELECT current_database(), current_user, inet_server_addr(),
+       inet_server_port(), current_setting('server_version'), inet_client_addr();
+```
+
+Bind that observation to the selected server/user and admitted endpoint. Until
+that happens, no successful same-profile SQL result is claimed.
 
 ## Registration adapter
 
