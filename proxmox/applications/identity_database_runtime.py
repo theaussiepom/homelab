@@ -161,7 +161,7 @@ def bind_sources(mounts):
     return sha(encoded(sorted(values)))
 
 
-def binding(name, row):
+def binding(name, row, service=None):
     config, state, host = row['Config'], row['State'], row['HostConfig']
     labels = config.get('Labels',{})
     require(labels.get('com.docker.compose.project') == 'homelab-identity'
@@ -176,10 +176,28 @@ def binding(name, row):
     endpoint = None
     if name != 'redis':
         require(config.get('Cmd') == [name], 'The running Authentik mode differs')
+        require(isinstance(service,dict)
+                and service.get('depends_on') == {'redis':{'condition':'service_healthy'}},
+                'Preserve the exact declared healthy Redis dependency')
+        dependency = 'com.docker.compose.depends_on'
+        declared_dependency = 'redis:service_healthy:false'
+        require(labels.get(dependency) in ('',declared_dependency),
+                'The generated Compose dependency label differs')
+        # Compose --no-deps emits an empty generated label on replacement.
+        # Restore only the exact source-declared value before hashing, retaining
+        # the commissioned nonempty-label fingerprint and all other Config fields.
+        normalized['Labels'][dependency] = declared_dependency
         endpoint = endpoint_env(env)
         env.pop(identity.HOST,None); env.pop(identity.PORT,None)
         normalized['Labels'].pop('com.docker.compose.config-hash',None)
         normalized['Labels'].pop('com.docker.compose.replace',None)
+        # Docker may encode unset DNS lists as null after recreation. The
+        # original packet used []; keep its full HostConfig hash compatible.
+        # Missing keys and every nonempty value remain part of the exact hash.
+        host = copy.deepcopy(host)
+        for key in ('Dns','DnsOptions','DnsSearch'):
+            if key in host and host[key] is None:
+                host[key] = []
     normalized['Env'] = env
     mounts = sorted(row['Mounts'],key=lambda m:m['Destination'])
     require(len({m['Destination'] for m in mounts}) == len(mounts), 'Ambiguous Authentik mounts')
@@ -230,7 +248,7 @@ def observe(document):
         require(len(ids) == 1 and re.fullmatch('[0-9a-f]{12,64}',ids[0]), 'Expected one bound container per service')
         row = parsed(command(DOCKER+['inspect','--format','{{json .}}',ids[0]]))
         declared_runtime(name,document['services'][name],row)
-        current = binding(name,row)
+        current = binding(name,row,document['services'][name])
         require(current['image'] == document['services'][name]['image'], 'Installed Compose and container image differ')
         bindings[name] = current; rows[name] = row
         states[name] = {'running':row['State']['Running'],'status':row['State']['Status'],

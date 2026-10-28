@@ -6,6 +6,18 @@ application deployment. Keep the commissioned site/stack inputs, source pin,
 installation receipts and current application data unchanged. A maintenance
 receipt records the update separately.
 
+Client fingerprints normalize two generated metadata differences during Compose
+recreation. An empty `com.docker.compose.depends_on` label from `--no-deps` is
+replaced in memory with `redis:service_healthy:false` only when the installed
+source declares exactly that healthy Redis dependency. Missing or different
+labels/declarations are refused. Unset client HostConfig `Dns`, `DnsOptions`
+and `DnsSearch` values encoded as `null` are hashed as empty lists. Missing DNS
+fields, nonempty settings and every other HostConfig field remain in the full
+hash. These normalizations retain the original nonempty-label/empty-DNS-list
+packet fingerprints without changing its schema or stored values. Redis keeps
+its exact configuration and HostConfig fingerprints. No target state is changed
+by normalization, and a failed activation is never automatically retried.
+
 ## Small service interface
 
 `identity_database.candidate(original_compose_bytes, before, after)` returns a
