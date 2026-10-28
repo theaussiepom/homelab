@@ -29,6 +29,20 @@ def sql(statement):
     return result.stdout.strip()
 
 
+def set_password(password):
+    # psql's \password uses libpq client-side encryption. Only the SCRAM verifier
+    # reaches SQL/log_statement; the original password stays on private stdin.
+    try:
+        subprocess.run(['runuser', '-u', 'postgres', '--', 'psql', '-X',
+                        '-v', 'ON_ERROR_STOP=1', '-d', 'postgres',
+                        '-c', "SET password_encryption='scram-sha-256'",
+                        '-c', r'\password zabbix'],
+                       input=password + '\n' + password + '\n',
+                       capture_output=True, text=True, timeout=30, check=True)
+    except subprocess.CalledProcessError:
+        raise ValueError('PostgreSQL monitoring password setup failed; preserve its hold') from None
+
+
 def save(path, value):
     with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), 'wb') as stream:
         stream.write(value)
@@ -113,8 +127,8 @@ def provision(root, hba, expected, address, password):
     backup = subprocess.run(['runuser', '-u', 'postgres', '--', 'pg_dumpall', '--globals-only'], capture_output=True, timeout=30, check=True)
     save(root / 'globals.before.sql', backup.stdout)
     save(root / 'HOLD.json', json.dumps({'owner': owner, 'automatic_retry': False}).encode())
-    # Restricted URL-safe password above prevents SQL injection. Keep it off argv.
-    sql("SET password_encryption='scram-sha-256'; CREATE ROLE zabbix LOGIN PASSWORD '" + password + "' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;")
+    sql("CREATE ROLE zabbix LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;")
+    set_password(password)
     sql('CREATE DATABASE zabbix OWNER zabbix;')
     replace_hba(hba, updated, attributes)
     try:

@@ -57,6 +57,13 @@ def run(packet, phase):
     variables = json.loads(regular(Path(packet['variables']), private=True))
     required.update(deploy.input_hashes(cfg))
     required.update(file_references(variables))
+    if phase == 'bootstrap' or 'access' in packet:
+        access = packet.get('access')
+        if not isinstance(access, dict) or not {'config', 'token', 'ca', 'state', 'backup'} <= set(access):
+            raise ValueError('Bootstrap needs the complete access packet')
+        if any(not isinstance(access[key], str) or not Path(access[key]).is_absolute()
+               for key in ('config', 'token', 'ca', 'state', 'backup')):
+            raise ValueError('Bootstrap needs the complete access packet with absolute paths')
     if 'access' in packet:
         required.update(packet['access'][key] for key in ('config', 'token', 'ca'))
     if not required <= set(packet['input_sha256']):

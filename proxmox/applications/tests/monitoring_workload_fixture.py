@@ -50,6 +50,8 @@ def client():
         if kind == 'mysql': variables['monitoring_db_config'] = dict(config[kind], uri='tcp://198.18.157.4:3306')
         sql = Templar(loader=DataLoader(), variables=variables).template(trust_as_template(task['ansible.builtin.command']['stdin']))
         (root / (kind + '.sql')).write_text(sql)
+    task = next(t for t in tasks if t['name'].startswith('Set the new PostgreSQL monitor password'))
+    (root / 'postgresql-password-command.json').write_text(json.dumps(task['ansible.builtin.command']['argv']))
     Path('/etc/zabbix').mkdir(exist_ok=True)
     Path('/run/zabbix').mkdir(exist_ok=True)
     Path('/etc/zabbix/agent.psk').write_text('a' * 64 + '\n')
@@ -104,6 +106,9 @@ def main(args):
             for kind, cmd in [('postgresql',['psql','-U','postgres','-v','ON_ERROR_STOP=1']),('mysql',['mariadb','-uroot','-psynthetic-admin'])]:
                 container=prefix+('-pg' if kind=='postgresql' else '-mysql')
                 docker('exec','-i',container,*cmd,input=(root/(kind+'.sql')).read_text(),capture_output=True,text=True)
+            password_command=json.loads((root/'postgresql-password-command.json').read_text())
+            docker('exec','-i',prefix+'-pg',password_command[0],'-U','postgres',*password_command[1:],
+                input=password+'\n'+password+'\n',capture_output=True,text=True)
             # Prove the monitor cannot create a role/database or read application rows.
             docker('exec',prefix+'-pg','psql','-U','postgres','-c','CREATE TABLE private_application(secret text);',capture_output=True)
             for statement in ['CREATE DATABASE forbidden','CREATE ROLE forbidden','SELECT * FROM private_application']:

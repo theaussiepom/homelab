@@ -71,6 +71,18 @@ class ProfileTests(unittest.TestCase):
             self.assertEqual(result.returncode,0,result.stdout + result.stderr)
             self.assertNotIn(secret.read_text(), result.stdout + result.stderr)
 
+    def test_postgresql_account_preflight_rejects_lan_before_a_hold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); play=root/'preflight.json'
+            tasks=Path(profiles.__file__).parents[1]/'common/ansible/zabbix-database-account.yml'
+            play.write_text(json.dumps([{'hosts':'localhost','gather_facts':False,'tasks':[{'ansible.builtin.import_tasks':str(tasks)}]}]))
+            variables={'zabbix_agent':{'manage_database_accounts':True,'workloads':{'postgresql':{'uri':'tcp://198.18.30.21:5432','password_file':'/absent/password'}}}}
+            result=subprocess.run(['ansible-playbook','-i','localhost,','-c','local',str(play),'-e',json.dumps(variables)],
+                env=dict(os.environ,ANSIBLE_LOCAL_TEMP=str(root/'ansible')),capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('PostgreSQL account commissioning requires the preapproved loopback session',result.stdout)
+            self.assertNotIn('Inspect the retained database monitoring receipt',result.stdout)
+
     def test_docker_copy_has_distinct_identity_and_no_passive_collectors(self):
         value = templates.prepared('template_app_docker.yaml')
         original = templates.yaml.safe_load((templates.monitoring.ROOT / 'templates/template_app_docker.yaml').read_text())

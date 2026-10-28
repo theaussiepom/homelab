@@ -50,6 +50,16 @@ class MonitoringCDTests(unittest.TestCase):
         with self.assertRaises(ValueError): monitoring_cd.run(self.packet, 'server')
         self.assert_no_commands()
 
+    def test_incomplete_bootstrap_access_cannot_create_a_hold(self):
+        for value in (None, {}, {'config':'/private/config','token':'/private/token','ca':'/private/ca'}, []):
+            with self.subTest(value=value):
+                packet=dict(self.packet)
+                if value is not None: packet['access']=value
+                with self.assertRaisesRegex(ValueError,'complete access packet'):
+                    monitoring_cd.run(packet,'bootstrap')
+                self.assert_no_commands()
+                self.assertFalse((self.work/'MONITORING-HOLD.json').exists())
+
     def test_completed_phase_is_not_replayed(self):
         self.receipt('configure')
         self.assertEqual(monitoring_cd.run(self.packet, 'configure'),

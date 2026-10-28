@@ -53,6 +53,22 @@ class InitialCollectionTests(unittest.TestCase):
                         else:
                             with self.assertRaisesRegex(expected, message): verification._verify_once(config)
 
+    def test_malformed_api_envelopes_have_a_fixed_safe_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            password=Path(tmp)/'password'; password.write_text('synthetic-password')
+            config={'url':'https://fixture.invalid','password_file':str(password)}
+            for value in (None, [], {}, {'error':{'message':'private-synthetic-data'}}, 'private-synthetic-data'):
+                opener=Mock(); opener.open.return_value=io.StringIO(json.dumps(value))
+                with self.subTest(value=value), patch.object(verification,'build_opener',return_value=opener):
+                    with self.assertRaisesRegex(verification.AcceptanceFailure, '^Monitoring API readback failed$' if isinstance(value,dict) and 'error' in value else '^Monitoring API reply is malformed$'):
+                        verification.verify(config)
+
+    def test_bad_numeric_fields_have_a_fixed_safe_failure(self):
+        for error in (KeyError('private-synthetic-data'), TypeError('private-synthetic-data'), ValueError('private-synthetic-data')):
+            with patch.object(verification,'_verify_once',side_effect=error):
+                with self.assertRaisesRegex(verification.AcceptanceFailure,'^Monitoring API sample is malformed$'):
+                    verification.verify({})
+
     def test_resource_inventory_rejects_malformed_samples_with_fixed_safe_reason(self):
         for raw in ('private-synthetic-data', 'null', '{}', '{"data":null}', '{"data":{}}',
                     '{"data":[null]}', '{"data":["private-synthetic-data"]}', '{"data":[{"vmid":[]}]}'):
@@ -83,7 +99,7 @@ class InitialCollectionTests(unittest.TestCase):
             sleep.assert_called_once_with(5)
 
     def test_identity_tls_errors_fail_immediately_and_freshness_wait_is_finite(self):
-        with patch.object(verification, '_verify_once', side_effect=ValueError('TLS identity differs')) as read, patch.object(verification.time, 'sleep') as sleep:
+        with patch.object(verification, '_verify_once', side_effect=verification.AcceptanceFailure('TLS identity differs')) as read, patch.object(verification.time, 'sleep') as sleep:
             with self.assertRaisesRegex(ValueError, 'TLS identity'): verification.verify({})
             self.assertEqual(read.call_count, 1); sleep.assert_not_called()
         with patch.object(verification, '_verify_once', side_effect=verification.FreshnessPending()), \

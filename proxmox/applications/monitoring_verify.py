@@ -42,7 +42,11 @@ def _verify_once(c):
         with opener.open(Request(c['url'].rstrip('/') + '/api_jsonrpc.php', headers=headers,
             data=json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}).encode()), timeout=20) as response:
             value = json.load(response)
+        if not isinstance(value, dict):
+            raise AcceptanceFailure('Monitoring API reply is malformed')
         if 'error' in value: raise AcceptanceFailure('Monitoring API readback failed')
+        if 'result' not in value:
+            raise AcceptanceFailure('Monitoring API reply is malformed')
         return value['result']
     token = call('user.login', {'username': 'Admin', 'password': Path(c['password_file']).read_text().strip()})
     accepted = False
@@ -115,6 +119,10 @@ def verify(c):
             if remaining <= 0:
                 raise AcceptanceFailure('Fresh monitoring samples did not arrive within the approved collection wait') from None
             time.sleep(min(5, remaining))
+        except AcceptanceFailure:
+            raise
+        except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
+            raise AcceptanceFailure('Monitoring API sample is malformed') from None
 
 
 if __name__ == '__main__':

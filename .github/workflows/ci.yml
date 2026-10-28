@@ -25,6 +25,14 @@ jobs:
           docker run --rm --platform linux/amd64 -v "$PWD:/src:ro" \
             -v "$RUNNER_TEMP/zabbix-collections:/collections" homelab-app-test \
             python3 /src/proxmox/applications/monitoring/install-collections.py --output /collections
+      - name: Check monitoring playbooks with their pinned API collections
+        run: |
+          docker run --rm --platform linux/amd64 --network none -v "$PWD:/src:ro" \
+            -v "$RUNNER_TEMP/zabbix-collections:/collections:ro" -e ANSIBLE_COLLECTIONS_PATH=/collections \
+            -e ANSIBLE_LOCAL_TEMP=/tmp/ansible homelab-app-test sh -ec '
+              for play in monitoring-bootstrap monitoring-database monitoring-configure monitoring-verify guest-monitoring; do
+                ansible-playbook -i localhost, --syntax-check "/src/proxmox/applications/ansible/$play.yml"
+              done'
       - name: Test fresh schema, templates, idempotence and active PSK data
         run: |
           docker build --platform linux/amd64 -t homelab-zabbix-db-test:1 proxmox/applications/tests/monitoring-database

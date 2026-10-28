@@ -180,7 +180,9 @@ config is root:zabbix 0640. Server macros reference named session `homelab` with
 user/password overrides, so database credentials stay off the Zabbix server.
 
 `manage_database_accounts: true` is optional one-time commissioning for **one** local
-native database. PostgreSQL grants `pg_monitor` without superuser, database/role
+native database. PostgreSQL commissioning requires a preapproved loopback session
+and a responding local TCP listener before any account hold; remote HBA admission
+stays with database CD. PostgreSQL grants `pg_monitor` without superuser, database/role
 creation, replication or bypass-RLS. MariaDB grants statistics privileges
 PROCESS/REPLICATION CLIENT/SHOW DATABASES/SHOW VIEW for this source IP, with three
 connections. The helper refuses preexisting unowned identities, missing retained
