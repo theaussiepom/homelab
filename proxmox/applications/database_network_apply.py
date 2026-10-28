@@ -53,13 +53,17 @@ def private_directory(path, *, create=False):
 
 def packet(value):
     require(isinstance(value, dict) and set(value) == {'schema', 'vmid', 'request_sha256',
-            'review_packet_sha256', 'apply_helper_sha256', 'allow_guest_restart'} and value['schema'] == SCHEMA,
+            'review_packet_sha256', 'apply_helper_sha256', 'allow_guest_restart'} and value['schema'] in (SCHEMA,'homelab-ingress-egress-apply-v1'),
             'Use the closed reviewed database network apply packet')
     require(type(value['vmid']) is int and value['vmid'] >= 100 and value['vmid'] not in {900, 4914, 4915, 4920}
             and all(isinstance(value[k], str) and re.fullmatch('[0-9a-f]{64}', value[k])
                     for k in ('request_sha256', 'review_packet_sha256', 'apply_helper_sha256')),
             'Bind the exact guest, saved review and helper source')
-    require(value['allow_guest_restart'] is True, 'Explicitly permit possible provider guest restart; hotplug is unverified')
+    if value['schema'] == SCHEMA:
+        require(value['allow_guest_restart'] is True, 'Explicitly permit possible provider guest restart; hotplug is unverified')
+    else:
+        require(value['vmid'] == 212 and value['allow_guest_restart'] is False,
+                'Firewall-only ingress packets cannot select guest restart authority')
     require(value['apply_helper_sha256'] == digest(Path(__file__).read_bytes()), 'Apply helper source differs from the reviewed packet')
     return value
 
@@ -89,6 +93,9 @@ def load(deployment, installed_config_path, catalogue_path, plan_evidence, packe
     packet_raw = regular(Path(packet_path))
     require(digest(packet_raw) == expected_packet_sha256, 'Apply packet bytes differ from their reviewed digest')
     selected = packet(json.loads(packet_raw))
+    if selected['schema'] == 'homelab-ingress-egress-apply-v1':
+        import ingress_firewall
+        return ingress_firewall.load(deployment,installed_config_path,catalogue_path,plan_evidence,packet_path,expected_packet_sha256)
     site, catalogue_path, plan_evidence = map(Path, (installed_config_path, catalogue_path, plan_evidence))
     cfg = json.loads(regular(site)); deployment.validate(cfg)
     require(cfg['guest']['vmid'] == selected['vmid'] and cfg['paths']['state_root'] == str(maintenance.STATE),
@@ -200,7 +207,7 @@ def custody(context, name, value):
 
 
 def marker(context):
-    return encoded({'schema': SCHEMA, 'vmid': context['selected']['vmid'], 'packet_sha256': context['packet_sha256'],
+    return encoded({'schema': context['selected']['schema'], 'vmid': context['selected']['vmid'], 'packet_sha256': context['packet_sha256'],
                     'review_packet_sha256': context['selected']['review_packet_sha256'], 'automatic_retry': False})
 
 
