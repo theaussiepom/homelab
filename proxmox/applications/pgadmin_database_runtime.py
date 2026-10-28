@@ -208,7 +208,7 @@ def validate_request(request):
     endpoint.selection(request['selector']);endpoint.origin(request['before']);endpoint.destination(request['target'])
     replacement=request['replacement']
     require(isinstance(replacement,dict) and set(replacement)=={'selector','before','after','removed_servers',
-            'created_server_id','server_sequence','name','owner_auth_source','profile_rows_sha256'},'Bind the closed registration replacement')
+            'created_server_id','server_sequence','database_rows_count','name','owner_auth_source','profile_rows_sha256'},'Bind the closed registration replacement')
     require(replacement['selector']==request['selector'] and replacement['before']==request['before']
             and replacement['after']==endpoint.destination(request['target']) and replacement['name']=='PostgreSQL'
             and replacement['owner_auth_source']=='oauth2','Bind the approved OAuth settings and new endpoint')
@@ -224,6 +224,8 @@ def validate_request(request):
             and replacement['created_server_id']==max(*ids,replacement['server_sequence'])+1
             and dict(request['selector'],**request['before']) in removed,'Bind a fresh registration and its original settings owner')
     hash_value(replacement['profile_rows_sha256'])
+    require(type(replacement['database_rows_count']) is int and replacement['database_rows_count']>=0,
+            'Bind the selected registration database-settings count')
     for key in ('compose_sha256','identity_sha256','config_sha256','profile_sha256'): hash_value(request[key])
     require(isinstance(request['image'],str) and re.fullmatch(r'dpage/pgadmin4@sha256:[0-9a-f]{64}',request['image'])
             and isinstance(request['image_id'],str) and re.fullmatch('sha256:[0-9a-f]{64}',request['image_id'])

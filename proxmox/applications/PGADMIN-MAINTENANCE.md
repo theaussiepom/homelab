@@ -130,8 +130,15 @@ selected OAuth owner’s original row settings, except ID/name/host/port; delete
 exactly those old registrations. The selected database role, TLS policy, encrypted
 saved password and other connection settings remain byte-for-byte unchanged in
 SQLite. Query history for the removed registrations is cleared, matching pgAdmin’s
-server-delete behavior; the coherent backup retains it. Shared registrations,
-other foreign-key dependents and debugger state hold for separate review. A drifted
+server-delete behavior; the coherent backup retains it. The selected registration's
+per-database `schema_res` settings follow the fresh registration: only
+`database.server` changes, preserving every database ID and stored value. The
+pinned application's model and database-view code use these rows for schema
+visibility restrictions. Reparent them before deleting old registrations so an
+`ON DELETE CASCADE` cannot discard them. Their exact count and contents digest
+are bound in the proposal. Rows belonging to another removed registration,
+unrelated rows already attached to the fresh ID, shared registrations, unknown
+foreign-key dependents and debugger state hold for separate review. A drifted
 inventory cannot silently expand the removal scope. The backup is copied into
 disposable memory to calculate the complete expected profile before any real
 write; the guard checks that exact fingerprint before committing all changes.
@@ -179,8 +186,9 @@ approved existing OAuth user's settings template. `before` is exactly
 `{'host': <observed literal>, 'port': <int>}`; `target` is
 `{'address': <IPv4>, 'port': 5432}`. Never infer an owner from a display name.
 The safe proposal binds the complete old inventory, selected template, OAuth
-authentication source, fresh ID, name, target and a digest of registration/history
-settings. Credentials stay inside SQLite. The write transaction rechecks the
+authentication source, fresh ID/sequence, name, target, selected per-database row
+count and a digest of registration/history/database settings. Credentials stay
+inside SQLite. The write transaction rechecks the
 proposal and rolls back every insert/delete if the expected-profile guard fails.
 Replay holds instead of deleting the new registration.
 

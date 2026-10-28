@@ -32,24 +32,26 @@ def replacement_plan(connection, selector, before, target):
     The new row keeps the selected owner's settings and encrypted values in
     SQLite. Only its ID/name/host/port change. No credential leaves the database.
     Query history belonging to removed registrations is cleared like pgAdmin's
-    delete action. Other dependent data holds rather than being erased.
+    delete action. The selected registration's per-database schema settings move
+    to the fresh ID without changing their contents. Other dependent data holds.
     """
     selected=plan(connection,selector,before,target)
     try:
         removed=registrations(connection)
         require(connection.execute('SELECT auth_source FROM user WHERE id=?',
                 (selector['user_id'],)).fetchall()==[('oauth2',)],'Bind the approved existing OAuth owner')
-        require(not connection.execute("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND tbl_name IN ('server','query_history') LIMIT 1").fetchone(),
+        require(not connection.execute("SELECT 1 FROM sqlite_schema WHERE type='trigger' AND tbl_name IN ('server','query_history','database') LIMIT 1").fetchone(),
                 'Review registration/history triggers separately')
         require(not connection.execute('SELECT 1 FROM sharedserver LIMIT 1').fetchone(),
                 'Review shared registrations before replacement')
         tables=[r[0] for r in connection.execute("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")]
         ids=[r['server_id'] for r in removed];parameters=','.join('?' for _ in ids)
-        history=[]
+        history=[];database_rows=[]
         for table in tables:
             for foreign in connection.execute('PRAGMA foreign_key_list('+quoted(table)+')'):
                 if foreign[2]!='server': continue
-                allowed=table=='query_history' and foreign[3]=='sid' and foreign[4]=='id'
+                allowed=foreign[4]=='id' and ((table=='query_history' and foreign[3]=='sid')
+                        or (table=='database' and foreign[3]=='server'))
                 if not allowed:
                     require(not connection.execute('SELECT 1 FROM '+quoted(table)+' WHERE '+quoted(foreign[3])+
                             ' IN ('+parameters+') LIMIT 1',ids).fetchone(),'Review dependent registration data separately')
@@ -58,8 +60,17 @@ def replacement_plan(connection, selector, before, target):
                         'Review dependent debugger data separately')
             if table=='query_history':
                 history=connection.execute('SELECT * FROM query_history WHERE sid IN ('+parameters+') ORDER BY rowid',ids).fetchall()
+            if table=='database':
+                require(any(fk[2:5]==('server','server','id') for fk in
+                            connection.execute('PRAGMA foreign_key_list("database")')),
+                        'Review unfamiliar per-database settings schema')
+                require(not connection.execute('SELECT 1 FROM "database" WHERE server IN ('+parameters+
+                        ') AND server<>? LIMIT 1',[*ids,selector['server_id']]).fetchone(),
+                        'Review another registration owner\'s database settings separately')
+                database_rows=connection.execute('SELECT * FROM "database" WHERE server=? ORDER BY rowid',
+                                                 (selector['server_id'],)).fetchall()
         rows=connection.execute('SELECT * FROM server ORDER BY id').fetchall()
-        digest=hashlib.sha256(repr((rows,history)).encode()).hexdigest()
+        digest=hashlib.sha256(repr((rows,history,database_rows)).encode()).hexdigest()
         sequence=0
         if 'sqlite_sequence' in tables:
             sequences=connection.execute("SELECT seq FROM sqlite_sequence WHERE name='server'").fetchall()
@@ -67,17 +78,22 @@ def replacement_plan(connection, selector, before, target):
             if sequences:
                 sequence=sequences[0][0]
                 require(type(sequence) is int and sequence>=0,'Invalid registration sequence')
+        created=max(*ids,sequence)+1
+        if 'database' in tables:
+            require(not connection.execute('SELECT 1 FROM "database" WHERE server=? LIMIT 1',(created,)).fetchone(),
+                    'The fresh registration would attach unrelated database settings')
     except sqlite3.Error:
         raise ValueError('The registration dependency schema requires review') from None
     return dict(selector=dict(selector),before=dict(before),after=selected['after'],removed_servers=removed,
-                created_server_id=max(*ids,sequence)+1,server_sequence=sequence,
-                name='PostgreSQL',owner_auth_source='oauth2',profile_rows_sha256=digest)
+                created_server_id=created,server_sequence=sequence,
+                database_rows_count=len(database_rows),name='PostgreSQL',
+                owner_auth_source='oauth2',profile_rows_sha256=digest)
 
 
 def replacement_apply(connection, proposal, *, validate_update=None):
     """Atomic fresh-ID replacement, under the caller's quiescence and backup."""
     require(isinstance(proposal,dict) and set(proposal)=={'selector','before','after','removed_servers',
-            'created_server_id','server_sequence','name','owner_auth_source','profile_rows_sha256'},'Use the exact replacement proposal')
+            'created_server_id','server_sequence','database_rows_count','name','owner_auth_source','profile_rows_sha256'},'Use the exact replacement proposal')
     require(validate_update is None or callable(validate_update),'Use a trusted update validator')
     require(not connection.in_transaction,'Preserve the caller-owned transaction')
     try:
@@ -96,6 +112,10 @@ def replacement_apply(connection, proposal, *, validate_update=None):
         # registrations. The transaction/callback covers all deletes and insert.
         connection.execute('INSERT INTO server ('+','.join(map(quoted,columns))+') VALUES ('+
                            ','.join('?' for _ in columns)+')',values)
+        if 'database' in [r[0] for r in connection.execute("SELECT name FROM sqlite_schema WHERE type='table'")]:
+            moved=connection.execute('UPDATE "database" SET server=? WHERE server=?',
+                    (proposal['created_server_id'],proposal['selector']['server_id']))
+            require(moved.rowcount==proposal['database_rows_count'],'Per-database settings count drifted')
         if connection.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='query_history'").fetchone():
             connection.execute('DELETE FROM query_history WHERE sid IN ('+parameters+')',ids)
         deleted=connection.execute('DELETE FROM server WHERE id IN ('+parameters+')',ids)

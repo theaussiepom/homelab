@@ -56,11 +56,52 @@ class ReplacementTests(unittest.TestCase):
         self.connection.execute("UPDATE user SET auth_source='internal' WHERE id=2");self.connection.commit()
         with self.assertRaises(ValueError): endpoint.replacement_apply(self.connection,plan)
 
+    def test_selected_database_metadata_follows_fresh_registration_without_content_changes(self):
+        self.connection.executescript('''CREATE TABLE "database"(id INTEGER,server INTEGER
+            REFERENCES server(id) ON DELETE CASCADE,schema_res TEXT,PRIMARY KEY(id,server));
+            INSERT INTO "database" VALUES(12345,8,'retained schema restriction');''')
+        self.connection.execute('PRAGMA foreign_keys=ON')
+        plan=self.proposal()
+        self.assertEqual(plan['database_rows_count'],1)
+        endpoint.replacement_apply(self.connection,plan)
+        self.assertEqual(self.connection.execute('SELECT * FROM "database"').fetchall(),
+                         [(12345,9,'retained schema restriction')])
+
+    def test_another_owners_database_metadata_is_not_reparented_or_deleted(self):
+        self.connection.executescript('''CREATE TABLE "database"(id INTEGER,server INTEGER
+            REFERENCES server(id) ON DELETE CASCADE,schema_res TEXT,PRIMARY KEY(id,server));
+            INSERT INTO "database" VALUES(12345,7,'other owner restriction');''')
+        before='\n'.join(self.connection.iterdump())
+        with self.assertRaises(ValueError):self.proposal()
+        self.assertEqual('\n'.join(self.connection.iterdump()),before)
+
+    def test_fresh_registration_cannot_attach_unrelated_orphan_database_settings(self):
+        self.connection.executescript('''CREATE TABLE "database"(id INTEGER,server INTEGER
+            REFERENCES server(id) ON DELETE CASCADE,schema_res TEXT,PRIMARY KEY(id,server));
+            INSERT INTO "database" VALUES(12345,9,'orphan restriction');''')
+        with self.assertRaises(ValueError):self.proposal()
+
     def test_profile_scope_guard_rolls_back_deletes_and_insert(self):
+        self.connection.executescript('''CREATE TABLE "database"(id INTEGER,server INTEGER
+            REFERENCES server(id) ON DELETE CASCADE,schema_res TEXT,PRIMARY KEY(id,server));
+            INSERT INTO "database" VALUES(12345,8,'retained restriction');''')
         plan=self.proposal();before='\n'.join(self.connection.iterdump())
         def refuse(connection): raise ValueError('protected profile changed')
         with self.assertRaises(ValueError): endpoint.replacement_apply(self.connection,plan,validate_update=refuse)
         self.assertEqual('\n'.join(self.connection.iterdump()),before)
+
+    def test_database_settings_drift_and_update_triggers_hold_before_deletion(self):
+        self.connection.executescript('''CREATE TABLE "database"(id INTEGER,server INTEGER
+            REFERENCES server(id) ON DELETE CASCADE,schema_res TEXT,PRIMARY KEY(id,server));
+            INSERT INTO "database" VALUES(12345,8,'retained restriction');''')
+        plan=self.proposal()
+        self.connection.execute('UPDATE "database" SET schema_res=?',('changed after plan',));self.connection.commit()
+        before='\n'.join(self.connection.iterdump())
+        with self.assertRaises(ValueError):endpoint.replacement_apply(self.connection,plan)
+        self.assertEqual('\n'.join(self.connection.iterdump()),before)
+        self.connection.executescript('''CREATE TRIGGER changed AFTER UPDATE ON "database"
+            BEGIN DELETE FROM user; END;''')
+        with self.assertRaises(ValueError):self.proposal()
 
     def test_replay_cannot_delete_the_replacement(self):
         plan=self.proposal();endpoint.replacement_apply(self.connection,plan)

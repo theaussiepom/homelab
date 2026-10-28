@@ -126,6 +126,7 @@ protected=[]
 table_hashes={}
 settings=None
 server_sequence=None
+database_bindings=[]
 for name, in c.execute("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name"):
     quoted='"'+name.replace('"','""')+'"'
     columns=[r[1] for r in c.execute('PRAGMA table_info('+quoted+')')]
@@ -141,13 +142,20 @@ for name, in c.execute("SELECT name FROM sqlite_schema WHERE type='table' ORDER 
             if row[columns.index('name')]=='server':
                 server_sequence=row[columns.index('seq')]
                 row[columns.index('seq')]=None
+    if name=='database':
+        selected_ids=[s[0] for s in servers if s[5]==2]
+        for row in rows:
+            if row[columns.index('server')] in selected_ids:
+                database_bindings.append(row[columns.index('server')])
+                row[columns.index('server')]=None
     item=(name,columns,sorted(rows,key=repr))
     table_hashes[name]=hashlib.sha256(repr(item).encode()).hexdigest()
     protected.append(item)
 print(json.dumps({'users':c.execute('SELECT id,email FROM user ORDER BY id').fetchall(),
     'servers':servers,'protected_sha256':hashlib.sha256(repr(protected).encode()).hexdigest(),
     'settings_sha256':hashlib.sha256(repr(settings).encode()).hexdigest(),
-    'table_hashes':table_hashes,'server_sequence':server_sequence}))''',
+    'table_hashes':table_hashes,'server_sequence':server_sequence,
+    'database_bindings':database_bindings}))''',
         capture_output=True, text=True)
     return json.loads(result.stdout)
 
@@ -218,6 +226,8 @@ def clone(table,changes):
     c.execute('INSERT INTO "'+table+'" ('+','.join('"'+s+'"' for s in columns)+') VALUES ('+','.join('?' for _ in values)+')',values)
 clone('user',{'id':2,'email':'oauth@example.invalid','username':'oauth-fixture','auth_source':'oauth2'})
 clone('server',{'id':2,'user_id':2,'host':'postgresql','name':'OAuth synthetic server'})
+c.execute('INSERT INTO "database"(id,server,schema_res) VALUES(?,?,?)',
+          (12345,2,'retained_synthetic_schema'))
 c.commit();c.close()''',stdout=subprocess.DEVNULL)
             before = preserved_profile(baseline)
             assert before['users'] and before['servers'][0][1] == 'Synthetic saved server', before
@@ -243,6 +253,7 @@ c.commit();c.close()''',stdout=subprocess.DEVNULL)
             # The actual model uses AUTOINCREMENT. A fresh registration must
             # advance only the server sequence; do not ignore other sequences.
             before['server_sequence']=3
+            before['database_bindings']=[3]
             migrated = 'homelab-pgadmin-migrated-' + uuid.uuid4().hex[:10]
             names.append(migrated)
             docker(*common, '--name', migrated, *app,
@@ -255,8 +266,9 @@ c.commit();c.close()''',stdout=subprocess.DEVNULL)
             assert after == before, {'message':'Profile changed beyond the approved replacement',
                                     'expected':before,'observed':after}
             print('Both synthetic registrations replaced by one fresh OAuth-owned registration; '
-                  'retained role/TLS/encrypted settings and all non-registration profile values '
-                  'survive the replacement and OAuth configuration migration.')
+                  'retained role/TLS/encrypted settings and per-database schema restrictions '
+                  'survive with only the database registration reference updated; all unrelated '
+                  'profile values survive the replacement and OAuth configuration migration.')
         except Exception:
             for name in names:
                 subprocess.run(['docker', 'logs', '--tail', '60', name], check=False, timeout=20)

@@ -134,6 +134,18 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(self.row['State']['Running'])
         self.assertFalse(any(c[len(runtime.DOCKER)]=='stop' for c in self.commands))
 
+    def test_selected_database_settings_move_only_the_registration_reference(self):
+        with closing(sqlite3.connect(self.paths['PROFILE'])) as connection:
+            connection.executescript('''CREATE TABLE "database"(id INTEGER,server INTEGER
+                REFERENCES server(id) ON DELETE CASCADE,schema_res TEXT,PRIMARY KEY(id,server));
+                INSERT INTO "database" VALUES(12345,7,'preserved restriction');''')
+        request=self.quiesced()
+        self.assertEqual(request['replacement']['database_rows_count'],1)
+        self.assertEqual(runtime.execute('activate',self.app,request)['status'],'passed')
+        with runtime.database(self.paths['PROFILE']) as connection:
+            self.assertEqual(connection.execute('SELECT * FROM "database"').fetchall(),[(12345,9,'preserved restriction')])
+        self.assertTrue(runtime.execute('verify',self.app,request)['profile_verified'])
+
     def test_restart_or_start_during_provider_cycle_prevents_activation(self):
         request=self.quiesced(); before=self.dump()
         self.row['State'].update(StartedAt='2026-01-01T01:30:00Z',FinishedAt='2026-01-01T01:31:00Z')
