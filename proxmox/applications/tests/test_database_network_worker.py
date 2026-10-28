@@ -1,7 +1,10 @@
 """Cross-bind runtime changes to the exact saved network operation before stops."""
 import copy
 import json
+import os
 from pathlib import Path
+import shlex
+import subprocess
 import sys
 import tempfile
 import types
@@ -123,6 +126,43 @@ class Tests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     worker.capture_identity_recovery(deployment, cfg, member, directory)
             self.assertFalse((directory / 'identity-original-compose.yml').exists())
+
+    @unittest.skipUnless(sys.platform == 'linux' and os.geteuid() == 0,
+                         'The offline Linux image supplies root-owned synthetic files')
+    def test_fixed_reader_enforces_ownership_mode_links_size_and_digest_on_synthetic_files(self):
+        actual_run = subprocess.run
+        raw = b'services: {} # synthetic, no application settings\n'
+        cfg = {'guest': {'vmid':211}, 'app': {'address':'192.0.2.20'},
+               'paths': {'private_key':'/unused-key', 'known_hosts':'/unused-known-hosts'}}
+        deployment = types.SimpleNamespace(guest_trust=Mock())
+        for case in ('valid', 'owner', 'mode', 'links', 'size', 'digest'):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp); directory = root / 'custody'; directory.mkdir(mode=0o700)
+                source = root / 'synthetic-compose.yml'; source.write_bytes(raw); source.chmod(0o600)
+                member = {'runtime_packet': {'compose_sha256': worker.digest(raw)}}
+                if case == 'owner': os.chown(source, 1, 1)
+                if case == 'mode': source.chmod(0o644)
+                if case == 'links': os.link(source, root / 'extra-link')
+                if case == 'size': source.write_bytes(b'x' * (1024 * 1024 + 1))
+                if case == 'digest': member['runtime_packet']['compose_sha256'] = 'f' * 64
+                def local_reader(argv, **kwargs):
+                    # SSH is never executed. Only its fixed Python reader runs
+                    # against this disposable synthetic file inside the test image.
+                    command = shlex.split(argv[-1]); self.assertEqual(command[:2], ['python3', '-c'])
+                    literal = "'/opt/homelab-app/compose.yml'"
+                    self.assertEqual(command[2].count(literal), 1)
+                    script = command[2].replace(literal, repr(str(source)))
+                    return actual_run([sys.executable, '-c', script], input=kwargs['input'],
+                                      capture_output=True, check=True, timeout=5)
+                with patch.object(worker.subprocess, 'run', side_effect=local_reader):
+                    if case == 'valid':
+                        self.assertEqual(worker.capture_identity_recovery(deployment, cfg, member, directory),
+                                         worker.digest(raw))
+                        self.assertEqual(worker.identity_recovery(member, directory), raw)
+                    else:
+                        with self.assertRaises(subprocess.CalledProcessError):
+                            worker.capture_identity_recovery(deployment, cfg, member, directory)
+                        self.assertFalse((directory / 'identity-original-compose.yml').exists())
 
 
 if __name__ == '__main__': unittest.main()
