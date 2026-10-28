@@ -229,6 +229,8 @@ class NativeDriver:
         require(regular(self.remote / name) == raw, 'NAS completed group custody differs')
 
     def call(self, action, role, member):
+        if role == 'identity' and action in {'quiesce', 'activate', 'verify'}:
+            self.check_custody('identity-original-compose.yml', self.identity_recovery(member))
         member_path = self.directory / (role + '-member.json')
         if member_path.exists() or member_path.is_symlink():
             require(regular(member_path) == encoded(member), 'Group member custody changed')
@@ -247,7 +249,18 @@ class NativeDriver:
         require(len(result.stdout) <= 1024 * 1024, 'Oversized private member result')
         return json.loads(result.stdout)
 
-    def preflight(self, role, member): return self.call('preflight', role, member)
+    def identity_recovery(self, member):
+        from database_network_worker import identity_recovery
+        path = self.state / str(member['vmid']) / ('database-network-runtime-' + self.selected['operation'])
+        return identity_recovery(member, path)
+
+    def preflight(self, role, member):
+        result = self.call('preflight', role, member)
+        if role == 'identity':
+            raw = self.identity_recovery(member)
+            require(result.get('recovery_sha256') == digest(raw), 'The admitted Compose recovery copy differs')
+            self.custody('identity-original-compose.yml', raw)
+        return result
     def quiesce(self, role, member): return self.call('quiesce', role, member)
     def network(self, role, member): return self.call('network', role, member)
     def startup(self, role, member): return self.call('startup', role, member)

@@ -84,5 +84,45 @@ class Tests(unittest.TestCase):
                            {'runtime_packet':{}}, Path('/private'), 'activate')
         remote.assert_not_called()
 
+    def test_authentik_original_compose_requires_exact_private_bytes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            raw = b'private synthetic compose\n'
+            member = {'runtime_packet': {'compose_sha256': worker.digest(raw)}}
+            with self.assertRaises(FileNotFoundError):
+                worker.identity_recovery(member, directory)
+            worker.save(directory / 'identity-original-compose.yml', raw)
+            self.assertEqual(worker.identity_recovery(member, directory), raw)
+            (directory / 'identity-original-compose.yml').chmod(0o644)
+            with self.assertRaises(ValueError): worker.identity_recovery(member, directory)
+            (directory / 'identity-original-compose.yml').chmod(0o600)
+            with self.assertRaises(ValueError):
+                worker.identity_recovery({'runtime_packet': {'compose_sha256': 'f'*64}}, directory)
+
+    def test_authentik_capture_stays_private_and_never_returns_configuration(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp); raw = b'private synthetic compose\n'
+            member = {'runtime_packet': {'compose_sha256': worker.digest(raw)}}
+            cfg = {'guest': {'vmid':211}, 'app': {'address':'192.0.2.20'}, 'paths': {'private_key':'/key', 'known_hosts':'/known'}}
+            deployment = types.SimpleNamespace(guest_trust=Mock())
+            with patch.object(worker.subprocess, 'run', return_value=types.SimpleNamespace(stdout=raw)) as remote:
+                result = worker.capture_identity_recovery(deployment, cfg, member, directory)
+            self.assertEqual(result, worker.digest(raw))
+            self.assertEqual(worker.identity_recovery(member, directory), raw)
+            self.assertNotIn(raw.decode(), str(remote.call_args))
+            self.assertIn('StrictHostKeyChecking=yes', remote.call_args.args[0])
+            self.assertNotIn('scp', remote.call_args.args[0])
+
+    def test_authentik_wrong_capture_is_refused_without_writing_a_copy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            member = {'runtime_packet': {'compose_sha256': 'a'*64}}
+            cfg = {'guest': {'vmid':211}, 'app': {'address':'192.0.2.20'}, 'paths': {'private_key':'/key', 'known_hosts':'/known'}}
+            deployment = types.SimpleNamespace(guest_trust=Mock())
+            with patch.object(worker.subprocess, 'run', return_value=types.SimpleNamespace(stdout=b'changed')):
+                with self.assertRaises(ValueError):
+                    worker.capture_identity_recovery(deployment, cfg, member, directory)
+            self.assertFalse((directory / 'identity-original-compose.yml').exists())
+
 
 if __name__ == '__main__': unittest.main()

@@ -96,6 +96,11 @@ client settings together, then verifies the maintained services. It does not
 restore databases, reinstall applications, replace credentials or change web
 addresses. The service owners supply Authentik and pgAdmin's small runtime
 adapters; their source pins remain separate from the original installers.
+Admission also retains the exact original Authentik Compose bytes privately on
+the runner and existing NAS custody route, verified against the bound hash before
+either client stops. Missing or changed recovery copies prevent stopping or
+activating Authentik. This is recovery material for a reviewed manual response;
+CD does not restore it automatically or expose its contents in job output.
 
 A reviewed native plan and complete server/client activation packet are still
 needed before an actual cutover. Source availability is not deployment approval.

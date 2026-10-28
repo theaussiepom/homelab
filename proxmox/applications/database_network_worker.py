@@ -42,6 +42,41 @@ def site_path(role):
     return INPUTS / ('postgresql.json' if role == 'postgresql' else 'foundation-' + role + '/site.json')
 
 
+def identity_recovery(member, directory):
+    """Hashes alone cannot recover an interrupted in-place Compose update."""
+    raw = regular(directory / 'identity-original-compose.yml')
+    require(0 < len(raw) <= 1024 * 1024
+            and digest(raw) == member['runtime_packet']['compose_sha256'],
+            'The private original Authentik Compose recovery copy differs')
+    return raw
+
+
+def capture_identity_recovery(deployment, cfg, member, directory):
+    """Copy only the fixed original Compose file over the commissioned SSH route."""
+    deployment.guest_trust(cfg, STATE / str(cfg['guest']['vmid']))
+    script = '''import hashlib,json,os,pathlib,stat,sys
+v=json.load(sys.stdin); p=pathlib.Path('/opt/homelab-app/compose.yml'); assert not any(x.is_symlink() for x in [p,*p.parents])
+def stable(s): return (s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW)
+with os.fdopen(fd,'rb') as f:
+ s=os.fstat(f.fileno()); assert stat.S_ISREG(s.st_mode) and s.st_uid==s.st_gid==0 and stat.S_IMODE(s.st_mode)==0o600 and s.st_nlink==1 and 0<s.st_size<=1024*1024
+ raw=f.read(1024*1024+1); assert len(raw)==s.st_size and stable(os.fstat(f.fileno()))==stable(s) and stable(p.stat())==stable(s)
+ assert hashlib.sha256(raw).hexdigest()==v['sha256']; sys.stdout.buffer.write(raw)'''
+    argv = ['ssh', '-F', '/dev/null', '-i', cfg['paths']['private_key'], '-o', 'IdentitiesOnly=yes',
+            '-o', 'StrictHostKeyChecking=yes', '-o', 'GlobalKnownHostsFile=/dev/null',
+            '-o', 'UserKnownHostsFile=' + cfg['paths']['known_hosts'], '-o', 'BatchMode=yes',
+            '-o', 'ControlMaster=no', '-o', 'VerifyHostKeyDNS=no', '-o', 'UpdateHostKeys=no',
+            '-o', 'ConnectTimeout=10', 'root@' + cfg['app']['address'], 'python3 -c ' + shlex.quote(script)]
+    result = subprocess.run(argv, input=encoded({'sha256': member['runtime_packet']['compose_sha256']}),
+                            capture_output=True, check=True, timeout=30)
+    require(0 < len(result.stdout) <= 1024 * 1024
+            and digest(result.stdout) == member['runtime_packet']['compose_sha256'],
+            'The captured original Authentik Compose bytes differ')
+    save(directory / 'identity-original-compose.yml', result.stdout)
+    network_apply.sync(directory)
+    return digest(identity_recovery(member, directory))
+
+
 def startup_probe(deployment, cfg, expected):
     """Read only the two fixed startup files over the existing pinned SSH key."""
     deployment.guest_trust(cfg, STATE / str(cfg['guest']['vmid']))
@@ -134,6 +169,9 @@ def execute(action, role, member, helper, installer, adapter, catalogue, operati
         startup_probe(deployment, cfg, member['startup'])
         checked = runtime(deployment, cfg, adapter, role, member, directory, 'preflight')
         require(checked.get('status') == 'passed', 'The runtime did not pass preflight')
+        if role == 'identity':
+            return {'status': 'admitted', 'vmid': member['vmid'],
+                    'recovery_sha256': capture_identity_recovery(deployment, cfg, member, directory)}
         return {'status': 'admitted', 'vmid': member['vmid']}
     if action == 'network':
         result = network_apply.apply(*args)
@@ -159,6 +197,7 @@ def execute(action, role, member, helper, installer, adapter, catalogue, operati
         return runtime(deployment, cfg, adapter, role, member, directory, 'verify', quiesce_receipt)
     require(action in {'quiesce', 'activate'} and (action != 'quiesce' or role != 'postgresql'),
             'Select only a declared member phase')
+    if role == 'identity': identity_recovery(member, directory)
     return runtime(deployment, cfg, adapter, role, member, directory, action, quiesce_receipt)
 
 

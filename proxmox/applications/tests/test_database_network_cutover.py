@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import database_network_cutover as cutover
@@ -131,6 +132,29 @@ class Tests(unittest.TestCase):
         directory = self.state / ('database-network-cutover-' + self.value['operation'])
         self.assertFalse((directory / 'complete.json').exists())
         self.assertTrue((directory / 'HOLD.json').is_file())
+
+    def test_native_identity_admission_copies_exact_recovery_bytes_to_nas(self):
+        driver = object.__new__(cutover.NativeDriver)
+        raw = b'private synthetic configuration'
+        driver.call = Mock(return_value={'status':'admitted', 'recovery_sha256':cutover.digest(raw)})
+        driver.identity_recovery = Mock(return_value=raw)
+        driver.custody = Mock()
+        member = self.value['members']['identity']
+        self.assertEqual(driver.preflight('identity', member)['status'], 'admitted')
+        driver.custody.assert_called_once_with('identity-original-compose.yml', raw)
+        driver.call.return_value['recovery_sha256'] = 'f'*64
+        driver.custody.reset_mock()
+        with self.assertRaises(ValueError): driver.preflight('identity', member)
+        driver.custody.assert_not_called()
+
+    def test_native_identity_missing_recovery_custody_prevents_stop_and_activation(self):
+        driver = object.__new__(cutover.NativeDriver)
+        driver.identity_recovery = Mock(return_value=b'private configuration')
+        driver.check_custody = Mock(side_effect=ValueError('missing private recovery copy'))
+        for phase in ('quiesce', 'activate', 'verify'):
+            with patch.object(cutover.subprocess, 'run') as remote, self.assertRaises(ValueError):
+                driver.call(phase, 'identity', self.value['members']['identity'])
+            remote.assert_not_called()
 
 
 if __name__ == '__main__': unittest.main()
