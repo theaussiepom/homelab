@@ -120,10 +120,11 @@ def backend_ready(route):
             conn.close()
 
 
-def route_ready(route):
+def route_ready(route, initial=False):
     """A TLS-verified anonymous redirect is a bounded load check, not login acceptance."""
     issuer = urlsplit(route['issuer']).hostname
-    for attempt in range(30):
+    deadline=time.monotonic()+(180 if initial else 60)
+    while time.monotonic()<deadline:
         try:
             conn = http.client.HTTPSConnection(route['host'], timeout=3)
             try:
@@ -149,7 +150,8 @@ def route_ready(route):
                 conn.close()
         except (OSError, http.client.HTTPException):
             pass
-        if attempt != 29: time.sleep(2)
+        remaining=deadline-time.monotonic()
+        if remaining>0:time.sleep(min(2,remaining))
     raise ValueError('The TLS-verified browser authentication redirect did not become ready')
 
 
@@ -227,7 +229,7 @@ def run(selected, verify_only=False):
             os.fchmod(anchor.fileno(), mode); os.fsync(anchor.fileno())
     require(read_config(CONFIG) == updated and shared.read(shared.COMPOSE) == compose_before
             and read_config(STATIC) == static_before, 'Route/static/Compose readback differs')
-    route_ready(settings['route'])
+    route_ready(settings['route'],initial=True)
     require(guard(settings) == original_runtime, 'Ingress restarted or changed during activation')
     shared.save(operation / 'complete.json', b'{"status":"passed"}\n')
     (operation / 'HOLD.json').unlink(); shared.sync(operation)

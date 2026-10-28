@@ -42,6 +42,21 @@ class PacketTests(unittest.TestCase):
         with self.assertRaises(ValueError): browser.packet({**value, 'allow_restart': True})
 
 
+class ReadinessTests(unittest.TestCase):
+    def test_first_certificate_gets_a_bounded_initial_window_without_service_actions(self):
+        for initial,seconds in [(True,180),(False,60)]:
+            clock=[0.0]
+            def sleep(delay):clock[0]+=delay
+            with self.subTest(initial=initial),patch.object(component.time,'monotonic',side_effect=lambda:clock[0]),\
+                    patch.object(component.time,'sleep',side_effect=sleep),\
+                    patch.object(component.socket,'create_connection',side_effect=component.ssl.SSLError('not issued yet')) as connect,\
+                    patch.object(shared,'command') as native:
+                with self.assertRaises(ValueError):component.route_ready(settings(),initial=initial)
+                self.assertEqual(clock[0],seconds)
+                self.assertEqual(connect.call_count,seconds//2)
+                native.assert_not_called()
+
+
 class WatchedWriteTests(unittest.TestCase):
     def test_short_writes_are_completed_and_zero_progress_is_refused(self):
         class Short(io.BytesIO):
@@ -174,7 +189,7 @@ class ComponentTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):component.run(self.selected)
 
     def test_healthy_but_restarted_container_is_not_accepted(self):
-        with patch.object(component, 'route_ready', side_effect=lambda route: setattr(self, 'started', 'different')):
+        with patch.object(component, 'route_ready', side_effect=lambda route, **kwargs: setattr(self, 'started', 'different')):
             with self.assertRaises(ValueError): component.run(self.selected)
         self.assertTrue((component.STATE/'influx-browser-v1/HOLD.json').is_file())
 
