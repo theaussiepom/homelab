@@ -104,6 +104,8 @@ def load(deployment, installed_config_path, catalogue_path, plan_evidence, packe
     request, review = json.loads(request_raw), json.loads(review_raw)
     request_fields = {'schema', 'engine', 'phase', 'vmid', 'client_vmids', 'legacy_server_address', 'catalogue_sha256',
                       'original', 'helper_sha256', 'apply_supported', 'lifecycle_effects_verified'}
+    if 'ingress_acme_baseline' in request:
+        request_fields.add('ingress_acme_baseline')
     require(set(request) == request_fields and request['schema'] == maintenance.SCHEMA
             and request['vmid'] == selected['vmid'] and request['apply_supported'] is False
             and request['lifecycle_effects_verified'] is False
@@ -113,6 +115,14 @@ def load(deployment, installed_config_path, catalogue_path, plan_evidence, packe
             'Use the unchanged reviewed planning packet, not an apply or readiness assertion')
     helpers = [Path(maintenance.__file__), Path(maintenance.networks.__file__),
                Path(__file__).with_name('database_network_server.py')]
+    accepted = None
+    if 'ingress_acme_baseline' in request:
+        import ingress_network_baseline as baseline
+        baseline.scope(cfg,request['engine'],request['phase'],request['client_vmids'],request['legacy_server_address'])
+        accepted = baseline.load(cfg,work,request['ingress_acme_baseline'])
+        require(regular(plan_evidence/'ingress-acme-baseline.json') == accepted['manifest_raw'],
+                'Saved accepted-ACME baseline differs')
+        helpers += baseline.helper_files()
     require(request['helper_sha256'] == {p.name: digest(p.read_bytes()) for p in helpers},
             'The original plan checker/catalogue helper source changed')
     catalogue_raw = regular(catalogue_path, private=False)
@@ -122,6 +132,8 @@ def load(deployment, installed_config_path, catalogue_path, plan_evidence, packe
     require(digest(saved) == review['plan_sha256'] and digest(shown) == review['plan_json_sha256'],
             'The exact saved binary or JSON plan changed')
     options = {k: request[k] for k in ('phase', 'client_vmids', 'legacy_server_address')}
+    if accepted is not None:
+        options['ingress_acme_baseline'] = request['ingress_acme_baseline']
     checked = maintenance.check_plan(json.loads(shown), cfg, catalogue, request['engine'], **options)
     require(review['observed_provider_refresh'] == checked['observed_provider_refresh'],
             'The reviewed provider observation summary changed')
@@ -134,7 +146,8 @@ def load(deployment, installed_config_path, catalogue_path, plan_evidence, packe
     return dict(cfg=cfg, site=site, catalogue_path=catalogue_path, catalogue_raw=catalogue_raw,
                 plan=plan_evidence, work=work, request=request, review=review, candidate=candidate,
                 selected=selected, packet_raw=packet_raw, packet_sha256=expected_packet_sha256,
-                packet_path=Path(packet_path), request_raw=request_raw, review_raw=review_raw, attempt=attempt)
+                packet_path=Path(packet_path), request_raw=request_raw, review_raw=review_raw, attempt=attempt,
+                ingress_acme=accepted)
 
 
 def refresh(deployment, context):
@@ -289,6 +302,8 @@ def apply(deployment, installed_config_path, catalogue_path, plan_evidence, pack
                 ('guest.tfplan', regular(c['plan'] / 'guest.tfplan')), ('guest.tfplan.json', regular(c['plan'] / 'guest.tfplan.json')),
                 ('state-before.json', regular(c['work'] / 'terraform.tfstate'))]:
                 custody(c, name, value)
+            if c['ingress_acme'] is not None:
+                custody(c,'ingress-acme-baseline.json',c['ingress_acme']['manifest_raw'])
             admission(deployment, c)
             log = c['attempt'] / 'apply.log'; write_new(log, b'')
             run_tofu(c, ['init', '-input=false', '-lockfile=readonly',
@@ -302,6 +317,9 @@ def apply(deployment, installed_config_path, catalogue_path, plan_evidence, pack
             post = {'state_sha256': digest(state_raw), 'state_lineage': state['lineage'], 'state_serial': state['serial']}
             admission(deployment, c, completed=post)
             checked = readonly_overlay(c, c['attempt'] / 'verify-initial')
+            if c['ingress_acme'] is not None:
+                import ingress_network_baseline as baseline
+                baseline.verify_runtime(deployment,c,c['attempt']/'verify-initial')
             c = refresh(deployment, c); admission(deployment, c, completed=post)
             custody(c, 'state-after.json', state_raw)
             deployment.backup(c['cfg'], c['work'] / 'terraform.tfstate', 'after-database-network-apply')
@@ -338,6 +356,10 @@ def verify(deployment, installed_config_path, catalogue_path, plan_evidence, pac
             for name, expected in [('request.json', c['request_raw']), ('review-packet.json', c['review_raw']),
                 ('guest.tfplan', regular(c['plan'] / 'guest.tfplan')), ('guest.tfplan.json', regular(c['plan'] / 'guest.tfplan.json'))]:
                 require(regular(c['attempt'] / name) == regular(remote / name) == expected, 'Original plan custody changed')
+            if c['ingress_acme'] is not None:
+                require(regular(c['attempt']/'ingress-acme-baseline.json')
+                        == regular(remote/'ingress-acme-baseline.json') == c['ingress_acme']['manifest_raw'],
+                        'Completed accepted-ACME baseline custody changed')
             require(regular(c['attempt'] / 'state-after.json') == regular(remote / 'state-after.json')
                     and digest(regular(c['attempt'] / 'state-after.json')) == overlay['state_sha256']
                     and regular(c['attempt'] / 'state-before.json') == regular(remote / 'state-before.json')
@@ -346,6 +368,9 @@ def verify(deployment, installed_config_path, catalogue_path, plan_evidence, pac
             c = refresh(deployment, c); admission(deployment, c, completed=overlay)
             directory = c['attempt'] / ('verify-' + str(time.time_ns()))
             result = readonly_overlay(c, directory)
+            if c['ingress_acme'] is not None:
+                import ingress_network_baseline as baseline
+                baseline.verify_runtime(deployment,c,directory)
             c = refresh(deployment, c); admission(deployment, c, completed=overlay)
             require(regular(c['work'] / 'HOLD.json') == marker(c), 'Verification hold ownership changed')
             (c['work'] / 'HOLD.json').unlink(); sync(c['work'])
