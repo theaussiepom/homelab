@@ -86,6 +86,9 @@ def compose(cfg):
     if cfg.get('kind') == 'monitoring':
         return monitoring.compose(cfg)
     kind = cfg.get('kind')
+    if kind == 'pegaprox':
+        import pegaprox
+        return pegaprox.compose(cfg)
     if kind not in KINDS:
         raise ValueError('Choose dns, identity, ingress, automation or db-tools; databases are native')
     inputs = cfg.get('services', {})
@@ -291,6 +294,9 @@ def main():
     args = parser.parse_args()
     cfg = json.loads(args.config.read_text())
     documents = {'compose.yml': compose(cfg)}
+    if cfg['kind'] == 'pegaprox':
+        import pegaprox
+        documents['compose-bootstrap.yml'] = pegaprox.bootstrap_compose(cfg)
     if cfg['kind'] == 'ingress' and 'foundation' not in cfg:
         documents['routes.yml'] = ingress(cfg)
     args.output.mkdir(mode=0o700, parents=True, exist_ok=True)
