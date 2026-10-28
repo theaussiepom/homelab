@@ -45,11 +45,20 @@
   no_log: true
   when: not ansible_check_mode
 
+- name: Install PegaProx's first-start stack without a host listener
+  ansible.builtin.copy:
+    src: "{{ app.render_dir }}/compose-bootstrap.yml"
+    dest: /opt/homelab-app/compose-bootstrap.yml
+    owner: root
+    group: root
+    mode: '0600'
+  when: app.kind == 'pegaprox' and not ansible_check_mode
+
 - name: Read the generated foundation runtime file list
   ansible.builtin.set_fact:
     foundation_runtime_files: "{{ lookup('ansible.builtin.file', app.render_dir + '/runtime-files.json') | from_json }}"
   no_log: true
-  when: stack.foundation is defined and not ansible_check_mode
+  when: (stack.foundation is defined or app.kind == 'monitoring') and not ansible_check_mode
 
 - name: Prepare the private foundation runtime directory
   ansible.builtin.file:
@@ -58,7 +67,7 @@
     owner: root
     group: root
     mode: '0700'
-  when: stack.foundation is defined and not ansible_check_mode
+  when: (stack.foundation is defined or app.kind == 'monitoring') and not ansible_check_mode
 
 - name: Install only the selected service-readable foundation files
   ansible.builtin.copy:
@@ -69,13 +78,19 @@
     mode: "{{ item.mode }}"
   loop: "{{ foundation_runtime_files | default([]) }}"
   no_log: true
-  when: stack.foundation is defined and not ansible_check_mode
+  when: (stack.foundation is defined or app.kind == 'monitoring') and not ansible_check_mode
 
 - name: Prepare the directory for generated ingress routes
   ansible.builtin.file:
     path: /srv/homelab/data/traefik/dynamic
     state: directory
   when: app.kind == 'ingress' and stack.foundation is not defined and not ansible_check_mode
+
+- name: Validate the selected Proxmox CA before building its trust directory
+  ansible.builtin.command:
+    argv: [openssl, x509, -in, /opt/homelab-app/runtime/proxmox-ca.pem, -noout]
+  changed_when: false
+  when: app.kind == 'monitoring' and not ansible_check_mode
 
 - name: Install only the new ingress routes into the restored Traefik file directory
   ansible.builtin.copy:
@@ -90,7 +105,7 @@
 
 - name: Load preserved custom images by verified archive
   ansible.builtin.include_tasks: image.yml
-  loop: "{{ stack.services | dict2items | selectattr('value.archive', 'defined') | list }}"
+  loop: "{{ stack.services | default({}) | dict2items | selectattr('value.archive', 'defined') | list }}"
   loop_control:
     loop_var: image_input
     label: "{{ image_input.key }}"
@@ -101,6 +116,10 @@
   changed_when: false
   no_log: true
   when: not ansible_check_mode
+
+- name: Preserve Bitwarden image identity and install its health helper
+  ansible.builtin.include_tasks: bitwarden.yml
+  when: app.kind == 'bitwarden'
 
 - name: Prepare the directory for the selected HA helper
   ansible.builtin.file:
@@ -122,7 +141,7 @@
   ansible.builtin.assert:
     that:
       - app.start_services | default(false) | bool
-      - app.exclusive_writer_confirmed | default(false) | bool
+      - app.exclusive_writer_confirmed | default(false) | bool or (app.kind == 'monitoring' and app.installation | default('') == 'clean')
     fail_msg: 'Data is staged. Start requires the selected cutover and exclusive-writer confirmation.'
   when: app.start_services | default(false) | bool and not ansible_check_mode
 
@@ -156,8 +175,12 @@
 
 - name: Start exactly this guest stack
   ansible.builtin.command:
-    argv: [docker, compose, -f, /opt/homelab-app/compose.yml, up, -d, --wait, --wait-timeout, '180', --remove-orphans=false]
+    argv: "{{ ['docker', 'compose', '-f', ('/opt/homelab-app/compose-bootstrap.yml' if app.kind == 'pegaprox' else '/opt/homelab-app/compose.yml'), 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--pull', 'never'] if app.kind == 'bitwarden' else []) + (['--no-deps', ordinary_service] if ordinary_service is defined else []) }}"
   register: compose_start
   changed_when: "'Started' in compose_start.stderr or 'Created' in compose_start.stderr or 'Recreated' in compose_start.stderr"
   no_log: true
   when: app.start_services | default(false) | bool and not ansible_check_mode
+
+- name: Initialise the clean PegaProx account after its first start
+  ansible.builtin.import_tasks: pegaprox-bootstrap.yml
+  when: app.kind == 'pegaprox'

@@ -1,0 +1,45 @@
+---
+- name: Query the selected Bitwarden schema as its retained account before application start
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - '20'
+      - mariadb
+      - --no-defaults
+      - --protocol=TCP
+      - "--host={{ stack.bitwarden.database_server }}"
+      - "--user={{ stack.services.bitwarden.environment.BW_DB_USERNAME }}"
+      - "--database={{ stack.bitwarden.database_name }}"
+      - --connect-timeout=8
+      - --batch
+      - --skip-column-names
+      - --execute
+      - 'SELECT 1 FROM `{{ stack.bitwarden.database_name }}`.`Cipher` LIMIT 0; SELECT 1;'
+  environment:
+    MYSQL_PWD: "{{ stack.services.bitwarden.environment.BW_DB_PASSWORD }}"
+  register: bitwarden_database_query
+  changed_when: false
+  failed_when: bitwarden_database_query.rc != 0 or bitwarden_database_query.stdout | trim != '1'
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Record the successful guest database query without credentials or vault rows
+  ansible.builtin.copy:
+    content: "{{ bitwarden_database_record | to_nice_json }}\n"
+    dest: "{{ app.render_dir }}/bitwarden-database-query.json"
+    mode: '0600'
+  vars:
+    bitwarden_database_record:
+      schema: homelab-bitwarden-db-query-v1
+      state: passed
+      vmid: "{{ app.vmid | int }}"
+      database_server: "{{ stack.bitwarden.database_server }}"
+      database_name: "{{ stack.bitwarden.database_name }}"
+      source_backup_sha256: "{{ app.bitwarden.source_backup_sha256 }}"
+      source_environment_sha256: "{{ app.bitwarden.source_environment_sha256 }}"
+      source_image_id: "{{ stack.bitwarden.source_image_id }}"
+      method: retained account selected-schema LIMIT 0 query
+  delegate_to: localhost
+  become: false
+  no_log: true
+  when: not ansible_check_mode

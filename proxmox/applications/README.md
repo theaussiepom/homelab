@@ -1,7 +1,17 @@
 # After bootstrap: bring home automation across one guest at a time
 
+For separate database networks, see the [private database network guide](database-networks.md).
+It explains which settings belong to bootstrap, database CD and each application.
+
 [Proxmox guide](../README.md) · [Bootstrap](../bootstrap/README.md) ·
 [Databases](DATABASES.md) · [HTTPS and sign-in](FOUNDATION.md) · [Home automation](AUTOMATION.md) · [pgAdmin](PGADMIN.md) · [PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
+
+[Bitwarden Lite migration](BITWARDEN.md) uses the same installer through a
+private-input adapter, with a separate database restore and explicit admission.
+
+For a fresh monitoring system without restoring old Zabbix history, see
+[Clean Zabbix monitoring](ZABBIX.md). It uses this same guest/CD path and can be
+prepared independently of the household application migration.
 
 The deployment guest receives GitHub jobs. These scripts are the next step:
 **OpenTofu creates one application guest; Ansible installs its applications and
@@ -86,6 +96,13 @@ reviewed creation. A network scan alone is never accepted.
 
 Use database-native backups, not copies of files from running databases.
 Preserve numeric file owners, permissions, ACLs and extended attributes.
+
+## Keep the normal guest job after migration
+
+Use [ordinary deployment](ORDINARY.md) for the permanent per-guest job. Selection,
+OpenTofu and application Ansible are visible steps in that job. Migration data
+restoration remains separate. Keep unready guests disabled and preserve every
+failure hold; completing migration retires only its one-time work.
 
 ## How a deployment works
 

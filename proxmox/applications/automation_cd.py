@@ -1,4 +1,4 @@
-"""Four Actions jobs share one create-only automation guest and staged input set."""
+"""One guest job runs ordered automation deployment steps on one staged input set."""
 import argparse
 import fcntl
 import json
@@ -41,7 +41,7 @@ def prepare_inputs(config, destination=INPUTS, environment=None):
     manifest = {'schema': value['schema'], 'config_sha256': files.digest(files.regular(config)),
                 'files': {key: files.digest(data) for key, data in payload.items()}}
     files.private_directory(destination.parent)
-    # Guest setup creates this once. Parallel app jobs only compare the complete
+    # Guest setup creates this once. Later app steps only compare the complete
     # immutable bundle; neither can fill an interrupted preparation's gaps.
     if destination.exists() or destination.is_symlink():
         files.private_directory(destination)
@@ -135,14 +135,42 @@ def run(phase, config, destination=INPUTS, environment=None, deployment=deploy, 
         return result
 
 
+def ordinary(phase, config, maintenance):
+    """The permanent job uses common reconciliation; migration remains separate."""
+    import copy
+    import tempfile
+    import ordinary_cd
+    value = json.loads(files.regular(config))
+    files.require(set(value) == {'schema','enabled','site','stack','discovery_previous_guests'}
+                  and value['schema'] == 'homelab-automation-deployment-v1' and value['enabled'] is True,
+                  'Explicitly review and enable the prepared automation configuration')
+    cfg, stack = copy.deepcopy(value['site']), copy.deepcopy(value['stack'])
+    files.require(cfg['app']['kind'] == stack['kind'] == 'automation'
+                  and cfg['app'].get('exclusive_writer_confirmed') is True,
+                  'Confirm the exact automation writer window')
+    prerequisites(cfg, maintenance)
+    # The selected capture remains migration provenance in the private source;
+    # ordinary deployment neither reads it nor restores it.
+    cfg['app'].pop('capture',None)
+    identity = files.digest(files.encoded({'site':cfg,'stack':stack}))
+    cfg['app']['stack_config'] = str(Path('/var/lib/homelab-inputs/ordinary/automation')/identity/'stack.json')
+    packet = {'schema':'homelab-ordinary-deployment-v1','enabled':True,'kind':'automation','identity':identity,
+              'files':{'site.json':files.encoded(cfg).decode(),'stack.json':files.encoded(stack).decode()}}
+    with tempfile.TemporaryDirectory(prefix='automation-ordinary-') as temp:
+        path=Path(temp)/'packet.json';files.write_new(path,files.encoded(packet))
+        return ordinary_cd.run('infrastructure' if phase == 'guest' else phase,path)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--phase', required=True, choices=('guest', *SERVICES))
     parser.add_argument('--config', required=True, type=Path)
     parser.add_argument('--maintenance',type=Path)
+    parser.add_argument('--ordinary',action='store_true',help='Permanent no-restore deployment path')
     args = parser.parse_args()
     try:
-        print(json.dumps(run(args.phase, args.config, maintenance=args.maintenance)))
+        print(json.dumps(ordinary(args.phase,args.config,args.maintenance) if args.ordinary else
+                         run(args.phase,args.config,maintenance=args.maintenance)))
     except deploy.InputNeeded as error:
         raise SystemExit(str(error)) from None
     except (OSError, ValueError, KeyError, deploy.subprocess.CalledProcessError) as error:

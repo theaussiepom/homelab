@@ -1,0 +1,10 @@
+---
+- name: Verify fresh native monitoring data and the HTTPS UI without changes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require fresh authenticated agent and Proxmox samples
+      ansible.builtin.command:
+        argv: [python3, "{{ playbook_dir }}/../monitoring_verify.py", --config, "{{ monitoring_verification_file }}"]
+      changed_when: false

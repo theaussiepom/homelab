@@ -23,6 +23,8 @@ import guest_identity
 import discovery
 import foundation
 import ingress_routing
+import bitwarden_migration
+import monitoring
 
 check_merge_create_plan = discovery.check_merge_create_plan
 
@@ -78,6 +80,18 @@ def write(path, value):
 
 
 def validate(cfg, stack=None):
+    if cfg.get('app', {}).get('kind') == 'bitwarden' and 'bitwarden' not in cfg['app']:
+        raise InputNeeded('Bitwarden is preparation only; review restore, private inputs and native admission first')
+    if cfg.get('app', {}).get('kind') == 'bitwarden':
+        stack_path = cfg['app'].get('stack_config')
+        if not isinstance(stack_path, str) or not Path(stack_path).is_absolute():
+            raise InputNeeded('Bitwarden requires its absolute private stack configuration before planning')
+    if cfg.get('app', {}).get('kind') == 'pegaprox':
+        import pegaprox
+        try:
+            pegaprox.validate_deployment(cfg)
+        except ValueError as error:
+            raise InputNeeded(str(error)) from None
     vmid = cfg['guest']['vmid']
     if isinstance(vmid, bool) or not isinstance(vmid, int) or vmid < 100 or vmid in {900, 4914, 4915, 4920}:
         raise ValueError('Select one application guest, never the deployment controller or protected targets')
@@ -100,6 +114,14 @@ def validate(cfg, stack=None):
         raise ValueError('Ansible must use a selected guest interface')
     if app.get('new_target') is not True:
         raise ValueError('This installer is for a selected new guest')
+    if app.get('kind') == 'monitoring':
+        if app.get('installation') != 'clean' or 'capture' in app:
+            raise InputNeeded('Monitoring requires an explicit clean installation without capture inputs')
+        stack = json.loads(Path(app['stack_config']).read_text())
+        selected_monitoring = monitoring.validate(stack)
+        if (stack['guest_memory_mib'] != app['memory_mib'] or
+                selected_monitoring['bind_address'] not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]):
+            raise InputNeeded('Monitoring listeners and resource budget must match this guest')
     if app.get('kind') in DATABASE_KINDS and ('capture' in app or 'capture' in app.get('database', {})):
         raise InputNeeded('Database restore is a separate migration step; remove capture inputs from server CD')
     if app.get('kind') in DATABASE_KINDS:
@@ -115,6 +137,10 @@ def validate(cfg, stack=None):
         if address and address not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
             raise ValueError('HA discovery must select an address assigned to this guest')
     if 'stack_config' in app:
+        if app.get('kind') == 'bitwarden':
+            bitwarden_migration.validate_admission(cfg, stack)
+            import render
+            render.compose(stack)
         selected = foundation.validate(stack)
         if selected and app.get('kind') == 'ingress' and len(cfg['guest']['interfaces']) > 1:
             if 'frontend_routing' not in app or ingress_routing.validate(app['frontend_routing'])[0] != selected['bind_address']:
@@ -145,8 +171,19 @@ def input_hashes(cfg):
         paths.append(app['stack_config'])
         stack = json.loads(Path(app['stack_config']).read_text())
         paths.extend(foundation.source_files(stack))
+        if app.get('kind') == 'bitwarden':
+            if 'network_contract' in app:
+                paths.append(app['network_contract']['path'])
+            for key in ('restore_receipt', 'prerequisites_receipt'):
+                paths.extend((app['bitwarden'][key]['path'], str(bitwarden_migration.nas_receipt(cfg, key))))
+        if app.get('kind') == 'monitoring':
+            paths.extend(monitoring.source_files(stack))
+    if app.get('kind') == 'pegaprox':
+        paths.append(app['pegaprox']['key_source'])
     paths.extend(item['key_path'] for item in app.get('repositories', []))
     paths.extend(item['source'] for item in app.get('database', {}).get('config_files', []))
+    if 'zabbix_agent' in app:
+        paths.extend(app['zabbix_agent'][key] for key in ('package_file', 'psk_file'))
     return {path: sha(path) for path in sorted(set(paths))}
 
 
@@ -354,6 +391,8 @@ def execute(action, cfg_path, approved_plan=None):
     work.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (work / 'workflow.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if (work / 'ORDINARY-HOLD.json').exists() or (work / 'ORDINARY-HOLD.json').is_symlink():
+            raise InputNeeded('An ordinary guest operation owns this target; preserve its hold and phase receipts')
         hold = work / 'ROLLOUT-HOLD.json'
         if hold.exists():
             raise InputNeeded('An interrupted rollout is held; review its phase receipts before another job')
@@ -385,7 +424,7 @@ def execute(action, cfg_path, approved_plan=None):
             check_merge_create_plan(json.loads(json_plan.read_text()), cfg['site']['node'], vmid)
         except ValueError:
             raise InputNeeded('Deploy needs three fresh creates for the selected guest and node; use reviewed steps for an existing installation') from None
-        if cfg['app'].get('kind') not in DATABASE_KINDS:
+        if cfg['app'].get('kind') not in DATABASE_KINDS | {'monitoring', 'pegaprox'}:
             if cfg['app'].get('exclusive_writer_confirmed') is not True:
                 raise InputNeeded('Confirm the selected service migration and retire its old writers before deploy')
             capture = cfg['app']['capture']
@@ -530,6 +569,10 @@ def main():
     parser.add_argument('--service', choices=AUTOMATION_SERVICES)
     args = parser.parse_args()
     try:
+        site = json.loads(args.site.read_text())
+        if (isinstance(site, dict) and isinstance(site.get('app'), dict)
+                and site['app'].get('kind') == 'bitwarden'):
+            raise InputNeeded('Bitwarden operations must use bitwarden_cd.py so adapter holds and completion custody are preserved')
         result = automation_service(args.site, args.service) if args.action == 'service' else execute(args.action, args.site, args.plan_sha256)
         print(json.dumps(result))
     except InputNeeded as error:

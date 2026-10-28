@@ -2,6 +2,9 @@
 
 [Back to the application guide](README.md)
 
+For the separate guarded Influx watched-file route and its admission limits,
+see [Influx browser preparation](INFLUX-BROWSER.md).
+
 This stage adds three small guests after DNS and PostgreSQL are working:
 **Traefik** provides HTTPS, **Authentik** provides sign-in, and **pgAdmin** gives
 you a web interface for PostgreSQL. You review the private deployment settings

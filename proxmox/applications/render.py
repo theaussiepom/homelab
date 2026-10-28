@@ -10,6 +10,12 @@ import os
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
+_bitwarden_spec = importlib.util.spec_from_file_location('homelab_bitwarden', Path(__file__).with_name('bitwarden.py'))
+bitwarden = importlib.util.module_from_spec(_bitwarden_spec)
+_bitwarden_spec.loader.exec_module(bitwarden)
+_monitoring_spec = importlib.util.spec_from_file_location('homelab_monitoring', Path(__file__).with_name('monitoring.py'))
+monitoring = importlib.util.module_from_spec(_monitoring_spec)
+_monitoring_spec.loader.exec_module(monitoring)
 _foundation_spec = importlib.util.spec_from_file_location('homelab_foundation', Path(__file__).with_name('foundation.py'))
 foundation = importlib.util.module_from_spec(_foundation_spec)
 _foundation_spec.loader.exec_module(foundation)
@@ -20,7 +26,7 @@ foundation_source_files = foundation.source_files
 KINDS = {'automation': {'homeassistant', 'node_red', 'mqtt'},
          'identity': {'server', 'worker', 'redis'},
          'dns': {'pihole', 'unbound'}, 'ingress': {'traefik'},
-         'db-tools': {'pgadmin'}}
+         'db-tools': {'pgadmin'}, 'bitwarden': {'bitwarden'}}
 
 
 def positive(value, name, minimum=1):
@@ -80,9 +86,14 @@ def pgadmin_environment(value):
 
 def compose(cfg):
     """Keep placement fixed; site-specific images, restored data and routes are inputs."""
+    if cfg.get('kind') == 'monitoring':
+        return monitoring.compose(cfg)
     kind = cfg.get('kind')
+    if kind == 'pegaprox':
+        import pegaprox
+        return pegaprox.compose(cfg)
     if kind not in KINDS:
-        raise ValueError('Choose dns, identity, ingress, automation or db-tools; databases are native')
+        raise ValueError('Choose dns, identity, ingress, automation, db-tools or bitwarden; databases are native')
     inputs = cfg.get('services', {})
     if set(inputs) != KINDS[kind]:
         raise ValueError('Supply exactly the services for this guest')
@@ -96,12 +107,17 @@ def compose(cfg):
     if total + 256 > budget:
         raise ValueError('Leave at least 256 MiB for the guest OS outside container limits')
     foundation.validate(cfg)
+    if kind == 'bitwarden':
+        bitwarden.validate(cfg)
     if kind == 'db-tools' and 'foundation' not in cfg:
         pgadmin_environment(inputs['pgadmin'])
     result = {'name': f'homelab-{kind}', 'services': {}}
     for name, value in inputs.items():
         image = value.get('image', '')
-        if re.fullmatch(r'sha256:[0-9a-f]{64}', image):
+        if kind == 'bitwarden' and image == 'ghcr.io/bitwarden/lite:latest':
+            # Explicit service policy: the operator selected latest, without a version pin.
+            policy = 'always'
+        elif re.fullmatch(r'sha256:[0-9a-f]{64}', image):
             if not str(value.get('archive', '')).startswith('/') or not re.fullmatch(r'[0-9a-f]{64}', value.get('archive_sha256', '')):
                 raise ValueError('A local image needs its SHA256-verified image archive')
             policy = 'never'
@@ -139,7 +155,8 @@ def compose(cfg):
                   'redis': [('redis', '/data')], 'pihole': [('pihole', '/etc/pihole')],
                   'unbound': [('unbound', '/opt/unbound/etc/unbound')],
                   'traefik': [('traefik', '/etc/traefik')],
-                  'pgadmin': [('pgadmin', '/var/lib/pgadmin')]}[name]
+                  'pgadmin': [('pgadmin', '/var/lib/pgadmin')],
+                  'bitwarden': [('bitwarden/data', '/etc/bitwarden'), ('bitwarden/logs', '/var/log/bitwarden')]}[name]
         service['volumes'] = [f'{root}/{src}:{target}' for src, target in mounts]
         for mount in value.get('extra_mounts', []):
             src, target = mount.get('source', ''), mount.get('target', '')
@@ -226,6 +243,8 @@ def compose(cfg):
         # A missing capture must fail, rather than initializing a fresh profile.
         services['pgadmin']['volumes'] = [{'type': 'bind', 'source': f'{root}/pgadmin',
             'target': '/var/lib/pgadmin', 'bind': {'create_host_path': False}}]
+    if kind == 'bitwarden':
+        return bitwarden.configure(cfg, result)
     return foundation.configure_compose(cfg, result)
 
 
@@ -313,6 +332,9 @@ def main():
     args = parser.parse_args()
     cfg = json.loads(args.config.read_text())
     documents = {'compose.yml': compose(cfg)}
+    if cfg['kind'] == 'pegaprox':
+        import pegaprox
+        documents['compose-bootstrap.yml'] = pegaprox.bootstrap_compose(cfg)
     if cfg['kind'] == 'ingress' and 'foundation' not in cfg:
         documents['routes.yml'] = ingress(cfg)
     args.output.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -323,9 +345,9 @@ def main():
         with os.fdopen(fd, 'w') as stream:
             json.dump(document, stream, indent=2)
             stream.write('\n')
-    if 'foundation' in cfg:
+    if 'foundation' in cfg or cfg['kind'] == 'monitoring':
         manifest = []
-        for artifact in foundation_files(cfg):
+        for artifact in (monitoring.files(cfg) if cfg['kind'] == 'monitoring' else foundation_files(cfg)):
             path = args.output / artifact['path']
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
             os.fchmod(fd, 0o600)

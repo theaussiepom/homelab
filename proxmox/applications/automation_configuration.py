@@ -1,5 +1,6 @@
 """Derive bootstrap additions from the same automation guest used by CD."""
 import argparse
+import copy
 import json
 import os
 from pathlib import Path
@@ -41,8 +42,11 @@ def compile_config(foundation, automation):
     previous = automation['discovery_previous_guests']
     site_config.require(previous == boot['service_discovery']['guests'],
                         'The previous discovery scope must match the commissioned foundation')
-    boot['service_discovery']['guests'] = sorted([*previous, vmid])
-    boot['service_discovery_extension'] = {'previous_guests': previous}
+    import provider_access
+    original_owner = provider_access.owner(boot)
+    boot['service_discovery']['guests'] = [*previous, vmid]
+    boot['service_discovery_extension'] = {
+        'owner_sha256': provider_access.owner_sha256(original_owner), 'guests': [vmid]}
     boot['application_networks'] = [{'vmid': vmid, 'bridge': nic['bridge'], 'vlan': nic.get('vlan')}
                                     for nic in cfg['guest']['interfaces']]
     # This validates the plan structure only. Bootstrap CD independently checks

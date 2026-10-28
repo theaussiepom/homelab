@@ -13,6 +13,31 @@ import foundation_cd
 
 
 class AutomationCDTests(unittest.TestCase):
+    def test_permanent_job_uses_common_reconciliation_and_never_restores_its_capture(self):
+        import ordinary_cd
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);config=root/'config.json'
+            cfg={'app':{'kind':'automation','exclusive_writer_confirmed':True,'capture':{'path':'/historical/capture'},
+                        'stack_config':'/historical/stack.json'},'guest':{'vmid':200}}
+            value={'schema':'homelab-automation-deployment-v1','enabled':True,'site':cfg,
+                   'stack':{'kind':'automation'},'discovery_previous_guests':[202,211,212]}
+            config.write_text(json.dumps(value))
+            observed=[]
+            def run(phase,path):
+                packet=json.loads(path.read_text());site=json.loads(packet['files']['site.json'])
+                self.assertNotIn('capture',site['app'])
+                self.assertIn('/ordinary/automation/',site['app']['stack_config'])
+                observed.append((phase,packet))
+                return {'status':'passed'}
+            with patch.object(automation_cd,'prerequisites') as prerequisites,patch.object(ordinary_cd,'run',side_effect=run):
+                automation_cd.ordinary('guest',config,None)
+                automation_cd.ordinary('mqtt',config,None)
+            self.assertEqual([p for p,_ in observed],['infrastructure','mqtt'])
+            self.assertEqual(observed[0][1],observed[1][1])
+            self.assertEqual(prerequisites.call_count,2)
+            self.assertIn('capture',json.loads(config.read_text())['site']['app'])
+
+
     def test_guest_requires_exact_completed_prerequisites_and_unchanged_custody(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

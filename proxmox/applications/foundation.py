@@ -26,7 +26,7 @@ SCHEMAS = {
                  {'oauth_display_name', 'provider_slug'}, {'oauth_client_secret'}, set()),
     'ingress': ({'bind_address', 'proxmox_url', 'proxmox_token_id', 'acme_email', 'pve_ca_file',
                  'acme_dns_resolvers'},
-                {'authentik_url'}, {'proxmox_token', 'cloudflare_dns_token'}, set()),
+                {'authentik_url', 'browser_route'}, {'proxmox_token', 'cloudflare_dns_token'}, set()),
 }
 
 
@@ -104,7 +104,7 @@ def validate(cfg):
         raise ValueError('Supply only the selected foundation secret file references')
     for path in secrets.values():
         file_path(path)
-    for name in (required | (optional & selected.keys())) - {'acme_dns_resolvers'}:
+    for name in (required | (optional & selected.keys())) - {'acme_dns_resolvers', 'browser_route'}:
         text(selected[name], name)
     services = cfg.get('services', {})
     if kind == 'identity':
@@ -127,6 +127,9 @@ def validate(cfg):
         if services.get('pgadmin', {}).get('user', '5050:5050') not in ('5050', '5050:5050'):
             raise ValueError('Foundation pgAdmin uses the selected UID/GID 5050')
     else:
+        if 'browser_route' in selected:
+            from ingress_browser import validate as browser_validate
+            browser_validate(selected['browser_route'])
         address(selected['bind_address'])
         dns_resolvers(selected['acme_dns_resolvers'])
         if 'authentik_url' in selected:
@@ -306,6 +309,9 @@ def files(cfg):
         if 'authentik_url' in selected:
             shared['http']['middlewares']['authentik'] = authentik_middleware(selected['authentik_url'])
         add('traefik.yml', json.dumps(static, indent=2) + '\n')
+        if 'browser_route' in selected:
+            from ingress_browser import merge
+            shared = merge(shared, selected['browser_route'])
         add('shared.yml', json.dumps(shared, indent=2) + '\n')
         add('pve-ca.pem', read_private(selected['pve_ca_file'], certificate=True))
         add('cloudflare-dns-token', values['cloudflare_dns_token'])

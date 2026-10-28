@@ -58,8 +58,10 @@ class AutomationConfigurationTests(unittest.TestCase):
         self.assertEqual(boot['applications'][-1],{'vmid':200,'hostname':'automation'})
         self.assertEqual(boot['application_networks'],[{'vmid':200,'bridge':foundation['networks']['management']['bridge'],
             'vlan':foundation['networks']['management']['vlan']}])
-        self.assertEqual(boot['service_discovery_extension'],{'previous_guests':value['discovery_previous_guests']})
-        self.assertEqual(boot['service_discovery']['guests'],sorted([*value['discovery_previous_guests'],200]))
+        self.assertEqual(boot['service_discovery_extension']['guests'], [value['site']['guest']['vmid']])
+        self.assertRegex(boot['service_discovery_extension']['owner_sha256'], '^[0-9a-f]{64}$')
+        self.assertEqual(boot['service_discovery']['guests'][:-1],value['discovery_previous_guests'])
+        self.assertEqual(boot['service_discovery']['guests'],[*value['discovery_previous_guests'],200])
 
     def test_foreign_host_paths_keys_budget_or_previous_scope_are_refused(self):
         foundation, value = packet()

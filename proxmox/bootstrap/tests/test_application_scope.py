@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import test_provider_access as fixture
+import provider_access
 
 
 class ApplicationScopeTests(unittest.TestCase):
@@ -31,8 +32,8 @@ class ApplicationScopeTests(unittest.TestCase):
         host.run_cd()
         original = copy.deepcopy(host.c)
         host.c['applications'].append({'vmid': 200, 'hostname': 'automation'})
-        host.c['service_discovery']['guests'] = [200, 202, 211, 212]
-        host.c['service_discovery_extension'] = {'previous_guests': [202, 211, 212]}
+        host.c['service_discovery']['guests'] = [202, 211, 212, 200]
+        host.c['service_discovery_extension'] = {'owner_sha256':provider_access.owner_sha256(provider_access.owner(original)), 'guests':[200]}
         return host, original
 
     def test_new_guest_and_existing_vlan_can_be_added_without_mint_or_network_reload(self):
@@ -48,13 +49,12 @@ class ApplicationScopeTests(unittest.TestCase):
         writes = host.api.writes[start:]
         self.assertEqual(len(writes), 4)  # Guest admin, bridge/tag use, provider guest read.
         self.assertTrue(all(path == '/access/acl' and method == 'PUT' for path, method, _ in writes))
-        self.assertTrue(result['service_discovery']['extended'])
+        self.assertEqual(result['service_discovery']['new_acl_rows'],1)
         self.assertEqual(host.api.network, network); self.assertEqual(host.api.rules, firewall)
         self.assertEqual((host.root / 'service-discovery/token.json').read_bytes(), token)
         self.assertEqual(len(host.api.tokens), 1)
-        archives = list((host.root / 'service-discovery').glob('owner-*.previous.json'))
-        self.assertEqual(len(archives), 1)
-        self.assertEqual(json.loads(archives[0].read_text()), json.loads(previous))
+        self.assertEqual((host.root/'service-discovery/owner.json').read_bytes(),previous)
+        self.assertEqual(len(list((host.root/'service-discovery/scope-extensions').glob('*.json'))),1)
         written = copy.deepcopy(host.api.writes)
         host.run_cd()
         self.assertEqual(host.api.writes, written)
@@ -64,7 +64,7 @@ class ApplicationScopeTests(unittest.TestCase):
             with self.subTest(problem=problem):
                 host, original = self.setup(); writes = copy.deepcopy(host.api.writes)
                 if problem == 'missing': host.c.pop('service_discovery_extension')
-                if problem == 'wrong': host.c['service_discovery_extension']['previous_guests'] = [211, 212]
+                if problem == 'wrong': host.c['service_discovery_extension']['owner_sha256'] = '0'*64
                 if problem == 'removal': host.c['service_discovery']['guests'] = [200, 212]
                 with self.assertRaises(ValueError): host.run_cd()
                 self.assertEqual(host.api.writes, writes)

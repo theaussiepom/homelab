@@ -8,7 +8,8 @@ Home Assistant keeps its own login. Node-RED keeps its existing Authentik login.
 
 ## What you will see in Actions
 
-The deployment groups four jobs under the guest's name and ID:
+The deployment keeps one permanent job named for the guest and ID. It contains
+visible OpenTofu, MQTT, Home Assistant and Node-RED steps:
 
 ```mermaid
 flowchart LR
@@ -18,21 +19,24 @@ flowchart LR
   A[Authentik and Traefik ready] --> N
 ```
 
-Guest setup creates the LXC, checks its identity, waits for its networks, installs
-Docker and restores its saved data and original custom images. It prepares the
-shared Compose file once, **without starting the applications**.
+The OpenTofu step creates a missing guest or reconciles its approved safe desired
+infrastructure through the existing backend. The application steps reuse the
+shared Ansible tasks and start only their selected service. Node-RED follows HA
+because its selected flows use it. Matching completed inputs/state return
+unchanged; a new approved configuration can converge through the same job.
 
-The same job first completes the declared prerequisites: Traefik's narrow access
-to the new guest, the existing Node-RED login callback, and the broker's DNS name.
-Their private `automation/maintenance.json` records select the existing guests and
-completed installation evidence. Those installation sources remain pinned.
+One-time data restoration, HA configuration preparation and existing-guest
+prerequisites belong to the separate reviewed migration procedure. Prepare the
+admitted application data, original image exports, narrow ingress permissions,
+existing Node-RED callback and broker DNS before enabling this normal job. The
+normal workflow requires their recorded completion; it does not run migration
+helpers, restore a capture or modify the HA HTTP store.
 
-Each later job starts and checks only its named application. Node-RED waits for
-HA because the selected flows use it. Independent guest jobs can run at the same
-time when runner capacity permits; changes within this shared guest use one lock.
-An interrupted or failed operation stays held for review. Rerunning Actions does
-not retry it. A later unchanged successful deployment only checks the prepared
-guest and services; it does not restore data or recreate their containers.
+Independent ready guest jobs can use admitted runner slots in parallel. The
+parent owns the queue and actual dependency edges. Within one shared guest, its
+ordered service steps keep one operation binding. An interruption or failure
+stays held; another run cannot replay it. Completing migration never removes the
+permanent deploy job. See [ordinary deployment](ORDINARY.md).
 
 This code is preparation until the private site enables its job with reviewed
 inputs. A green source test is not proof that the restored house works.
@@ -47,7 +51,8 @@ site provides one `automation/deployment.json`, plus an independent immutable
 - `enabled`: an explicit boolean. Keep it false while preparing and reviewing.
 - `discovery_previous_guests`: the exact existing Proxmox discovery scope.
 - `site`: the existing application installer profile, including one guest, its
-  interfaces, resources, firewall allowances and verified capture reference.
+  interfaces, resources and firewall allowances. A retained capture reference is
+  historical migration provenance; ordinary deployment strips it from its inputs.
 - `stack`: the three services, image identities, resource limits and saved mounts.
 
 Use GitHub Secret `AUTOMATION_NODE_RED_API_TOKEN` for the existing Node-RED API
@@ -55,9 +60,10 @@ token. It becomes a private runner input, never a value in Git or Proxmox Notes.
 Node-RED's encryption key, OIDC client secret, flows and palette stay in the
 private saved data. MQTT retains its password file and persistent messages.
 
-Before creation, the installer checks the exact saved OpenTofu plan, capture and
-original image archives. It creates only the selected new guest and its firewall.
-It refuses to adopt an existing guest or overwrite a changed input bundle.
+The ordinary adapter checks an OpenTofu plan limited to the selected guest and
+its firewall. It refuses adoption, replacement, recreation from missing state,
+data-volume changes and unexpected drift. It preserves historical installation
+inputs and receipts. Original custom images remain hash-verified when loaded.
 
 The optional `extra_hosts` service map preserves old Docker database names while
 pointing them at the selected new server. This avoids rewriting passwords or
@@ -79,7 +85,7 @@ PostgreSQL membership. Preserve the existing HA Recorder hostname with an
 Node-RED flows before adding other aliases: having a database module installed
 does not establish an actual connection.
 
-All four jobs must consume the same effective deployment settings. A missing or
+All four steps must consume the same effective deployment settings. A missing or
 changed catalogue stops preparation. Rendering those settings does not create
 bridges, migrate a database, rewrite HA settings or prove an app can connect.
 Those prerequisites must be ready before enabling deployment.
@@ -110,16 +116,17 @@ allowance, DNS record, discovery permission or application configuration.
 For a guest with both a frontend and a Home interface, use the existing
 `frontend_routing` settings to keep replies on the interface that received the
 connection. The same routing helper used for Traefik runs before Docker. Each
-application job checks the prepared route before starting its service.
+application step checks the prepared route before starting its service.
 
 `automation_configuration.py` derives the new bootstrap guest/VLAN grants from
 the application profile. Its discovery extension adds only the selected guest
 to the existing read-only token; it does not replace that token or change its
-role. Private CD selects that bootstrap source only when `enabled` is true.
+role. The coordinator must select its reviewed current bootstrap packet separately;
+enabling an app never silently replaces the commissioned host source pin.
 
-HA configuration conversion is a separate migration step. CD restores the
-selected, already prepared configuration and starts the chosen image; it does
-not rewrite `configuration.yaml`, the `.storage/http` settings, trusted proxies
+HA configuration conversion is a separate migration step. Prepare and verify
+the selected configuration before deployment. The normal job starts the chosen
+image and does not rewrite `configuration.yaml`, the `.storage/http` settings, trusted proxies
 or sensor configuration. Old inputs containing `ha_http` are rejected before
 target actions. Agree how to prepare and verify the new listener and proxy
 settings before enabling deployment; source tests do not settle that decision.
