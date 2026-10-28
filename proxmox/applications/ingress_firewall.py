@@ -25,13 +25,21 @@ require=m.require
 
 
 def policy(value):
-    require(isinstance(value,dict) and set(value)=={'schema','vmid','source','destination','port','baseline'}
-            and value['schema']==POLICY_SCHEMA and value['vmid']==212 and type(value['vmid']) is int
-            and type(value['port']) is int and 1<=value['port']<=65535,'Use one closed ingress backend rule')
-    for name in ('source','destination'):
-        address=ipaddress.IPv4Address(value[name])
-        require(str(address)==value[name] and address.is_private and not any((address.is_multicast,
-            address.is_loopback,address.is_link_local,address.is_unspecified)),'Use exact private backend IPv4 addresses')
+    require(isinstance(value,dict) and set(value)=={'schema','vmid','rules','baseline'}
+            and value['schema']==POLICY_SCHEMA and value['vmid']==212 and type(value['vmid']) is int,
+            'Use the closed ingress backend rule policy')
+    rules=value['rules']
+    require(isinstance(rules,list) and 1<=len(rules)<=2,'Select only the finite reviewed backend rule list')
+    ports=[]
+    for row in rules:
+        require(isinstance(row,dict) and set(row)=={'source','destination','port'}
+                and type(row['port']) is int and row['port'] in (8080,5000) and row['port'] not in ports,
+                'Select each known backend port at most once')
+        ports.append(row['port'])
+        for name in ('source','destination'):
+            address=ipaddress.IPv4Address(row[name])
+            require(str(address)==row[name] and address.is_private and not any((address.is_multicast,
+                address.is_loopback,address.is_link_local,address.is_unspecified)),'Use exact private backend IPv4 addresses')
     b=value['baseline'];work=m.STATE/'212'
     require(isinstance(b,dict) and set(b)=={'state_sha256','state_lineage','state_serial','network_overlay',
             'network_plan_directory','catalogue','acme','browser_packet_sha256'}
@@ -51,25 +59,33 @@ def policy(value):
 
 def candidate(guest,value):
     policy(value);nics=guest.get('interfaces',[])
-    require(guest.get('vmid')==212 and len(nics)==4 and nics[1].get('bridge')=='vmbr30'
-            and nics[3].get('bridge')=='vmbr33','Preserve the accepted four-interface ingress')
-    backend=ipaddress.IPv4Interface(nics[1]['ipv4']);destination=ipaddress.IPv4Address(value['destination'])
-    require(str(backend.ip)==value['source'] and destination in backend.network
-            and destination not in (backend.ip,backend.network.network_address,backend.network.broadcast_address),
-            'Use the installed backend source and one distinct same-subnet target')
+    require(guest.get('vmid')==212 and len(nics)==4 and any(n.get('bridge')=='vmbr33' for n in nics),
+            'Preserve the accepted four-interface ingress')
     result=copy.deepcopy(guest)
-    rule={'direction':'out','proto':'tcp','port':str(value['port']),'source':value['source']+'/32',
-          'destination':value['destination']+'/32','comment':'Selected ingress backend'}
-    require(rule not in result['rules'],'The selected rule is already present; preserve its accepted operation')
-    result['rules'].append(rule)
+    for row in value['rules']:
+        matches=[n for n in nics if str(ipaddress.IPv4Interface(n['ipv4']).ip)==row['source']]
+        require(len(matches)==1,'Derive each unique source from the installed ingress NICs')
+        nic=matches[0];backend=ipaddress.IPv4Interface(nic['ipv4']);destination=ipaddress.IPv4Address(row['destination'])
+        require((row['port']==8080 and nic.get('bridge')=='vmbr30' and nic.get('vlan') is None)
+                or (row['port']==5000 and nic.get('vlan')==25),'Use the established backend or management interface')
+        require(destination in backend.network and destination not in
+                (backend.ip,backend.network.network_address,backend.network.broadcast_address),
+                'Use the installed source and one distinct same-subnet target')
+        rule={'direction':'out','proto':'tcp','port':str(row['port']),'source':row['source']+'/32',
+              'destination':row['destination']+'/32','comment':'Selected ingress backend'}
+        require(rule not in result['rules'],'The selected rule is already present; preserve its accepted operation')
+        result['rules'].append(rule)
     return result
 
 
-def provider_rule(rows,value):
-    result=copy.deepcopy(baseline.new_rule_template(rows))
-    result.update(type='out',action='ACCEPT',proto='tcp',dport=str(value['port']),
-                  source=value['source']+'/32',dest=value['destination']+'/32',comment='Selected ingress backend')
-    if 'pos' in result:result['pos']=len(rows)
+def provider_rules(rows,value):
+    template=baseline.new_rule_template(rows);result=[]
+    for index,row in enumerate(value['rules']):
+        rule=copy.deepcopy(template)
+        rule.update(type='out',action='ACCEPT',proto='tcp',dport=str(row['port']),
+                    source=row['source']+'/32',dest=row['destination']+'/32',comment='Selected ingress backend')
+        if 'pos' in rule:rule['pos']=len(rows)+index
+        result.append(rule)
     return result
 
 
@@ -92,14 +108,15 @@ def check_plan(value,node,guest,selected,accepted):
         if address!=m.RULES:
             require(change.get('actions')==['no-op'] and before==after,'No container, NIC, option or lifecycle changes')
             continue
-        m.validate_rule_positions(before);m.validate_rule_positions(after,allow_omitted=[len(before.get('rule',[]))])
+        m.validate_rule_positions(before);m.validate_rule_positions(after,allow_omitted=range(len(before.get('rule',[])),len(after.get('rule',[]))))
         require(change.get('actions')==['update'] and {k:v for k,v in before.items() if k!='rule'}==
                 {k:v for k,v in after.items() if k!='rule'}
-                and after.get('rule',[])[:-1]==before.get('rule')
-                and len(after['rule'])==len(before['rule'])+1,'Preserve every old raw firewall rule and position')
-        wanted=provider_rule(before['rule'],selected);actual=copy.deepcopy(after['rule'][-1])
-        if 'pos' in actual and actual['pos'] is None:actual['pos']=len(before['rule'])
-        require(actual==wanted,'Only the exact source, target, TCP port and ordinary provider defaults')
+                and after.get('rule',[])[:len(before.get('rule',[]))]==before.get('rule')
+                and len(after['rule'])==len(before['rule'])+len(selected['rules']),'Preserve every old raw firewall rule and position')
+        for index,(actual,wanted) in enumerate(zip(after['rule'][len(before['rule']):],provider_rules(before['rule'],selected))):
+            actual=copy.deepcopy(actual)
+            if 'pos' in actual and actual['pos'] is None:actual['pos']=len(before['rule'])+index
+            require(actual==wanted,'Only the exact sources, targets, TCP ports and ordinary provider defaults')
     return observations
 
 

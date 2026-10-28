@@ -3,12 +3,14 @@
 `ingress_firewall.py` prepares one firewall-only saved plan for the commissioned
 four-interface ingress. It is an adapter for the existing application saved-plan
 maintenance/apply driver, not a database engine, guest installer or runtime fix.
-It appends one outbound TCP rule with exact `/32` source and destination and one
-port on the existing backend subnet. Source must be the installed eth1 address.
+It appends a closed list of one or two outbound TCP rules with exact `/32`
+sources and destinations: port8080 on the existing backend NIC and, only when
+separately selected, port5000 on the management NIC. Each source must match one
+unique installed NIC, and each target must be on that NIC’s existing subnet.
 The container, all NICs, firewall options and every previous raw rule are no-ops.
 
-The closed `homelab-ingress-egress-policy-v1` policy binds guest212, source,
-destination, port and the accepted baseline: canonical state hash/lineage/serial,
+The closed `homelab-ingress-egress-policy-v1` policy binds guest212, an ordered `rules` list (source, destination and port),
+and the accepted baseline: canonical state hash/lineage/serial,
 completed network overlay reference, original saved network plan directory,
 exact operation catalogue reference, accepted ACME manifest reference, and the
 completed browser packet hash. Private references stay under guest212 custody.
@@ -49,4 +51,6 @@ existing network-overlay schema and does not claim service or browser acceptance
 Do not add this to recurring checks. A completed browser installation job bound
 to the old state must be retired in the coordinated private deployment change,
 while preserving its installed route and original claim/completion records.
-A second port or backend requires its own selected policy and native review.
+The only supported ports are8080 and5000, each at most once. The second rule
+must stay unselected until its actual backend/trust packet is accepted. Any
+additional rule requires separate source/policy qualification and native review.

@@ -18,7 +18,7 @@ def guest():
 
 
 def policy():
-    return dict(schema=firewall.POLICY_SCHEMA,vmid=212,source='10.88.30.23',destination='10.88.30.35',port=8080,
+    return dict(schema=firewall.POLICY_SCHEMA,vmid=212,rules=[dict(source='10.88.30.23',destination='10.88.30.35',port=8080)],
         baseline={'state_sha256':'1'*64,'state_lineage':'accepted','state_serial':3,
             'network_overlay':{'path':'/var/lib/homelab-applications/212/database-network-apply-'+'a'*64+'/overlay.json','sha256':'2'*64},
             'network_plan_directory':'database-network-plan-accepted',
@@ -37,7 +37,7 @@ class ScopeTests(unittest.TestCase):
         self.plan={'resource_changes':[{'address':name,'change':{'actions':['no-op'],'before':value,
             'after':copy.deepcopy(value),'after_unknown':{}}} for name,value in before.items()]}
         row=self.plan['resource_changes'][-1]['change'];row['actions']=['update']
-        row['after']['rule'].append(firewall.provider_rule(before[m.RULES]['rule'],self.policy))
+        row['after']['rule'].extend(firewall.provider_rules(before[m.RULES]['rule'],self.policy))
 
     def test_candidate_appends_one_source_bound_rule_preserving_four_nics_and_every_old_rule(self):
         self.assertEqual(self.candidate['interfaces'],self.guest['interfaces'])
@@ -46,10 +46,22 @@ class ScopeTests(unittest.TestCase):
             'source':'10.88.30.23/32','destination':'10.88.30.35/32','comment':'Selected ingress backend'})
         firewall.check_plan(self.plan,'pve-test',self.guest,self.policy,self.before)
 
+    def test_two_reviewed_rules_derive_distinct_existing_sources_in_one_exact_append(self):
+        self.policy['rules'].append(dict(source='10.88.25.23',destination='10.88.25.34',port=5000))
+        selected=firewall.candidate(self.guest,self.policy)
+        self.assertEqual(selected['interfaces'],self.guest['interfaces'])
+        self.assertEqual([r['port'] for r in selected['rules'][-2:]],['8080','5000'])
+        self.assertEqual([r['source'] for r in selected['rules'][-2:]],['10.88.30.23/32','10.88.25.23/32'])
+        value=copy.deepcopy(self.plan)
+        value['resource_changes'][-1]['change']['after']['rule']=copy.deepcopy(self.before[m.RULES]['rule'])+firewall.provider_rules(self.before[m.RULES]['rule'],self.policy)
+        firewall.check_plan(value,'pve-test',self.guest,self.policy,self.before)
+        self.policy['rules'].append(dict(source='10.88.25.23',destination='10.88.25.35',port=22))
+        with self.assertRaises(ValueError):firewall.candidate(self.guest,self.policy)
+
     def test_scope_refuses_other_source_subnet_destination_or_fifth_nic(self):
         for key,bad in [('source','10.88.40.33'),('destination','10.88.31.35'),('destination','0.0.0.0'),('port',True)]:
             # The source must be on the installed backend interface, never the frontend.
-            row={**self.policy,key:bad}
+            row=copy.deepcopy(self.policy);row['rules'][0][key]=bad
             with self.subTest(key=key,bad=bad),self.assertRaises(ValueError):firewall.candidate(self.guest,row)
         changed=copy.deepcopy(self.guest);changed['interfaces'].append(copy.deepcopy(changed['interfaces'][-1]))
         with self.assertRaises(ValueError):firewall.candidate(changed,self.policy)
@@ -126,7 +138,7 @@ class SavedPlanTests(unittest.TestCase):
         rows=[]
         for address,before in self.accepted_values.items():
             after=copy.deepcopy(before)
-            if address==m.RULES:after['rule'].append(firewall.provider_rule(before['rule'],self.target))
+            if address==m.RULES:after['rule'].extend(firewall.provider_rules(before['rule'],self.target))
             rows.append({'address':address,'change':{'actions':['update'] if address==m.RULES else ['no-op'],
                 'before':copy.deepcopy(before),'after':after,'after_unknown':{},'replace_paths':[]}})
         return {'resource_changes':rows}
@@ -180,6 +192,15 @@ class SavedPlanTests(unittest.TestCase):
             if path.is_file() and path.name not in ('apply.log','admitted-plan.json'):
                 self.assertEqual(path.read_bytes(),(self.nas/operation.name/path.name).read_bytes())
         self.assertFalse((self.work/'HOLD.json').exists())
+
+    def test_combined_two_rule_saved_plan_uses_one_existing_driver_apply(self):
+        self.target['rules'].append(dict(source='10.88.25.23',destination='10.88.25.34',port=5000))
+        self.policy_path.write_bytes(m.encoded(self.target));_,args=self.prepared();self.calls.clear()
+        with patch.object(m,'tofu',side_effect=self.native):driver.apply(*args)
+        self.assertEqual(sum('apply' in c for c in self.calls),1)
+        selected=json.loads((self.evidence/'candidate-guest.json').read_bytes())
+        self.assertEqual([r['port'] for r in selected['rules'][-2:]],['8080','5000'])
+        self.assertEqual(len(selected['interfaces']),4)
 
     def test_missing_route_nas_or_changed_network_ancestry_refuses_before_native_commands(self):
         for path in (self.nas/'influx-browser-complete.json',self.old_plan/'candidate-guest.json',
