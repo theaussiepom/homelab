@@ -87,7 +87,7 @@ the common coordinator with `app` (the original app identity),
 `database_network_action`, `database_network_request` and
 `database_network_result_path` (a new private controller result file). Trusted
 source bytes from `pgadmin_database_runtime.py` and `pgadmin_endpoint.py` are sent
-with `python3 -c`; inspect/verify install no guest helper. No packet field can
+with `python3 -c`; the inspect/verify phases do not install a guest helper. No packet field can
 choose commands, source files, guest paths, SQL or a different image.
 
 The pure controller sequence is:
@@ -211,7 +211,7 @@ wait for unrelated application migrations.
   Also prove the former PostgreSQL backend endpoint is unreachable and no old
   TCP 5432 allowance remains; HTTP/OAuth on the client's backend must still work.
 - Verify the exact approved registration delta and all remaining SQLite content
-  and original file metadata against the coherent backup, without exposing credentials. Verify the original install
+  and original file metadata against the coherent backup, without exposing credentials. Verify the original installation
   inputs/state/receipts remain unchanged; record maintenance separately.
 - From the existing browser profile, complete the retained HTTPS/Authentik login
   and connect using the **fresh registration under the same approved OAuth owner** and retained role/TLS policy.
