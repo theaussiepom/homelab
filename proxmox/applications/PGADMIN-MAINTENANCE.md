@@ -248,3 +248,10 @@ external network, no published ports, no host socket or private bind mounts.
 Its nested daemon needs test-only privilege. This is not a restart of the host
 Docker service, a native Proxmox test or complete qualification of the separately
 pinned Debian26.1.5 package/provider lifecycle.
+The generic profile fixture never invokes this privileged fixture. Its separate
+CI step explicitly opts in only on a disposable GitHub-hosted Linux runner. The
+fixture refuses remote/ambiguous Docker environment overrides or a non-default
+effective context; it requires the exact local root-owned socket and matching
+daemon hostname. Every outer command then uses that fixed endpoint and isolated
+CLI config, including cleanup and image streaming. It is default-deny outside
+that admission and must not be run against a shared or production daemon.

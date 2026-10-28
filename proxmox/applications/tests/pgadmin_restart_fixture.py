@@ -6,25 +6,73 @@ state. Privilege is confined to this test daemon; never restart the host daemon.
 This proves Docker26.1.4 policy behavior, not native Proxmox lifecycle effects or
 the separately pinned Debian26.1.5 package's complete target qualification.
 """
+import argparse
 import json
+import os
+import socket
+import stat
 import subprocess
+import sys
+import tempfile
 import time
 import uuid
 
 DIND = 'docker:26.1.4-dind@sha256:dd43b430341a40d88f4f30edb03865daa9d6fa39c9b1da70f27e2a89cec3eae1'
+LOCAL = 'unix:///var/run/docker.sock'
 
 
-def docker(*args, **kwargs):
-    return subprocess.run(['docker',*args],check=True,timeout=180,**kwargs)
+def validate_opt_in(opt_in, environment, platform):
+    """Only an explicitly admitted disposable GitHub-hosted Linux runner."""
+    if opt_in is not True or platform!='linux' or any(environment.get(k)!=v for k,v in {
+            'GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted','RUNNER_OS':'Linux'}.items()):
+        raise ValueError('Privileged cycle fixture requires explicit disposable GitHub-hosted Linux admission')
+    if environment.get('DOCKER_HOST','') not in ('',LOCAL) or environment.get('DOCKER_CONTEXT','') not in ('','default') \
+            or any(environment.get(k) for k in ('DOCKER_CONFIG','DOCKER_TLS','DOCKER_TLS_VERIFY','DOCKER_CERT_PATH')):
+        raise ValueError('Refuse remote or ambiguous Docker environment')
 
 
-def run():
+def validate_endpoint(context, endpoint):
+    if context!='default' or endpoint!=LOCAL:
+        raise ValueError('Require the default context and exact local runner Docker socket')
+
+
+def validate_daemon(info, hostname, socket_mode, socket_uid):
+    if not stat.S_ISSOCK(socket_mode) or socket_uid!=0 or not isinstance(info,dict) \
+            or info.get('Name')!=hostname or info.get('OSType')!='linux' or info.get('DockerRootDir')!='/var/lib/docker':
+        raise ValueError('Docker endpoint is not the confirmed local rootful runner daemon')
+
+
+def run(*, allow_disposable=False):
+    environment=dict(os.environ)
+    validate_opt_in(allow_disposable,environment,sys.platform)
+    # These commands read local CLI context metadata, never contact a daemon.
+    context=subprocess.run(['docker','context','show'],env=environment,check=True,
+                           capture_output=True,text=True,timeout=10).stdout.strip()
+    if context!='default': raise ValueError('Refuse the cached non-default Docker context')
+    endpoint=json.loads(subprocess.run(['docker','context','inspect','default','--format',
+        '{{json .Endpoints.docker.Host}}'],env=environment,check=True,capture_output=True,text=True,timeout=10).stdout)
+    validate_endpoint(context,endpoint)
+    socket_info=os.lstat('/var/run/docker.sock')
+    clean_environment={k:v for k,v in environment.items() if not k.startswith('DOCKER_')}
+    # Pin every outer command, including cleanup and image streaming, to the
+    # admitted endpoint. Ambient context/config changes cannot retarget it.
+    with tempfile.TemporaryDirectory(prefix='pgadmin-cycle-docker-config-') as config:
+        prefix=['docker','--host',LOCAL,'--config',config]
+        info=json.loads(subprocess.run(prefix+['info','--format','{{json .}}'],env=clean_environment,
+            check=True,capture_output=True,text=True,timeout=20).stdout)
+        validate_daemon(info,socket.gethostname(),socket_info.st_mode,socket_info.st_uid)
+        _run_cycle(prefix,clean_environment)
+
+
+def _run_cycle(prefix, environment):
+    def docker(*args, **kwargs):
+        return subprocess.run(prefix+list(args),env=environment,check=True,timeout=180,**kwargs)
     name='homelab-pgadmin-cycle-'+uuid.uuid4().hex[:12]
     volume=name+'-data'
     def inner(*args, **kwargs): return docker('exec',name,'docker',*args,**kwargs)
     def ready():
         for attempt in range(60):
-            result=subprocess.run(['docker','exec',name,'docker','info'],capture_output=True,timeout=10)
+            result=subprocess.run(prefix+['exec',name,'docker','info'],env=environment,capture_output=True,timeout=10)
             if result.returncode==0: return
             time.sleep(0.5)
         raise RuntimeError('Isolated Docker fixture did not become ready')
@@ -46,9 +94,9 @@ def run():
         ready()
         # Supply an already digest-verified image over stdin; the inner daemon
         # has no network and cannot pull anything. The workload is a shell loop.
-        archive=subprocess.Popen(['docker','image','save',image_id],stdout=subprocess.PIPE)
+        archive=subprocess.Popen(prefix+['image','save',image_id],env=environment,stdout=subprocess.PIPE)
         try:
-            loaded=subprocess.run(['docker','exec','-i',name,'docker','load'],stdin=archive.stdout,
+            loaded=subprocess.run(prefix+['exec','-i',name,'docker','load'],env=environment,stdin=archive.stdout,
                                   capture_output=True,timeout=180)
             archive.stdout.close()
             assert loaded.returncode==0 and archive.wait(timeout=30)==0
@@ -78,11 +126,14 @@ def run():
               'ID/image/stopped timestamps/restart count, while the control restarted. '
               'Native provider lifecycle remains unqualified.')
     except Exception:
-        subprocess.run(['docker','logs','--tail','40',name],check=False,timeout=20)
+        subprocess.run(prefix+['logs','--tail','40',name],env=environment,check=False,timeout=20)
         raise
     finally:
-        subprocess.run(['docker','rm','-f',name],check=False,timeout=30,stdout=subprocess.DEVNULL)
-        subprocess.run(['docker','volume','rm',volume],check=False,timeout=30,stdout=subprocess.DEVNULL)
+        subprocess.run(prefix+['rm','-f',name],env=environment,check=False,timeout=30,stdout=subprocess.DEVNULL)
+        subprocess.run(prefix+['volume','rm',volume],env=environment,check=False,timeout=30,stdout=subprocess.DEVNULL)
 
 
-if __name__=='__main__': run()
+if __name__=='__main__':
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--allow-disposable-github-runner',action='store_true')
+    run(allow_disposable=parser.parse_args().allow_disposable_github_runner)

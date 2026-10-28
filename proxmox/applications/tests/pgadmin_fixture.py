@@ -288,5 +288,3 @@ if __name__ == '__main__':
         check()
     else:
         main()
-        from pgadmin_restart_fixture import run as restart_policy_fixture
-        restart_policy_fixture()
