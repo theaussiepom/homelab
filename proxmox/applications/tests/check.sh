@@ -3,6 +3,7 @@
 set -eu
 export PYTHONDONTWRITEBYTECODE=1
 python3 -m unittest discover -s /src/proxmox/applications/tests -v
+python3 /src/proxmox/applications/tests/ordinary_package_cache_fixture.py
 python3 /src/proxmox/applications/tests/pegaprox_ansible_fixture.py
 python3 /src/proxmox/applications/tests/restore_fixture.py
 python3 /src/proxmox/applications/tests/zigbee_start_fixture.py
