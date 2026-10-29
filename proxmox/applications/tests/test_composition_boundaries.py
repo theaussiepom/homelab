@@ -287,3 +287,12 @@ class CompositionTests(unittest.TestCase):
         self.assertEqual(
             set(prepared.values()), {value.encode() for value in environment.values()}
         )
+
+    def test_foundation_listener_ownership_accepts_a_qualified_dhcp_interface(self):
+        for kind in ("identity", "ingress", "db-tools"):
+            with self.subTest(kind=kind):
+                stack = foundation_fixture(self.root, kind)
+                address = stack["foundation"]["bind_address"] if kind != "db-tools" else stack["pgadmin_bind_address"]
+                cfg = self.configuration(kind, stack, address)
+                cfg["guest"]["interfaces"][0].update(ipv4="dhcp", ipv4_endpoint=address + "/27", gateway=None)
+                self.assertEqual(contract.validate(cfg, stack), cfg["guest"]["vmid"])

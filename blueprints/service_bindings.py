@@ -1,6 +1,7 @@
 """Resolve published application endpoints into consumers, DNS and firewall edges."""
 
 import connections
+import network_endpoints
 import dns_records
 
 
@@ -31,7 +32,7 @@ def bind(resolved, route_records=None):
                 dns_records.validate({name: value})
             connections.require(
                 set(endpoint["addresses"].values())
-                <= {nic["ipv4"].split("/")[0] for nic in cfg["guest"]["interfaces"]}
+                <= network_endpoints.addresses(cfg["guest"])
                 and name not in records,
                 "Publish a unique hostname on its owning guest interface",
             )

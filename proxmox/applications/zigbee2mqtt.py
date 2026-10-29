@@ -66,11 +66,13 @@ def validate(settings):
 
 
 def validate_deployment(cfg, stack):
+    import network_endpoints
+
     selected = validate(stack["zigbee"])
     if (
         cfg["guest"].get("serial_device") != {"path": selected["serial_device"]}
         or selected["bind_address"]
-        not in {nic["ipv4"].split("/")[0] for nic in cfg["guest"]["interfaces"]}
+        not in network_endpoints.addresses(cfg["guest"])
         or set(stack["services"]) != {"zigbee2mqtt"}
     ):
         raise ValueError("Bind the declared coordinator and listener to this guest")

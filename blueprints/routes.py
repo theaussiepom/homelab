@@ -2,6 +2,7 @@
 
 import copy
 import discovery
+import network_endpoints
 
 
 def bind(resolved, routes):
@@ -27,7 +28,7 @@ def bind(resolved, routes):
                 discovery.name(key)
                 discovery.origin(
                     url,
-                    {nic["ipv4"].split("/")[0] for nic in cfg["guest"]["interfaces"]},
+                    network_endpoints.addresses(cfg["guest"]),
                 )
                 endpoints[guest + "." + application + "." + key] = (guest, url)
     if "ingress" in resolved:
@@ -66,9 +67,9 @@ def bind(resolved, routes):
             discovery.require(
                 address
                 not in {
-                    nic["ipv4"].split("/")[0]
+                    address
                     for cfg, _, _ in resolved.values()
-                    for nic in cfg["guest"]["interfaces"]
+                    for address in network_endpoints.addresses(cfg["guest"])
                 },
                 "Use an app endpoint for a managed guest backend",
             )

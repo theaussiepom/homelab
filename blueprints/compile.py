@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "proxmox/applications"))
 sys.path.insert(0, str(ROOT / "blueprints"))
 import connections
+import network_endpoints
 import guest_contract
 import service_bindings
 import routes
@@ -243,10 +244,12 @@ def _resolve_guest(root, overlay, name, spec):
         "Keep the selected guest identity consistent",
     )
     nics = cfg["guest"]["interfaces"]
+    network_endpoints.addresses(cfg["guest"])
     require(
         any(
             n["mac"] == cfg["app"]["mac"]
-            and n["ipv4"].split("/")[0] == cfg["app"]["address"]
+            and n["ipv4"] != "manual"
+            and str(network_endpoints.interface(n).ip) == cfg["app"]["address"]
             for n in nics
         ),
         "Bind application SSH to an assigned interface",

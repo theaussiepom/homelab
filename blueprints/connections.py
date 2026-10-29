@@ -6,6 +6,7 @@ or host enforcement. External resolvers and client policies remain explicit inpu
 
 from dataclasses import dataclass
 import ipaddress
+import network_endpoints
 import re
 from urllib.parse import urlsplit
 
@@ -37,10 +38,9 @@ def validate_identities(configurations):
                 nic.get("vlan"),
             )
             identities = [("MAC", nic["mac"].lower())]
-            if nic["ipv4"] not in {"dhcp", "manual"}:
-                identities.append(
-                    ("IPv4", str(ipaddress.IPv4Interface(nic["ipv4"]).ip))
-                )
+            endpoint = network_endpoints.interface(nic)
+            if endpoint is not None:
+                identities.append(("IPv4", str(endpoint.ip)))
             for kind, value in identities:
                 key = (link, kind, value)
                 require(
@@ -54,9 +54,9 @@ def source_address(guest, destination):
     """Use a connected interface, otherwise the declared default IPv4 route."""
     address = ipaddress.IPv4Address(destination)
     nics = [
-        (nic, ipaddress.IPv4Interface(nic["ipv4"]))
+        (nic, endpoint)
         for nic in guest["interfaces"]
-        if nic["ipv4"] not in {"dhcp", "manual"}
+        if (endpoint := network_endpoints.interface(nic)) is not None
     ]
     connected = [(nic, ip) for nic, ip in nics if address in ip.network]
     if connected:
@@ -65,7 +65,7 @@ def source_address(guest, destination):
             (nic, ip) for nic, ip in connected if ip.network.prefixlen == prefix
         ]
     else:
-        selected = [(nic, ip) for nic, ip in nics if nic.get("gateway")]
+        selected = [(nic, ip) for nic, ip in nics if nic.get("gateway") or nic["ipv4"] == "dhcp"]
     require(
         len(selected) == 1,
         "Declare an unambiguous source interface for guest connections",
@@ -113,8 +113,7 @@ def connections(configurations, external_routes=None):
             owners = {
                 other
                 for other, row in configurations.items()
-                for nic in row["guest"]["interfaces"]
-                if nic["ipv4"].split("/")[0] == address
+                if address in network_endpoints.addresses(row["guest"])
             }
             require(
                 len(owners) <= 1, "Assign each internal resolver address to one guest"

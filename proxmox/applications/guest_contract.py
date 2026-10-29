@@ -1,6 +1,7 @@
 """Validate current Debian LXC definitions without reading credentials or targets."""
 
 import json
+import network_endpoints
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
@@ -63,6 +64,7 @@ def data_bind_sources(document):
 
 def validate(cfg, stack=None):
     app, guest = cfg["app"], cfg["guest"]
+    addresses = network_endpoints.addresses(guest)
     require(
         guest.get("platform", "debian-lxc") == "debian-lxc",
         "Only Debian LXC is implemented",
@@ -126,7 +128,8 @@ def validate(cfg, stack=None):
     )
     require(
         any(
-            nic["ipv4"].split("/")[0] == app["address"]
+            nic["ipv4"] != "manual"
+            and str(network_endpoints.interface(nic).ip) == app["address"]
             and nic["mac"].lower() == app["mac"].lower()
             for nic in guest["interfaces"]
         ),
@@ -160,7 +163,7 @@ def validate(cfg, stack=None):
         _, _, _, mac = ingress_routing.validate(app["frontend_routing"])
         require(
             any(
-                n["ipv4"] == app["frontend_routing"]["address"]
+                str(network_endpoints.interface(n)) == app["frontend_routing"]["address"]
                 and n["mac"].lower() == mac
                 for n in guest["interfaces"]
             ),
@@ -255,7 +258,6 @@ def validate(cfg, stack=None):
             "Bind the stack kind and memory budget",
         )
         selected = foundation.validate(stack)
-        addresses = {nic["ipv4"].split("/")[0] for nic in guest["interfaces"]}
         if selected and app["kind"] in {"identity", "ingress"}:
             require(
                 selected["bind_address"] in addresses,

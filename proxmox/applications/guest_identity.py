@@ -11,6 +11,7 @@ import struct
 import subprocess
 from urllib.parse import quote, urlencode
 from private_io import private_writer
+import network_endpoints
 
 
 def fingerprint(key):
@@ -35,32 +36,54 @@ def creation_fingerprint(rows):
     return found[0]
 
 
-def pin(cfg, work, address, get_json, persist):
-    """No credential is sent to the guest before its public key is verified."""
+def verify_network(cfg, address, get_json):
+    """Read trusted PVE identity and refuse changed DHCP leases before any SSH."""
     if ipaddress.ip_address(address).version != 4:
         raise ValueError('Select the verified guest IPv4 address')
     guest = cfg['guest']
+    network_endpoints.addresses(guest)
     prefix = '/nodes/' + quote(cfg['site']['node'], safe='')
     config = get_json(prefix + '/lxc/' + str(guest['vmid']) + '/config')
     if config.get('hostname') != guest['hostname'] or config.get('protection') != 1 or config.get('unprivileged') != 1:
         raise ValueError('Proxmox returned a different or unprotected application guest')
     selected = [nic for nic in guest['interfaces'] if nic['mac'].lower() == cfg['app']['mac'].lower()]
-    if len(selected) != 1:
+    if len(selected) != 1 or network_endpoints.interface(selected[0]) is None or str(network_endpoints.interface(selected[0]).ip) != address:
         raise ValueError('Select exactly one application interface')
-    networks = []
-    for key, value in config.items():
-        if re.fullmatch(r'net[0-9]+', key):
-            fields = dict(part.split('=', 1) for part in value.split(',') if '=' in part)
-            if fields.get('hwaddr', '').lower() == cfg['app']['mac'].lower():
-                networks.append(fields)
-    vlan = str(selected[0]['vlan']) if selected[0]['vlan'] is not None else None
-    if len(networks) != 1 or networks[0].get('bridge') != selected[0]['bridge'] or networks[0].get('tag') != vlan:
-        raise ValueError('The guest network does not match its reviewed identity')
     interfaces = get_json(prefix + '/lxc/' + str(guest['vmid']) + '/interfaces')
-    active = [row for row in interfaces if row.get('hwaddr', '').lower() == cfg['app']['mac'].lower()]
-    if len(active) != 1 or str(ipaddress.ip_interface(active[0].get('inet', '')).ip) != address:
-        raise ValueError('The selected address does not belong to the Proxmox guest interface')
+    for nic in guest['interfaces']:
+        if nic not in selected and nic['ipv4'] != 'dhcp':
+            continue
+        networks = []
+        for key, value in config.items():
+            if re.fullmatch(r'net[0-9]+', key):
+                pairs = [part.split('=', 1) for part in value.split(',')]
+                if any(len(pair) != 2 for pair in pairs) or len({pair[0] for pair in pairs}) != len(pairs):
+                    raise ValueError('Require unambiguous Proxmox network fields')
+                fields = dict(pairs)
+                if fields.get('hwaddr', '').lower() == nic['mac'].lower():
+                    networks.append(fields)
+        vlan = str(nic['vlan']) if nic['vlan'] is not None else None
+        if len(networks) != 1 or networks[0].get('bridge') != nic['bridge'] or networks[0].get('tag') != vlan:
+            raise ValueError('The guest network does not match its reviewed identity')
+        if nic['ipv4'] == 'dhcp' and (networks[0].get('ip') != 'dhcp' or networks[0].get('gw')):
+            raise ValueError('Preserve the reviewed DHCP allocation without a static gateway')
+        active = [row for row in interfaces if row.get('hwaddr', '').lower() == nic['mac'].lower()]
+        expected = network_endpoints.interface(nic)
+        if len(active) != 1:
+            raise ValueError('Require one observed interface for each reviewed MAC')
+        observed_value = active[0].get('inet', '')
+        if not isinstance(observed_value, str) or '/' not in observed_value:
+            raise ValueError('Require an observed assigned IPv4 address and prefix')
+        observed = ipaddress.IPv4Interface(observed_value)
+        if observed.ip != expected.ip or (nic['ipv4'] == 'dhcp' and observed != expected):
+            raise ValueError('The observed guest endpoint differs from its reviewed address or prefix')
 
+
+def pin(cfg, work, address, get_json, persist):
+    """No credential is sent to the guest before its public key is verified."""
+    verify_network(cfg, address, get_json)
+    guest = cfg['guest']
+    prefix = '/nodes/' + quote(cfg['site']['node'], safe='')
     hosts = Path(cfg['paths']['known_hosts'])
     info = hosts.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:

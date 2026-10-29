@@ -117,3 +117,16 @@ class RoutesTests(unittest.TestCase):
                 ] = "http://198.18.30.21:80"
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                 r.bind(cfg, {"app": route})
+
+    def test_dhcp_qualified_backend_keeps_managed_route_and_discovery_ownership(self):
+        cfg = fixture()
+        cfg["native"][0]["guest"]["interfaces"][0].update(ipv4="dhcp", ipv4_endpoint="198.18.30.20/27", gateway=None)
+        route = {"host": "app.invalid", "target": {"endpoint": "native.web.ui"}}
+        self.assertEqual(r.bind(cfg, {"app": route}), {"app.invalid": "198.18.40.33"})
+        import discovery
+        labels = discovery.labels(cfg["native"][0])
+        self.assertEqual(labels["traefik.http.services.app.loadbalancer.server.url"], "http://198.18.30.20:80")
+        changed = fixture()
+        changed["native"][0]["guest"]["interfaces"][0].update(ipv4="dhcp", ipv4_endpoint="198.18.30.20/27", gateway=None)
+        with self.assertRaisesRegex(ValueError, "managed guest backend"):
+            r.bind(changed, {"app": dict(route, target={"url": "http://198.18.30.20:80"})})

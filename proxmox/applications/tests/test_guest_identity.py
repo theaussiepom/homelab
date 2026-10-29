@@ -22,7 +22,7 @@ class IdentityTests(unittest.TestCase):
     def setup_fixture(self, root):
         cfg = {'site': {'node': 'practice-pve'},
                'guest': {'vmid': 6101, 'hostname': 'practice-dns', 'interfaces': [
-                   {'mac': '02:00:00:00:61:01', 'bridge': 'vmbr0', 'vlan': 40}]},
+                   {'mac': '02:00:00:00:61:01', 'bridge': 'vmbr0', 'vlan': 40, 'ipv4': '198.18.100.42/24'}]},
                'app': {'mac': '02:00:00:00:61:01'},
                'paths': {'known_hosts': str(root / 'hosts'), 'api_token': str(root / 'api')}}
         (root / 'hosts').touch(mode=0o600)

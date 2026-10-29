@@ -126,6 +126,24 @@ class PacketTests(unittest.TestCase):
         self.assertIn("stack.json", first["dns"]["files"])
         self.assertNotIn("stack.json", first["mariadb"]["files"])
 
+    def test_dhcp_packet_preserves_allocation_and_binds_only_qualified_endpoint(self):
+        profile = compiler.read(self.root / "guests/dns/profile.json")
+        nic = profile["config"]["guest"]["interfaces"][0]
+        nic.update(ipv4="dhcp", ipv4_endpoint="198.18.25.8/27", gateway=None)
+        self.save("guests/dns/profile.json", profile)
+        packet = compiler.compile_stack(self.root, self.overlay)["dns"]
+        cfg = json.loads(packet["files"]["site.json"])
+        self.assertEqual(cfg["guest"]["interfaces"][0]["ipv4"], "dhcp")
+        self.assertEqual(cfg["app"]["address"], "198.18.25.8")
+        first = packet["identity"]
+        nic["ipv4_endpoint"] = "198.18.25.8/28"
+        self.save("guests/dns/profile.json", profile)
+        self.assertNotEqual(compiler.compile_stack(self.root, self.overlay)["dns"]["identity"], first)
+        nic.pop("ipv4_endpoint")
+        self.save("guests/dns/profile.json", profile)
+        with self.assertRaisesRegex(ValueError, "qualified IPv4 endpoint"):
+            compiler.compile_stack(self.root, self.overlay)
+
     def test_merge_and_preserved_image_contracts(self):
         self.assertEqual(
             compiler.merge({"a": {"b": 1}, "c": 2}, {"a": {"d": 3}, "c": 4}),

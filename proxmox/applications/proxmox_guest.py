@@ -79,6 +79,12 @@ def api_get(cfg, path):
         return json.load(response)["data"]
 
 
+def dhcp_admission(cfg):
+    """Verify reviewed DHCP leases through trusted PVE before guest SSH."""
+    if any(nic["ipv4"] == "dhcp" for nic in cfg["guest"]["interfaces"]):
+        guest_identity.verify_network(cfg, cfg["app"]["address"], lambda p: api_get(cfg, p))
+
+
 def guest_trust(cfg, work):
     """Pin this guest after creation; unrelated known_hosts additions are harmless."""
     address = cfg["app"]["address"]
@@ -224,6 +230,8 @@ def infrastructure(cfg, site, work, operation, expected):
 
     host_devices.check(cfg, operation)
     existing = (work / "terraform.tfstate").is_file()
+    if existing:
+        dhcp_admission(cfg)
     backup(cfg, work / "terraform.tfstate", "before-ordinary")
     shutil.copytree(
         SOURCE / "tofu",
@@ -233,6 +241,10 @@ def infrastructure(cfg, site, work, operation, expected):
     variables = {k: cfg[k] for k in ("site", "guest", "ssh_public_keys")}
     variables["guest"] = dict(
         {key: value for key, value in cfg["guest"].items() if key != "serial_device"},
+        interfaces=[
+            {key: value for key, value in nic.items() if key != "ipv4_endpoint"}
+            for nic in cfg["guest"]["interfaces"]
+        ],
         routing_labels=discovery.labels(cfg),
     )
     write(operation / "tofu/site.auto.tfvars.json", variables)

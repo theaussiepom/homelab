@@ -328,3 +328,35 @@ synthetic profile without default credentials, preserves the complete profile
 projection and verifies trusted OIDC discovery and the selected callback. Its old
 registration-replacement migration assertions remain retired. Required hosted CI
 runs these fixtures; they do not qualify native applications or private state.
+
+
+## DHCP allocation and qualified endpoints
+
+`guest.interfaces[].ipv4` remains the provider allocation: a static IPv4 CIDR or
+`"dhcp"`. A DHCP interface must additionally declare `ipv4_endpoint` as its
+independently qualified assigned IPv4 CIDR and must have no static gateway.
+Static interfaces derive their endpoint from `ipv4` and reject `ipv4_endpoint`;
+there is no second static authority, runtime discovery or guessed prefix. For
+example, a synthetic reviewed interface can declare `"ipv4": "dhcp"`,
+`"ipv4_endpoint": "198.18.40.2/27"`, `"gateway": null`. The real private assigned
+prefix requires site evidence; this example is not acceptance for any live guest.
+
+The shared endpoint helper feeds SSH binding, health/backend interface ownership,
+service publication, routing, DNS resolver ownership, source selection and network
+identity collision checks. Connected destinations select the longest qualified
+prefix; a DHCP NIC supplies its own default route. Ambiguous source choices fail.
+The qualified endpoint participates in packet identity, while the provider input
+strips `ipv4_endpoint` and preserves `ipv4: "dhcp"` and the null gateway. No
+provider, network allocation or tool choice is changed.
+
+Before an existing DHCP guest's infrastructure reconciliation and every guest SSH
+phase, read-only admission checks the trusted PVE guest identity, configured DHCP,
+MAC, bridge and VLAN against reviewed inputs. It also requires one observed
+interface with that exact MAC and assigned IPv4 address/prefix. New-guest SSH key
+pinning uses the same network admission before its existing creation-task proof.
+All reviewed DHCP interfaces are checked even when SSH uses a different static
+NIC. A missing or ambiguous interface, changed lease/prefix or static conversion
+holds execution before SSH; it never rewrites trust, adopts a lease, converts the
+NIC or clears failed evidence. Existing locks, state custody and no-replay behavior
+remain in force. Hosted synthetic checks do not qualify the private endpoint or
+provide native execution authority.

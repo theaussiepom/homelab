@@ -151,3 +151,13 @@ class ServiceBindingsTests(unittest.TestCase):
             ),
             1,
         )
+
+    def test_dhcp_publication_and_consumer_use_qualified_ips_without_allocation_conversion(self):
+        rows = fixture()
+        for guest, index, endpoint in [("automation", 0, "198.18.40.21/27"), ("radio", 0, "198.18.30.22/27")]:
+            rows[guest][0]["guest"]["interfaces"][index].update(ipv4="dhcp", ipv4_endpoint=endpoint, gateway=None)
+        service.bind(rows)
+        self.assertEqual(rows["dns"][1]["dns_records"]["broker.mqtt"], "198.18.40.21")
+        flow = next(service.connections_for({name: row[0] for name, row in rows.items()}))
+        self.assertEqual((flow.source_address, flow.target_address), ("198.18.30.22", "198.18.30.21"))
+        self.assertEqual(rows["automation"][0]["guest"]["interfaces"][0]["ipv4"], "dhcp")

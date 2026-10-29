@@ -196,10 +196,35 @@ class ConnectionContractTests(unittest.TestCase):
         self,
     ):
         dynamic = guest("198.18.1.2", [])
-        dynamic["guest"]["interfaces"][0]["ipv4"] = "dhcp"
+        dynamic["guest"]["interfaces"][0].update(ipv4="dhcp", ipv4_endpoint="198.18.1.2/24", gateway=None)
         c.validate_identities({"dynamic": dynamic})
+        manual = copy.deepcopy(dynamic)
+        manual["guest"]["interfaces"][0].pop("ipv4_endpoint")
+        manual["guest"]["interfaces"][0]["ipv4"] = "manual"
+        c.validate_identities({"manual": manual})
         link = c.Connection("source", "target", "198.18.1.2", "198.18.2.3", "tcp", 8123)
         with self.assertRaisesRegex(ValueError, "explicit firewall ports"):
             c.permits([{"direction": "out", "proto": "tcp", "port": 8123}], "out", link)
 
         self.assertTrue(c.permits([{"direction": "out", "proto": "tcp"}], "out", link))
+
+    def test_dhcp_endpoint_participates_in_resolver_identity_firewalls_and_source_selection(self):
+        cfg = self.configurations()
+        nic = cfg["ingress"]["guest"]["interfaces"][0]
+        nic.update(ipv4="dhcp", ipv4_endpoint="198.18.1.2/27", gateway=None)
+        cfg["ingress"]["guest"]["interfaces"].append({"ipv4": "manual", "bridge": nic["bridge"], "vlan": nic["vlan"], "mac": "02:00:00:00:ff:fe"})
+        self.assertEqual(c.source_address(cfg["ingress"]["guest"], "198.19.1.9"), "198.18.1.2")
+        cfg["app"]["guest"]["dns_servers"] = ["198.18.1.2"]
+        flows = list(c.connections(cfg))
+        self.assertEqual({f.protocol for f in flows if f.port == 53}, {"tcp", "udp"})
+        self.assertEqual({f.target for f in flows if f.port == 53}, {"ingress"})
+        duplicate = guest("198.18.1.2", [])
+        duplicate["guest"]["interfaces"][0]["mac"] = "02:00:00:00:ff:ff"
+        cfg["duplicate"] = duplicate
+        with self.assertRaisesRegex(ValueError, "Duplicate IPv4"):
+            c.validate_identities(cfg)
+        cfg["ingress"]["guest"]["interfaces"].append(dict(nic, ipv4_endpoint="198.18.1.3/27"))
+        with self.assertRaisesRegex(ValueError, "unambiguous"):
+            c.source_address(cfg["ingress"]["guest"], "198.18.1.9")
+        with self.assertRaisesRegex(ValueError, "unambiguous"):
+            c.source_address(cfg["ingress"]["guest"], "198.19.1.9")

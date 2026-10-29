@@ -2,6 +2,7 @@
 
 import copy
 import ipaddress
+import network_endpoints
 from pathlib import PurePosixPath
 import re
 from urllib.parse import urlsplit
@@ -135,7 +136,7 @@ def labels(cfg):
     )
     routes = cfg.get("routes", {})
     validate_routes(
-        routes, {nic["ipv4"].split("/")[0] for nic in cfg["guest"]["interfaces"]}
+        routes, network_endpoints.addresses(cfg["guest"])
     )
     result = {}
     for key, route in routes.items():

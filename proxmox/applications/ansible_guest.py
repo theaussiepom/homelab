@@ -30,6 +30,7 @@ def run_phase(cfg, site, work, operation, expected, phase):
 
     require(binding(cfg, site) == expected, "Approved inputs changed before Ansible")
     require(phase in phases(cfg), "Select a current preparation or application phase")
+    proxmox_guest.dhcp_admission(cfg)
     proxmox_guest.guest_trust(cfg, work)
     phase_work = operation / phase
     private_directory(phase_work, create=True)
