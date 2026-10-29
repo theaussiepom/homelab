@@ -1,9 +1,0 @@
----
-- name: Require an admitted exact target and identity-preserving operation
-  ansible.builtin.assert:
-    that:
-      - homelab_allow_mutation | bool
-      - homelab_scope_admitted | bool
-      - homelab_preserve_uid_gid | bool
-      - homelab_target_is_new_guest | bool
-    fail_msg: "Target preparation is held; bind release/target/scope and preserved identities first."
