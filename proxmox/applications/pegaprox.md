@@ -242,3 +242,23 @@ qualification. Review the unused ID/address, MAC, resources, exact Debian
 packages/template, approved client allowance, scoped runner grant and separate
 key custody. CD does not yet connect PegaProx to a Proxmox cluster or grant it
 API/SSH authority; that follows the separately reviewed runtime-access decision.
+
+## Commissioned availability
+
+Keep the completed installation inputs and receipt bindings as historical
+custody. An existing-service correction can enable guest autostart and change
+only the preserved Docker container's restart policy to `unless-stopped`, after
+backing up its data, key, certificate and failed verification evidence. Do not
+repeat the clean installation, account bootstrap or container creation.
+
+`pegaprox_availability.py --policy POLICY --deployment DESIRED` verifies that the
+existing protected guest is running with autostart, Docker is enabled, and the
+exact admitted container, image, Compose and data/key mounts retain that ongoing
+policy. It requires the original completion receipt and pinned SSH identity.
+The checker only reads state; a mismatch is a real deployment failure. Keep the
+original health and initialized-account verification in the permanent job after
+this availability check.
+
+The commissioned availability policy also binds the original receipt identity,
+prepared manifest and current input hashes. Persistent Docker service enablement
+must report `enabled`; temporary runtime enablement does not satisfy startup policy.
