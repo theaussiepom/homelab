@@ -167,7 +167,7 @@ def infrastructure(cfg, site, work, operation, expected, adapter=None):
     if changed:
         deploy.quiet(tofu + ['apply', '-input=false', '-lock-timeout=30s', str(operation / 'guest.tfplan')], environment, log)
     if not existing:
-        deploy.write(work / 'apply-window.json', dict(window, finished_at_ns=time.time_ns()))
+        files.write_marker(work / 'apply-window.json', dict(window, finished_at_ns=time.time_ns()))
         deploy.guest_identity.pin(cfg, work, cfg['app']['address'], lambda p: deploy.api_get(cfg, p), deploy.write)
     deploy.backup(cfg, work / 'terraform.tfstate', 'after-ordinary')
     return {'changed': changed, 'created': not existing, 'state_sha256': deploy.sha(work / 'terraform.tfstate')}

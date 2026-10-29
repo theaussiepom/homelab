@@ -99,6 +99,14 @@ class CreationIdentityTests(unittest.TestCase):
         for name in ('plan.json', 'apply-window.json'):
             self.assertEqual((self.work / name).read_text(), 'original installation proof')
 
+    def test_interrupted_completion_preserves_the_unfinished_creation_window(self):
+        with patch.object(ordinary.files.os, 'replace', side_effect=OSError('synthetic interruption')):
+            with self.assertRaises(OSError):
+                self.run_creation()
+        self.assertNotIn('finished_at_ns', json.loads((self.work / 'apply-window.json').read_text()))
+        self.assertTrue((self.work / 'apply-window.json.pending').exists())
+        self.assertEqual((self.root / 'hosts').read_text(), '')
+
 
 if __name__ == '__main__':
     unittest.main()
