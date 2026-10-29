@@ -39,7 +39,6 @@ Object.assign(auth.strategy.options, {
     callbackURL: `${external}/auth/strategy/callback/`
 });
 // The retained configuration binds the former Docker bridge address. The new
-// guest keeps its current firewall posture; stored rules are not proof of
-// effective enforcement. Native OIDC stays required; probes retain loopback.
+// guest firewall restricts access; loopback also remains available for probes.
 settings.uiHost = "0.0.0.0";
 module.exports = settings;

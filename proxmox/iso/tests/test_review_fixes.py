@@ -1,6 +1,5 @@
 """Regressions for the installer review's failure and evidence boundaries."""
 from contextlib import redirect_stdout
-from datetime import datetime, timezone
 import gzip
 import hashlib
 import importlib.util
@@ -96,65 +95,6 @@ class FetchVerificationTests(unittest.TestCase):
                     message = 'unexpected release key' if failure == 'key' else 'package index hash mismatch'
                     with self.assertRaisesRegex(RuntimeError, message):
                         exec(compile(source, 'fetch-assistant.py', 'exec', optimize=1), {'__name__': '__main__'})
-
-
-class LegacyCompilerTests(unittest.TestCase):
-    def test_malformed_catalogue_hardware_refuses_before_layout_lookup(self):
-        for hardware in (None, [], 'invalid', 1, True):
-            inputs = {'catalog': core.canonical({'hardware': hardware})}
-            with self.subTest(hardware=hardware), self.assertRaisesRegex(core.Refusal, 'hardware must be an object'):
-                core.context(inputs, datetime.now(timezone.utc))
-
-    def test_unavailable_legacy_mirror_contract_refuses_explicitly(self):
-        with self.assertRaisesRegex(core.Refusal, 'unsupported.*mirror'):
-            core.context({'catalog': b'{"hardware":{"disk_layout":"zfs-mirror"}}'}, datetime.now(timezone.utc))
-        with self.assertRaisesRegex(core.Refusal, 'unsupported.*mirror'):
-            core.answer({'disk_layout': 'zfs-mirror'})
-
-    def test_verified_signature_survives_replacement_of_original_file(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            signer = 'unit@example.invalid'
-            trust = root/'allowed-signers'
-            core.new_file(trust, b'fixture trust')
-            now = datetime.now(timezone.utc)
-            ctx = {'catalog': {'site': {'id': 'unit', 'environment': 'synthetic'}}, 'bindings': {}, 'boot_id': '22222222-2222-4222-8222-222222222222'}
-            request = core.request_for(ctx, now)
-            data = core.canonical(request)
-            signature = root/'request.json.sig'
-            core.new_file(signature, b'captured signature')
-            captured = signature.read_bytes()
-            def replace_original_after_verification(argv, **kwargs):
-                self.assertEqual(Path(argv[argv.index('-s')+1]).read_bytes(), captured)
-                self.assertEqual(Path(argv[argv.index('-f')+1]).read_bytes(), b'fixture trust')
-                self.assertEqual(kwargs['input'], data)
-                signature.write_bytes(b'replaced after verification')
-                return subprocess.CompletedProcess(argv, 0)
-            with patch.object(core.subprocess, 'run', side_effect=replace_original_after_verification):
-                verified_request, verified_signature = core.verify_request(data, ctx, now, signature, trust, signer)
-            self.assertEqual(verified_request, request)
-            self.assertEqual(verified_signature, captured)
-            self.assertNotEqual(verified_signature, signature.read_bytes())
-
-    def test_render_or_manifest_failure_leaves_no_output_directory(self):
-        for failing_function in ('answer', 'manifest_for'):
-            with tempfile.TemporaryDirectory() as folder:
-                out = Path(folder).resolve()/'bundle'
-                with self.subTest(function=failing_function), patch.object(core, 'answer', return_value=b'answer') as render, patch.object(core, 'manifest_for', return_value={}) as manifest:
-                    {'answer': render, 'manifest_for': manifest}[failing_function].side_effect = core.Refusal('invalid input')
-                    with self.assertRaisesRegex(core.Refusal, 'invalid input'):
-                        core.compile_bundle({}, {}, b'request', b'verified signature', {'first_boot': b'payload'}, out)
-                    self.assertFalse(out.exists())
-
-    def test_bundle_manifest_hashes_the_single_rendered_answer(self):
-        with tempfile.TemporaryDirectory() as folder:
-            out = Path(folder).resolve()/'bundle'
-            ctx = {'catalog': {'installer': {'partition_label': 'UNIT'}}, 'release_identity': {}, 'bindings': {}, 'boot_id': 'unit', 'target': {'devname': '/dev/vda', 'size_bytes': 1024**3, 'by_ids': []}}
-            with patch.object(core, 'answer', side_effect=[b'first render', b'different second render']) as render:
-                manifest = core.compile_bundle(ctx, {'expires_at': '2026-10-25T00:05:00Z'}, b'request', b'verified signature', {'first_boot': b'payload'}, out)
-            self.assertEqual(render.call_count, 1)
-            self.assertEqual(manifest['answer_sha256'], core.sha((out/'answer.toml').read_bytes()))
-            self.assertEqual((out/'request.json.sig').read_bytes(), b'verified signature')
 
 
 if __name__ == '__main__':

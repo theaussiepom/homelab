@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Approved static-media contract, separate from legacy boot-bound compilation.
+"""Approved static-media contract for the attended two-disk installer.
 
 Run offline in the isolated Linux builder. Never opens a physical device.
 """
@@ -14,7 +14,6 @@ import sys
 import tempfile
 
 ROOT = Path('/work')
-sys.path.insert(0, str(ROOT / 'src'))
 sys.path.insert(0, str(ROOT / 'src'))
 from homelab_installer import core
 from launch import SLOTS, validate_config

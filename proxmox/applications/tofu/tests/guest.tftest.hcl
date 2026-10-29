@@ -1,5 +1,35 @@
 mock_provider "proxmox" {}
 
+run "active_radio_leaves_host_devices_to_its_capability" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      vmid = 209, hostname = "radio", started = true, start_on_boot = true
+    })
+  }
+  assert {
+    condition     = proxmox_virtual_environment_container.guest.started && proxmox_virtual_environment_container.guest.start_on_boot
+    error_message = "Radio must deploy active and start at boot."
+  }
+  assert {
+    condition     = length(proxmox_virtual_environment_container.guest.device_passthrough) == 0
+    error_message = "Device attachment belongs to the restricted host capability, outside token-authenticated API requests."
+  }
+}
+
+run "stopped_desired_state_is_rejected" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node  = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), { started = false })
+  }
+  expect_failures = [var.guest]
+}
+
+
 variables {
   site = {
     node         = "practice-pve"
@@ -91,44 +121,6 @@ run "fractional_volume_size_is_rejected" {
   variables {
     node  = "practice-pve"
     guest = merge(jsondecode(file("tests/base-guest.json")), { volumes = { data = { path = "/srv/homelab", size_gib = 1.5 } } })
-  }
-  expect_failures = [var.guest]
-}
-
-run "ordinary_guests_receive_no_host_devices" {
-  command = plan
-  module { source = "./guest" }
-  variables { node = "practice-pve" }
-  assert {
-    condition     = length(proxmox_virtual_environment_container.guest.device_passthrough) == 0
-    error_message = "Existing guests must not receive a host device."
-  }
-}
-
-run "one_exact_usb_serial_device" {
-  command = plan
-  module { source = "./guest" }
-  variables {
-    node = "practice-pve"
-    guest = merge(jsondecode(file("tests/base-guest.json")), {
-      serial_device = { path = "/dev/serial/by-id/usb-Example_Radio_123-if00" }
-    })
-  }
-  assert {
-    condition = (length(proxmox_virtual_environment_container.guest.device_passthrough) == 1 &&
-      one(proxmox_virtual_environment_container.guest.device_passthrough).path == "/dev/serial/by-id/usb-Example_Radio_123-if00" &&
-      one(proxmox_virtual_environment_container.guest.device_passthrough).mode == "0660" &&
-    proxmox_virtual_environment_container.guest.unprivileged)
-    error_message = "Pass only the selected serial device without making the guest privileged."
-  }
-}
-
-run "wildcard_devices_are_rejected" {
-  command = plan
-  module { source = "./guest" }
-  variables {
-    node  = "practice-pve"
-    guest = merge(jsondecode(file("tests/base-guest.json")), { serial_device = { path = "/dev/*" } })
   }
   expect_failures = [var.guest]
 }

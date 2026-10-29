@@ -1,0 +1,40 @@
+---
+- name: Prepare the selected guest capabilities once
+  hosts: application
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Verify guest identity and separately prepared prerequisites
+      ansible.builtin.import_tasks: tasks/guest-ready.yml
+
+    - name: Require the reusable Linux baseline capability
+      ansible.builtin.assert:
+        that:
+          - preparation_capabilities in [['linux'], ['linux', 'docker']]
+          - "('docker' in preparation_capabilities) == (app.kind not in ['postgresql', 'mariadb', 'influxdb'])"
+
+    - name: Reuse the guarded repositories, accounts and exact packages
+      ansible.builtin.import_tasks: tasks/packages-install.yml
+
+    - name: Prepare guest networking before Docker
+      ansible.builtin.import_tasks: ../../common/ansible/network-ready.yml
+      vars:
+        network_ready_unit: docker.service
+      when: "'docker' in preparation_capabilities"
+
+    - name: Enable Docker for guests that select it
+      ansible.builtin.systemd_service:
+        name: docker
+        state: started
+        enabled: true
+      when: "'docker' in preparation_capabilities"
+
+    - name: Check Docker and Compose availability
+      ansible.builtin.command:
+        argv: "{{ item }}"
+      loop:
+        - [docker, version]
+        - [docker, compose, version, --short]
+      changed_when: false
+      when: "'docker' in preparation_capabilities"

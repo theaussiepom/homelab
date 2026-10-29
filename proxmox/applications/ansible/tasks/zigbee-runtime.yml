@@ -1,0 +1,22 @@
+---
+- name: Install the read-only Zigbee configuration checker
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../zigbee2mqtt.py"
+    dest: /opt/homelab-app/zigbee2mqtt.py
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install the declared Zigbee endpoint settings
+  ansible.builtin.copy:
+    content: "{{ stack.zigbee | to_json }}\n"
+    dest: /opt/homelab-app/zigbee-settings.json
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Require the preserved network configuration and exact coordinator
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/zigbee2mqtt.py, validate, --settings, /opt/homelab-app/zigbee-settings.json]
+  changed_when: false
+  no_log: true

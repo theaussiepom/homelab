@@ -1,6 +1,6 @@
 FROM --platform=linux/amd64 debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates python3 python3-venv python3-apt openssh-client git \
+    ca-certificates python3 python3-venv openssh-client git \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements.lock.txt /opt/requirements.lock.txt
 RUN python3 -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r /opt/requirements.lock.txt
