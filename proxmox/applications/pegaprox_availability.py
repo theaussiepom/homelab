@@ -58,7 +58,10 @@ def verify(policy, cfg):
         and json.loads(completion).get('status') == 'passed',
         'Preserve the original completed PegaProx installation receipt')
     # guest_trust can establish a missing receipt during installation; this read-only path cannot.
-    files.regular(work / 'ssh-trust.json', private=True)
+    trust = work / 'ssh-trust.json'
+    files.require(trust.is_file() and not trust.is_symlink(),
+                  'Require the original SSH trust binding; no availability-time adoption')
+    files.regular(trust, private=True)
     base = '/nodes/' + cfg['site']['node'] + '/lxc/' + str(policy['vmid'])
     host, status = deploy.api_get(cfg, base + '/config'), deploy.api_get(cfg, base + '/status/current')
     files.require(host.get('hostname') == cfg['guest']['hostname'] and host.get('onboot') == 1
