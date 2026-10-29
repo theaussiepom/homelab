@@ -263,9 +263,15 @@ def compose(cfg):
         service = services['zigbee2mqtt']
         del service['network_mode']
         service['ports'] = [f"{radio['bind_address']}:{radio['frontend_port']}:{radio['frontend_port']}"]
-        service['devices'] = [f"{radio['serial_device']}:/dev/ttyACM0:rw"]
+        # In a user namespace runc bind-mounts the OCI device path from the
+        # Docker host. Keep that path present; the explicit bind supplies the
+        # preserved application alias without requiring a second guest node.
+        device = radio['serial_device']
+        service['devices'] = [f'{device}:{device}:rw']
         service['volumes'] = [{'type': 'bind', 'source': f'{root}/zigbee2mqtt',
-            'target': '/app/data', 'bind': {'create_host_path': False}}]
+            'target': '/app/data', 'bind': {'create_host_path': False}},
+            {'type': 'bind', 'source': device, 'target': '/dev/ttyACM0',
+             'read_only': False, 'bind': {'create_host_path': False}}]
     if kind == 'bitwarden':
         return bitwarden.configure(cfg, result)
     if kind == 'zigbee2mqtt':

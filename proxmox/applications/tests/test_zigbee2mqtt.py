@@ -37,6 +37,33 @@ def state():
 
 
 class ZigbeeTests(unittest.TestCase):
+    def test_user_namespace_device_source_exists_without_a_guest_tty_alias(self):
+        """Keep runc's device source valid and bind the preserved application path."""
+        import yaml
+        import zigbee2mqtt
+        cfg = fixture()
+        original = copy.deepcopy(cfg)
+        selection = zigbee2mqtt.fingerprint(cfg['zigbee'])
+        # The parent LXC exposes only this character node, not /dev/ttyACM0.
+        guest_nodes = {DEVICE: (166, 0)}
+        application_path = yaml.safe_load(state()['configuration.yaml'])['serial']['port']
+        self.assertNotIn(application_path, guest_nodes)
+        service = render.compose(cfg)['services']['zigbee2mqtt']
+        self.assertEqual(len(service['devices']), 1)
+        host, container, access = service['devices'][0].split(':')
+        self.assertIn(container, guest_nodes, 'runc in a user namespace binds from the OCI device path')
+        self.assertEqual((host, container, access), (DEVICE, DEVICE, 'rw'))
+        aliases = [mount for mount in service['volumes'] if mount['target'] == application_path]
+        self.assertEqual(len(aliases), 1)
+        alias = aliases[0]
+        self.assertEqual(alias['type'], 'bind')
+        self.assertEqual(alias['source'], host)
+        self.assertEqual(guest_nodes[alias['source']], (166, 0))
+        self.assertIs(alias['read_only'], False)
+        self.assertIs(alias['bind']['create_host_path'], False)
+        self.assertEqual(cfg, original)
+        self.assertEqual(zigbee2mqtt.fingerprint(cfg['zigbee']), selection)
+
     def test_invalid_radio_capture_cannot_create_a_guest_in_either_entry_point(self):
         from test_rollout import RolloutTests
         for action in ('deploy', 'apply'):
@@ -57,12 +84,15 @@ class ZigbeeTests(unittest.TestCase):
                 execute_step.assert_not_called()
 
     def test_radio_uses_one_exact_device_and_one_existing_data_tree(self):
+        """Expose only the selected node and preserve the application data bind."""
         cfg=fixture(); svc=render.compose(cfg)['services']['zigbee2mqtt']
-        self.assertEqual(svc['devices'], [DEVICE + ':/dev/ttyACM0:rw'])
+        self.assertEqual(svc['devices'], [DEVICE + ':' + DEVICE + ':rw'])
         self.assertNotIn('network_mode', svc)
         self.assertEqual(svc['ports'], ['198.18.30.22:8080:8080'])
         self.assertEqual(svc['volumes'], [{'type':'bind', 'source':'/srv/homelab/data/zigbee2mqtt',
-             'target':'/app/data', 'bind': {'create_host_path':False}}])
+             'target':'/app/data', 'bind': {'create_host_path':False}},
+             {'type':'bind', 'source':DEVICE, 'target':'/dev/ttyACM0',
+              'read_only':False, 'bind': {'create_host_path':False}}])
         for field in ('privileged', 'cap_add', 'device_cgroup_rules'):
             self.assertNotIn(field,svc)
 
