@@ -120,7 +120,8 @@ origin, and observed full container ID, image ID and configuration/mount
 fingerprint. The image ID is observation evidence; keep the configured image
 reference at `ghcr.io/bitwarden/lite:latest`.
 
-The driver requires the original committed deployment configuration, private
+The driver requires the original deployment configuration after the existing
+canonical-network compilation (`BITWARDEN_PACKET` in the private job), private
 inputs, completed receipts, database-query proof, existing SSH trust and matching
 NAS custody. It refuses every existing operation/verification hold. Hold
 disposition requires separate review; this packet cannot clear one. The sole
@@ -139,7 +140,7 @@ deployment path or retiring the normal job.
 ```sh
 python3 reviewed-helper/proxmox/applications/foundation_maintenance.py \
   --packet bitwarden/startup.json --source original-deployment-source \
-  --config bitwarden/deployment.json
+  --config "$BITWARDEN_PACKET"
 ```
 
 The policy fixes automatic startup after Docker/host restart; it does not prove a
