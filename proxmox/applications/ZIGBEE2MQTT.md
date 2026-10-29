@@ -76,7 +76,13 @@ For the stack input, use `kind: zigbee2mqtt`, one `services.zigbee2mqtt` entry a
 the closed `zigbee` object shown in the synthetic unit fixture. Its fields are
 `serial_device`, `bind_address`, `frontend_port`, `adapter`, `mqtt_server`,
 `mqtt_base_topic` and `state_sha256`. The guest input's `serial_device.path` must
-match. Docker maps that one device to `/dev/ttyACM0`, publishes the existing
+match. Docker registers that one device at the same by-id path on both sides
+with `rw` access, then explicitly bind-mounts the same node at `/dev/ttyACM0`.
+Both bind sources must already exist. This preserves the application path in
+nested unprivileged LXC, where runc otherwise tries to bind the container device
+path from the guest even when only the by-id node exists. The renderer adds no
+guest alias, additional device permission or Proxmox configuration change.
+Docker publishes the existing
 frontend port only on the selected backend IPv4 address and binds the restored
 data to `/app/data`. It adds no privileged mode, broad device rules or host
 control sockets. The existing application guide explains the saved-plan and
