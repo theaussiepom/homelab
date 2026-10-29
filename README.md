@@ -1,116 +1,78 @@
-# Build your Proxmox homelab
+# HomeLab framework
 
-Start with a custom installation USB, then run a small script from your computer
-to create one deployment container on Proxmox. That container connects to your
-private GitHub repository so it can run future deployment jobs.
+Build a small Proxmox homelab with reusable OpenTofu resources, Ansible preparation
+and application blueprints. The executable platform is Debian 13 LXC. VM guests
+require separate implementation and qualification.
 
-This is aimed at home automation enthusiasts who are comfortable copying terminal
-commands and editing a settings file. The guides explain terms as they appear.
+Three repositories have different jobs:
+
+| Repository | What belongs there |
+| --- | --- |
+| **homelab** (this one) | Reusable infrastructure, preparation and app blueprints, phase runner and tests |
+| **homelab-stack** | Copyable composition: guests, applications, dependencies, images and example topology |
+| **homelab-site** (private) | Reviewed stack selection, actual private overrides, Secrets references and deployment controls |
 
 ```mermaid
 flowchart LR
-    A[Make the USB] --> B[Install Proxmox]
-    B --> C[Create one deployment container]
-    C --> D[GitHub runs a successful check]
-    D --> E[Later: deploy your apps]
+  framework[homelab: reusable blueprints] --> stack[homelab-stack: composition]
+  stack --> site[homelab-site: deliberate adoption]
+  site --> infra[Infrastructure]
+  infra --> prep[Preparation]
+  prep --> apps[Applications]
 ```
 
-## Start here
+Start with the [stack contract](docs/stack-contract.md), then the stack's README.
+[Blueprint definitions](blueprints/catalogue.json) list exactly the supported
+guest applications and Linux/Docker capabilities. Ordinary deployment reuses
+[the guarded adapter](proxmox/applications/deploy.py), the existing LXC
+[module](proxmox/applications/tofu/guest/main.tf) and Ansible tasks.
+OpenTofu owns guest CPU/RAM/disks/NICs/firewall/autostart. Ansible owns packages,
+Docker/Compose where selected, and applications. A native database omits Docker.
 
-**Read the [Proxmox guide](proxmox/README.md)** for the whole sequence. It links
-to the two practical walkthroughs:
-
-| What you want to do | Guide | What you have at the end |
-| --- | --- | --- |
-| Prepare and install the host | [Make the installation USB](proxmox/iso/README.md) | Proxmox installed on the selected pair of SSDs, with network and SSH access. |
-| Connect the host to GitHub deployment | [Create the first deployment guest](proxmox/bootstrap/README.md) | One small Debian container, an online GitHub runner and a successful verification job. |
-| Prepare application deployment | [One-guest application guide](proxmox/applications/README.md) | DNS/database/login foundations, then HA, Node-RED and MQTT. Source tests are distinct from native acceptance. |
-
-The custom installer supports **two new mirrored SSDs, one original disk to
-preserve, two wired network ports and tagged VLANs**. Check the guide before
-assuming it fits a different computer or home network.
-
-## 1. Get a copy on your computer
-
-You need Git. On a Mac, open **Terminal**, run `git --version`, and follow Apple's
-Command Line Tools prompt if one appears. Linux users can install Git through
-their distribution's package manager.
-
-Run these commands in Terminal, one at a time:
+For local source tests, use Python 3.12+ with the pinned dependencies in
+[pyproject.toml](pyproject.toml):
 
 ```sh
-git clone https://github.com/theaussiepom/homelab.git
-cd homelab
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -r requirements.lock.txt
+python3 -m pytest -q tests
+python3 -m unittest discover -s blueprints
+python3 -m unittest discover -s proxmox/applications/tests
+ansible-playbook -i localhost, --syntax-check proxmox/applications/ansible/preparation.yml
+ansible-playbook -i localhost, --syntax-check proxmox/applications/ansible/reconcile.yml
 ```
 
-You should now see this README and the `proxmox` folder. If you already have a
-copy, keep any local work and use a reviewed version; do not clone over it or
-discard changes to get a clean folder.
+CI requires 100% line and branch coverage for every production Python file in
+each repository, and 100% line, branch and function coverage for both Node-RED
+helpers. Measure and enforce the complete Python inventory locally:
 
-The guides say which folder to use for each command. A **workstation** means the
-Mac or Linux computer where you run these commands. The **host** is the machine
-that will run Proxmox.
+```sh
+export GITLEAKS_BIN=/path/to/verified/gitleaks
+python3 tools/measure_coverage.py --all --stack ../homelab-stack --site ../homelab-site --fail-under 100 --output .work/coverage
+```
 
-## 2. Follow the Proxmox guide
+Omit `--fail-under` for an exploratory measurement. CI always supplies the gate.
+Stack and site suite reports measure their own code; the framework is measured by
+its independent full suite. Use a fresh output directory. The report inventories every tracked production Python
+file and local source addition, including scripts that were never imported. It runs
+framework, blueprint, application, bootstrap, installer, recovery and source guard
+suites, plus stack and private-site tests when supplied. Test source is excluded;
+no production file or defensive branch is excluded. Reports contain
+per-component and per-file line/branch fractions, missing paths, JSON, Cobertura XML
+and HTML. Separate JavaScript coverage uses Node's built-in coverage runner for both
+Node-RED helpers. Ansible, shell and OpenTofu require their behavioral/syntax/native
+fixtures and do not have Python-style line percentages. Native qualification remains
+separate. CI publishes summaries and bounded 14-day Python report artifacts.
 
-Continue to the [combined Proxmox guide](proxmox/README.md). Start with its
-prerequisites, then follow the installer and bootstrap in order. Each walkthrough
-includes expected results and advice for failures.
+`--suite framework`, `--suite blueprints`, `--suite applications`,
+`--suite stack --stack PATH` and `--suite site --site PATH` select individual suites.
+Use `--all` for the complete Python inventory, including bootstrap, installer,
+CI tooling, recovery and the private checker. Failing tests still fail their jobs.
 
-Keep passwords, private keys, real settings, backups and installation images
-private. The examples in this public repository use invented values.
-
-## What is ready?
-
-Status updated on **26 October 2026**, including the physical results from 25 October:
-
-- **Installer and first deployment guest:** the custom ISO was installed on the
-  maintainer's physical host. Bootstrap handover reached successful GitHub checks
-  on both a fresh lab machine and that host. The physical run needed a tagged-VLAN
-  permission fix; the verification record explains the failed attempt and correction.
-- **Your installation:** still needs your own disk, network and access checks.
-  Another computer's successful installation does not verify yours.
-- **DNS and empty database servers:** private GitHub CD has installed and
-  checked DNS plus matching PostgreSQL, MariaDB and InfluxDB servers on the
-  physical host. Household database restores and later applications remain
-  separate work. PegaProx is planned in its own LXC; it is not installed yet.
-
-For the physical run, the initial OpenTofu backup was saved privately on the Mac.
-The runner's ongoing NAS state-backup mount and immediate copy/readback have
-since passed on the physical host. The [existing-bootstrap update](proxmox/bootstrap/README.md#8-prepare-the-runner-to-deploy-your-applications)
-and merge-driven host job have also passed there, including the private backend
-bridge and declared database access. These checks cover state copies; restoring
-them and protecting live application data remain separate. The linked
-verification record also states which NAS security controls were not assessed.
-The [Proxmox guide](proxmox/README.md) separates completed and outstanding steps.
-
-See the [ISO verification record](proxmox/iso/verification/README.md) and
-[bootstrap verification record](proxmox/bootstrap/verification.md) for exact test
-scope, later corrections and remaining limits.
-
-## Checks on GitHub
-
-Open **Actions → Validate HomeLab** to see the source checks in one graph.
-Application tests, repository checks and security checks run independently on
-GitHub's machines. ISO source tests run on every pull request; the longer ISO
-build and virtual boot checks run when installer or validation-workflow inputs
-change. The manual entry runs those ISO checks, and the weekly entry runs CodeQL.
-These checks use synthetic data and do not deploy to your Proxmox host.
-
-## Other folders
-
-These are separate from the two-step Proxmox setup:
-
-| Folder | Use it for |
-| --- | --- |
-| [Local site example](examples/site/README.md) | Practise the broader framework using invented data on your computer. It does not deploy real guests. |
-| [Database backup](services/database-backup/README.md) | Understand the existing BenBeast backup extension and its dated restore evidence. |
-| [Network recovery](services/network-recovery/README.md) | Understand the existing BenBeast-specific network repair service. It is not a generic Proxmox prerequisite. |
-| [Contributing safely](docs/contributing-safely.md) | Make code changes, run checks and prepare pull requests. |
-
-The broader framework's full-site Proxmox execution adapter remains held. Its
-technical contracts are in [execution](docs/execution.md),
-[private-site configuration](docs/configure-private-site.md),
-[ownership](docs/ownership-and-lifecycle.md) and [rehearsal](docs/rehearsal.md).
-Use the separate [one-container bootstrap](proxmox/bootstrap/README.md) for the
-working first-guest path.
+The full application suite includes explicitly gated Docker/native fixtures;
+read its skips and prerequisites. These tests are not target qualification.
+[Bootstrap and recovery reference](docs/framework-reference.md)
+remain available for separately approved work. Source changes run CI only; live
+rollouts require a reviewed private-site adoption. No credential values, application
+data, custom images or radio identities belong in any source repository.

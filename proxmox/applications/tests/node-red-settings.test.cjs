@@ -16,7 +16,7 @@ function load(overrides = {}, original = undefined) {
         assert.equal(name, "/config/settings.js"); return settings;
     }, process: {env: {NODE_RED_IDENTITY_URL: "https://sso.example.invalid",
         NODE_RED_EXTERNAL_URL: "https://flows.example.invalid", NODE_RED_OIDC_PROVIDER: "nodered",
-        NODE_RED_OIDC_CLIENT_ID: "original-client", ...overrides}}});
+        NODE_RED_OIDC_CLIENT_ID: "original-client", ...overrides}}}, {filename: path.join(__dirname, "../node-red-settings.js")});
     return module.exports;
 }
 test("moves OIDC origins and the old Docker listener, preserving credentials and access policy", () => {
@@ -38,4 +38,17 @@ test("refuses unsafe or missing origins and malformed provider identifiers", () 
         assert.throws(() => load({NODE_RED_IDENTITY_URL: value}));
     }
     assert.throws(() => load({NODE_RED_OIDC_PROVIDER: "../other"}));
+});
+
+test("checks every restored strategy requirement and site input", () => {
+    for (const auth of [null, {type: "strategy"}, {type: "strategy", strategy: {}},
+        {type: "strategy", strategy: {name: "openidconnect"}},
+        {type: "strategy", strategy: {name: "openidconnect", options: {clientSecret: 1}}},
+        {type: "strategy", strategy: {name: "openidconnect", options: {clientSecret: ""}}}]) {
+        assert.throws(() => load({}, {adminAuth: auth}));
+    }
+    for (const value of ["https://sso.example.invalid:444", "https://sso.example.invalid/?q=x", "https://sso.example.invalid/#x", "https://sso.example.invalid\n"]) {
+        assert.throws(() => load({NODE_RED_EXTERNAL_URL: value}));
+    }
+    for (const value of ["", "bad/client"]) assert.throws(() => load({NODE_RED_OIDC_CLIENT_ID: value}));
 });
