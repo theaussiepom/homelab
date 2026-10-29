@@ -39,7 +39,9 @@ def source_tree(root, failing=False):
     )
 
 
-def test_real_subprocess_and_zero_coverage_files_are_measured(tmp_path):
+def test_real_subprocess_and_zero_coverage_files_are_measured(tmp_path, monkeypatch):
+    # A standalone measurement must also work without GitHub summary output.
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     source_tree(tmp_path)
     result = metrics.measure(tmp_path, tmp_path / "report", ["framework"])
     assert result["tests_passed"] is True
