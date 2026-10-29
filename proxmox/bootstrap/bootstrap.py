@@ -113,11 +113,11 @@ def prepare(catalog_path, settings_path, destination):
     destination.mkdir(parents=True, mode=0o700)
     tofu = destination / 'tofu'
     tofu.mkdir()
-    shared = ROOT / 'infrastructure/proxmox'
+    shared = HERE
     shutil.copytree(HERE / 'templates/module', tofu / 'modules/deploy')
-    shutil.copy2(shared / 'critical/versions.tf', tofu / 'modules/deploy/versions.tf')
+    shutil.copy2(shared / 'docker/versions.tf', tofu / 'modules/deploy/versions.tf')
     for name in ('versions.tf', '.terraform.lock.hcl'):
-        shutil.copy2(shared / 'critical' / name, tofu / name)
+        shutil.copy2(shared / 'docker' / name, tofu / name)
     shutil.copy2(HERE / 'templates/main.tf', tofu / 'main.tf')
     (tofu / 'backend.tf').write_text('terraform {\n  backend "local" { path = "terraform.tfstate" }\n}\n')
     nic = guest['interfaces'][0]
@@ -164,9 +164,7 @@ def prepare(catalog_path, settings_path, destination):
 def snapshot(destination):
     """Copy public inputs only; never expose .local/, Git metadata or caches."""
     destination.mkdir(parents=True, mode=0o700)
-    paths = ['proxmox/bootstrap', 'examples/site/catalog/site.json',
-             'infrastructure/proxmox/critical/versions.tf',
-             'infrastructure/proxmox/critical/.terraform.lock.hcl']
+    paths = ['proxmox/bootstrap']
     excluded = shutil.ignore_patterns('.local', '.work', 'evidence', '__pycache__',
                                      '.terraform', '*.tfstate*', '*.tfplan', '*.pyc')
     for name in paths:
@@ -174,10 +172,7 @@ def snapshot(destination):
         if source.is_symlink():
             raise Refused('Source symlinks are not part of the test snapshot')
         target.parent.mkdir(parents=True, exist_ok=True)
-        if source.is_dir():
-            shutil.copytree(source, target, ignore=excluded, symlinks=True)
-        else:
-            shutil.copy2(source, target)
+        shutil.copytree(source, target, ignore=excluded, symlinks=True)
     if any(p.is_symlink() for p in destination.rglob('*')):
         raise Refused('Source snapshot contains a symlink; it will not be mounted into Docker')
     return {'snapshot': str(destination)}
@@ -261,7 +256,7 @@ def rehearse(evidence):
     write(evidence / 'attempt.json', {'started_at': datetime.now(timezone.utc).isoformat()})
     work = Path('/tmp/bootstrap-rehearsal')
     work.mkdir(mode=0o700)
-    catalog = read(ROOT / 'examples/site/catalog/site.json')
+    catalog = read(ROOT / 'proxmox/bootstrap/fixtures/site.json')
     catalog['site']['ssh_public_keys'] = ['ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB']
     write(work / 'site.json', catalog)
     write(work / 'settings.json', read(HERE / 'settings.example.json'))
@@ -285,8 +280,6 @@ def rehearse(evidence):
         log_run(['tofu', 'validate', '-no-color'], directory, evidence / (label + '-validate.log'))
         log_run(['tofu', 'test', '-no-color'], directory, evidence / (label + '-mock-tests.log'))
     log_run(['ansible-playbook', '-i', 'localhost,', '--syntax-check', str(HERE / 'ansible/runner.yml')], ROOT, evidence / 'ansible-syntax.log')
-    import os
-    os.environ['ANSIBLE_ROLES_PATH'] = str(ROOT / 'ansible/roles')
     log_run(['ansible-playbook', '-i', 'localhost,', '--syntax-check', str(HERE / 'ansible/install-runner.yml')], ROOT, evidence / 'native-ansible-syntax.log')
     log_run(['ansible-playbook', '-i', 'localhost,', '--syntax-check', str(HERE / 'ansible/configure-deploy.yml')], ROOT, evidence / 'configuration-ansible-syntax.log')
     log_run(['python3', str(HERE / 'tests/runner_fixture.py'), str(work / 'runner'), str(evidence)], ROOT, evidence / 'runner-fixture.log')

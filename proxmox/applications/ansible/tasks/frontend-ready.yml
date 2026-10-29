@@ -1,0 +1,15 @@
+---
+- name: Read separately prepared frontend routing settings
+  ansible.builtin.slurp:
+    src: /opt/homelab-app/frontend-routing.json
+  register: ordinary_frontend_routing
+
+- name: Require the intended settings without converting them in ordinary deployment
+  ansible.builtin.assert:
+    that:
+      - (ordinary_frontend_routing.content | b64decode | from_json) == app.frontend_routing
+
+- name: Verify existing frontend reply routing without changing it
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/ingress-routing.py, --config, /opt/homelab-app/frontend-routing.json]
+  changed_when: false

@@ -1,0 +1,35 @@
+---
+- name: Confirm the selected guest before any application changes
+  ansible.builtin.assert:
+    that:
+      - groups['application'] | length == 1
+      - app.hostname == ansible_facts.hostname
+      - app.address in ansible_facts.all_ipv4_addresses
+      - app.mac | lower in (ansible_facts.interfaces | map('extract', ansible_facts) | selectattr('macaddress', 'defined') | map(attribute='macaddress') | map('lower') | list)
+      - ansible_facts.virtualization_type == 'lxc'
+      - ansible_facts.distribution == 'Debian'
+      - ansible_facts.distribution_major_version == '13'
+      - ansible_facts.architecture == 'x86_64'
+      - app.kind in ['dns', 'ingress', 'postgresql', 'mariadb', 'influxdb', 'identity', 'db-tools', 'automation', 'bitwarden', 'pegaprox', 'zigbee2mqtt']
+      - app.capture is not defined
+      - app.packages | select('match', '^[a-z0-9][a-z0-9+.-]*=[0-9][A-Za-z0-9.+:~\-]*$') | list | length == app.packages | length
+      - app.health_checks | length > 0
+
+- name: Inspect separately prepared application paths
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+  loop: "{{ app.required_paths | default([]) }}"
+  register: ordinary_required_paths
+
+- name: Require the prepared path type before runtime changes
+  ansible.builtin.assert:
+    that:
+      - not item.stat.islnk | default(false)
+      - (item.stat.isdir | default(false)) if item.item.type == 'directory' else (item.stat.isreg | default(false))
+    fail_msg: 'Complete separate data/configuration preparation first.'
+  loop: "{{ ordinary_required_paths.results }}"
+
+- name: Verify separately prepared frontend routing before runtime changes
+  ansible.builtin.import_tasks: frontend-ready.yml
+  when: app.frontend_routing is defined

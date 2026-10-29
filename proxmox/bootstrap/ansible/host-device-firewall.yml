@@ -1,0 +1,27 @@
+---
+- name: Read this capability's firewall scope
+  ansible.builtin.command:
+    argv: [pvesh, get, '{{ device_firewall.path }}', --output-format, json]
+  register: device_firewall_read
+  changed_when: false
+- name: Select only this capability's owned allowance
+  ansible.builtin.set_fact:
+    device_firewall_owned: '{{ (device_firewall_read.stdout | from_json) | selectattr("comment", "defined") | selectattr("comment", "equalto", device_firewall.comment) | list }}'
+- name: Preserve duplicate or changed firewall ownership
+  ansible.builtin.assert:
+    that:
+      - device_firewall_owned | length <= 1
+      - device_firewall_owned | length == 0 or (device_firewall_owned[0].type == device_firewall.direction and device_firewall_owned[0].action == 'ACCEPT' and device_firewall_owned[0].proto == 'tcp' and device_firewall_owned[0].dport | string == '22' and device_firewall_owned[0].source == device_firewall.source and device_firewall_owned[0].dest == device_firewall.destination and device_firewall_owned[0].enable | int == 1 and not device_firewall_owned[0].get('iface'))
+- name: Preserve the original firewall scope privately
+  ansible.builtin.copy:
+    content: |
+      {{ device_firewall_read.stdout }}
+    dest: '/etc/homelab-host-devices/firewall-{{ device_policy.vmid }}-{{ device_firewall.direction }}.before.json'
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
+- name: Add only the absent bounded SSH allowance
+  ansible.builtin.command:
+    argv: [pvesh, create, '{{ device_firewall.path }}', --type, '{{ device_firewall.direction }}', --action, ACCEPT, --proto, tcp, --dport, '22', --source, '{{ device_firewall.source }}', --dest, '{{ device_firewall.destination }}', --enable, '1', --pos, '0', --comment, '{{ device_firewall.comment }}']
+  when: device_firewall_owned | length == 0

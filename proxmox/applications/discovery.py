@@ -1,118 +1,257 @@
-"""Typed Proxmox discovery notes and the bounded first-deployment plan policy."""
+"""One HTTP route model, rendered as guest discovery notes or file configuration."""
+
+import copy
 import ipaddress
+from pathlib import PurePosixPath
 import re
 from urllib.parse import urlsplit
 
-from plan import check_plan, RESOURCES
-import foundation
+PRIVATE_BACKENDS = tuple(
+    ipaddress.IPv4Network(value)
+    for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15")
+)
+DEFAULT_MIDDLEWARES = {"security-headers": {"headers": {"contentTypeNosniff": True}}}
 
-PRIVATE_BACKENDS = tuple(ipaddress.IPv4Network(value) for value in
-                         ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def name(value):
+    require(
+        isinstance(value, str) and re.fullmatch(r"[a-z][a-z0-9-]{0,62}", value),
+        "Use a literal routing name",
+    )
+    return value
+
+
+def hostname(value):
+    require(
+        isinstance(value, str)
+        and len(value) <= 253
+        and "." in value
+        and all(
+            re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", part)
+            for part in value.split(".")
+        ),
+        "Use a literal fully qualified route hostname",
+    )
+    return value
+
+
+def origin(value, addresses=None):
+    message = "Use a private HTTP(S) backend origin on the selected interface"
+    require(
+        isinstance(value, str)
+        and not any(c.isspace() for c in value)
+        and "\\" not in value,
+        message,
+    )
+    try:
+        parsed = urlsplit(value)
+        ip = ipaddress.IPv4Address(parsed.hostname)
+        port = parsed.port
+    except (ValueError, TypeError):
+        raise ValueError(message) from None
+    require(
+        parsed.scheme in {"http", "https"}
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path in {"", "/"}
+        and not parsed.query
+        and not parsed.fragment
+        and (port is None or 1 <= port <= 65535)
+        and any(ip in network for network in PRIVATE_BACKENDS)
+        and (addresses is None or str(ip) in addresses),
+        message,
+    )
+    return parsed
+
+
+def validate_routes(routes, addresses=None):
+    require(
+        isinstance(routes, dict) and len(routes) <= 64, "Use a bounded named routes map"
+    )
+    hosts = set()
+    for key, route in routes.items():
+        name(key)
+        require(
+            isinstance(route, dict)
+            and {"host", "url"} <= route.keys()
+            and not route.keys()
+            - {"host", "url", "aliases", "middlewares", "transport"},
+            "Use only the resolved routing contract fields",
+        )
+        aliases = route.get("aliases", [])
+        require(
+            isinstance(aliases, list) and len(aliases) <= 8,
+            "Use a bounded hostname aliases list",
+        )
+        selected = [hostname(value) for value in [route["host"], *aliases]]
+        require(
+            len(set(selected)) == len(selected) and not hosts.intersection(selected),
+            "Route hostnames must be globally unique",
+        )
+        hosts.update(selected)
+        backend = origin(route["url"], addresses)
+        middleware = route.get("middlewares", ["security-headers"])
+        require(
+            isinstance(middleware, list) and len(middleware) <= 16,
+            "Use an ordered middleware reference list",
+        )
+        require(
+            len({name(value) for value in middleware}) == len(middleware),
+            "Middleware references must be unique",
+        )
+        if "transport" in route:
+            name(route["transport"])
+            require(
+                backend.scheme == "https", "A TLS transport requires an HTTPS backend"
+            )
+    return hosts
+
+
+def router(key, route):
+    hosts = [route["host"], *route.get("aliases", [])]
+    rule = " || ".join(f"Host(`{value}`)" for value in hosts)
+    return {
+        "rule": "(" + rule + ")" if len(hosts) > 1 else rule,
+        "priority": 10,
+        "service": key,
+        "entryPoints": ["websecure"],
+        "tls": {"certResolver": "letsencrypt"},
+        "middlewares": [
+            value + "@file" for value in route.get("middlewares", ["security-headers"])
+        ],
+    }
 
 
 def labels(cfg):
-    """Compile only public routing facts; profiles never supply raw Notes labels."""
-    if 'routing_labels' in cfg.get('guest', {}):
-        raise ValueError('Supply typed discovery_routes, never arbitrary guest routing labels')
-    routes = cfg.get('app', {}).get('discovery_routes', [])
-    if not isinstance(routes, list) or len(routes) > 16:
-        raise ValueError('Discovery routes must be a finite list of at most 16 routes')
-    names, hosts, result = set(), set(), {}
-    addresses = {nic['ipv4'].split('/')[0] for nic in cfg.get('guest', {}).get('interfaces', [])}
-    for route in routes:
-        if (not isinstance(route, dict) or not {'name', 'host', 'url'} <= set(route)
-                or set(route) - {'name', 'host', 'url', 'login', 'aliases'}):
-            raise ValueError('Use only name, host and url plus the optional typed login in a discovery route')
-        name, host, url = route['name'], route['host'], route['url']
-        if not isinstance(name, str) or not re.fullmatch(r'[a-z][a-z0-9-]{0,62}', name):
-            raise ValueError('Use a literal discovery service name')
-        aliases = route.get('aliases', [])
-        if not isinstance(aliases, list) or len(aliases) > 8:
-            raise ValueError('Route aliases must be a finite list')
-        route_hosts = [host, *aliases]
-        for selected_host in route_hosts:
-            if (not isinstance(selected_host, str) or len(selected_host) > 253 or '.' not in selected_host
-                    or any(not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', label)
-                           for label in selected_host.split('.'))):
-                raise ValueError('Use a literal fully qualified route hostname')
-        if name in names or len(set(route_hosts)) != len(route_hosts) or hosts.intersection(route_hosts):
-            raise ValueError('Discovery names and hostnames must be unique within the guest')
-        login, kind = route.get('login', 'own'), cfg.get('app', {}).get('kind')
-        if (not isinstance(login, str) or login not in {'own', 'authentik', 'oidc', 'outpost'}
-                or login == 'authentik' and (kind != 'automation' or name != 'node-red')
-                or login == 'oidc' and (kind != 'automation' or name != 'node-red'
-                                       or cfg['app'].get('node_red_authentication') != 'authentik-oidc')
-                or login == 'outpost' and (kind != 'identity' or name != 'node-red-outpost')
-                or name == 'node-red-outpost' and login != 'outpost'
-                or kind == 'automation' and name == 'node-red' and login not in {'authentik', 'oidc'}):
-            raise ValueError('Node-RED requires Authentik; only the identity outpost callback bypasses it')
-        if not isinstance(url, str) or any(c.isspace() for c in url) or '\\' in url:
-            raise ValueError('Use an explicit private backend HTTP origin')
-        parsed = urlsplit(url)
-        try:
-            ip = ipaddress.IPv4Address(parsed.hostname)
-            port = parsed.port
-        except (ValueError, TypeError):
-            raise ValueError('Use an explicit private backend HTTP origin') from None
-        if (parsed.scheme != 'http' or parsed.username is not None or parsed.password is not None
-                or parsed.path not in ('', '/') or parsed.query or parsed.fragment
-                or port is not None and not 1 <= port <= 65535
-                or not any(ip in network for network in PRIVATE_BACKENDS)
-                or str(ip) not in addresses):
-            raise ValueError('The private backend HTTP origin must select an interface on this guest')
-        if login == 'outpost' and port != 9000:
-            raise ValueError('The embedded outpost callback must use the identity backend on port9000')
-        names.add(name); hosts.update(route_hosts)
-        router, service = f'traefik.http.routers.{name}', f'traefik.http.services.{name}'
-        host_rule = ' || '.join(f'Host(`{selected_host}`)' for selected_host in route_hosts)
-        if len(route_hosts) > 1:
-            host_rule = '(' + host_rule + ')'
-        if login == 'outpost':
-            host_rule += ' && PathPrefix(`/outpost.goauthentik.io/`)'
-        if login == 'authentik':
-            ingress = cfg.get('app', {}).get('ingress_foundation')
-            if not isinstance(ingress, dict) or not ingress.get('authentik_url'):
-                raise ValueError('Node-RED needs the selected ingress Authentik middleware settings')
-            foundation.private_authentik_origin(ingress['authentik_url'])
-        middleware = 'security-headers@file' + (',authentik@file' if login == 'authentik' else '')
-        result.update({'traefik.enable': 'true', f'{router}.rule': host_rule,
-                       f'{router}.priority': '100' if login == 'outpost' else '10',
-                       f'{router}.service': name, f'{router}.entrypoints': 'websecure',
-                       f'{router}.tls': 'true', f'{router}.tls.certresolver': 'letsencrypt',
-                       f'{router}.middlewares': middleware,
-                       f'{service}.loadbalancer.server.url': url.rstrip('/')})
-    if cfg.get('app', {}).get('kind') == 'automation' and routes and names != {'homeassistant', 'node-red'}:
-        raise ValueError('Automation discovery must select HA and the authenticated Node-RED route')
+    """Guest Notes contain public route facts, with no application or login policy."""
+    require(
+        "routing_labels" not in cfg.get("guest", {}),
+        "Use typed routes, never arbitrary routing labels",
+    )
+    routes = cfg.get("routes", {})
+    validate_routes(
+        routes, {nic["ipv4"].split("/")[0] for nic in cfg["guest"]["interfaces"]}
+    )
+    result = {}
+    for key, route in routes.items():
+        selected = router(key, route)
+        prefix = f"traefik.http.routers.{key}"
+        result.update(
+            {
+                "traefik.enable": "true",
+                f"{prefix}.rule": selected["rule"],
+                f"{prefix}.priority": "10",
+                f"{prefix}.service": key,
+                f"{prefix}.entrypoints": "websecure",
+                f"{prefix}.tls": "true",
+                f"{prefix}.tls.certresolver": "letsencrypt",
+            }
+        )
+        if selected["middlewares"]:
+            result[f"{prefix}.middlewares"] = ",".join(selected["middlewares"])
+        service = f"traefik.http.services.{key}.loadbalancer"
+        result[f"{service}.server.url"] = route["url"].rstrip("/")
+        if "transport" in route:
+            result[f"{service}.serverstransport"] = route["transport"] + "@file"
     return result
 
 
-def check_merge_create_plan(value, node, vmid):
-    """Admit a merge-triggered *new* guest, never convergence or a continuation.
+def ca_path(key):
+    return "/etc/ssl/certs/route-" + key + ".pem"
 
-    The original check_plan remains the guard for reviewed legacy plans. This
-    narrower policy adds only automatic admission of the three fresh resources
-    selected by an explicit morning merge; it cannot approve an existing guest.
-    """
-    check_plan(value, node, vmid)
-    if not isinstance(node, str) or not node:
-        raise ValueError('The selected Proxmox node must be known')
-    if (value.get('errored') is True or value.get('complete') is False
-            or value.get('applyable') is False or value.get('deferred_changes')
-            or value.get('resource_drift')):
-        raise ValueError('Automatic creation requires a complete plan without deferred changes or drift')
-    for row in value['resource_changes']:
-        change = row['change']
-        key = RESOURCES[row['address']]
-        after = change['after']
-        expected_type = row['address'].split('.')[2]
-        if (row.get('mode', 'managed') != 'managed' or row.get('type') != expected_type
-                or change.get('actions') != ['create'] or change.get('before') is not None
-                or row.get('previous_address') is not None or row.get('deposed') is not None
-                or 'importing' in change or 'importing' in row
-                or change.get('generated_config') is not None):
-            raise ValueError('Automatic admission permits only three fresh creates, without import or adoption')
-        if type(after.get(key)) is not int or after[key] != vmid or after.get('node_name') != node:
-            raise ValueError('Every fresh resource must have the exact known guest and node identity')
-        unknown = change.get('after_unknown', {})
-        if not isinstance(unknown, dict) or unknown.get(key) or unknown.get('node_name'):
-            raise ValueError('Automatic creation cannot defer the selected guest or node identity')
+
+def validate_ingress(settings):
+    require(
+        isinstance(settings, dict)
+        and not settings.keys() - {"routes", "middlewares", "transports"},
+        "Use the ingress routing contract",
+    )
+    validate_routes(settings.get("routes", {}))
+    middleware, transports = settings.get("middlewares", {}), settings.get(
+        "transports", {}
+    )
+    require(
+        isinstance(middleware, dict) and isinstance(transports, dict),
+        "Use named ingress definitions",
+    )
+    for key, definition in middleware.items():
+        name(key)
+        require(
+            key not in DEFAULT_MIDDLEWARES
+            and isinstance(definition, dict)
+            and len(definition) == 1
+            and all(isinstance(value, dict) for value in definition.values()),
+            "Declare one middleware definition; preserve shared defaults",
+        )
+    for key, definition in transports.items():
+        name(key)
+        require(
+            isinstance(definition, dict)
+            and definition
+            and not definition.keys() - {"server_name", "ca_file"},
+            "Declare verified TLS transport settings",
+        )
+        if "server_name" in definition:
+            hostname(definition["server_name"])
+        if "ca_file" in definition:
+            path = definition["ca_file"]
+            require(
+                isinstance(path, str)
+                and PurePosixPath(path).is_absolute()
+                and ".." not in PurePosixPath(path).parts
+                and not any(c.isspace() for c in path),
+                "Use an absolute public CA file path",
+            )
+    for route in settings.get("routes", {}).values():
+        references(route, settings)
+    return settings
+
+
+def references(route, settings):
+    require(
+        set(route.get("middlewares", ["security-headers"]))
+        <= DEFAULT_MIDDLEWARES.keys() | settings.get("middlewares", {}).keys(),
+        "Select declared middleware references",
+    )
+    require(
+        "transport" not in route
+        or route["transport"] in settings.get("transports", {}),
+        "Select a declared TLS transport",
+    )
+
+
+def shared(settings):
+    """External backends and shared middleware/transports belong to the file provider."""
+    validate_ingress(settings)
+    http = {
+        "middlewares": copy.deepcopy(
+            dict(DEFAULT_MIDDLEWARES, **settings.get("middlewares", {}))
+        ),
+        "routers": {},
+        "services": {},
+        "serversTransports": {},
+    }
+    for key, route in settings.get("routes", {}).items():
+        http["routers"][key] = router(key, route)
+        backend = {"servers": [{"url": route["url"].rstrip("/")}]}
+        if "transport" in route:
+            backend["serversTransport"] = route["transport"] + "@file"
+        http["services"][key] = {"loadBalancer": backend}
+    for key, definition in settings.get("transports", {}).items():
+        http["serversTransports"][key] = {
+            **(
+                {"serverName": definition["server_name"]}
+                if "server_name" in definition
+                else {}
+            ),
+            **({"rootCAs": [ca_path(key)]} if "ca_file" in definition else {}),
+        }
+    return {
+        "tls": {"options": {"default": {"minVersion": "VersionTLS12"}}},
+        "http": http,
+    }

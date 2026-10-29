@@ -10,6 +10,7 @@ import stat
 import struct
 import subprocess
 from urllib.parse import quote, urlencode
+from private_io import private_writer
 
 
 def fingerprint(key):
@@ -102,8 +103,10 @@ def pin(cfg, work, address, get_json, persist):
     if fingerprint(keys[0][2]) != expected:
         raise ValueError('Guest SSH identity differs from the trusted Proxmox evidence; preserve it for review')
     if not existing:
-        fd = os.open(hosts, os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW)
-        with os.fdopen(fd, 'r+b') as stream:
+        with private_writer(hosts, append=True, readable=True, create=False) as stream:
+            opened = os.fstat(stream.fileno())
+            if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+                raise ValueError('Guest host-trust file changed during verification')
             if stream.seek(0, os.SEEK_END):
                 stream.seek(-1, os.SEEK_END)
                 if stream.read(1) != b'\n':

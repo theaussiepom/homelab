@@ -378,7 +378,7 @@ Keep this runner dedicated to deployment: PegaProx is planned in its own LXC.
 ## 9. Let GitHub maintain the host prerequisites
 
 For multiple internal database bridges and their purpose descriptions, see the
-[database network guide](../applications/database-networks.md). Each declared
+[database network guide](../../docs/stack-contract.md). Each declared
 bridge stays isolated: no physical uplink, host address or gateway.
 
 

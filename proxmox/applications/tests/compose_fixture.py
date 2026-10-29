@@ -1,18 +1,23 @@
-"""Write synthetic Compose documents for Docker Compose's real parser."""
+"""Render synthetic current app stacks for Docker Compose structural validation."""
+
 import json
 from pathlib import Path
 import sys
+import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from test_render import fixture
-from render import compose, ingress
-from test_pgadmin import fixture as pgadmin_fixture
-from test_zigbee2mqtt import fixture as zigbee_fixture
+from test_foundation import fixture as foundation_fixture
+from render import compose
 
-output = Path(sys.argv[1]); output.mkdir(parents=True, exist_ok=True)
-for kind in ('dns', 'identity', 'ingress', 'automation'):
-    (output / f'{kind}.json').write_text(json.dumps(compose(fixture(kind))))
-(output / 'routes.json').write_text(json.dumps(ingress(fixture('ingress'))))
-(output / 'db-tools.json').write_text(json.dumps(compose(pgadmin_fixture())))
-
-(output / 'zigbee2mqtt.json').write_text(json.dumps(compose(zigbee_fixture())))
+root = Path(sys.argv[1])
+root.mkdir(parents=True, exist_ok=True)
+with tempfile.TemporaryDirectory() as td:
+    directory = Path(td)
+    for kind in ["dns", "identity", "ingress", "automation", "db-tools", "zigbee2mqtt"]:
+        cfg = (
+            foundation_fixture(directory, kind)
+            if kind in ["identity", "ingress", "db-tools"]
+            else fixture(kind)
+        )
+        (root / (kind + ".json")).write_text(json.dumps(compose(cfg)))

@@ -1,0 +1,248 @@
+---
+# Explicit operator registration, before enabling a hardware guest. Ordinary CD
+# only invokes the resulting forced-command capability; it never runs this play.
+- name: Prepare a dedicated capability key on the deployment runner
+  hosts: deploy
+  become: true
+  gather_facts: false
+  vars:
+    device_policy: "{{ lookup('ansible.builtin.file', host_device_policy_file) | from_json }}"
+  tasks:
+    - name: Require exactly one runner and one host before key preparation
+      ansible.builtin.assert:
+        that:
+          - groups.deploy | length == 1
+          - groups.pve | length == 1
+          - device_policy.vmid | type_debug == 'int'
+    - name: Inspect the runner's private key directory
+      ansible.builtin.stat:
+        path: /home/homelab-runner/.ssh
+        follow: false
+      register: host_device_key_directory
+    - name: Require the prepared private key directory
+      ansible.builtin.assert:
+        that:
+          - host_device_key_directory.stat.isdir | default(false)
+          - host_device_key_directory.stat.pw_name == 'homelab-runner'
+          - host_device_key_directory.stat.mode == '0700'
+    - name: Inspect the dedicated key pair
+      ansible.builtin.stat:
+        path: '/home/homelab-runner/.ssh/proxmox-host-device-{{ device_policy.vmid }}{{ item }}'
+        follow: false
+      loop: ['', '.pub']
+      register: host_device_keys
+    - name: Preserve partial or non-regular key pairs
+      ansible.builtin.assert:
+        that:
+          - host_device_keys.results[0].stat.exists == host_device_keys.results[1].stat.exists
+          - not host_device_keys.results[0].stat.exists or (host_device_keys.results[0].stat.isreg | default(false))
+          - not host_device_keys.results[1].stat.exists or (host_device_keys.results[1].stat.isreg | default(false))
+    - name: Create only the absent dedicated key pair
+      ansible.builtin.command:
+        argv: [ssh-keygen, -q, -t, ed25519, -N, '', -C, homelab-host-device, -f, '/home/homelab-runner/.ssh/proxmox-host-device-{{ device_policy.vmid }}']
+      become_user: homelab-runner
+      when: not host_device_keys.results[0].stat.exists
+      no_log: true
+    - name: Read the public capability key
+      ansible.builtin.slurp:
+        src: /home/homelab-runner/.ssh/proxmox-host-device-{{ device_policy.vmid }}.pub
+      register: host_device_public
+    - name: Verify the private key identity without changing it
+      ansible.builtin.command:
+        argv: [ssh-keygen, -y, -P, '', -f, '/home/homelab-runner/.ssh/proxmox-host-device-{{ device_policy.vmid }}']
+      become_user: homelab-runner
+      register: host_device_derived_key
+      changed_when: false
+      no_log: true
+    - name: Verify private key metadata
+      ansible.builtin.stat:
+        path: /home/homelab-runner/.ssh/proxmox-host-device-{{ device_policy.vmid }}
+        follow: false
+      register: host_device_private
+    - name: Preserve unexpected private key ownership or permissions
+      ansible.builtin.assert:
+        that:
+          - host_device_private.stat.isreg | default(false)
+          - host_device_private.stat.pw_name == 'homelab-runner'
+          - host_device_private.stat.mode == '0600'
+          - host_device_private.stat.nlink == 1
+          - host_device_derived_key.stdout.split()[:2] == (host_device_public.content | b64decode).split()[:2]
+      no_log: true
+    - name: Select the public key identity
+      ansible.builtin.set_fact:
+        host_device_public_key: "{{ ((host_device_public.content | b64decode).split())[:2] | join(' ') }}"
+    - name: Require an Ed25519 capability key and one deployment address
+      ansible.builtin.assert:
+        that:
+          - host_device_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+$')
+          - ansible_host is match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
+
+- name: Register the bounded host authority
+  hosts: pve
+  become: true
+  gather_facts: false
+  vars:
+    device_policy: "{{ lookup('ansible.builtin.file', host_device_policy_file) | from_json }}"
+    device_policy_path: '/etc/homelab-host-devices/{{ device_policy.vmid }}.json'
+    device_helper_source: '{{ playbook_dir }}/../../applications/host_device_helper.py'
+    device_key_line: 'restrict,from="{{ hostvars[groups.deploy[0]].ansible_host }}",command="/usr/bin/python3 -I /usr/local/libexec/homelab-host-device.py --policy {{ device_policy_path }}" {{ hostvars[groups.deploy[0]].host_device_public_key }}'
+  tasks:
+    - name: Require one reviewed host and deployment runner
+      ansible.builtin.assert:
+        that:
+          - groups.pve | length == 1
+          - groups.deploy | length == 1
+          - device_policy.vmid | type_debug == 'int'
+          - ansible_host is match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
+    - name: Inspect the existing private policy directory
+      ansible.builtin.stat:
+        path: /etc/homelab-host-devices
+        follow: false
+      register: device_policy_directory
+    - name: Preserve unexpected policy directory ownership or permissions
+      ansible.builtin.assert:
+        that:
+          - not device_policy_directory.stat.exists or (device_policy_directory.stat.isdir | default(false) and device_policy_directory.stat.uid == 0 and device_policy_directory.stat.mode == '0700')
+    - name: Create the private policy directory
+      ansible.builtin.file:
+        path: /etc/homelab-host-devices
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Inspect immutable capability files
+      ansible.builtin.stat:
+        path: '{{ item }}'
+        checksum_algorithm: sha256
+        follow: false
+      loop: [/usr/local/libexec/homelab-host-device.py, '{{ device_policy_path }}']
+      register: device_installed
+    - name: Preserve changed capability code or policy
+      ansible.builtin.assert:
+        that:
+          - not device_installed.results[0].stat.exists or (device_installed.results[0].stat.isreg | default(false) and device_installed.results[0].stat.uid == 0 and device_installed.results[0].stat.mode == '0755' and device_installed.results[0].stat.checksum == lookup('ansible.builtin.file', device_helper_source, rstrip=False) | hash('sha256'))
+          - not device_installed.results[1].stat.exists or (device_installed.results[1].stat.isreg | default(false) and device_installed.results[1].stat.uid == 0 and device_installed.results[1].stat.mode == '0600' and device_installed.results[1].stat.checksum == lookup('ansible.builtin.file', host_device_policy_file, rstrip=False) | hash('sha256'))
+    - name: Install the immutable capability implementation
+      ansible.builtin.copy:
+        src: '{{ device_helper_source }}'
+        dest: /usr/local/libexec/homelab-host-device.py
+        owner: root
+        group: root
+        mode: '0755'
+        force: false
+    - name: Install the immutable per-guest policy
+      ansible.builtin.copy:
+        src: '{{ host_device_policy_file }}'
+        dest: '{{ device_policy_path }}'
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+    - name: Validate policy and host identity before granting access
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, /usr/local/libexec/homelab-host-device.py, --policy, '{{ device_policy_path }}']
+        stdin: '{{ lookup("ansible.builtin.file", host_device_policy_file) }}'
+      environment:
+        SSH_ORIGINAL_COMMAND: check
+      changed_when: false
+    - name: Inspect the intended deployment runner identity
+      ansible.builtin.command:
+        argv: [pvesh, get, '/nodes/{{ device_policy.node }}/lxc/{{ host_device_runner_vmid | default(900) }}/config', --output-format, json]
+      register: device_runner_config
+      changed_when: false
+    - name: Keep firewall preparation bound to the deployment runner
+      ansible.builtin.assert:
+        that:
+          - (host_device_runner_vmid | default(900)) | type_debug == 'int'
+          - (device_runner_config.stdout | from_json).hostname == 'deploy'
+          - (device_runner_config.stdout | from_json).unprivileged == 1
+          - (device_runner_config.stdout | from_json).protection == 1
+          - "'ip=' + hostvars[groups.deploy[0]].ansible_host + '/' in (device_runner_config.stdout | from_json).net0"
+    - name: Prepare only this capability's two SSH routes
+      ansible.builtin.include_tasks: host-device-firewall.yml
+      loop:
+        - path: '/nodes/{{ device_policy.node }}/firewall/rules'
+          direction: in
+          source: '{{ hostvars[groups.deploy[0]].ansible_host }}/32'
+          destination: '{{ ansible_host }}/32'
+          comment: 'homelab-host-device-{{ device_policy.vmid }}'
+        - path: '/nodes/{{ device_policy.node }}/lxc/{{ host_device_runner_vmid | default(900) }}/firewall/rules'
+          direction: out
+          source: '{{ hostvars[groups.deploy[0]].ansible_host }}/32'
+          destination: '{{ ansible_host }}/32'
+          comment: 'homelab-host-device-{{ device_policy.vmid }}'
+      loop_control:
+        loop_var: device_firewall
+    - name: Read the existing host authorizations
+      ansible.builtin.slurp:
+        src: /etc/pve/priv/authorized_keys
+      register: host_device_authorizations
+      no_log: true
+    - name: Refuse an existing key with different host authority
+      ansible.builtin.assert:
+        that:
+          - ((host_device_authorizations.content | b64decode).splitlines() | select('search', hostvars[groups.deploy[0]].host_device_public_key | regex_escape) | list) in [[], [device_key_line]]
+          - >-
+            ((host_device_authorizations.content | b64decode).splitlines() |
+            select('search', ('--policy ' + device_policy_path + '"') | regex_escape) |
+            list) in [[], [device_key_line]]
+      no_log: true
+    - name: Preserve the original host authorizations privately
+      ansible.builtin.copy:
+        remote_src: true
+        src: /etc/pve/priv/authorized_keys
+        dest: '/etc/homelab-host-devices/authorized_keys-{{ device_policy.vmid }}.before'
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+      no_log: true
+    - name: Register only the forced-command capability
+      ansible.builtin.lineinfile:
+        path: /etc/pve/priv/authorized_keys
+        line: '{{ device_key_line }}'
+        state: present
+        unsafe_writes: true
+      no_log: true
+    - name: Read the host key through the operator's trusted connection
+      ansible.builtin.slurp:
+        src: /etc/ssh/ssh_host_ed25519_key.pub
+      register: host_device_server_key
+
+- name: Pin and verify the registered capability from the runner
+  hosts: deploy
+  become: true
+  gather_facts: false
+  vars:
+    device_policy: "{{ lookup('ansible.builtin.file', host_device_policy_file) | from_json }}"
+    host_device_trust: |
+      {{ hostvars[groups.pve[0]].ansible_host }} {{ (hostvars[groups.pve[0]].host_device_server_key.content | b64decode).split()[:2] | join(" ") }}
+  tasks:
+    - name: Inspect existing host trust without following a link
+      ansible.builtin.stat:
+        path: /var/lib/homelab-inputs/pve-host-known_hosts
+        follow: false
+      register: host_device_known
+    - name: Read and preserve existing host trust
+      ansible.builtin.slurp:
+        src: /var/lib/homelab-inputs/pve-host-known_hosts
+      when: host_device_known.stat.exists
+      register: host_device_prior_trust
+    - name: Refuse changed host trust
+      ansible.builtin.assert:
+        that:
+          - not host_device_known.stat.exists or (host_device_known.stat.isreg | default(false) and host_device_known.stat.pw_name == 'homelab-runner' and host_device_known.stat.mode == '0600' and (host_device_prior_trust.content | default('') | b64decode) == host_device_trust)
+    - name: Save only the absent pinned host key
+      ansible.builtin.copy:
+        content: '{{ host_device_trust }}'
+        dest: /var/lib/homelab-inputs/pve-host-known_hosts
+        owner: homelab-runner
+        group: homelab-runner
+        mode: '0600'
+        force: false
+    - name: Verify the registered check from the deployment account
+      ansible.builtin.command:
+        argv: [ssh, -F, /dev/null, -i, '/home/homelab-runner/.ssh/proxmox-host-device-{{ device_policy.vmid }}', -o, BatchMode=yes, -o, StrictHostKeyChecking=yes, -o, IdentitiesOnly=yes, -o, GlobalKnownHostsFile=/dev/null, -o, ConnectTimeout=10, -o, UserKnownHostsFile=/var/lib/homelab-inputs/pve-host-known_hosts, 'root@{{ hostvars[groups.pve[0]].ansible_host }}', check]
+        stdin: '{{ lookup("ansible.builtin.file", host_device_policy_file) }}'
+      become_user: homelab-runner
+      changed_when: false

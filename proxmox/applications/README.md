@@ -1,191 +1,122 @@
-# After bootstrap: bring home automation across one guest at a time
+# Application deployment
 
-For separate database networks, see the [private database network guide](database-networks.md).
-It explains which settings belong to bootstrap, database CD and each application.
+`deploy.py` is the permanent deployment entrypoint. It accepts the current guest
+packet and runs Infrastructure, Preparation, then the application's ordered phases.
+There are no service-specific deployment controllers or historical packet adapters.
+The stack composes eleven supported guests; the private site selects and enables them.
 
-[Proxmox guide](../README.md) · [Bootstrap](../bootstrap/README.md) ·
-[Databases](DATABASES.md) · [HTTPS and sign-in](FOUNDATION.md) · [Home automation](AUTOMATION.md) · [pgAdmin](PGADMIN.md) · [Zigbee2MQTT](ZIGBEE2MQTT.md) · [PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
+| Module | Responsibility |
+| --- | --- |
+| [guest_contract.py](guest_contract.py) | Pure guest, resource, capability and prerequisite validation |
+| [deployment_inputs.py](deployment_inputs.py) | Immutable input materialization and external-file binding |
+| [runtime_secrets.py](runtime_secrets.py) | Delivery of fixed existing runtime bindings |
+| [secret_contract.py](secret_contract.py) | One definition of required secrets, sources and runtime filenames |
+| [private_io.py](private_io.py) | Owned private files and durable writes |
+| [deployment_state.py](deployment_state.py) | Per-guest locks, ordered attempts, holds and receipts |
+| [plan_policy.py](plan_policy.py) | The saved-plan policy for explicit creation or reconciliation |
+| [proxmox_guest.py](proxmox_guest.py) | TLS API, safe saved plans, creation identity and state recovery copies |
+| [ansible_guest.py](ansible_guest.py) | Preparation/application invocation with exact SSH trust |
+| [deploy.py](deploy.py) | The fixed deployment sequence and CLI |
+| [zigbee2mqtt.py](zigbee2mqtt.py) | Preserved network/coordinator identity and active application verification |
+| [dns_records.py](dns_records.py) | Owned Pi-hole records, exact readback and direct local DNS probes |
+| [discovery.py](discovery.py) | Shared route validation, Proxmox Notes labels and ingress file configuration |
 
-[Bitwarden Lite migration](BITWARDEN.md) uses the same installer through a
-private-input adapter, with a separate database restore and explicit admission.
+Infrastructure, shared Preparation and each application remain separate entities
+inside one guest workflow. Preparation owns Linux and Docker/Compose once per LXC;
+Docker is not repeated in each application. Deployment selects running guests.
+Zigbee2MQTT uses the same sequence, with its one stable serial device declared in
+the BPG container resource. There are no stopped, prepare/attached or first-start
+deployment modes. Prepared data/configuration remain prerequisites, and ordinary
+deployment never extracts captures or creates a new Zigbee network.
 
-For a fresh monitoring system without restoring old Zabbix history, see
-[Clean Zabbix monitoring](ZABBIX.md). It uses this same guest/CD path and can be
-prepared independently of the household application migration.
-
-The deployment guest receives GitHub jobs. These scripts are the next step:
-**OpenTofu creates one application guest; Ansible installs its applications and
-restores its saved configuration. Database guests are the exception: CD prepares
-an empty database server; existing databases are restored separately before their
-applications start.**
-
-**Current status:** DNS has been created, restored, started and checked on a
-physical Proxmox host through private GitHub CD. All three empty database servers
-have also passed native installation, systemd startup and service-specific checks
-through CD, using the matching versions listed in the [database guide](DATABASES.md).
-Their first creation stopped on a startup compatibility warning; the existing
-empty guests were corrected and finished through an explicitly reviewed
-continuation. A fresh, uninterrupted Deploy from that corrected baseline has
-not been retested. Database contents, later applications and household acceptance
-remain separate work. The [foundation stage](FOUNDATION.md) has also reached native
-Traefik and Authentik service checks and pgAdmin's local login page. Routed HTTPS
-and browser sign-in are still outstanding; installed services alone do not prove
-that this stage works.
-
-## What are we bringing across?
+Before starting Zigbee, the application records the prepared network identity and
+coordinator in a private receipt. Subsequent runs require that identity unchanged;
+normal device database and counter updates are allowed. The container defaults to
+`restart: always`, and its health check makes Compose wait for the frontend.
+The physical USB device and Proxmox permissions still require native qualification.
 
 ```mermaid
 flowchart TD
-  A[Deployment guest + NAS state recovery copies] --> B[DNS and required network paths]
-  B --> C[Native MariaDB, PostgreSQL and InfluxDB]
-  B --> E[Traefik HTTPS routes]
-  C --> D[Authentik + its Redis dependency]
-  E --> D
-  D --> P[pgAdmin with Authentik sign-in]
-  P --> F[One automation LXC: Home Assistant + Node-RED + MQTT]
-  F --> G[Check existing Zigbee and real household automations]
+  C[Pure stack compiler] --> D[deploy.py]
+  D --> I[Immutable inputs and runtime bindings]
+  I --> S[DeploymentAttempt: lock and durable custody]
+  S --> P[Infrastructure: proxmox_guest]
+  P --> A[Preparation then applications: ansible_guest]
 ```
 
-| Order | What it does | What must be proved before moving on |
-| --- | --- | --- |
-| 0 | Keep the runner's state recoverable on the NAS | Recovery copy written/read back; one active state owner |
-| 1 | DNS, using Pi-hole and Unbound | Lookups work from the next guest; router still provides DHCP |
-| 2 | Required native databases | Matching versions, restored users/grants/data and a real client query |
-| 3 | Traefik HTTPS access | Verified Proxmox discovery and valid certificates for selected routes |
-| 4 | Authentik with Redis, then pgAdmin | Restored identity, native OAuth login and saved pgAdmin profile; automation retains its existing native Node-RED OIDC login |
-| 5 | The shared automation guest | HA, Node-RED and MQTT work together with restored settings |
-| 6 | The working house | Existing radios, devices, automations and household access work |
+A `DeploymentAttempt` owns one guest's existing state and one GitHub run. It is not
+a scheduler or an arbitrary task graph. PVE and Ansible own their own execution;
+application-specific validation/rendering stays with the application components.
+The adapters recheck effective bindings before and after native work.
 
-The private Actions graph can chain these jobs after one reviewed merge. Each job
-still owns one guest. See the [foundation guide](FOUNDATION.md) for the next three
-services and its bounded first-creation policy. PegaProx, PBS
-and optional recovery projects are not HA prerequisites. Existing radio
-services and physical hosts stay in place.
+All Docker containers default to `restart: always` through
+[the shared container policy](container_policy.py), including Bitwarden, PegaProx
+and the standalone monitoring component. Guest profiles omit `restart` and inherit
+this convention. An explicit `restart` override may select `always`, `unless-stopped`
+or `no`; the current stack has no overrides. Native database services use systemd.
+Readiness checks remain independent of Docker's restart policy; automatic restarts
+do not replace prepared application state or deployment verification.
 
-## What you need before deployment
+Plan admission has one owner. Both creation and reconciliation reject import,
+move, replacement, deferred identity and drift; reconciliation also protects data
+volumes and installed guest identity. There is no separate historical plan CLI.
+Foundation injection, validation and rendering share the fixed secret contract.
+Private readers/writers are shared by the renderers and command evidence logs;
+unexpected ownership, permissions or symlinks hold rather than being normalized.
 
-- A working [bootstrap](../bootstrap/README.md) and private GitHub deployment repository.
-- An unused guest ID/address and resource budget, with its VLAN carried by the
-  host and switches. These scripts do not configure your router or switches.
-- API access for that guest/storage/network, declared through
-  [bootstrap step 8](../bootstrap/README.md#8-prepare-the-runner-to-deploy-your-applications).
-- The runner's NAS recovery directory, deployment SSH key and trusted Proxmox CA.
-  Deploy verifies the new guest's SSH identity from its Proxmox creation log;
-  no Proxmox root SSH private key goes onto the runner. Secrets stay private.
-- For application guests, a coherent NAS capture of their configuration/data,
-  preserved custom images and independently available keys. Database-server CD
-  needs its private server configuration, packages and health probes, without a
-  backup. Existing database restores are a separate migration step.
-- NAS protection for new application/database writes, commissioned before the
-  live start. State recovery copies alone do not back up application data.
+MariaDB package-account preparation uses its explicit current account mode and
+recorded numeric identity. It never accepts an installer `new_target` flag.
+Node-RED uses native Authentik OIDC. HTTP hostnames and middleware references belong
+to the separate stack/site routes map. The HA mDNS helper requires `HOMELAB_HA_IPV4`.
+It does not infer an address from the former `MACVLAN_PREFIX` input. Separately
+prepared runtime files must already match these current inputs before adoption.
 
-Use `nesting: true` and `keyctl: false` for the tested Debian 13/systemd base,
-while keeping the guest unprivileged. The tested database guests use fixed
-management IPv4 and a separate fixed backend interface. An initial DHCP setup
-waited for DHCPv6 and delayed the second interface; fixed management IPv4 avoided
-that issue. The maintainer explicitly approved this profile for the three
-empty database guests on 26 October 2026. Review and approve the feature, address
-and allowed-traffic scope for your own host before applying it.
+The [blueprint catalogue](../../blueprints/catalogue.json) owns phase order,
+capabilities and mandatory preserved paths. The compiler adds those prerequisites;
+the runtime validates them; Ansible checks them before package/service changes.
+Stacks may add prerequisites, but cannot remove or change a mandatory path's type.
 
-Static IPv4 addresses and reservation-backed DHCP are supported. For DHCP use
-`"dhcp"` for both the selected interface's `ipv4` and the application's
-`address`, and omit that interface's gateway. The deployment job obtains the
-lease from the verified Proxmox API by the selected MAC address before Ansible.
-The new SSH key must match the fingerprint recorded by Proxmox during this
-reviewed creation. A network scan alone is never accepted.
+The compiler resolves the complete composition once and rejects duplicate VMIDs
+before admitting any guest packet. Every enabled guest must satisfy its readiness
+inputs. A workflow then selects its packet and phase from that validated model.
+The current compiler API is `compile_stack`; there is no separate guest-only
+admission path.
 
-Use database-native backups, not copies of files from running databases.
-Preserve numeric file owners, permissions, ACLs and extended attributes.
+The guest contract presents named images consistently to compilation and runtime
+preparation. Ansible receives only the derived image archive inputs, so the shared
+task does not depend on an application's source shape. Rendered data binds must
+all have declared prepared paths. Startup files such as the HA mDNS helper and
+original Node-RED settings are explicit file prerequisites as well. Preparation
+refreshes repository indexes before installing the exact approved packages.
 
-## Keep the normal guest job after migration
+See [the deployment contract](../../docs/stack-contract.md) for custody and adoption.
+Run source tests with `python3 -m unittest discover -s proxmox/applications/tests`.
+The Linux/container fixtures in `tests/check.sh` are for disposable source CI only;
+this redesign does not claim they ran on native PVE or in hosted Actions.
 
-Use [ordinary deployment](ORDINARY.md) for the permanent per-guest job. Selection,
-OpenTofu and application Ansible are visible steps in that job. Migration data
-restoration remains separate. Keep unready guests disabled and preserve every
-failure hold; completing migration retires only its one-time work.
+Other retained components have current consumers: the Compose renderer and app
+health probes serve deployment; routing and Node-RED helpers are maintained runtime
+configuration used by the prepared applications; the monitoring renderer, schema,
+templates and acceptance probe support the existing clean monitoring/active-agent
+fixtures. The unused agent deployment task has been retired. Host/ISO bootstrap remains a separate
+framework subsystem. No old deployment template is needed to use these components.
 
-## How a deployment works
+Configuration conversion, SQL/data restore, initial account creation and writable
+cutover are explicit operator prerequisites. They are not implemented as alternate
+application deployment paths. Historical procedures are recoverable from Git; the
+current source tree does not retain their orchestration scripts or compatibility
+branches. Existing state/hold names remain safety records and are never converted
+or cleared by this cleanup.
 
-New guests wait for their managed IPv4 networks before starting Docker or native
-database services. The same shared startup gate protects a newly installed
-deployment runner. This checks local network readiness, without requiring the
-internet to answer. If readiness times out, the dependent service stays stopped
-instead of starting with only some of its addresses. Existing guests need an
-explicitly reviewed update; changing source does not silently restart them.
-For ingress guests, the routing helper must wait for that gate too, before Docker.
-An existing routing helper can receive this dependency through CD without
-restarting it or Docker; its original unit and network-gate hashes are checked first.
+The [monitoring stack example](monitoring/stack.example.json) and matching
+[version contract](monitoring/versions.json) describe the reusable monitoring
+component. Its secret files must be supplied externally. It has no separate
+deployment controller and is not enabled as a guest by this stack.
 
-First, copy the [private-repository workflow templates](templates/README.md)
-into your own private deployment repository and supply its private inputs.
-
-Use **Application guest deployment** in the private repository's Actions tab.
-Select one guest:
-
-1. **Plan:** preview one guest and its firewall. Review the result and retain its
-   plan SHA256, the fingerprint of the exact saved plan.
-2. **Deploy:** supply that fingerprint. One run creates the guest, verifies its
-   identity, installs/configures it, starts the service and checks it. For an
-   application guest, this also verifies and restores its saved data during the
-   chosen migration window. For a database guest, it prepares an empty server
-   and leaves the data restore to the separate migration step. It does
-   not need another button press between these phases. Replacement and deletion
-   remain refused.
-3. Check the result, then check real devices and automations with the people
-   using the house. **Verify** can run the service checks again without a restart.
-
-Deploy starts the selected service. For application guests, confirm their old
-writers are retired in the private inputs before choosing it. An empty database
-server can be prepared while the original database remains in use; do not point
-applications at it until the manual restore is complete. HA can control real devices: this is a
-deliberate migration action, not a preview. Missing or mismatched application captures stop
-the run before guest creation. Database CD never imports a backup.
-
-The separate **apply**, **stage** and **start** steps remain available for
-controlled qualification and reviewed recovery. They are not required during a
-normal new-guest Deploy run. Existing or partly applied installations are held
-for inspection rather than automatically reinstalled.
-
-Active state stays outside the checkout, with NAS copies before and after each
-phase. A failed change or interrupted Deploy leaves a **HOLD** and private logs
-for review; rerunning a job does not automatically retry or clean up that target.
-
-If an installed Traefik guest needs a certificate-DNS correction, use the reviewed
-CD maintenance path. Its private packet names the old and new resolvers and binds
-the existing guest, configuration and state. OpenTofu previews only the matching
-DNS firewall additions; Ansible changes only that resolver list and recreates the
-Traefik container once. It keeps the image, tokens, certificates and other settings.
-Guest networking and Docker itself are not restarted. The existing health check
-allows normal startup time before checking the running container. A failed attempt
-stays held. If the change applied but its startup check failed, a separately
-reviewed confirmation can check that same running container without applying the
-firewall change or recreating it again. It preserves the failed logs and settings;
-only a successful check archives its matching hold. The next CD step must still
-show a no-change plan. A failed confirmation cannot retry on the next push.
-An interrupted confirmation also stays held for separate review, even if the
-guest check succeeded before CD lost control; a later push does not reconstruct
-missing completion records automatically.
-The standard continuation hold stays active until both local and NAS completion
-records are saved, so other deployment entry points also stop if that final save
-fails.
-After the dependency is fixed, a separately approved verification continuation can
-check the existing pgAdmin guest without reinstalling it or restoring its data.
-
-## Where do settings live?
-
-| Public `homelab` | Private deployment repository |
-| --- | --- |
-| Guest/app scripts, synthetic examples, tests and guides | Exact public-source revision, site-specific guest settings and deployment workflow |
-| No household addresses, passwords or personal backups | Addresses/VLAN selections can be private Git; tokens, private keys, dumps and restored app settings stay outside Git |
-
-The [example inputs](examples/site.example.json) have invented addresses and
-deliberately unusable package/image selections. Replace them privately using
-the [technical reference](OPERATIONS.md); do not point unchanged examples at a server.
-
-## What is still outstanding?
-
-The three empty database servers have passed native installation and startup.
-Their household database restores and real client connections remain untested.
-Later application guests still need their own Docker/configuration, network,
-login and household checks on the selected target. Keep the old working system
-available until those checks succeed.
+Native PostgreSQL, MariaDB and InfluxDB use the shared repository/package/account
+preparation tasks and parameterized database reconciliation. Retained numeric
+UID/GID values must match before vendor packages run. The explicit MariaDB
+package-account mode records the vendor-created identity rather than renumbering
+it. SQL import, database contents and writer handover are separate prerequisites;
+ordinary deployment never restores or imports them. Database backend NICs and
+listener substitutions come from the reviewed stack/site definitions.
