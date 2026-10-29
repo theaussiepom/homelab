@@ -72,7 +72,7 @@ def validate_migration_stack(cfg):
     image = service.get('image', '')
     registry = re.fullmatch(r'ghcr\.io/bitwarden/lite@sha256:[0-9a-f]{64}', image)
     archived = image == settings['source_image_id'] and set(service) >= {'archive', 'archive_sha256'}
-    if set(service) - allowed or not (registry or archived or image == 'ghcr.io/bitwarden/lite:latest') or service.get('restart', 'no') != 'no':
+    if set(service) - allowed or not (registry or archived or image == 'ghcr.io/bitwarden/lite:latest') or service.get('restart', 'unless-stopped') not in ('no', 'unless-stopped'):
         raise ValueError('Use official Lite latest or the preserved image, with an observed source image identity')
     return str(address)
 
@@ -84,6 +84,7 @@ def configure(cfg, document):
     if cfg['bitwarden']['schema'] == 'homelab-bitwarden-preparation-v1':
         service['env_file'] = [ENV_FILE]
     else:
+        service['restart'] = cfg['services']['bitwarden'].get('restart', 'unless-stopped')
         original = cfg['services']['bitwarden'].get('environment', {})
         if 'TZ' in original:
             service['environment']['TZ'] = original['TZ'].replace('$', '$$')
