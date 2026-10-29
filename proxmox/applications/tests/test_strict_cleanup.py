@@ -19,7 +19,15 @@ class StrictCleanupTests(unittest.TestCase):
         import provider_fixture
 
         notes = provider_fixture.fixture_notes()
-        self.assertEqual(set(notes), {"authentik", "pgadmin", "node-red"})
+        self.assertEqual(set(notes), {"authentik", "pgadmin", "node-red", "influxdb"})
+        self.assertIn(
+            "traefik.http.routers.influxdb.middlewares: local-clients@file,security-headers@file",
+            notes["influxdb"],
+        )
+        self.assertIn(
+            "traefik.http.services.influxdb.loadbalancer.server.url: http://127.0.0.1:8086",
+            notes["influxdb"],
+        )
         node = notes["node-red"]
         self.assertIn(
             "traefik.http.routers.node-red.middlewares: security-headers@file", node
