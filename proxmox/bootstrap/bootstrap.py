@@ -164,7 +164,7 @@ def prepare(catalog_path, settings_path, destination):
 def snapshot(destination):
     """Copy public inputs only; never expose .local/, Git metadata or caches."""
     destination.mkdir(parents=True, mode=0o700)
-    paths = ['proxmox/bootstrap']
+    paths = ['proxmox/bootstrap', 'proxmox/common/ansible', 'proxmox/applications/host_device_helper.py']
     excluded = shutil.ignore_patterns('.local', '.work', 'evidence', '__pycache__',
                                      '.terraform', '*.tfstate*', '*.tfplan', '*.pyc')
     for name in paths:
@@ -172,7 +172,10 @@ def snapshot(destination):
         if source.is_symlink():
             raise Refused('Source symlinks are not part of the test snapshot')
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(source, target, ignore=excluded, symlinks=True)
+        if source.is_file():
+            shutil.copy2(source, target)
+        else:
+            shutil.copytree(source, target, ignore=excluded, symlinks=True)
     if any(p.is_symlink() for p in destination.rglob('*')):
         raise Refused('Source snapshot contains a symlink; it will not be mounted into Docker')
     return {'snapshot': str(destination)}

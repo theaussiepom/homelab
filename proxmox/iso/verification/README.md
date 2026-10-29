@@ -121,7 +121,7 @@ affected images/cases were checked again.
 The earlier packaged review covered optimised-Python trust checks, stale metadata
 and ordinary guard failures. Its historical test counts included an older compiler
 that has since been removed, together with its tests. Current source coverage is
-measured by the framework's report-only coverage command; these historical boot
+measured by the framework coverage command with enforced per-file thresholds; these historical boot
 results do not qualify later source changes. The observer remains unchanged.
 
 The generated network file intentionally uses Proxmox's conventional `0644`

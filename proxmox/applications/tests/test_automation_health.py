@@ -101,10 +101,6 @@ class AutomationHealthTests(unittest.TestCase):
             sleep.assert_not_called()
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ProbeBoundaryTests(unittest.TestCase):
     def test_mqtt_credentials_acknowledgements_and_multi_byte_packet_lengths(self):
         from unittest.mock import MagicMock
@@ -206,3 +202,7 @@ class ProbeBoundaryTests(unittest.TestCase):
         ):
             self.assertEqual(health.run("mqtt")["read_only_probe"], "passed")
             sleep.assert_called_once_with(2)
+
+
+if __name__ == "__main__":
+    unittest.main()

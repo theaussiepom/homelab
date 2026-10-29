@@ -15,10 +15,14 @@ jobs:
   blueprints:
     name: Guest blueprint contracts
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
       - name: Install pinned source tooling
         run: python3 -m pip install --require-hashes -r requirements.lock.txt
       - name: Check coverage measurement against known paths
@@ -77,6 +81,28 @@ jobs:
           docker run --rm --platform linux/amd64 --network none -v "$PWD:/src:ro" \
             -v "$RUNNER_TEMP/zabbix-agent2.deb:/fixture-agent.deb:ro" homelab-app-test \
             python3 /src/proxmox/applications/tests/native_agent_fixture.py /fixture-agent.deb
+  bitwarden-runtime:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    name: Bitwarden startup and attachment persistence (Docker)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install pinned source requirements
+        run: python3 -m pip install --require-hashes -r requirements.lock.txt
+      - name: Build pinned source test tools
+        run: docker build --platform linux/amd64 -t homelab-app-test -f proxmox/bootstrap/docker/Dockerfile proxmox/bootstrap/docker
+      - name: Fetch the selected synthetic runtime images
+        run: |
+          docker pull --platform linux/amd64 ghcr.io/bitwarden/lite:latest
+          docker pull --platform linux/amd64 mariadb@sha256:805c8e104bd563d5bfa24fadd3f31cd419ea859cb5277f32b5dbf2db714f9ed1
+      - name: Exercise current rendering, startup, restart and attachment preservation
+        run: python3 proxmox/applications/tests/bitwarden_runtime_fixture.py
   applications:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     name: Application contracts and runtime components (Docker)
@@ -342,7 +368,7 @@ jobs:
   validate:
     name: Repository validation
     if: always() && (github.event_name == 'push' || github.event_name == 'pull_request')
-    needs: [blueprints, changes, monitoring, applications, iso-unit, python, source-safety, dependency-review, analyze, build-and-boot]
+    needs: [blueprints, changes, monitoring, bitwarden-runtime, applications, iso-unit, python, source-safety, dependency-review, analyze, build-and-boot]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:

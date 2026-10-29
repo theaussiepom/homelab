@@ -37,6 +37,7 @@ SERVICES = {
     211: ("authentik", "sso.example.invalid", 9000),
     202: ("pgadmin", "pgadmin.example.invalid", 8080),
     200: ("node-red", "flows.example.invalid", 1880),
+    212: ("influxdb", "influx.example.invalid", 8086),
 }
 
 
@@ -99,7 +100,8 @@ def fixture_notes():
         compiled = labels(
             {
                 "guest": {"interfaces": [{"ipv4": "10.88.30.21/24"}]},
-                "routes": {name: {"host": host, "url": f"http://10.88.30.21:{port}"}},
+                "routes": {name: {"host": host, "url": f"http://10.88.30.21:{port}",
+                                  **({"middlewares": ["local-clients", "security-headers"]} if name == "influxdb" else {})}},
             }
         )
         if name == "node-red":
@@ -176,6 +178,8 @@ def serve():
                         "host": self.headers.get("Host"),
                         "proto": self.headers.get("X-Forwarded-Proto"),
                         "user": self.headers.get("X-authentik-username"),
+                        "authorization": self.headers.get("Authorization"),
+                        "cookie": self.headers.get("Cookie"),
                     }
                 ).encode()
             )
@@ -246,7 +250,7 @@ def serve():
         def log_message(self, *args):
             pass
 
-    for port in (9000, 8080, 1880, 8123):
+    for port in (9000, 8080, 1880, 8123, 8086):
         server = ThreadingHTTPServer(("127.0.0.1", port), Backend)
         threading.Thread(target=server.serve_forever, daemon=True).start()
     api = ThreadingHTTPServer(("127.0.0.1", 8006), PVE)
@@ -297,9 +301,10 @@ def serve():
     threading.Event().wait()
 
 
-def request(host, path, headers=None):
+def request(host, path, headers=None, peer="127.0.0.1"):
     context = ssl.create_default_context(cafile="/fixture/ca.pem")
-    conn = http.client.HTTPSConnection("127.0.0.1", 8443, timeout=3, context=context)
+    conn = http.client.HTTPSConnection("127.0.0.1", 8443, timeout=3, context=context,
+                                      source_address=(peer, 0))
     try:
         conn.request("GET", path, headers={"Host": host, **(headers or {})})
         response = conn.getresponse()
@@ -347,7 +352,7 @@ def check():
                 "/auth/strategy",
                 "/auth/strategy/callback?code=synthetic",
             ]
-        else:
+        elif name == "pgadmin":
             paths += ["/oauth2/authorize?code=synthetic"]
         for path in paths:
             status, headers, body = request(host, path)
@@ -358,12 +363,22 @@ def check():
                 "host": host,
                 "proto": "https",
                 "user": None,
+                "authorization": None,
+                "cookie": None,
             }
             assert headers.get("X-Fixture-Policy") == "notes-discovery"
             assert headers.get("Strict-Transport-Security") == "max-age=31536000"
             assert (
                 "Location" not in headers
             ), "Native application paths must reach their own login handler"
+    native = {"Authorization": "Token synthetic-only", "Cookie": "native=synthetic"}
+    status, _, body = request("influx.example.invalid", "/api/v2/query?org=synthetic", native)
+    observed = json.loads(body)
+    assert status == 200 and observed["backend"] == 8086
+    assert observed["authorization"] == native["Authorization"]
+    assert observed["cookie"] == native["Cookie"]
+    for headers in ({}, {"X-Forwarded-For": "127.0.0.1", "CF-Connecting-IP": "127.0.0.1"}):
+        assert request("influx.example.invalid", "/", headers, peer="127.0.0.2")[0] == 403
     status, _, body = request("ha.example.invalid", "/auth/authorize")
     assert status == 200 and json.loads(body)["backend"] == 8123
     for host, port in (
@@ -411,8 +426,8 @@ def check():
         )
     assert "/api2/json/nodes/fixture/lxc/213/config" not in paths
     print(
-        "Provider fixture passed: pinned plugin discovers three synthetic guests; "
-        "HA and Node-RED native login paths, external HTTP/TLS/aliases, Notes TLS transports, CA/SNI rejection, middleware denial and WebSocket upgrade verified. "
+        "Provider fixture passed: pinned plugin discovers four synthetic guests; "
+        "HA and Node-RED native login paths, external HTTP/TLS/aliases, Notes TLS transports, CA/SNI rejection, middleware denial, spoofed-peer denial, Influx native headers/cookies and WebSocket upgrade verified. "
         "Native PVE and real login remain unverified."
     )
 
@@ -563,6 +578,7 @@ def main():
                     },
                 },
                 "middlewares": {
+                    "local-clients": {"ipAllowList": {"sourceRange": ["127.0.0.1/32"]}},
                     "private-clients": {
                         "ipAllowList": {"sourceRange": ["198.18.0.0/15"]}
                     },

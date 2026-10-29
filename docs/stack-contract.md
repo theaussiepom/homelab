@@ -264,3 +264,53 @@ references. Managed routes render to guest Notes, external routes to the file
 provider. Shared middleware definitions and verified TLS transports belong to
 ingress. All route DNS names point to its frontend; MQTT service DNS stays separate.
 The stack/site source schemas are v2/v3, with no old per-app route adapter.
+
+
+## Retired source and retained preparation obligations
+
+The removed `ansible/` roles, `src/homelab` CLI and four encrypted draft roots
+belonged to the superseded draft engine. They are not alternate deployment
+paths. The current application's `proxmox/applications/tofu/versions.tf` retains
+the same local backend and exact OpenTofu/provider versions as pre-replacement
+main `d77b6bf5e417c371839d2e61c32c8d6f0fb0df36`.
+Private state files, private plans, locks and verified NAS recovery copies are
+its existing protection model; this does not claim OpenTofu state/plan encryption
+or qualify encryption of the underlying storage. No backend conversion or
+passphrase change occurs during ordinary deployment.
+
+Guest readiness checks prepared application paths for type and symlinks; it does
+not reproduce the retired draft role's generic UID/GID/mode manifest. Separate
+`data-prepared` and `configuration-prepared` qualification must establish numeric
+ownership and modes for every retained data/configuration path. Ordinary CD must
+preserve that prepared metadata and must not repair it by recursive chown, restore
+or initialization. Specific current owners still enforce native database account
+IDs/receipts, the PegaProx key's UID/GID/mode/hash, Bitwarden's retained PUID/PGID
+and private runtime-file hash, controller private-file ownership/modes and the
+restricted radio device's exact metadata. These checks do not establish generic
+metadata equivalence for every application path; that remains native preparation
+evidence, not a successful source test.
+
+Ordinary deployment selects an active guest. A newly created container can start
+before its dependent guest-firewall options/rules are applied; the per-NIC firewall
+flag alone does not close that initial-start interval. Before accepting
+`state-and-trust-reviewed` for fresh creation, independently qualify the selected
+network and host/datacenter firewall protection for that interval. Without that
+qualification, fresh native creation remains held. The retired stopped-creation
+migration path is not restored to ordinary CD, and this source does not assert
+that any current guest is exposed or that native protection has been qualified.
+
+The removed fixture files are not all equivalent to successor tests:
+
+| Earlier guarantee | Current scope and evidence |
+| --- | --- |
+| Bitwarden startup, restart and attachment persistence | Retained: `bitwarden_runtime_fixture.py` exercises the current renderer, real synthetic Lite/MariaDB startup, restart and recreation, and a volume attachment sentinel. Required hosted CI runs it. This does not verify real vault rows, user authentication or native migration. |
+| Installed browser-helper drift refusal during a maintenance transition | The transition controller is retired. Current ordinary routing consumes endpoint/route definitions; `frontend-ready.yml` verifies separately prepared reply-routing policy without changing it. No equivalent historical helper-adoption protocol is claimed. |
+| Selective Unbound ACME configuration edits and metadata preservation | Automatic conversion is retired. The separately prepared Unbound configuration remains an existing read-only mount; source compilation does not rewrite it. Actual resolver/ACME configuration and ownership require separate preparation acceptance. Owned Pi-hole record reconciliation has its own current behavioral fixture. |
+| Manually stopped clients survive a disposable Docker-daemon cycle | That maintenance-specific behavior is retired. The requested ordinary deployment maintains active services and defaults containers to `restart: always`; it must not preserve a manual stop as desired state. |
+| Watched-file Influx routing, source gating and native auth headers | Managed Influx routing now belongs to guest Notes. The pinned provider fixture exercises managed Influx routing, direct-peer denial despite spoofed headers, and native Authorization/cookie preservation. The former file-migration protocol is retired; external routes remain the separate file-provider map. |
+
+The stack/site owners must verify adopted identifiers, endpoints, middleware,
+metadata preparation and prerequisite records against their exact published
+versions. Framework source tests do not qualify native firewall enforcement,
+TLS trust, browser/SQL acceptance, physical devices or restore capability. Missing
+acceptance must remain a visible preflight failure, never an implicit exclusion.

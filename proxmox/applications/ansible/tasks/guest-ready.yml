@@ -13,7 +13,7 @@
       - app.kind in ['dns', 'ingress', 'postgresql', 'mariadb', 'influxdb', 'identity', 'db-tools', 'automation', 'bitwarden', 'pegaprox', 'zigbee2mqtt']
       - app.capture is not defined
       - app.packages | select('match', '^[a-z0-9][a-z0-9+.-]*=[0-9][A-Za-z0-9.+:~\-]*$') | list | length == app.packages | length
-      - app.health_checks | length > 0
+      - application_service is not defined or (app.health_checks | default([]) | length > 0)
 
 - name: Inspect separately prepared application paths
   ansible.builtin.stat:

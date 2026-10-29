@@ -102,7 +102,7 @@ recovery copies safe and do not run a second active copy from your workstation.
 ## 4. Continue with application deployment
 
 If your databases use separate internal networks, follow the
-[database network guide](../docs/stack-contract.md). These virtual
+[stack deployment contract](../docs/stack-contract.md). These virtual
 networks do not need additional switch or access-point VLANs.
 
 For merge-driven host prerequisites, follow [bootstrap step 9](bootstrap/README.md#9-let-github-maintain-the-host-prerequisites).
@@ -162,4 +162,4 @@ Physical installation and first-start networking are part of the actual migratio
 They are separate from software-only tests. Keep real
 credentials, settings, state, plans and installation media outside Git.
 
-For the next service stage, see [HTTPS, sign-in and database administration](applications/README.md).
+For the next service stage, see [application deployment components](applications/README.md).
