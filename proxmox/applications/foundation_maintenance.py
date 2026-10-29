@@ -29,6 +29,9 @@ def require(value, message):
 
 
 def packet(value):
+    if isinstance(value, dict) and value.get('schema') == 'homelab-bitwarden-startup-v1':
+        from bitwarden_startup import packet as startup_packet
+        return startup_packet(value)
     if isinstance(value, dict) and value.get('schema') == 'homelab-ingress-browser-update-v1':
         from ingress_browser import packet as browser_packet
         return browser_packet(value)
@@ -267,8 +270,20 @@ def main():
         require(subprocess.check_output(['git', '-C', str(helper), 'rev-parse', 'HEAD'], text=True, timeout=10).strip()
                 == selected['revision'], 'Use the exact reviewed maintenance source')
         require(not Path('/var/lib/homelab-bootstrap/CONFIGURING').exists(), 'Bootstrap is active')
+        if selected['schema'] == 'homelab-bitwarden-startup-v1':
+            import bitwarden_startup
+            require(subprocess.check_output(['git', '-C', str(args.source), 'rev-parse', 'HEAD'],
+                    text=True, timeout=10).strip() == selected['source_revision'],
+                    'Preserve the exact original Bitwarden deployment source')
         sys.path.insert(0, str(args.source.resolve() / 'proxmox/applications'))
         deployment, fc, config = (importlib.import_module(name) for name in ('deploy', 'foundation_cd', 'site_config'))
+        if selected['schema'] == 'homelab-bitwarden-startup-v1':
+            from database_network_apply import nas_root
+            site = INPUTS / 'bitwarden/site.json'
+            result = bitwarden_startup.run(deployment, fc, json.loads(fc.regular(site, private=True)),
+                site, helper, selected, STATE, nas_root, expected, args.config)
+            print(json.dumps(result))
+            return
         guest = 'ingress' if selected['schema'] in ('homelab-ingress-image-update-v1',
                                                    'homelab-ingress-acme-update-v1',
                                                    'homelab-ingress-acme-confirmation-v1',

@@ -106,6 +106,46 @@ receipts are mirrored to NAS. Subsequent runs verify that exact installation
 rather than restoring/recreating it. A rollback after target writes requires
 reviewed reverse-data treatment; restarting the old container can lose writes.
 
+## Startup policy after migration
+
+Admitted deployments default to `unless-stopped`. The disabled preparation
+preview retains `no`, and explicit legacy `no` inputs remain readable so an
+existing installation's saved plan and receipts need not be rewritten.
+
+For an already completed installation with `no`, use a separately reviewed
+`homelab-bitwarden-startup-v1` packet through `foundation_maintenance.py` in the
+same permanent Bitwarden job. Bind the reviewed helper revision, original
+deployment revision, VMID, saved-plan and completion hashes, retained public
+origin, and observed full container ID, image ID and configuration/mount
+fingerprint. The image ID is observation evidence; keep the configured image
+reference at `ghcr.io/bitwarden/lite:latest`.
+
+The driver requires the original committed deployment configuration, private
+inputs, completed receipts, database-query proof, existing SSH trust and matching
+NAS custody. It refuses every existing operation/verification hold. Hold
+disposition requires separate review; this packet cannot clear one. The sole
+guest mutation is `docker update --restart unless-stopped` on that exact running
+container. It never starts, restarts, pulls, recreates, stages or restores it.
+Configuration, environment, mounts and all original migration records remain
+unchanged. A stopped container or identity/configuration drift stops admission.
+
+Exclusive local/NAS claims and the shared continuation hold preserve interrupted
+or failed attempts without automatic retry. After completion, the same packet
+only observes the desired policy and exact identity. Later pushes continue
+through the original installation's normal read-only verification. Keep this
+maintenance selection inside its existing job rather than adding a second
+deployment path or retiring the normal job.
+
+```sh
+python3 reviewed-helper/proxmox/applications/foundation_maintenance.py \
+  --packet bitwarden/startup.json --source original-deployment-source \
+  --config bitwarden/deployment.json
+```
+
+The policy fixes automatic startup after Docker/host restart; it does not prove a
+reboot, public routing or authenticated client acceptance. See Docker's
+[restart policy documentation](https://docs.docker.com/engine/containers/start-containers-automatically/).
+
 ## Exposure and acceptance
 
 Publish HTTP 8080 only on the selected private backend. The bind mounts refuse to

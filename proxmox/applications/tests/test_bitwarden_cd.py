@@ -169,6 +169,14 @@ def setup(root):
 
 
 class CDTests(unittest.TestCase):
+    def test_admitted_service_supports_normal_boot_restart_without_changing_preview_gates(self):
+        with tempfile.TemporaryDirectory() as d:
+            config, _, _, _, _ = setup(Path(d))
+            config['stack']['services']['bitwarden']['restart']='unless-stopped'
+            self.assertEqual(render.compose(config['stack'])['services']['bitwarden']['restart'],'unless-stopped')
+            config['stack']['services']['bitwarden'].pop('restart')
+            self.assertEqual(render.compose(config['stack'])['services']['bitwarden']['restart'],'unless-stopped')
+
     def test_public_cli_requires_adapter_for_every_bitwarden_phase(self):
         with tempfile.TemporaryDirectory() as d:
             site = Path(d) / "site.json"
