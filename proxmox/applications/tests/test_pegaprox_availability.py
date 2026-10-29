@@ -1,5 +1,7 @@
 """Enforce the commissioned guest's actual startup policy and immutable identity."""
 import copy
+import contextlib
+import io
 import hashlib
 import json
 from pathlib import Path
@@ -122,6 +124,18 @@ class PegaProxAvailabilityTests(unittest.TestCase):
                 ssh.return_value=SimpleNamespace(returncode=0,stdout=json.dumps(self.runtime))
                 self.assertEqual(availability.verify(self.policy,self.cfg)['status'],'passed')
                 self.assertEqual(trust_check.call_count,1)
+                inspection=ssh.call_args.kwargs['input']
+                container={'Id':self.runtime['id'],'Image':self.runtime['image_id'],
+                    'State':{'Running':True},'HostConfig':{'RestartPolicy':self.runtime['restart_policy']},'Mounts':[]}
+                for enabled,accepted in [('enabled',True),('enabled-runtime',False),('disabled',False)]:
+                    output=io.StringIO()
+                    with patch.object(availability.subprocess,'check_output',return_value=json.dumps([container]).encode()), \
+                            patch.object(availability.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout=enabled)) as service, \
+                            patch.object(Path,'read_bytes',return_value=b'accepted compose'), \
+                            contextlib.redirect_stdout(output):
+                        exec(inspection,{})
+                    self.assertEqual(json.loads(output.getvalue())['docker_enabled'],accepted)
+                    self.assertEqual(service.call_args.args[0],['systemctl','is-enabled','docker.service'])
                 self.runtime['restart_policy']={'Name':'no','MaximumRetryCount':0}
                 ssh.return_value=SimpleNamespace(returncode=0,stdout=json.dumps(self.runtime))
                 with self.assertRaises(ValueError):availability.verify(self.policy,self.cfg)
