@@ -38,6 +38,19 @@ class PreparationTests(unittest.TestCase):
         with self.assertRaises(ValueError):ordinary.prepare(self.packet,self.inputs)
         self.assertFalse((site.parent/'prepared.json').exists())
 
+    def test_postgresql_hba_filename_is_prepared_without_relaxing_path_boundaries(self):
+        """Accept PostgreSQL's standard filename and keep input names within one directory."""
+        self.value['kind']='postgresql'
+        self.value['files']={'site.json':json.dumps({'app':{'kind':'postgresql'}}),
+                             'pg_hba.conf':'local all postgres peer\n'}
+        self.save();_,site=ordinary.prepare(self.packet,self.inputs)
+        self.assertEqual((site.parent/'pg_hba.conf').read_text(),'local all postgres peer\n')
+        for name in ('../pg_hba.conf','/pg_hba.conf','nested/pg_hba.conf','pg hba.conf'):
+            with self.subTest(name=name):
+                self.value['files'][name]='must not be written';self.save()
+                with self.assertRaises(ValueError):ordinary.prepare(self.packet,self.inputs)
+                del self.value['files'][name]
+
     def test_runtime_token_stays_private_and_drift_does_not_replace_a_prepared_stack(self):
         self.value['kind']='automation'
         destination=self.inputs/'automation'/self.value['identity']

@@ -44,7 +44,7 @@ def prepare(packet_path, inputs=Path('/var/lib/homelab-inputs/ordinary'), enviro
                   'Bind the reviewed ordinary input identity')
     destination = inputs / kind / identity
     payload = {name: value.encode() for name, value in packet['files'].items()}
-    files.require('site.json' in payload and all(re.fullmatch(r'[a-z][a-z0-9.-]{0,63}', n) for n in payload),
+    files.require('site.json' in payload and all(re.fullmatch(r'[a-z][a-z0-9_.-]{0,63}', n) for n in payload),
                   'Use bounded ordinary input file names')
     cfg = json.loads(payload['site.json'])
     initial_radio = False
