@@ -4,7 +4,7 @@ For separate database networks, see the [private database network guide](databas
 It explains which settings belong to bootstrap, database CD and each application.
 
 [Proxmox guide](../README.md) · [Bootstrap](../bootstrap/README.md) ·
-[Databases](DATABASES.md) · [HTTPS and sign-in](FOUNDATION.md) · [pgAdmin](PGADMIN.md) · [PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
+[Databases](DATABASES.md) · [HTTPS and sign-in](FOUNDATION.md) · [Home automation](AUTOMATION.md) · [pgAdmin](PGADMIN.md) · [Zigbee2MQTT](ZIGBEE2MQTT.md) · [PegaProx decision](pegaprox.md) · [Technical reference](OPERATIONS.md)
 
 [Bitwarden Lite migration](BITWARDEN.md) uses the same installer through a
 private-input adapter, with a separate database restore and explicit admission.
@@ -52,7 +52,7 @@ flowchart TD
 | 1 | DNS, using Pi-hole and Unbound | Lookups work from the next guest; router still provides DHCP |
 | 2 | Required native databases | Matching versions, restored users/grants/data and a real client query |
 | 3 | Traefik HTTPS access | Verified Proxmox discovery and valid certificates for selected routes |
-| 4 | Authentik with Redis, then pgAdmin | Restored identity, native OAuth login and saved pgAdmin profile; Node-RED outpost follows with automation |
+| 4 | Authentik with Redis, then pgAdmin | Restored identity, native OAuth login and saved pgAdmin profile; automation retains its existing native Node-RED OIDC login |
 | 5 | The shared automation guest | HA, Node-RED and MQTT work together with restored settings |
 | 6 | The working house | Existing radios, devices, automations and household access work |
 
@@ -96,6 +96,13 @@ reviewed creation. A network scan alone is never accepted.
 
 Use database-native backups, not copies of files from running databases.
 Preserve numeric file owners, permissions, ACLs and extended attributes.
+
+## Keep the normal guest job after migration
+
+Use [ordinary deployment](ORDINARY.md) for the permanent per-guest job. Selection,
+OpenTofu and application Ansible are visible steps in that job. Migration data
+restoration remains separate. Keep unready guests disabled and preserve every
+failure hold; completing migration retires only its one-time work.
 
 ## How a deployment works
 

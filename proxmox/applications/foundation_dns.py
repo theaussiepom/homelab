@@ -42,8 +42,9 @@ UNBOUND_CONTAINER = '/opt/unbound/etc/unbound/unbound.conf'
 def configure(value):
     """Closed non-secret settings travel with the exact streamed helper source."""
     global SETTINGS, RECORDS, REDIRECTS, UNCHANGED, ADDRESS, SITE, TARGET, LEGACY_PROXY, ACME_EXCEPTIONS, WORK
-    require(isinstance(value, dict) and set(value) == {'schema', 'site', 'target', 'records', 'redirects',
-            'unchanged', 'legacy_proxy', 'acme_exceptions'} and value['schema'] == 'homelab-foundation-dns-v1',
+    fields = {'schema', 'site', 'target', 'records', 'redirects', 'unchanged', 'legacy_proxy', 'acme_exceptions'}
+    require(isinstance(value, dict) and fields <= set(value) and not set(value) - fields - {'extra_records','extra_records_before'}
+            and value['schema'] == 'homelab-foundation-dns-v1',
             'Expected the closed rendered DNS settings')
     def address(item):
         require(isinstance(item, str), 'Expected a literal DNS IPv4 address')
@@ -83,10 +84,22 @@ def configure(value):
     for name in value['records']:
         require(sum(name.endswith('.' + zone) for zone in value['redirects']) == 1,
                 'Each selected name must belong to one redirect zone')
+    extra = value.get('extra_records', {})
+    require(isinstance(extra, dict) and len(extra) <= 16
+            and not set(extra) & (set(value['records']) | set(value['redirects']) | set(value['unchanged'])),
+            'Additional application hosts must be bounded and cannot replace foundation names or zones')
+    for name, ip in extra.items():
+        hostname(name); address(ip)
+    previous=value.get('extra_records_before',{})
+    require(isinstance(previous,dict) and set(previous) == set(extra),
+            'Additional application hosts require their exact reviewed previous binding')
+    for ip in previous.values():
+        if ip is not None:address(ip)
     # Round-trip makes an independent copy; later caller mutations cannot alter admission.
     SETTINGS = json.loads(json.dumps(value))
     SITE, TARGET = SETTINGS['site'], SETTINGS['target']
     RECORDS, REDIRECTS, UNCHANGED = (SETTINGS[key] for key in ('records', 'redirects', 'unchanged'))
+    RECORDS = {**RECORDS, **extra}
     ADDRESS, LEGACY_PROXY = TARGET['address'], SETTINGS['legacy_proxy']
     ACME_EXCEPTIONS = tuple(SETTINGS['acme_exceptions'])
     WORK = Path('/var/lib/homelab-applications') / str(TARGET['vmid'])
@@ -152,6 +165,9 @@ def merge_hosts(current):
                 found[normalized].append(address)
         parsed.append((line, fields))
     # Keep exact whitespace, ordering and shared aliases on an already-correct run.
+    for name,before in SETTINGS.get('extra_records_before',{}).items():
+        require(found[name] in ([[] if before is None else [before], [RECORDS[name]]]),
+                'An additional DNS name has an unexpected existing binding; preserve it for review')
     if all(found[name] == [address] for name, address in RECORDS.items()):
         return list(current)
     result = []

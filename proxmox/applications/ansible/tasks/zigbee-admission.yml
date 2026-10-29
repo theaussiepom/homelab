@@ -1,0 +1,27 @@
+---
+- name: Install the read-only Zigbee state checker
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../zigbee2mqtt.py"
+    dest: /opt/homelab-app/zigbee2mqtt.py
+    owner: root
+    group: root
+    mode: '0700'
+  when: app.kind == 'zigbee2mqtt'
+
+- name: Install only the selected Zigbee validation facts
+  ansible.builtin.copy:
+    content: "{{ stack.zigbee | to_nice_json }}"
+    dest: /opt/homelab-app/zigbee.json
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  when: app.kind == 'zigbee2mqtt'
+
+- name: Check first-start admission or preserve the admitted live Zigbee identity
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/opt/homelab-app/zigbee2mqtt.py', '--config', '/opt/homelab-app/zigbee.json', '--directory', '/srv/homelab/data/zigbee2mqtt', '--admission-receipt', '/opt/homelab-app/zigbee-admission.json', '--restore-receipt', '/opt/homelab-app/restore.json', '--capture-sha256', (app.zigbee_admission.capture_sha256 if ordinary_reconcile | default(false) else app.capture.sha256)] + (['--selection-sha256', app.zigbee_admission.selection_sha256] if ordinary_reconcile | default(false) else []) + (['--require-admission', '--first-start-approval', app.zigbee_first_start_approval | default({}) | to_json] if app.start_services | default(false) | bool else []) + (['--admit-first-start'] if (app.start_services | default(false) | bool and not (ordinary_reconcile | default(false)) and app.zigbee_first_start_approval.approved | default(false) is sameas true) else []) }}"
+  register: zigbee_admission
+  changed_when: zigbee_admission.rc == 0 and (zigbee_admission.stdout | from_json).admission_created
+  no_log: true
+  when: app.kind == 'zigbee2mqtt' and not ansible_check_mode

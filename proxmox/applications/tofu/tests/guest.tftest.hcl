@@ -94,3 +94,41 @@ run "fractional_volume_size_is_rejected" {
   }
   expect_failures = [var.guest]
 }
+
+run "ordinary_guests_receive_no_host_devices" {
+  command = plan
+  module { source = "./guest" }
+  variables { node = "practice-pve" }
+  assert {
+    condition     = length(proxmox_virtual_environment_container.guest.device_passthrough) == 0
+    error_message = "Existing guests must not receive a host device."
+  }
+}
+
+run "one_exact_usb_serial_device" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      serial_device = { path = "/dev/serial/by-id/usb-Example_Radio_123-if00" }
+    })
+  }
+  assert {
+    condition = (length(proxmox_virtual_environment_container.guest.device_passthrough) == 1 &&
+      one(proxmox_virtual_environment_container.guest.device_passthrough).path == "/dev/serial/by-id/usb-Example_Radio_123-if00" &&
+      one(proxmox_virtual_environment_container.guest.device_passthrough).mode == "0660" &&
+    proxmox_virtual_environment_container.guest.unprivileged)
+    error_message = "Pass only the selected serial device without making the guest privileged."
+  }
+}
+
+run "wildcard_devices_are_rejected" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node  = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), { serial_device = { path = "/dev/*" } })
+  }
+  expect_failures = [var.guest]
+}

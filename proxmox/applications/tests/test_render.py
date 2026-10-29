@@ -38,6 +38,32 @@ def fixture(kind):
 class RenderTests(unittest.TestCase):
     """Check application behaviour and guard against the incidents already seen."""
 
+    def test_native_oidc_uses_preserved_settings_and_selected_https_origins(self):
+        cfg = fixture('automation')
+        cfg['node_red_oidc'] = {'identity_url': 'https://sso.example.invalid',
+            'node_red_url': 'https://flows.example.invalid', 'client_id': 'retained-client', 'provider_slug': 'nodered'}
+        cfg['services']['node_red'].update(command=['--settings', '/runtime-settings.js'], extra_mounts=[{
+            'source': '/srv/homelab/data/node-red/runtime-settings.js', 'target': '/runtime-settings.js', 'read_only': True}])
+        env = render.compose(cfg)['services']['node_red']['environment']
+        self.assertEqual(env['NODE_RED_IDENTITY_URL'], 'https://sso.example.invalid')
+        self.assertEqual(env['NODE_RED_OIDC_CLIENT_ID'], 'retained-client')
+        self.assertNotIn('NODE_RED_OIDC_CLIENT_SECRET', env)
+        for url in ('http://sso.example.invalid', 'https://user:secret@sso.example.invalid', 'https://sso.example.invalid/path', 'https://sso.example.invalid\n', '\thttps://sso.example.invalid',
+                    'https://sso.example.invalid\x00', 'https://sso.example.invalid\x7f', None):
+            for origin in ('identity_url', 'node_red_url'):
+                bad = copy.deepcopy(cfg); bad['node_red_oidc'][origin] = url
+                with self.subTest(origin=origin, url=url), self.assertRaises(ValueError): render.compose(bad)
+        cfg['services']['node_red']['command'] = ['--settings', '/config/settings.js']
+        with self.assertRaisesRegex(ValueError, 'wrapper'): render.compose(cfg)
+
+    def test_legacy_docker_database_aliases_can_move_without_changing_credentials(self):
+        cfg = fixture('automation')
+        cfg['services']['homeassistant']['extra_hosts'] = {'mariadb.db_hass': '10.88.30.24'}
+        self.assertEqual(render.compose(cfg)['services']['homeassistant']['extra_hosts'], {'mariadb.db_hass': '10.88.30.24'})
+        for hosts in ({'bad\nname': '10.88.30.24'}, {'database': '169.254.1.1'}, {'database': 'not-an-ip'}):
+            cfg['services']['homeassistant']['extra_hosts'] = hosts
+            with self.subTest(hosts=hosts), self.assertRaises(ValueError): render.compose(cfg)
+
     def test_capture_mounts_use_a_directory_inside_the_data_disk(self):
         """A freshly formatted volume may already contain filesystem recovery files."""
         cfg = fixture('dns')

@@ -7,9 +7,11 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
+import sys
 import ssl
 import stat
 import time
@@ -22,6 +24,8 @@ import guest_identity
 import discovery
 import foundation
 import ingress_routing
+import zigbee2mqtt
+import zigbee_usb
 import bitwarden_migration
 import monitoring
 
@@ -29,6 +33,7 @@ check_merge_create_plan = discovery.check_merge_create_plan
 
 SOURCE = Path(__file__).resolve().parent
 DATABASE_KINDS = {'mariadb', 'postgresql', 'influxdb'}
+AUTOMATION_SERVICES = ('mqtt', 'homeassistant', 'node_red')
 
 
 class InputNeeded(ValueError):
@@ -77,7 +82,7 @@ def write(path, value):
     sync_directory(path.parent)
 
 
-def validate(cfg, stack_override=None):
+def validate(cfg, stack=None):
     if cfg.get('app', {}).get('kind') == 'bitwarden' and 'bitwarden' not in cfg['app']:
         raise InputNeeded('Bitwarden is preparation only; review restore, private inputs and native admission first')
     if cfg.get('app', {}).get('kind') == 'bitwarden':
@@ -94,14 +99,29 @@ def validate(cfg, stack_override=None):
     if isinstance(vmid, bool) or not isinstance(vmid, int) or vmid < 100 or vmid in {900, 4914, 4915, 4920}:
         raise ValueError('Select one application guest, never the deployment controller or protected targets')
     app = cfg['app']
+    if 'stack_config' in app and stack is None:
+        stack = json.loads(Path(app['stack_config']).read_text())
+    device = cfg['guest'].get('serial_device')
+    if app.get('kind') == 'zigbee2mqtt':
+        zigbee_usb.stage(cfg)
+        radio = zigbee2mqtt.validate(stack.get('zigbee'))
+        backend = [nic for nic in cfg['guest']['interfaces'] if nic.get('role') == 'backend']
+        if (stack.get('kind') != 'zigbee2mqtt' or not isinstance(device, dict) or
+                device != {'path': radio['serial_device']} or
+                len(backend) != 1 or radio['bind_address'] != backend[0]['ipv4'].split('/')[0]):
+            raise ValueError('Zigbee must bind the same exact USB device and guest backend address')
+    elif device is not None or 'usb_stage' in app:
+        raise ValueError('Serial passthrough belongs only to the selected Zigbee guest')
     discovery.labels(cfg)
     if 'frontend_routing' in app:
-        if app.get('kind') != 'ingress':
-            raise ValueError('Frontend source routing belongs only to ingress')
+        if app.get('kind') not in {'ingress', 'automation'}:
+            raise ValueError('Frontend source routing requires a selected multihomed application')
         address, _, _, mac = ingress_routing.validate(app['frontend_routing'])
         if not any(nic['ipv4'] == app['frontend_routing']['address'] and nic['mac'].lower() == mac
                    for nic in cfg['guest']['interfaces']):
             raise ValueError('Frontend routing must bind the exact selected guest interface')
+    if 'ha_http' in app:
+        raise InputNeeded('HA configuration conversion is separate from CD; supply an already prepared configuration')
     if app['vmid'] != vmid or app['hostname'] != cfg['guest']['hostname'] or app['memory_mib'] != cfg['guest']['memory_mib']:
         raise ValueError('OpenTofu and Ansible must select the same guest and resource budget')
     if not any(nic['ipv4'].split('/')[0] == app['address'] and nic['mac'].lower() == app['mac'].lower() for nic in cfg['guest']['interfaces']):
@@ -127,12 +147,10 @@ def validate(cfg, stack_override=None):
                                   or database.get('group') != 'mysql' or 'uid' in database or 'gid' in database):
             raise InputNeeded('Package account mode is only for a new empty MariaDB mysql account; remove fixed uid/gid inputs')
     if app.get('kind') == 'automation' and 'stack_config' in app:
-        stack = json.loads(Path(app['stack_config']).read_text())
         address = stack.get('services', {}).get('homeassistant', {}).get('environment', {}).get('HOMELAB_HA_IPV4')
         if address and address not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
             raise ValueError('HA discovery must select an address assigned to this guest')
     if 'stack_config' in app:
-        stack = stack_override if stack_override is not None else json.loads(Path(app['stack_config']).read_text())
         if app.get('kind') == 'bitwarden':
             bitwarden_migration.validate_admission(cfg, stack)
             import render
@@ -145,7 +163,6 @@ def validate(cfg, stack_override=None):
             if selected['bind_address'] not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
                 raise ValueError('Foundation listeners must select an address assigned to this guest')
     if app.get('kind') == 'db-tools':
-        stack = json.loads(Path(app['stack_config']).read_text())
         if stack.get('pgadmin_bind_address') not in [nic['ipv4'].split('/')[0] for nic in cfg['guest']['interfaces']]:
             raise ValueError('pgAdmin must select a backend address assigned to this guest')
     for key in ('state_root', 'backup_mount', 'backup_directory', 'api_token', 'ca_file', 'private_key', 'known_hosts'):
@@ -251,6 +268,15 @@ def quiet(command, environment, log, cwd=None):
         subprocess.run(command, env=environment, cwd=cwd, stdout=output, stderr=output, check=True)
 
 
+def ansible_environment(cfg, environment=None):
+    """Keep every application path on the same exact pinned SSH trust options."""
+    environment = os.environ.copy() if environment is None else environment
+    environment.update({'ANSIBLE_CONFIG': str(SOURCE / 'ansible' / 'ansible.cfg'),
+                        'ANSIBLE_HOST_KEY_CHECKING': 'True',
+                        'ANSIBLE_SSH_ARGS': '-F /dev/null -o StrictHostKeyChecking=yes -o BatchMode=yes -o ControlMaster=no -o GlobalKnownHostsFile=/dev/null -o VerifyHostKeyDNS=no -o UpdateHostKeys=no -o IdentitiesOnly=yes -o UserKnownHostsFile=' + shlex.quote(cfg['paths']['known_hosts'])})
+    return environment
+
+
 def backup(cfg, state, label):
     mount = Path(cfg['paths']['backup_mount']).resolve()
     if not os.path.ismount(mount):
@@ -287,6 +313,14 @@ def _execute_step(action, cfg_path, approved_plan=None):
         if (work / 'HOLD.json').exists():
             raise ValueError('A failed mutation is held for review; preserve its state and logs')
         state = work / 'terraform.tfstate'
+        radio = cfg['app'].get('kind') == 'zigbee2mqtt'
+        if radio:
+            zigbee_usb.verify_firewall(cfg, api_get)
+            if zigbee_usb.stage(cfg) == 'attached':
+                zigbee_usb.require_prepared(cfg, work)
+                zigbee_usb.verify_live(cfg, api_get)
+            elif action not in {'plan', 'apply'}:
+                raise InputNeeded('The stopped radio preparation cannot stage/start; finish the operator USB attachment first')
         backup(cfg, state, 'before-' + action)
         environment = os.environ.copy()
         environment.update({'TF_IN_AUTOMATION': '1', 'CHECKPOINT_DISABLE': '1',
@@ -298,13 +332,17 @@ def _execute_step(action, cfg_path, approved_plan=None):
             shutil.copytree(SOURCE / 'tofu', work / 'tofu', dirs_exist_ok=True,
                             ignore=shutil.ignore_patterns('.terraform', '*.tfstate*', '*.tfplan'))
             variables = {k: cfg[k] for k in ('site', 'guest', 'ssh_public_keys')}
-            variables['guest'] = dict(cfg['guest'], routing_labels=discovery.labels(cfg))
+            variables['guest'] = dict(zigbee_usb.guest_variables(cfg), routing_labels=discovery.labels(cfg))
             write(work / 'tofu' / 'site.auto.tfvars.json', variables)
             quiet(tofu + ['init', '-input=false', '-lockfile=readonly', '-backend-config=path=' + str(state)], environment, logfile)
             quiet(tofu + ['plan', '-input=false', '-lock-timeout=30s', '-out=' + str(work / 'guest.tfplan')], environment, logfile)
             output = subprocess.check_output(tofu + ['show', '-json', str(work / 'guest.tfplan')], env=environment)
             plan_value = json.loads(output)
             check_plan(plan_value, cfg['site']['node'], vmid)
+            if radio:
+                zigbee_usb.check_plan(plan_value, cfg)
+                if zigbee_usb.stage(cfg) == 'prepare':
+                    check_merge_create_plan(plan_value, cfg['site']['node'], vmid)
             write(work / 'guest.tfplan.json', plan_value)
             creates_guest = any(row['address'] == 'module.guest.proxmox_virtual_environment_container.guest'
                                 and row['change']['actions'] == ['create'] and row['change'].get('before') is None
@@ -313,6 +351,8 @@ def _execute_step(action, cfg_path, approved_plan=None):
                        'plan_json_sha256': sha(work / 'guest.tfplan.json'), 'site_sha256': sha(cfg_path),
                        'source_sha256': source_hash(), 'input_hashes': input_hashes(cfg), 'vmid': vmid,
                        'creates_guest': creates_guest}
+            if radio:
+                receipt['usb_stage'] = zigbee_usb.stage(cfg)
             write(work / 'plan.json', receipt)
             return receipt
         receipt = json.loads((work / 'plan.json').read_text())
@@ -323,6 +363,14 @@ def _execute_step(action, cfg_path, approved_plan=None):
         if action == 'apply':
             if not approved_plan or approved_plan != receipt['plan_sha256'] or approved_plan != sha(work / 'guest.tfplan'):
                 raise ValueError('Apply requires the exact reviewed plan SHA256')
+            if radio:
+                plan_path = work / 'guest.tfplan.json'
+                if plan_path.is_symlink() or sha(plan_path) != receipt.get('plan_json_sha256'):
+                    raise ValueError('Preserve the matching radio JSON plan before apply')
+                selected_plan = json.loads(plan_path.read_text())
+                zigbee_usb.check_plan(selected_plan, cfg)
+                if zigbee_usb.stage(cfg) == 'prepare':
+                    check_merge_create_plan(selected_plan, cfg['site']['node'], vmid)
         elif action not in {'stage', 'start', 'verify'}:
             raise ValueError('Unknown deployment step')
         applied = work / 'applied.json'
@@ -347,14 +395,14 @@ def _execute_step(action, cfg_path, approved_plan=None):
                 quiet(tofu + ['apply', '-input=false', '-lock-timeout=30s', str(work / 'guest.tfplan')], environment, logfile)
                 write(work / 'apply-window.json', dict(window, finished_at_ns=time.time_ns()))
                 write(work / 'applied.json', receipt)
+                if radio and zigbee_usb.stage(cfg) == 'prepare':
+                    write(work / 'usb-prepared.json', zigbee_usb.prepared_receipt(cfg, state))
             else:
                 app = dict(cfg['app'], start_services=(action == 'start'), render_dir=str(work / 'rendered'))
                 write(work / 'variables.json', {'app': app,
                       'network_ready_interfaces': required_network_interfaces(cfg)})
                 write(work / 'inventory.json', {'application': {'hosts': {app['hostname']: {'ansible_host': app['address'], 'ansible_user': 'root'}}}})
-                environment.update({'ANSIBLE_CONFIG': str(SOURCE / 'ansible' / 'ansible.cfg'),
-                                    'ANSIBLE_HOST_KEY_CHECKING': 'True',
-                                    'ANSIBLE_SSH_ARGS': '-F /dev/null -o StrictHostKeyChecking=yes -o BatchMode=yes -o ControlMaster=no -o GlobalKnownHostsFile=/dev/null -o VerifyHostKeyDNS=no -o UpdateHostKeys=no -o IdentitiesOnly=yes -o UserKnownHostsFile=' + shlex.quote(cfg['paths']['known_hosts'])})
+                ansible_environment(cfg, environment)
                 playbook = 'verify.yml' if action == 'verify' else 'site.yml'
                 quiet(['ansible-playbook', '-i', str(work / 'inventory.json'),
                        '--private-key', cfg['paths']['private_key'], str(SOURCE / 'ansible' / playbook),
@@ -372,20 +420,44 @@ def _execute_step(action, cfg_path, approved_plan=None):
         return {'step': action, 'vmid': vmid, 'status': 'passed'}
 
 
+def check_radio_capture(cfg):
+    """Reuse the exact original capture guard for direct and staged CD apply."""
+    capture = cfg['app'].get('capture', {})
+    path = Path(capture.get('path', ''))
+    if (capture.get('coherent') is not True or path.is_symlink() or not path.is_file()
+            or sha(path) != capture.get('sha256')):
+        raise InputNeeded('Verify the selected Zigbee capture before creating its guest')
+    stack = json.loads(Path(cfg['app']['stack_config']).read_text())
+    zigbee2mqtt.check_archive(path, stack['zigbee'])
+
+
 def execute(action, cfg_path, approved_plan=None):
     """Keep one approved rollout running through all phases, with no retries."""
     os.umask(0o077)
     cfg = json.loads(cfg_path.read_text())
     vmid = validate(cfg)
+    if cfg['app'].get('kind') == 'zigbee2mqtt' and action == 'deploy':
+        raise InputNeeded('Zigbee uses two stages: plan/apply prepare, operator USB attachment, then plan/apply attached and stage/start/verify')
+    if action == 'apply' and cfg['app'].get('kind') == 'zigbee2mqtt':
+        check_radio_capture(cfg)
     work = Path(cfg['paths']['state_root']) / str(vmid)
     work.mkdir(mode=0o700, parents=True, exist_ok=True)
     with (work / 'workflow.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if (work / 'ORDINARY-HOLD.json').exists() or (work / 'ORDINARY-HOLD.json').is_symlink():
+            raise InputNeeded('An ordinary guest operation owns this target; preserve its hold and phase receipts')
         hold = work / 'ROLLOUT-HOLD.json'
         if hold.exists():
             raise InputNeeded('An interrupted rollout is held; review its phase receipts before another job')
-        if action != 'deploy':
+        if action in {'radio-prepare', 'radio-attach', 'radio-start'}:
+            if cfg['app'].get('kind') != 'zigbee2mqtt':
+                raise InputNeeded('Initial radio phases belong only to the selected coordinator guest')
+            import zigbee_cd
+            return zigbee_cd.initial(action, cfg_path, cfg, work, engine=sys.modules[__name__])
+        if action not in {'deploy', 'prepare'}:
             return _execute_step(action, cfg_path, approved_plan)
+        if action == 'prepare' and cfg['app'].get('kind') != 'automation':
+            raise InputNeeded('Separate service jobs are only for the selected automation guest')
         if (work / 'HOLD.json').exists():
             raise InputNeeded('A failed deployment is held; preserve its state and logs for review')
         if (work / 'applied.json').exists() or (work / 'started.json').exists():
@@ -430,7 +502,8 @@ def execute(action, cfg_path, approved_plan=None):
         # Each original step retains its own native-operation HOLD as well.
         started = time.time_ns()
         results = []
-        for step in ('apply', 'identity', 'stage', 'start', 'verify'):
+        steps = ('apply', 'identity', 'stage') if action == 'prepare' else ('apply', 'identity', 'stage', 'start', 'verify')
+        for step in steps:
             write(hold, {'step': step, 'vmid': vmid, 'plan_sha256': approved_plan,
                          'started_at_ns': started, 'automatic_retry': False})
             if step == 'identity':
@@ -442,26 +515,125 @@ def execute(action, cfg_path, approved_plan=None):
             else:
                 result = _execute_step(step, cfg_path, approved_plan)
             results.append({'step': step, 'result': result})
-        receipt = {'step': 'deploy', 'vmid': vmid, 'status': 'passed',
+        receipt = {'step': action, 'vmid': vmid, 'status': 'passed',
                    'plan_sha256': approved_plan, 'steps': results}
-        write(work / 'rollout-complete.json', receipt)
+        if action == 'prepare':
+            receipt.update(plan=plan, compose_sha256=sha(work / 'rendered' / 'compose.yml'))
+        write(work / ('prepare-complete.json' if action == 'prepare' else 'rollout-complete.json'), receipt)
         hold.unlink()
         sync_directory(work)
         return receipt
 
 
+def automation_binding(cfg, cfg_path, work):
+    """Service jobs must consume the exact successfully staged guest and inputs."""
+    instruction = 'Automation preparation or its bound inputs changed; preserve the receipts for review'
+    try:
+        prepared = json.loads((work / 'prepare-complete.json').read_text())
+        plan = json.loads((work / 'plan.json').read_text())
+        valid = (prepared['status'] == 'passed' and prepared['step'] == 'prepare'
+                 and prepared['vmid'] == cfg['guest']['vmid'] and prepared['plan'] == plan
+                 and prepared['plan_sha256'] == plan['plan_sha256'] == sha(work / 'guest.tfplan')
+                 and plan['plan_json_sha256'] == sha(work / 'guest.tfplan.json')
+                 and plan['site_sha256'] == sha(cfg_path) and plan['source_sha256'] == source_hash()
+                 and plan['input_hashes'] == input_hashes(cfg)
+                 and json.loads((work / 'applied.json').read_text()) == plan
+                 and prepared['compose_sha256'] == sha(work / 'rendered' / 'compose.yml'))
+    except (OSError, KeyError, ValueError):
+        raise InputNeeded(instruction) from None
+    if not valid:
+        raise InputNeeded(instruction)
+    return {'vmid': cfg['guest']['vmid'], 'prepared_sha256': sha(work / 'prepare-complete.json'),
+            'compose_sha256': prepared['compose_sha256']}
+
+
+def _automation_service_step(cfg, work, service, start):
+    """Run one service playbook; it cannot restore or rewrite shared configuration."""
+    cfg = dict(cfg, app=dict(cfg['app'], address=application_address(cfg)))
+    guest_trust(cfg, work)
+    app = dict(cfg['app'], health_checks=cfg['app']['service_health_checks'][service])
+    variables = work / (service + '-variables.json')
+    inventory = work / (service + '-inventory.json')
+    write(variables, {'app': app, 'automation_service': service, 'automation_service_start': start,
+                     'automation_compose_sha256': sha(work / 'rendered' / 'compose.yml'),
+                     'network_ready_interfaces': required_network_interfaces(cfg)})
+    write(inventory, {'application': {'hosts': {app['hostname']: {
+        'ansible_host': app['address'], 'ansible_user': 'root'}}}})
+    environment = ansible_environment(cfg)
+    environment.update({'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8'})
+    quiet(['ansible-playbook', '-i', str(inventory), '--private-key', cfg['paths']['private_key'],
+           str(SOURCE / 'ansible' / 'automation-service.yml'), '--extra-vars', '@' + str(variables)],
+          environment, work / f'{time.time_ns()}-{service}.log')
+    return {'status': 'passed', 'service': service, 'started': start}
+
+
+def automation_service(cfg_path, service, lock_timeout=300):
+    """Allow independent Actions jobs while serializing mutations of one guest."""
+    os.umask(0o077)
+    cfg = json.loads(cfg_path.read_text())
+    vmid = validate(cfg)
+    checks = cfg['app'].get('service_health_checks', {})
+    if (cfg['app'].get('kind') != 'automation' or service not in AUTOMATION_SERVICES
+            or set(checks) != set(AUTOMATION_SERVICES) or not all(checks.values())):
+        raise InputNeeded('Select one automation service and all three service-specific acceptance probes')
+    work = Path(cfg['paths']['state_root']) / str(vmid)
+    if not work.is_dir():
+        raise InputNeeded('Prepare the automation guest before its application jobs')
+    with (work / 'workflow.lock').open('a') as lock:
+        deadline = time.monotonic() + lock_timeout
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise InputNeeded('Another guest job still owns the lock; no application action was started') from None
+                time.sleep(1)
+        if any((work / name).exists() or (work / name).is_symlink() for name in
+               ('HOLD.json', 'ROLLOUT-HOLD.json', 'CONTINUATION-HOLD.json','AUTOMATION-CD-HOLD.json',
+                'ORDINARY-HOLD.json')):
+            raise InputNeeded('An interrupted automation operation is held; no automatic replay')
+        binding = automation_binding(cfg, cfg_path, work)
+        if service != 'mqtt':
+            mqtt = work / 'mqtt-complete.json'
+            if not mqtt.is_file() or json.loads(mqtt.read_text()).get('binding') != binding:
+                raise InputNeeded('MQTT must complete successfully before its consumers start')
+        complete = work / (service + '-complete.json')
+        start = not complete.exists()
+        if not start and json.loads(complete.read_text()).get('binding') != binding:
+            raise InputNeeded('The completed service has different inputs; review a specific update')
+        if cfg['app'].get('exclusive_writer_confirmed') is not True:
+            raise InputNeeded('Retire the original writers before starting the selected application')
+        hold = work / 'ROLLOUT-HOLD.json'
+        marker = {'step': service, 'binding': binding, 'started_at_ns': time.time_ns(),
+                  'automatic_retry': False, 'remote_closure': 'unconfirmed'}
+        write(hold, marker)
+        result = _automation_service_step(cfg, work, service, start)
+        if result.get('status') != 'passed':
+            raise InputNeeded('The service job did not finish successfully; preserve its hold')
+        if start:
+            write(complete, {'service': service, 'binding': binding, 'status': 'passed', 'result': result})
+        if json.loads(hold.read_text()) != marker:
+            raise InputNeeded('The service hold changed; preserve it for review')
+        hold.unlink()
+        sync_directory(work)
+        return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['plan', 'deploy', 'apply', 'stage', 'start', 'verify'])
+    parser.add_argument('action', choices=['plan', 'deploy', 'prepare', 'service', 'apply', 'stage', 'start', 'verify'])
     parser.add_argument('--site', required=True, type=Path)
     parser.add_argument('--plan-sha256')
+    parser.add_argument('--service', choices=AUTOMATION_SERVICES)
     args = parser.parse_args()
     try:
         site = json.loads(args.site.read_text())
         if (isinstance(site, dict) and isinstance(site.get('app'), dict)
                 and site['app'].get('kind') == 'bitwarden'):
             raise InputNeeded('Bitwarden operations must use bitwarden_cd.py so adapter holds and completion custody are preserved')
-        print(json.dumps(execute(args.action, args.site, args.plan_sha256)))
+        result = automation_service(args.site, args.service) if args.action == 'service' else execute(args.action, args.site, args.plan_sha256)
+        print(json.dumps(result))
     except InputNeeded as error:
         raise SystemExit(str(error)) from None
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:

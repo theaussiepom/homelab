@@ -8,6 +8,10 @@
     - name: Check the selected new guest before changing it
       ansible.builtin.import_tasks: tasks/guard.yml
 
+    - name: Require separately staged original radio data before installation
+      ansible.builtin.import_tasks: tasks/zigbee-staged.yml
+      when: app.kind == 'zigbee2mqtt'
+
     - name: Install exact packages without starting vendor services
       ansible.builtin.import_tasks: tasks/packages.yml
 
@@ -58,7 +62,7 @@
 
     - name: Configure the application stack
       ansible.builtin.import_tasks: tasks/compose.yml
-      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'monitoring', 'pegaprox', 'bitwarden']
+      when: app.kind in ['dns', 'identity', 'ingress', 'automation', 'db-tools', 'monitoring', 'pegaprox', 'bitwarden', 'zigbee2mqtt']
 
     - name: Adopt future commissioned guests through the same active agent tasks
       ansible.builtin.include_tasks: ../../common/ansible/zabbix-agent.yml

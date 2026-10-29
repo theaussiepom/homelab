@@ -36,7 +36,7 @@ def save(path, value):
 def validate(c):
     fields = {'schema', 'endpoint', 'node', 'deploy', 'bridge', 'applications',
               'existing_grants', 'backup_source'}
-    require(fields <= set(c) <= fields | {'service_discovery', 'private_bridges', 'service_discovery_extension'},
+    require(fields <= set(c) <= fields | {'service_discovery', 'private_bridges', 'service_discovery_extension', 'application_networks'},
             'Use the closed bootstrap CD configuration')
     require(c['schema'] == 'homelab-bootstrap-cd-v1', 'Unsupported bootstrap CD schema')
     endpoint = urlsplit(c['endpoint'])
@@ -82,6 +82,16 @@ def validate(c):
         provider_access.validate(c)
     require('service_discovery_extension' not in c or 'service_discovery' in c,
             'A discovery extension requires the declared discovery configuration')
+    networks = c.get('application_networks', [])
+    require(isinstance(networks, list) and len(networks) <= 32, 'Declare a finite application network list')
+    for row in networks:
+        require(isinstance(row, dict) and set(row) == {'vmid', 'bridge', 'vlan'}
+                and type(row['vmid']) is int and row['vmid'] in {app['vmid'] for app in c['applications']}
+                and re.fullmatch(r'vmbr[0-9]{1,4}', row['bridge'])
+                and (row['vlan'] is None or type(row['vlan']) is int and 1 <= row['vlan'] <= 4094),
+                'Network access must select a declared application and existing VLAN bridge')
+    require(len({(r['vmid'],r['bridge'],r['vlan']) for r in networks}) == len(networks),
+            'Duplicate application network access')
 
 
 def rows(items):
@@ -91,7 +101,10 @@ def rows(items):
 def desired(c):
     return rows(c['existing_grants']) | {('/vms/' + str(a['vmid']), 'PVEVMAdmin', 0)
                                       for a in c['applications']} | {
-        ('/sdn/zones/localnetwork/' + name, 'PVESDNUser', 0) for name in bridge_definitions(c)}
+        ('/sdn/zones/localnetwork/' + name, 'PVESDNUser', 0) for name in bridge_definitions(c)} | {
+        (path, 'PVESDNUser', 0) for row in c.get('application_networks', []) for path in
+        (['/sdn/zones/localnetwork/' + row['bridge']] +
+         ([] if row['vlan'] is None else ['/sdn/zones/localnetwork/' + row['bridge'] + '/' + str(row['vlan'])]))}
 
 
 def bridge_definitions(c):
@@ -197,6 +210,12 @@ def inspect(api, c):
     network = api.call(node + '/network')
     require(not network.get('changes'), 'Unrelated pending host-network changes need review')
     interfaces = network['data']
+    for row in c.get('application_networks', []):
+        selected = [nic for nic in interfaces if nic['iface'] == row['bridge']]
+        require(len(selected) == 1 and selected[0].get('type') == 'bridge'
+                and selected[0].get('active') == 1
+                and (row['vlan'] is None or selected[0].get('bridge_vlan_aware') == 1),
+                'Declared application VLAN bridge must already be active and VLAN-aware; no host-network correction')
     for name in bridge_definitions(c):
         bridge = [r for r in interfaces if r['iface'] == name]
         require(len(bridge) <= 1, 'Duplicate bridge identity')
@@ -405,7 +424,8 @@ def run(c, api, root=Path('/var/lib/homelab-bootstrap'), backup=Path('/srv/homel
     evidence.mkdir(mode=0o700)
     before = inspect(api, c)
     if 'service_discovery' in c:
-        before['service_discovery'] = provider_access.inspect(api, c, root, backup)
+        before['service_discovery'] = provider_access.inspect(
+            api, c, root, backup)
     payload = {'configuration': c, 'plan': before}
     save(evidence / 'plan.json', payload)
     destination = backup / evidence.name

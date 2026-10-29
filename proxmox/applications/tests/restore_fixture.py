@@ -7,6 +7,7 @@ import subprocess
 import struct
 import sys
 import tempfile
+import tarfile
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -33,6 +34,57 @@ with tempfile.TemporaryDirectory(dir='/var/tmp') as tmp:
     assert os.getxattr(result, b'system.posix_acl_access') == os.getxattr(data, b'system.posix_acl_access')
     assert not restore.restore(archive, target, receipt, restore.digest(archive))
     print('GNU tar restore: contents, UID 70, GID 1000, mode, POSIX ACL, xattr and repeat receipt passed')
+
+    # Exercise the newly admitted npm spelling through the exact restore path,
+    # not merely its archive validator. No private application data is used.
+    npm = root / 'npm'; (npm / 'node_modules/.bin').mkdir(parents=True)
+    (npm / 'node_modules/acorn/bin').mkdir(parents=True)
+    (npm / 'node_modules/acorn/bin/acorn').write_text('synthetic executable')
+    (npm / 'node_modules/.bin/acorn').symlink_to('../acorn/bin/acorn')
+    os.link(npm / 'node_modules/acorn/bin/acorn', npm / 'same-file')
+    npm_archive = root / 'npm.tar'
+    subprocess.run(['tar', '--create', '--file', str(npm_archive), '--acls', '--xattrs',
+                    '--numeric-owner', '-C', str(npm), '.'], check=True)
+    npm_target = root / 'npm-target'
+    assert restore.restore(npm_archive, npm_target, root / 'npm-receipt.json', restore.digest(npm_archive))
+    npm_link = npm_target / 'node_modules/.bin/acorn'
+    assert npm_link.is_symlink() and os.readlink(npm_link) == '../acorn/bin/acorn'
+    assert npm_link.read_text() == 'synthetic executable' and npm_link.resolve().is_relative_to(npm_target)
+    assert (npm_target / 'same-file').stat().st_ino == npm_link.stat().st_ino
+    malicious = root / 'escape.tar'
+    with tarfile.open(malicious, 'w') as stream:
+        link = tarfile.TarInfo('config/link'); link.type = tarfile.SYMTYPE; link.linkname = '../../outside'
+        stream.addfile(link)
+        stream.addfile(tarfile.TarInfo('config/link/would-escape'))
+    try:
+        restore.restore(malicious, root / 'rejected', root / 'rejected-receipt.json', restore.digest(malicious))
+        raise AssertionError('Escaping symlink was accepted')
+    except ValueError:
+        pass
+    assert not (root / 'outside').exists() and not (root / 'rejected').exists()
+    print('Exact GNU tar restore: npm sibling link restored; escaping archive rejected before extraction')
+
+    # A GNU tar hardlink can relocate a symlink's relative text. This archive
+    # must be refused before the exact restore path creates its destination.
+    relocated = root / 'relocated-link.tar'
+    outside = root / 'outside-marker'; outside.write_text('synthetic outside')
+    with tarfile.open(relocated, 'w') as stream:
+        for name, kind, target in [('a', tarfile.DIRTYPE, ''),
+                ('a/b', tarfile.SYMTYPE, '.'), ('c', tarfile.LNKTYPE, 'a/b'),
+                ('d', tarfile.SYMTYPE, 'c/../outside-marker')]:
+            member = tarfile.TarInfo(name)
+            member.type, member.linkname = kind, target
+            member.mode = 0o755 if kind == tarfile.DIRTYPE else 0o777
+            stream.addfile(member)
+    rejected = root / 'relocated-target'; rejected_receipt = root / 'relocated-receipt.json'
+    try:
+        restore.restore(relocated, rejected, rejected_receipt, restore.digest(relocated))
+        raise AssertionError('Hardlink-relocated symlink escape was accepted')
+    except ValueError:
+        pass
+    assert not rejected.exists() and not rejected_receipt.exists()
+    assert outside.read_text() == 'synthetic outside'
+    print('Exact restore: hardlink-relocated symlink escape rejected before any destination/receipt writes')
 
     # Exercise the real Ansible restore task against the native volume shape.
     # These absolute guest paths exist only in this disposable Docker container.

@@ -1,0 +1,75 @@
+---
+- name: Start and check one prepared automation service
+  hosts: application
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Confirm the selected prepared guest and service without changing them
+      ansible.builtin.assert:
+        that:
+          - groups['application'] | length == 1
+          - app.kind == 'automation'
+          - app.vmid | int >= 100
+          - app.vmid | int not in [900, 4914, 4915, 4920]
+          - app.hostname == ansible_facts.hostname
+          - app.address in ansible_facts.all_ipv4_addresses
+          - app.mac | lower in (ansible_facts.interfaces | map('extract', ansible_facts) | selectattr('macaddress', 'defined') | map(attribute='macaddress') | map('lower') | list)
+          - ansible_facts.virtualization_type == 'lxc'
+          - ansible_facts.distribution == 'Debian'
+          - automation_service in ['mqtt', 'homeassistant', 'node_red']
+          - app.exclusive_writer_confirmed | default(false) | bool
+          - app.health_checks | length > 0
+
+    - name: Check the prepared shared Compose file
+      ansible.builtin.stat:
+        path: /opt/homelab-app/compose.yml
+        follow: false
+        checksum_algorithm: sha256
+      register: prepared_compose
+
+    - name: Refuse a missing, replaced or changed shared stack
+      ansible.builtin.assert:
+        that:
+          - prepared_compose.stat.isreg | default(false)
+          - not prepared_compose.stat.islnk | default(false)
+          - prepared_compose.stat.checksum == automation_compose_sha256
+
+    - name: Require all selected guest interfaces before starting an application
+      ansible.builtin.command:
+        argv: [/usr/lib/systemd/systemd-networkd-wait-online, --ipv4, --timeout=30, "--interface={{ item }}:routable"]
+      loop: "{{ network_ready_interfaces }}"
+      changed_when: false
+
+    - name: Verify the prepared frontend reply route before starting a service
+      ansible.builtin.command:
+        argv: [python3, /opt/homelab-app/ingress-routing.py, --config, /opt/homelab-app/frontend-routing.json]
+      changed_when: false
+      when: app.frontend_routing is defined
+
+    - name: Start only the selected service with no dependent or unrelated changes
+      ansible.builtin.command:
+        argv: [docker, compose, -f, /opt/homelab-app/compose.yml, up, -d, --no-deps, --wait, --wait-timeout, '180', "{{ automation_service }}"]
+      when: automation_service_start | bool and not ansible_check_mode
+      no_log: true
+
+    - name: Read the selected service container
+      ansible.builtin.command:
+        argv: [docker, compose, -f, /opt/homelab-app/compose.yml, ps, --status, running, --services, "{{ automation_service }}"]
+      register: running_service
+      changed_when: false
+      failed_when: running_service.stdout | trim != automation_service
+      when: not ansible_check_mode
+      no_log: true
+
+    - name: Verify this service using its private read-only probes
+      ansible.builtin.command:
+        argv: "{{ item.argv }}"
+      register: health_probe
+      changed_when: false
+      failed_when: health_probe.rc != 0 or (item.expect | default('')) not in health_probe.stdout
+      loop: "{{ app.health_checks }}"
+      loop_control:
+        label: "{{ item.name }}"
+      no_log: true
+      when: not ansible_check_mode

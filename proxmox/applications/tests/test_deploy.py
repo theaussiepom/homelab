@@ -27,6 +27,15 @@ def fixture(root):
 
 
 class DeployTests(unittest.TestCase):
+    def test_retired_ha_conversion_packet_is_rejected_before_any_target_action(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = fixture(Path(tmp))
+            cfg['app'].update(kind='automation', ha_http={
+                'source_sha256': 'a' * 64, 'store_sha256': 'b' * 64,
+                'trusted_proxy': '10.88.30.33'})
+            with self.assertRaisesRegex(deploy.InputNeeded, 'HA configuration conversion'):
+                deploy.validate(cfg)
+
     def test_network_gate_waits_for_backend_even_when_management_exists(self):
         cfg={'guest':{'interfaces':[{'ipv4':'dhcp'},{'ipv4':'10.88.30.23/24'},{'ipv4':'manual'}]}}
         self.assertEqual(deploy.required_network_interfaces(cfg),['eth0','eth1'])

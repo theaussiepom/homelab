@@ -34,6 +34,7 @@
     backup: true
   loop: "{{ app.database.config_files }}"
   no_log: true
+  register: database_configuration
 
 - name: Prepare guest networking before native database startup
   ansible.builtin.import_tasks: ../../../common/ansible/network-ready.yml
@@ -44,6 +45,6 @@
 - name: Start and enable only the selected native database server
   ansible.builtin.systemd_service:
     name: "{{ {'mariadb': 'mariadb', 'postgresql': 'postgresql', 'influxdb': 'influxdb'}[app.kind] }}"
-    state: started
+    state: "{{ 'restarted' if ordinary_reconcile | default(false) | bool and database_configuration.changed else 'started' }}"
     enabled: true
   when: app.start_services | default(false) | bool and not ansible_check_mode

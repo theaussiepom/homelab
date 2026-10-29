@@ -23,10 +23,14 @@ _foundation_spec.loader.exec_module(foundation)
 foundation_files = foundation.files
 foundation_source_files = foundation.source_files
 
+_zigbee_spec = importlib.util.spec_from_file_location('homelab_zigbee', Path(__file__).with_name('zigbee2mqtt.py'))
+zigbee2mqtt = importlib.util.module_from_spec(_zigbee_spec)
+_zigbee_spec.loader.exec_module(zigbee2mqtt)
+
 KINDS = {'automation': {'homeassistant', 'node_red', 'mqtt'},
          'identity': {'server', 'worker', 'redis'},
          'dns': {'pihole', 'unbound'}, 'ingress': {'traefik'},
-         'db-tools': {'pgadmin'}, 'bitwarden': {'bitwarden'}}
+         'db-tools': {'pgadmin'}, 'bitwarden': {'bitwarden'}, 'zigbee2mqtt': {'zigbee2mqtt'}}
 
 
 def positive(value, name, minimum=1):
@@ -93,10 +97,16 @@ def compose(cfg):
         import pegaprox
         return pegaprox.compose(cfg)
     if kind not in KINDS:
-        raise ValueError('Choose dns, identity, ingress, automation, db-tools or bitwarden; databases are native')
+        raise ValueError('Choose a supported application kind; databases are native')
     inputs = cfg.get('services', {})
     if set(inputs) != KINDS[kind]:
         raise ValueError('Supply exactly the services for this guest')
+    if kind == 'zigbee2mqtt':
+        zigbee2mqtt.validate(cfg.get('zigbee'))
+        radio = inputs['zigbee2mqtt']
+        if (set(radio.get('environment', {})) - {'TZ'} or radio.get('extra_mounts') or
+                any(key in radio for key in ('command', 'entrypoint', 'user'))):
+            raise ValueError('Preserve Zigbee configuration without environment, command or mount overrides')
     if kind == 'identity' and inputs['server'].get('image') != inputs['worker'].get('image'):
         raise ValueError('Authentik server and worker require the same pinned image')
     root = cfg.get('data_root', '/srv/homelab/data')
@@ -136,6 +146,16 @@ def compose(cfg):
                    'environment': {k: literal(v) for k, v in value.get('environment', {}).items()},
                    'volumes': [], 'network_mode': 'host'}
         service['environment']['TZ'] = literal(cfg.get('timezone', 'Etc/UTC'))
+        if 'extra_hosts' in value:
+            hosts = value['extra_hosts']
+            if (kind != 'automation' or not isinstance(hosts, dict) or len(hosts) > 32
+                    or any(not isinstance(host, str) or not re.fullmatch(r'[a-z0-9][a-z0-9_.-]{0,252}', host) for host in hosts)):
+                raise ValueError('Use a finite automation hostname-to-address map')
+            for address in hosts.values():
+                ip = ipaddress.IPv4Address(address)
+                if ip.is_unspecified or ip.is_multicast or ip.is_link_local:
+                    raise ValueError('Automation host aliases require usable literal IPv4 addresses')
+            service['extra_hosts'] = dict(hosts)
         # These paths refer to the restored capture, never to the source production host.
         mounts = {'homeassistant': [('homeassistant/config', '/config')],
                   'node_red': [('node-red/data', '/data'), ('node-red/config', '/config')],
@@ -146,6 +166,7 @@ def compose(cfg):
                   'unbound': [('unbound', '/opt/unbound/etc/unbound')],
                   'traefik': [('traefik', '/etc/traefik')],
                   'pgadmin': [('pgadmin', '/var/lib/pgadmin')],
+                  'zigbee2mqtt': [('zigbee2mqtt', '/app/data')],
                   'bitwarden': [('bitwarden/data', '/etc/bitwarden'), ('bitwarden/logs', '/var/log/bitwarden')]}[name]
         service['volumes'] = [f'{root}/{src}:{target}' for src, target in mounts]
         for mount in value.get('extra_mounts', []):
@@ -174,6 +195,30 @@ def compose(cfg):
                 raise ValueError('Mount the captured HA startup directory read-only for the mDNS helper')
         result['services'][name] = service
     services = result['services']
+    if kind == 'automation' and 'node_red_oidc' in cfg:
+        oidc = cfg['node_red_oidc']
+        if (not isinstance(oidc, dict) or set(oidc) != {'identity_url', 'node_red_url', 'client_id', 'provider_slug'}
+                or not isinstance(oidc['client_id'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,256}', oidc['client_id'])
+                or not isinstance(oidc['provider_slug'], str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,62}', oidc['provider_slug'])):
+            raise ValueError('Preserve the selected native Node-RED OIDC client and provider')
+        for name in ('identity_url', 'node_red_url'):
+            origin = oidc[name]
+            if (not isinstance(origin, str)
+                    or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in origin)):
+                raise ValueError('Node-RED OIDC requires literal HTTPS origins')
+            parsed = urlsplit(origin)
+            if (parsed.scheme != 'https' or not dns_name(parsed.hostname) or parsed.port is not None
+                    or parsed.username or parsed.password or parsed.path not in ('', '/') or parsed.query or parsed.fragment):
+                raise ValueError('Node-RED OIDC requires literal HTTPS origins')
+        node = services['node_red']
+        if (node.get('command') != ['--settings', '/runtime-settings.js']
+                or f'{root}/node-red/runtime-settings.js:/runtime-settings.js:ro' not in node['volumes']):
+            raise ValueError('Native Node-RED OIDC must use the preserved settings wrapper')
+        node['environment'].update({
+            'NODE_RED_IDENTITY_URL': oidc['identity_url'].rstrip('/'),
+            'NODE_RED_EXTERNAL_URL': oidc['node_red_url'].rstrip('/'),
+            'NODE_RED_OIDC_CLIENT_ID': oidc['client_id'],
+            'NODE_RED_OIDC_PROVIDER': oidc['provider_slug']})
     if kind == 'identity':
         env = foundation.identity_environment(cfg) if 'foundation' in cfg else {'AUTHENTIK_SECRET_KEY': required(cfg, 'authentik_secret_key'),
                'AUTHENTIK_POSTGRESQL__HOST': required(cfg, 'postgresql_host'),
@@ -213,8 +258,20 @@ def compose(cfg):
         # A missing capture must fail, rather than initializing a fresh profile.
         services['pgadmin']['volumes'] = [{'type': 'bind', 'source': f'{root}/pgadmin',
             'target': '/var/lib/pgadmin', 'bind': {'create_host_path': False}}]
+    if kind == 'zigbee2mqtt':
+        radio = cfg['zigbee']
+        service = services['zigbee2mqtt']
+        del service['network_mode']
+        service['ports'] = [f"{radio['bind_address']}:{radio['frontend_port']}:{radio['frontend_port']}"]
+        service['devices'] = [f"{radio['serial_device']}:/dev/ttyACM0:rw"]
+        service['volumes'] = [{'type': 'bind', 'source': f'{root}/zigbee2mqtt',
+            'target': '/app/data', 'bind': {'create_host_path': False}}]
     if kind == 'bitwarden':
         return bitwarden.configure(cfg, result)
+    if kind == 'zigbee2mqtt':
+        selected_alias = zigbee2mqtt.mqtt_alias(cfg)
+        if selected_alias:
+            services['zigbee2mqtt']['extra_hosts'] = selected_alias
     return foundation.configure_compose(cfg, result)
 
 
@@ -291,10 +348,7 @@ def ingress(cfg):
     routers['node_red']['middlewares'] = ['authentik']
     routers['outpost'] = {'rule': routers['node_red']['rule'] + ' && PathPrefix(`/outpost.goauthentik.io/`)',
                           'priority': 100, 'entryPoints': [entrypoint], 'tls': dict(tls), 'service': 'identity'}
-    middleware = {'authentik': {'forwardAuth': {
-        'address': cfg['identity_url'].rstrip('/') + '/outpost.goauthentik.io/auth/traefik',
-        'trustForwardHeader': False,
-        'authResponseHeaders': ['X-authentik-username', 'X-authentik-groups', 'X-authentik-email', 'X-authentik-name', 'X-authentik-uid']}}}
+    middleware = {'authentik': foundation.authentik_middleware(cfg['identity_url'])}
     return {'http': {'routers': routers, 'services': services, 'middlewares': middleware}}
 
 

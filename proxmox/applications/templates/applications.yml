@@ -5,7 +5,7 @@ on:
       guest:
         description: One selected guest
         type: choice
-        options: [dns, mariadb, postgresql, influxdb, identity, ingress, automation, db-tools]
+        options: [dns, mariadb, postgresql, influxdb, identity, ingress, automation, db-tools, zigbee2mqtt]
         required: true
       step:
         description: Plan first; deploy prepares and checks one reviewed guest
