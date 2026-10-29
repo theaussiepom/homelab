@@ -24,6 +24,10 @@ def validate_archive(path):
                 link = PurePosixPath(member.linkname)
                 if link.is_absolute() or '..' in link.parts:
                     raise ValueError('Review escaping or absolute links separately')
+                # A hardlink to a symlink relocates its relative text. Even a
+                # previously contained target can then escape at the new path.
+                if link in links or any(parent in links for parent in link.parents):
+                    raise ValueError('A capture hardlink traverses a symlink')
             if member.issym():
                 link = PurePosixPath(member.linkname)
                 if link.is_absolute():

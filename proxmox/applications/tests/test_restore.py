@@ -42,6 +42,43 @@ class RestoreTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'traverses'):
                 restore.validate_archive(path)
 
+    def test_hardlink_relocated_symlink_cannot_hide_parent_traversal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'relocated.tar'
+            with tarfile.open(path, 'w') as stream:
+                for name, kind, target in [('a', tarfile.DIRTYPE, ''),
+                        ('a/b', tarfile.SYMTYPE, '.'), ('c', tarfile.LNKTYPE, 'a/b'),
+                        ('d', tarfile.SYMTYPE, 'c/../outside-marker')]:
+                    member = tarfile.TarInfo(name)
+                    member.type, member.linkname = kind, target
+                    stream.addfile(member)
+            with self.assertRaisesRegex(ValueError, 'traverses'):
+                restore.validate_archive(path)
+
+    def test_hardlink_cannot_relocate_a_parent_symlink_or_traverse_one(self):
+        for linkname in ('a/b/c', 'a/b/c/file'):
+            with self.subTest(linkname=linkname), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / 'relocated-parent.tar'
+                with tarfile.open(path, 'w') as stream:
+                    for name, kind, target in [('a', tarfile.DIRTYPE, ''),
+                            ('a/b', tarfile.DIRTYPE, ''), ('a/b/c', tarfile.SYMTYPE, '..'),
+                            ('relocated', tarfile.LNKTYPE, linkname)]:
+                        member = tarfile.TarInfo(name)
+                        member.type, member.linkname = kind, target
+                        stream.addfile(member)
+                with self.assertRaisesRegex(ValueError, 'hardlink traverses'):
+                    restore.validate_archive(path)
+
+    def test_regular_file_hardlink_and_npm_sibling_symlink_remain_valid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.archive(Path(tmp), [('node_modules/acorn/bin/acorn', None),
+                ('node_modules/.bin/acorn', '../acorn/bin/acorn')])
+            with tarfile.open(path, 'a') as stream:
+                member = tarfile.TarInfo('same-file')
+                member.type, member.linkname = tarfile.LNKTYPE, 'node_modules/acorn/bin/acorn'
+                stream.addfile(member)
+            restore.validate_archive(path)
+
     def test_escape_and_symlink_traversal_are_refused(self):
         for members in ([('../escape', None)], [('/etc/shadow', None)], [('link', '/etc')],
                         [('config/link', '../../etc')], [('config/link', '..')],
