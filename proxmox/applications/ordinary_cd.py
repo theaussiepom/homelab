@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 import deploy
 import foundation_cd as files
@@ -156,9 +157,17 @@ def infrastructure(cfg, site, work, operation, expected, adapter=None):
     changed = any(row['change']['actions'] != ['no-op'] for row in value['resource_changes'])
     deploy.write(operation / 'plan.json', {'binding': expected, 'plan_sha256': deploy.sha(operation / 'guest.tfplan'),
                                           'changed': changed, 'existing_guest': existing})
+    if not existing:
+        # The shared identity checker anchors a new key to this exact plan and
+        # the successful creation task inside its actual apply window.
+        files.require(changed, 'A new guest requires the reviewed creation plan')
+        files.write_new(work / 'plan.json', files.regular(operation / 'plan.json', private=True))
+        window = {'plan_sha256': deploy.sha(operation / 'guest.tfplan'), 'started_at_ns': time.time_ns()}
+        files.write_new(work / 'apply-window.json', encoded(window))
     if changed:
         deploy.quiet(tofu + ['apply', '-input=false', '-lock-timeout=30s', str(operation / 'guest.tfplan')], environment, log)
     if not existing:
+        deploy.write(work / 'apply-window.json', dict(window, finished_at_ns=time.time_ns()))
         deploy.guest_identity.pin(cfg, work, cfg['app']['address'], lambda p: deploy.api_get(cfg, p), deploy.write)
     deploy.backup(cfg, work / 'terraform.tfstate', 'after-ordinary')
     return {'changed': changed, 'created': not existing, 'state_sha256': deploy.sha(work / 'terraform.tfstate')}
