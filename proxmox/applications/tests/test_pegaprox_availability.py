@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import patch
 import unittest
 
@@ -15,7 +16,9 @@ class PegaProxAvailabilityTests(unittest.TestCase):
         """Prepare an admitted commissioned runtime and its exact identities."""
         self.policy = {'schema':'homelab-pegaprox-availability-v1','vmid':214,
             'completion_sha256':'a'*64,'container_id':'b'*64,'image_id':'sha256:'+'c'*64,
-            'compose_sha256':'d'*64,'restart_policy':'unless-stopped'}
+            'compose_sha256':'d'*64,'restart_policy':'unless-stopped',
+            'commissioning_binding':{'schema':'homelab-pegaprox-cd-v1','guest':'pegaprox','vmid':214,
+                'prepared_sha256':'e'*64,'source_sha256':'f'*64,'input_hashes':{'/original/stack.json':'0'*64}}}
         self.cfg = {'guest':{'vmid':214,'hostname':'pegaprox','started':True,'start_on_boot':True},
             'app':{'vmid':214,'kind':'pegaprox'}}
         self.host = {'hostname':'pegaprox','protection':1,'unprivileged':1,'onboot':1}
@@ -94,6 +97,53 @@ class PegaProxAvailabilityTests(unittest.TestCase):
                     patch.object(availability.deploy,'guest_trust',side_effect=AssertionError('no trust adoption')):
                 with self.assertRaises(ValueError):availability.verify(self.policy,self.cfg)
             self.assertFalse((work/'ssh-trust.json').exists())
+
+
+    def test_verify_forwards_native_observations_and_refuses_runtime_policy_drift(self):
+        """Exercise receipt and input checks through SSH observation and the final comparison."""
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);work=root/'214';work.mkdir(mode=0o700)
+            prepared=root/'prepared.json';prepared.write_bytes(b'original prepared manifest');prepared.chmod(0o600)
+            stack=root/'stack.json';stack.write_bytes(b'original stack');stack.chmod(0o600)
+            binding=self.policy['commissioning_binding']
+            binding['prepared_sha256']=hashlib.sha256(prepared.read_bytes()).hexdigest()
+            binding['input_hashes']={str(stack):hashlib.sha256(stack.read_bytes()).hexdigest()}
+            raw=json.dumps({'status':'passed','binding':binding}).encode()
+            completion=work/'pegaprox-complete.json';completion.write_bytes(raw);completion.chmod(0o600)
+            trust=work/'ssh-trust.json';trust.write_text('{}');trust.chmod(0o600)
+            self.policy['completion_sha256']=hashlib.sha256(raw).hexdigest()
+            self.cfg['app'].update(stack_config=str(stack),address='10.0.0.214')
+            self.cfg['paths']={'state_root':str(root),'private_key':'/original/key','known_hosts':'/original/hosts'}
+            self.cfg['site']={'node':'fixture'}
+            with patch.object(availability.deploy,'input_hashes',return_value=binding['input_hashes']), \
+                    patch.object(availability.deploy,'api_get',side_effect=[self.host,self.status]*2), \
+                    patch.object(availability.deploy,'guest_trust') as trust_check, \
+                    patch.object(availability.subprocess,'run') as ssh:
+                ssh.return_value=SimpleNamespace(returncode=0,stdout=json.dumps(self.runtime))
+                self.assertEqual(availability.verify(self.policy,self.cfg)['status'],'passed')
+                self.assertEqual(trust_check.call_count,1)
+                self.runtime['restart_policy']={'Name':'no','MaximumRetryCount':0}
+                ssh.return_value=SimpleNamespace(returncode=0,stdout=json.dumps(self.runtime))
+                with self.assertRaises(ValueError):availability.verify(self.policy,self.cfg)
+            stack.write_bytes(b'changed original input')
+            with patch.object(availability.deploy,'api_get') as api, \
+                    patch.object(availability.deploy,'input_hashes',return_value=binding['input_hashes']):
+                with self.assertRaises(ValueError):availability.verify(self.policy,self.cfg)
+                api.assert_not_called()
+
+    def test_foreign_commissioning_receipt_refuses_before_native_access(self):
+        """A matching raw receipt hash cannot admit a receipt for another guest."""
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);work=root/'214';work.mkdir(mode=0o700)
+            foreign=copy.deepcopy(self.policy['commissioning_binding']);foreign['vmid']=215
+            raw=json.dumps({'status':'passed','binding':foreign}).encode()
+            for name,body in [('pegaprox-complete.json',raw),('ssh-trust.json',b'{}')]:
+                path=work/name;path.write_bytes(body);path.chmod(0o600)
+            self.policy['completion_sha256']=hashlib.sha256(raw).hexdigest()
+            self.cfg['paths']={'state_root':str(root)}
+            with patch.object(availability.deploy,'api_get') as api:
+                with self.assertRaises(ValueError):availability.verify(self.policy,self.cfg)
+                api.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()

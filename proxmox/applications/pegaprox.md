@@ -258,3 +258,7 @@ policy. It requires the original completion receipt and pinned SSH identity.
 The checker only reads state; a mismatch is a real deployment failure. Keep the
 original health and initialized-account verification in the permanent job after
 this availability check.
+
+The commissioned availability policy also binds the original receipt identity,
+prepared manifest and current input hashes. Persistent Docker service enablement
+must report `enabled`; temporary runtime enablement does not satisfy startup policy.

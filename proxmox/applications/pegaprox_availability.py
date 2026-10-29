@@ -10,7 +10,7 @@ import deploy
 import foundation_cd as files
 
 FIELDS = {'schema', 'vmid', 'completion_sha256', 'container_id', 'image_id',
-          'compose_sha256', 'restart_policy'}
+          'compose_sha256', 'restart_policy', 'commissioning_binding'}
 
 
 def validate(policy, cfg):
@@ -25,6 +25,19 @@ def validate(policy, cfg):
         for k in ('completion_sha256', 'container_id', 'compose_sha256'))
         and isinstance(policy['image_id'], str) and re.fullmatch('sha256:[0-9a-f]{64}', policy['image_id']),
         'Bind the original completion and exact existing container, image and Compose')
+
+
+    binding = policy['commissioning_binding']
+    files.require(isinstance(binding, dict) and set(binding) == {
+        'schema', 'guest', 'vmid', 'prepared_sha256', 'source_sha256', 'input_hashes'}
+        and binding['schema'] == 'homelab-pegaprox-cd-v1' and binding['guest'] == 'pegaprox'
+        and type(binding['vmid']) is int and binding['vmid'] == policy['vmid']
+        and all(isinstance(binding[k], str) and re.fullmatch('[0-9a-f]{64}', binding[k])
+                for k in ('prepared_sha256', 'source_sha256'))
+        and isinstance(binding['input_hashes'], dict) and binding['input_hashes']
+        and all(isinstance(k, str) and Path(k).is_absolute() and isinstance(v, str)
+                and re.fullmatch('[0-9a-f]{64}', v) for k, v in binding['input_hashes'].items()),
+        'Bind the exact original commissioning identity and its retained private inputs')
 
 
 def check(policy, cfg, host, status, runtime):
@@ -62,6 +75,15 @@ def verify(policy, cfg):
     files.require(trust.is_file() and not trust.is_symlink(),
                   'Require the original SSH trust binding; no availability-time adoption')
     files.regular(trust, private=True)
+    binding = policy['commissioning_binding']
+    files.require(json.loads(completion).get('binding') == binding,
+                  'The original completion must belong to this commissioned guest')
+    prepared = Path(cfg['app']['stack_config']).parent / 'prepared.json'
+    files.require(hashlib.sha256(files.regular(prepared, private=True)).hexdigest()
+                  == binding['prepared_sha256']
+                  and deploy.input_hashes(cfg) == binding['input_hashes']
+                  and all(deploy.sha(Path(name)) == wanted for name, wanted in binding['input_hashes'].items()),
+                  'The retained commissioning manifest and current input files must match')
     base = '/nodes/' + cfg['site']['node'] + '/lxc/' + str(policy['vmid'])
     host, status = deploy.api_get(cfg, base + '/config'), deploy.api_get(cfg, base + '/status/current')
     files.require(host.get('hostname') == cfg['guest']['hostname'] and host.get('onboot') == 1
@@ -70,7 +92,8 @@ def verify(policy, cfg):
     code = '''import hashlib,json,pathlib,subprocess
 c=json.loads(subprocess.check_output(['docker','inspect',CONTAINER],timeout=10))[0]
 p=pathlib.Path('/opt/homelab-app/compose.yml')
-enabled=subprocess.run(['systemctl','is-enabled','--quiet','docker'],capture_output=True,timeout=10).returncode==0
+service=subprocess.run(['systemctl','is-enabled','docker.service'],capture_output=True,text=True,timeout=10)
+enabled=service.returncode==0 and service.stdout.strip()=='enabled'
 print(json.dumps({'id':c['Id'],'image_id':c['Image'],'running':c['State']['Running'],
  'restart_policy':c['HostConfig']['RestartPolicy'],'compose_sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
  'docker_enabled':enabled,'mounts':sorted([[m['Source'],m['Destination'],m['RW']] for m in c['Mounts'] if m['Type']=='bind'])}))

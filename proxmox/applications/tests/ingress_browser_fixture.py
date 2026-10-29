@@ -59,12 +59,13 @@ def request(path, headers=None, host=HOST, peer='127.0.0.1'):
     finally: conn.close()
 
 
-def wait_for(expected, path="/", host=HOST):
+def wait_for(expected, path="/", host=HOST, backend=None):
     """Wait for a specific router response, rather than an unloaded default 404."""
     for n in range(40):
         try:
-            if request(path, host=host)[0] == expected: return
-        except (OSError, http.client.HTTPException): pass
+            status, _, body = request(path, host=host)
+            if status == expected and (backend is None or json.loads(body).get('backend') == backend): return
+        except (OSError, http.client.HTTPException, ValueError): pass
         if n != 39: time.sleep(0.5)
     raise RuntimeError('Synthetic file-provider load exceeded its bound')
 
@@ -72,9 +73,10 @@ def wait_for(expected, path="/", host=HOST):
 def check(stage):
     """Check existing routing before adding and verifying the watched overlay."""
     if stage == 'before':
-        wait_for(200, path='/existing', host='other.example.invalid')
+        wait_for(200, path='/existing', host='other.example.invalid', backend=8086)
         assert request('/')[0] == 404
-        assert request('/existing', host='other.example.invalid')[0] == 200
+        status, _, body = request('/existing', host='other.example.invalid')
+        assert status == 200 and json.loads(body)['backend'] == 8086
         return
     wait_for(302)
     assert request('/')[1]['Location'] == 'https://sso.example.invalid/application/o/authorize/'
