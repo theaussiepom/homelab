@@ -61,7 +61,7 @@
       ansible.builtin.apt:
         name: "{{ app.packages }}"
         state: present
-        update_cache: false
+        update_cache: true
         allow_downgrade: false
         policy_rc_d: 101
         fail_on_autoremove: true
