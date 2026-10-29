@@ -30,7 +30,7 @@ supported design; changing example values alone is not enough.
 
 You also need:
 
-- A Mac or Linux workstation, with a [copy of this repository](../README.md#1-get-a-copy-on-your-computer).
+- A Mac or Linux workstation, with a [copy of this repository](../README.md).
 - Docker running; on a Mac, use Docker Desktop with Linux containers. Apple
   Silicon Macs use x86-64 emulation for these tools.
 - A private GitHub repository that you administer, and GitHub CLI (`gh`) signed
@@ -102,7 +102,7 @@ recovery copies safe and do not run a second active copy from your workstation.
 ## 4. Continue with application deployment
 
 If your databases use separate internal networks, follow the
-[database network guide](applications/database-networks.md). These virtual
+[stack deployment contract](../docs/stack-contract.md). These virtual
 networks do not need additional switch or access-point VLANs.
 
 For merge-driven host prerequisites, follow [bootstrap step 9](bootstrap/README.md#9-let-github-maintain-the-host-prerequisites).
@@ -118,9 +118,10 @@ servers have passed CD installation/checks on the maintainer's host. Database
 restores, later apps and household acceptance remain outstanding; bootstrap
 does not migrate those services itself.
 
-[PegaProx has its own planned LXC](applications/pegaprox.md). It remains separate
-from the runner and is not an HA prerequisite. Its installation is not yet
-implemented.
+[PegaProx is a separate management LXC](applications/README.md). The current stack
+provides its permanent infrastructure/preparation/application path. Its initial
+account and retained database key must already be prepared before ordinary deployment.
+It is separate from the runner and is not an HA prerequisite.
 
 Before creating more guests, finish the runner's ongoing NAS state backup and
 review access for the next guest using
@@ -154,11 +155,11 @@ Status updated on **26 October 2026**, including the physical results from 25 Oc
 | Installer | Packaged virtual checks plus a physical installation with a healthy two-drive mirror, separate original disk and working first-start access. | Each new machine needs its own checks; repeated physical restart behaviour is not established by that first start. See [ISO verification](iso/verification/README.md). |
 | Bootstrap | Clean lab handover, then a corrected physical handover. On 26 October the physical runner also passed NAS mount/copy readback, application-access configuration and merge-driven host checks for the private backend bridge/database grants. | Each new host needs its own checks; NAS-side security, restoring state copies and live application-data protection are outside these checks. See [bootstrap verification](bootstrap/verification.md#physical-nas-and-database-foundation-passed-on-26-october-2026). |
 | PegaProx | Decision recorded: a separate management LXC. | Guest sizing/address, reviewed access, CD jobs, installation and actual use checks. See the [application plan](applications/README.md). |
-| DNS and database servers | DNS and the three empty native database servers passed deployment/checks; a normal follow-up CD run verified the database servers without reinstallation or restart. | Household database restores, real application clients and a post-install host reboot. See [databases](applications/DATABASES.md). |
+| DNS and database servers | DNS and the three empty native database servers passed deployment/checks; a normal follow-up CD run verified the database servers without reinstallation or restart. | Household database restores, real application clients and a post-install host reboot. See [databases](applications/README.md). |
 | Household applications | Deployment source is prepared for later guests. | Guest-by-guest deployment and application acceptance. |
 
 Physical installation and first-start networking are part of the actual migration.
 They are separate from software-only tests. Keep real
 credentials, settings, state, plans and installation media outside Git.
 
-For the next service stage, see [HTTPS, sign-in and database administration](applications/FOUNDATION.md).
+For the next service stage, see [application deployment components](applications/README.md).

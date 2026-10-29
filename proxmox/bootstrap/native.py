@@ -4,7 +4,6 @@ Credentials use the tools' normal environment variables. There is no custom
 Session, signing service, profile registry or replacement state implementation.
 """
 import hashlib
-import json
 import os
 from contextlib import contextmanager
 import fcntl
@@ -73,7 +72,7 @@ def copy_workspace(work, destination):
 def backup(work, destination):
     """Copy exact state and configuration under the shared workspace lock."""
     work, destination = work.resolve(), destination.absolute()
-    source_root = HERE.parents[1] if (HERE.parents[1] / 'proxmox/bootstrap').is_dir() else HERE
+    source_root = HERE.parents[1]
     if destination.resolve().is_relative_to(source_root):
         raise Refused('Keep private state backups outside the public checkout')
     with workspace_lock(work, backup=True):

@@ -1,0 +1,313 @@
+{
+  "schema": "homelab-blueprints-v1",
+  "guests": {
+    "dns": {
+      "capabilities": [
+        "linux",
+        "docker"
+      ],
+      "applications": [
+        "unbound",
+        "pihole"
+      ],
+      "platform": "debian-lxc",
+      "required_paths": [
+        {
+          "path": "/srv/homelab/data/pihole",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/unbound/unbound.conf",
+          "type": "file"
+        },
+        {
+          "path": "/srv/homelab/data/unbound",
+          "type": "directory"
+        }
+      ],
+      "name": "DNS",
+      "application_names": {
+        "unbound": "Unbound",
+        "pihole": "Pi-hole"
+      }
+    },
+    "ingress": {
+      "capabilities": [
+        "linux",
+        "docker"
+      ],
+      "applications": [
+        "traefik"
+      ],
+      "platform": "debian-lxc",
+      "required_paths": [
+        {
+          "path": "/srv/homelab/data/traefik",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/traefik/certs",
+          "type": "directory"
+        }
+      ],
+      "name": "Traefik",
+      "application_names": {
+        "traefik": "Traefik"
+      }
+    },
+    "postgresql": {
+      "capabilities": [
+        "linux"
+      ],
+      "applications": [
+        "postgresql"
+      ],
+      "platform": "debian-lxc",
+      "required_paths": [],
+      "name": "PostgreSQL",
+      "application_names": {
+        "postgresql": "PostgreSQL"
+      }
+    },
+    "mariadb": {
+      "capabilities": [
+        "linux"
+      ],
+      "applications": [
+        "mariadb"
+      ],
+      "platform": "debian-lxc",
+      "required_paths": [],
+      "name": "MariaDB",
+      "application_names": {
+        "mariadb": "MariaDB"
+      }
+    },
+    "influxdb": {
+      "capabilities": [
+        "linux"
+      ],
+      "applications": [
+        "influxdb"
+      ],
+      "platform": "debian-lxc",
+      "required_paths": [],
+      "name": "InfluxDB",
+      "application_names": {
+        "influxdb": "InfluxDB"
+      }
+    },
+    "identity": {
+      "capabilities": [
+        "linux",
+        "docker"
+      ],
+      "applications": [
+        "authentik"
+      ],
+      "platform": "debian-lxc",
+      "required_paths": [
+        {
+          "path": "/srv/homelab/data/authentik",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/authentik/certs",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/authentik/media",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/authentik/templates",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/redis",
+          "type": "directory"
+        }
+      ],
+      "name": "Authentik",
+      "application_names": {
+        "authentik": "Authentik"
+      }
+    },
+    "db-tools": {
+      "capabilities": [
+        "linux",
+        "docker"
+      ],
+      "applications": [
+        "pgadmin"
+      ],
+      "platform": "debian-lxc",
+      "required_paths": [
+        {
+          "path": "/srv/homelab/data/pgadmin",
+          "type": "directory"
+        }
+      ],
+      "name": "pgAdmin",
+      "application_names": {
+        "pgadmin": "pgAdmin"
+      }
+    },
+    "automation": {
+      "capabilities": [
+        "linux",
+        "docker"
+      ],
+      "applications": [
+        "mqtt",
+        "homeassistant",
+        "node_red"
+      ],
+      "platform": "debian-lxc",
+      "required_paths": [
+        {
+          "path": "/srv/homelab/data/homeassistant/config",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/mqtt/config",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/node-red/data",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/node-red/runtime-settings.js",
+          "type": "file"
+        },
+        {
+          "path": "/srv/homelab/data/node-red/healthcheck.js",
+          "type": "file"
+        },
+        {
+          "path": "/srv/homelab/data/ha-startup",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/homeassistant/config/www/community",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/homeassistant/media",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/mqtt/data",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/mqtt/log",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/node-red/config",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/ha-startup/mdns-route.sh",
+          "type": "file"
+        },
+        {
+          "path": "/srv/homelab/data/node-red/config/settings.js",
+          "type": "file"
+        }
+      ],
+      "name": "Automation",
+      "application_names": {
+        "mqtt": "MQTT",
+        "homeassistant": "Home Assistant",
+        "node_red": "Node-RED"
+      }
+    },
+    "bitwarden": {
+      "capabilities": [
+        "linux",
+        "docker"
+      ],
+      "applications": [
+        "bitwarden"
+      ],
+      "platform": "debian-lxc",
+      "required_paths": [
+        {
+          "path": "/srv/homelab/data/bitwarden",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/bitwarden/data",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/bitwarden/logs",
+          "type": "directory"
+        }
+      ],
+      "name": "Bitwarden",
+      "application_names": {
+        "bitwarden": "Bitwarden"
+      }
+    },
+    "pegaprox": {
+      "capabilities": [
+        "linux",
+        "docker"
+      ],
+      "applications": [
+        "pegaprox"
+      ],
+      "platform": "debian-lxc",
+      "required_paths": [
+        {
+          "path": "/srv/homelab/data/pegaprox/config",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/pegaprox/logs",
+          "type": "directory"
+        }
+      ],
+      "name": "PegaProx",
+      "application_names": {
+        "pegaprox": "PegaProx"
+      }
+    },
+    "zigbee2mqtt": {
+      "capabilities": [
+        "linux",
+        "docker"
+      ],
+      "applications": [
+        "zigbee2mqtt"
+      ],
+      "platform": "debian-lxc",
+      "required_paths": [
+        {
+          "path": "/srv/homelab/data/zigbee2mqtt",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/zigbee2mqtt/configuration.yaml",
+          "type": "file"
+        },
+        {
+          "path": "/srv/homelab/data/zigbee2mqtt/database.db",
+          "type": "file"
+        },
+        {
+          "path": "/srv/homelab/data/zigbee2mqtt/coordinator_backup.json",
+          "type": "file"
+        }
+      ],
+      "name": "Zigbee2MQTT",
+      "application_names": {
+        "zigbee2mqtt": "Zigbee2MQTT"
+      }
+    }
+  }
+}

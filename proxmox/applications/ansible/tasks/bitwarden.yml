@@ -11,7 +11,7 @@
     argv: [docker, image, inspect, "{{ stack.services.bitwarden.image }}", --format, "{{ '{{' }}.Id{{ '}}' }}"]
   register: bitwarden_image
   changed_when: false
-  failed_when: bitwarden_image.stdout | trim != stack.bitwarden.source_image_id
+  failed_when: bitwarden_image.stdout | trim != stack.bitwarden.image_id
   when: not ansible_check_mode
 
 - name: Install the bounded unauthenticated Bitwarden health helper

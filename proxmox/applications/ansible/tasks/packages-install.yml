@@ -1,0 +1,24 @@
+---
+- name: Reuse guarded repository and account preparation
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Refresh the selected repository indexes before exact package installation
+  ansible.builtin.apt:
+    update_cache: true
+    update_cache_retries: 1
+    lock_timeout: 30
+
+- name: Reconcile the approved exact packages
+  ansible.builtin.apt:
+    name: "{{ app.packages }}"
+    state: present
+    update_cache: false
+    allow_downgrade: false
+    policy_rc_d: 101
+    fail_on_autoremove: true
+
+- name: Retain the recorded package-created MariaDB account
+  ansible.builtin.include_tasks: tasks/database-package-account.yml
+  vars:
+    database_account_after_packages: true
+  when: app.kind == 'mariadb' and app.database.account_mode | default('fixed') == 'package'
