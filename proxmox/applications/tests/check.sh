@@ -3,6 +3,7 @@
 set -eu
 export PYTHONDONTWRITEBYTECODE=1
 python3 /src/tools/measure_coverage.py --suite applications --output "${HOMELAB_COVERAGE_OUTPUT:-/tmp/application-coverage}"
+python3 /src/proxmox/applications/tests/package_install_fixture.py
 python3 /src/proxmox/applications/tests/database_account_fixture.py
 python3 /src/proxmox/applications/tests/database_server_fixture.py
 python3 /src/proxmox/applications/tests/runner_network_guard_fixture.py

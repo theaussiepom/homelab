@@ -87,6 +87,7 @@ def test_public_checks_share_one_entry_and_independent_jobs_have_no_dependencies
         "changes",
         "monitoring",
         "bitwarden-runtime",
+        "retained-runtimes",
         "applications",
         "iso-unit",
         "python",
@@ -96,7 +97,7 @@ def test_public_checks_share_one_entry_and_independent_jobs_have_no_dependencies
         "analyze",
         "build-and-boot",
     }
-    for name in ("monitoring", "bitwarden-runtime", "applications", "iso-unit", "python", "source-safety"):
+    for name in ("monitoring", "bitwarden-runtime", "retained-runtimes", "applications", "iso-unit", "python", "source-safety"):
         assert (
             jobs[name]["if"]
             == "github.event_name == 'push' || github.event_name == 'pull_request'"

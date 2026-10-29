@@ -314,3 +314,17 @@ metadata preparation and prerequisite records against their exact published
 versions. Framework source tests do not qualify native firewall enforcement,
 TLS trust, browser/SQL acceptance, physical devices or restore capability. Missing
 acceptance must remain a visible preflight failure, never an implicit exclusion.
+
+
+Additional current behavioral coverage uses only disposable synthetic resources:
+`package_install_fixture.py` exercises both real shared APT tasks against a stale
+local index, exact version selection, no vendor start, unchanged repeat and absent
+pin refusal. `pegaprox_runtime_fixture.py` exercises the pinned current renderer,
+separate key, encrypted database row and restart through the current passwordless
+health verifier. Its initial synthetic account exists only in a fresh isolated
+fixture volume; no setup helper is restored to ordinary CD.
+`pgadmin_runtime_fixture.py` starts the selected immutable image from an existing
+synthetic profile without default credentials, preserves the complete profile
+projection and verifies trusted OIDC discovery and the selected callback. Its old
+registration-replacement migration assertions remain retired. Required hosted CI
+runs these fixtures; they do not qualify native applications or private state.

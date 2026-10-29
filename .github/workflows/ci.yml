@@ -96,6 +96,30 @@ jobs:
           docker pull --platform linux/amd64 mariadb@sha256:805c8e104bd563d5bfa24fadd3f31cd419ea859cb5277f32b5dbf2db714f9ed1
       - name: Exercise current rendering, startup, restart and attachment preservation
         run: python3 proxmox/applications/tests/bitwarden_runtime_fixture.py
+  retained-runtimes:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    name: PegaProx and pgAdmin retained runtime (Docker)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install pinned source requirements
+        run: python3 -m pip install --require-hashes -r requirements.lock.txt
+      - name: Build pinned source test tools
+        run: docker build --platform linux/amd64 -t homelab-app-test -f proxmox/bootstrap/docker/Dockerfile proxmox/bootstrap/docker
+      - name: Fetch only the selected immutable application images
+        run: |
+          docker pull --platform linux/amd64 ghcr.io/pegaprox/pegaprox@sha256:8d295a524a52f0b923616a3eb415ff6422fe62beba5bb441f35c75d8985f1add
+          docker pull --platform linux/amd64 dpage/pgadmin4@sha256:cefc4cc6b7d9d71a9e81e76fb9d7e14038ab5661b539a190eea1b63fa612589a
+      - name: Preserve the separate PegaProx key and encrypted data through restart
+        run: python3 proxmox/applications/tests/pegaprox_runtime_fixture.py
+      - name: Start the retained pgAdmin profile without bootstrap credentials and check OIDC
+        run: python3 proxmox/applications/tests/pgadmin_runtime_fixture.py
   applications:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     name: Application contracts and runtime components (Docker)
@@ -347,7 +371,7 @@ jobs:
   validate:
     name: Repository validation
     if: always() && (github.event_name == 'push' || github.event_name == 'pull_request')
-    needs: [blueprints, changes, monitoring, bitwarden-runtime, applications, iso-unit, python, source-safety, dependency-review, analyze, build-and-boot]
+    needs: [blueprints, changes, monitoring, bitwarden-runtime, retained-runtimes, applications, iso-unit, python, source-safety, dependency-review, analyze, build-and-boot]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
