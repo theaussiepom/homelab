@@ -55,6 +55,7 @@ def publish(repo, path, version, stamp):
 
 
 def main():
+    """Prove stale-cache refresh, exact installs and no-start guards offline."""
     if not Path('/.dockerenv').exists() or os.geteuid() != 0:
         raise SystemExit('Run only in the disposable offline application Docker fixture')
     # Use the real OS bindings, as the target's apt module does.
