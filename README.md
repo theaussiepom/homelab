@@ -63,7 +63,8 @@ per-component and per-file line/branch fractions, missing paths, JSON, Cobertura
 and HTML. Separate JavaScript coverage uses Node's built-in coverage runner for both
 Node-RED helpers. Ansible, shell and OpenTofu require their behavioral/syntax/native
 fixtures and do not have Python-style line percentages. Native qualification remains
-separate. CI publishes summaries and bounded 14-day Python report artifacts.
+separate. CI prints readable coverage summaries in job logs and the step summary; it does not
+upload coverage-report artifacts.
 
 `--suite framework`, `--suite blueprints`, `--suite applications`,
 `--suite stack --stack PATH` and `--suite site --site PATH` select individual suites.

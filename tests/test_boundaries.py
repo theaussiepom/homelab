@@ -196,34 +196,13 @@ def test_iso_ci_reuses_docker_commands_and_reports_only_bounded_test_evidence(tm
     for workflow in (ci,):
         assert "pull_request_target" not in workflow["on"]
         assert "${{ secrets." not in json.dumps(workflow)
-        coverage_reports = {
-            "blueprints": {
-                "name": "coverage-blueprints",
-                "path": "${{ runner.temp }}/blueprint-coverage",
-                "retention-days": "14",
-            },
-            "applications": {
-                "name": "coverage-applications",
-                "path": "${{ runner.temp }}/application-coverage/report",
-                "retention-days": "14",
-            },
-            "python": {
-                "name": "coverage-framework",
-                "path": "${{ runner.temp }}/framework-coverage",
-                "retention-days": "14",
-            },
-        }
         for job_name, candidate in workflow["jobs"].items():
             assert candidate["runs-on"] == "ubuntu-24.04"
             for step in candidate["steps"]:
                 if "uses" in step:
                     assert re.fullmatch("[0-9a-f]{40}", step["uses"].split("@")[1])
                 if step.get("uses", "").startswith("actions/upload-artifact@"):
-                    # Only report-only coverage may be uploaded. ISO images,
-                    # disk/credential evidence and arbitrary paths stay forbidden.
-                    assert job_name in coverage_reports
-                    assert step["with"] == coverage_reports[job_name]
-                    assert step["if"] == "always()"
+                    raise AssertionError("Source CI must not upload coverage reports, ISO images, or private evidence")
 
 
 def test_required_validation_gate_rejects_failures_cancellation_and_unexpected_skips(
@@ -278,3 +257,18 @@ def test_required_validation_gate_rejects_failures_cancellation_and_unexpected_s
     assert any(
         "--all --fail-under 100" in step.get("run", "") for step in python_job["steps"]
     )
+
+
+def test_coverage_stays_enforced_and_readable_without_report_artifact_uploads():
+    source = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "upload-artifact" not in source
+    workflow = yaml.load(source, Loader=yaml.BaseLoader)
+    assert any("--all --fail-under 100" in step.get("run", "")
+               for step in workflow["jobs"]["python"]["steps"])
+    for job in ("python", "blueprints", "applications"):
+        assert any("measure_coverage.py" in step.get("run", "") or "tests/check.sh" in step.get("run", "")
+                   for step in workflow["jobs"][job]["steps"])
+    application = workflow["jobs"]["applications"]
+    assert any("cat" in step.get("run", "") and "summary.md" in step.get("run", "")
+               for step in application["steps"])
+    assert "--test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100" in source
