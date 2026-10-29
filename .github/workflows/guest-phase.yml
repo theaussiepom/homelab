@@ -94,10 +94,10 @@ jobs:
         env:
           GUEST: ${{ inputs.guest }}
           PHASE: ${{ inputs.phase }}
-          NODE_RED_API_TOKEN: ${{ secrets.AUTOMATION_NODE_RED_API_TOKEN }}
-          AUTHENTIK_SECRET_KEY: ${{ secrets.FOUNDATION_AUTHENTIK_SECRET_KEY }}
-          AUTHENTIK_POSTGRES_PASSWORD: ${{ secrets.FOUNDATION_AUTHENTIK_POSTGRES_PASSWORD }}
-          AUTHENTIK_SMTP_PASSWORD: ${{ secrets.FOUNDATION_AUTHENTIK_SMTP_PASSWORD }}
-          PGADMIN_OAUTH_SECRET: ${{ secrets.FOUNDATION_PGADMIN_OAUTH_SECRET }}
-          CLOUDFLARE_DNS_TOKEN: ${{ secrets.FOUNDATION_CLOUDFLARE_DNS_TOKEN }}
+          NODE_RED_API_TOKEN: ${{ inputs.guest == 'automation' && secrets.AUTOMATION_NODE_RED_API_TOKEN || '' }}
+          AUTHENTIK_SECRET_KEY: ${{ inputs.guest == 'identity' && secrets.FOUNDATION_AUTHENTIK_SECRET_KEY || '' }}
+          AUTHENTIK_POSTGRES_PASSWORD: ${{ inputs.guest == 'identity' && secrets.FOUNDATION_AUTHENTIK_POSTGRES_PASSWORD || '' }}
+          AUTHENTIK_SMTP_PASSWORD: ${{ inputs.guest == 'identity' && secrets.FOUNDATION_AUTHENTIK_SMTP_PASSWORD || '' }}
+          PGADMIN_OAUTH_SECRET: ${{ inputs.guest == 'db-tools' && secrets.FOUNDATION_PGADMIN_OAUTH_SECRET || '' }}
+          CLOUDFLARE_DNS_TOKEN: ${{ inputs.guest == 'ingress' && secrets.FOUNDATION_CLOUDFLARE_DNS_TOKEN || '' }}
         run: python3 framework-source/proxmox/applications/deploy.py --phase "$PHASE" --packet "$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json"
