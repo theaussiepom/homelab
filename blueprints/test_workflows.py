@@ -62,13 +62,13 @@ class WorkflowGenerationTests(unittest.TestCase):
                 "default": "[]",
             },
         )
-        self.assertEqual(first["deploy.yml"]["jobs"]["web"]["needs"], ["database"])
+        self.assertEqual(first["deploy.yml"]["jobs"]["web"]["needs"], ["selection", "database"])
         self.catalogue["web"]["applications"].append("verify")
         self.catalogue["web"]["application_names"]["verify"] = "Verify"
         self.manifest["guests"]["web"]["depends_on"] = []
         self.write_manifest()
         current = workflows.models(self.root)
-        self.assertNotIn("needs", current["deploy.yml"]["jobs"]["web"])
+        self.assertEqual(current["deploy.yml"]["jobs"]["web"]["needs"], ["selection"])
         jobs = current["guest-web.yml"]["jobs"]
         self.assertEqual(list(jobs), ["infrastructure", "preparation", "web", "verify"])
         self.assertEqual(jobs["verify"]["needs"], "web")
@@ -90,11 +90,56 @@ class WorkflowGenerationTests(unittest.TestCase):
         self.write_manifest()
         current = workflows.models(self.root)
         self.assertIn("guest-worker.yml", current)
-        self.assertEqual(current["deploy.yml"]["jobs"]["worker"]["needs"], ["database"])
+        self.assertEqual(current["deploy.yml"]["jobs"]["worker"]["needs"], ["selection", "database"])
         self.assertIn(
             "!contains(fromJSON(inputs.disabled || '[]'), 'worker')",
             current["deploy.yml"]["jobs"]["worker"]["if"],
         )
+
+    def test_generated_selection_gate_rejects_invalid_lists_before_any_guest_can_skip(self):
+        import json
+        import os
+        import subprocess
+
+        model = workflows.models(self.root)["deploy.yml"]
+        gate = model["jobs"]["selection"]
+        self.assertEqual(gate["runs-on"], "ubuntu-24.04")
+        self.assertEqual(gate["if"], workflows.PRIVATE_MAIN)
+        self.assertNotIn("secrets", gate)
+        self.assertNotIn("environment", gate)
+        step = gate["steps"][0]
+        for guest in self.manifest["guests"]:
+            self.assertIn("selection", model["jobs"][guest]["needs"])
+        for disabled, expected in [
+            ("", 0), ("[]", 0), ('["web"]', 0),
+            ('["database", "web"]', 0),
+            ('["database"]', 1), ('["unknown"]', 1),
+            ('["web", "web"]', 1), ('["database", "web", "unknown"]', 1),
+            ('[1]', 1), ('{}', 1), ('null', 1), ('broken', 1),
+        ]:
+            with self.subTest(disabled=disabled):
+                environment = dict(os.environ, **dict(step["env"], DISABLED=disabled))
+                result = subprocess.run(
+                    ["bash", "-e", "-c", step["run"]], env=environment,
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, expected, result.stderr)
+                try:
+                    workflows.compiler.selection(self.manifest, workflows.compiler.parse_disabled(disabled))
+                except (ValueError, TypeError):
+                    compiler_status = 1
+                else:
+                    compiler_status = 0
+                self.assertEqual(result.returncode, compiler_status)
+        self.assertEqual(json.loads(step["env"]["DEPENDENCIES"]),
+                         {name: row["depends_on"] for name, row in self.manifest["guests"].items()})
+
+    def test_guest_names_cannot_replace_the_selection_gate(self):
+        self.catalogue["selection"] = self.catalogue.pop("web")
+        self.manifest["guests"]["selection"] = self.manifest["guests"].pop("web")
+        self.write_manifest()
+        with self.assertRaisesRegex(ValueError, "safe guest workflow identifier"):
+            workflows.models(self.root)
 
     def test_check_reports_missing_changed_and_extra_files_without_writing(self):
         with self.assertRaisesRegex(ValueError, "stale"):

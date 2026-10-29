@@ -18,6 +18,11 @@ the same meaning. Exclusions must name unique known guests, and cannot disable
 a prerequisite while a consumer stays active. Newly declared guests therefore
 participate without updating a second list. There is no `enabled` input or alias.
 Packet `enabled` is derived from this selection, not another configuration source.
+A generated hosted validation job checks the disabled list before any guest job
+can be skipped. Every guest also depends on that job, so disabling a root
+prerequisite cannot turn invalid selection into an all-skipped successful run.
+This gate uses only the public dependency map and input names, with no private
+Environment, Secrets, checkout or target access.
 
 A private overlay has `schema: homelab-site-v3`, central `values`, `common`, per-guest
 `guests`, `images` overrides, `routes` and `accepted` prerequisites. Guest overrides may

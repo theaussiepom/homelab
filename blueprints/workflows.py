@@ -2,6 +2,7 @@
 """Generate the stack's checked-in workflow graph from current declarative inputs."""
 
 import argparse
+import json
 from pathlib import Path
 import re
 import sys
@@ -51,12 +52,38 @@ def models(stack):
         "name": "HomeLab stack",
         "on": workflow_call(),
         "permissions": {"contents": "read"},
-        "jobs": {},
+        "jobs": {
+            "selection": {
+                "name": "Validate guest selection",
+                "if": PRIVATE_MAIN,
+                "runs-on": "ubuntu-24.04",
+                "timeout-minutes": 2,
+                "steps": [{
+                    "name": "Reject invalid exclusions before the guest graph",
+                    "env": {
+                        "DISABLED": "${{ inputs.disabled }}",
+                        "DEPENDENCIES": json.dumps({name: row["depends_on"] for name, row in spec["guests"].items()}),
+                    },
+                    "run": """python3 - <<'PYCODE'
+import json, os
+spec = json.loads(os.environ['DEPENDENCIES'])
+disabled = json.loads(os.environ['DISABLED'] or '[]')
+if not (isinstance(disabled, list) and all(isinstance(name, str) for name in disabled)
+        and len(set(disabled)) == len(disabled) and set(disabled) <= set(spec)):
+    raise SystemExit('Disable only unique known guest names')
+active = set(spec) - set(disabled)
+if any(not set(spec[name]) <= active for name in active):
+    raise SystemExit('Cannot disable a prerequisite while its consumers remain active')
+PYCODE
+""",
+                }],
+            },
+        },
     }
     result = {"deploy.yml": deploy}
     for guest, blueprint in compiler.CATALOGUE.items():
         compiler.require(
-            re.fullmatch(r"[a-z][a-z0-9-]*", guest),
+            re.fullmatch(r"[a-z][a-z0-9-]*", guest) and guest != "selection",
             "Use a safe guest workflow identifier",
         )
         compiler.require(
@@ -88,8 +115,7 @@ def models(stack):
         }
         parent = {"name": guest_name}
         needs = spec["guests"][guest]["depends_on"]
-        if needs:
-            parent["needs"] = list(needs)
+        parent["needs"] = ["selection", *needs]
         # GitHub conditions combine with &&, while workflow inputs remain literal
         # expression strings. No job identifier or dependency is decided at runtime.
         parent["if"] = (
