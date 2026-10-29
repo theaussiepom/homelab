@@ -59,18 +59,21 @@ def request(path, headers=None, host=HOST, peer='127.0.0.1'):
     finally: conn.close()
 
 
-def wait_for(expected):
+def wait_for(expected, path="/", host=HOST):
+    """Wait for a specific router response, rather than an unloaded default 404."""
     for n in range(40):
         try:
-            if request('/')[0] == expected: return
+            if request(path, host=host)[0] == expected: return
         except (OSError, http.client.HTTPException): pass
         if n != 39: time.sleep(0.5)
     raise RuntimeError('Synthetic file-provider load exceeded its bound')
 
 
 def check(stage):
+    """Check existing routing before adding and verifying the watched overlay."""
     if stage == 'before':
-        wait_for(404)
+        wait_for(200, path='/existing', host='other.example.invalid')
+        assert request('/')[0] == 404
         assert request('/existing', host='other.example.invalid')[0] == 200
         return
     wait_for(302)
