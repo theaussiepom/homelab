@@ -45,7 +45,10 @@ as a current workflow success or implement generic legacy compatibility.
 
 The two proof files are ordinary immutable packet files. Existing public profile
 `files` templates can select raw proof text from private overlay `values`; ordinary
-source resolution must preserve the exact selected bytes. No new runtime loader
+source resolution selects one complete central value or an exact literal proof.
+Proof contents are never interpolated, including literal `${inputs}` or other
+central-value tokens; ordinary runtime files retain their normal substitution.
+No new runtime loader
 or source-file override is required. Their bounded filenames
 may differ from the names above, but must be distinct. Set
 `paths.coordinated_custody_inputs` to `${inputs}` in the composition source;

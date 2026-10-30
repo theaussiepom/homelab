@@ -25,10 +25,10 @@ from custody_fixtures import CompletedGroup, save, backend
 
 
 class AdmissionTests(unittest.TestCase):
-    def fixture(self, postgres=False):
+    def fixture(self, postgres=False, proof_literal=None):
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
-        value = CompletedGroup(td.name, postgres=postgres)
+        value = CompletedGroup(td.name, postgres=postgres, proof_literal=proof_literal)
         mount = patch.object(records.os.path, 'ismount', return_value=True)
         findmnt = patch.object(records.subprocess, 'check_output', return_value='nfs4 nas.example.invalid:/backups\n')
         mount.start(); findmnt.start()
@@ -474,3 +474,65 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(records.decode(packets['mariadb']['files']['site.json'])['coordinated_custody'], selected)
         cfg['paths']['coordinated_custody_inputs'] = '${other}'
         with self.assertRaises(ValueError): contract.configured_closure(value.resolved())
+
+    def test_literal_proof_bytes_survive_real_resolution_compilation_and_preparation(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[3] / 'blueprints/compile.py'
+        spec = importlib.util.spec_from_file_location('literal_custody_compiler', path)
+        compiler = importlib.util.module_from_spec(spec); spec.loader.exec_module(compiler)
+        for mode in ('central-value', 'literal'):
+            value = self.fixture(proof_literal='retain ${inputs} and ${literal.name} exactly')
+            cfg = copy.deepcopy(value.cfgs['mariadb']); cfg.pop('deployment')
+            selected = cfg.pop('coordinated_custody'); cfg['paths'].pop('coordinated_custody_inputs')
+            cfg['guest'].update(dns_servers=[], rules=[])
+            source = value.root / 'source'
+            save(source / 'common.json', {})
+            profile = {'config': cfg, 'stack': None, 'files': {
+                'catalogue.json': '${custody.catalogue}' if mode == 'central-value' else value.catalogue_raw.decode(),
+                'acceptance.json': '${custody.acceptance}' if mode == 'central-value' else value.acceptance_raw.decode(),
+                'ordinary.txt': 'directory=${inputs};value=${literal.name}'}}
+            save(source / 'guests/mariadb/profile.json', profile)
+            save(source / 'stack.json', {'schema': 'homelab-stack-v2', 'values': {}, 'routes': {},
+                                        'guests': {'mariadb': {'depends_on': [], 'prerequisites': []}}})
+            overlay = {'schema': 'homelab-site-v3', 'common': {}, 'images': {}, 'accepted': {}, 'routes': {},
+                       'values': {'custody.catalogue': value.catalogue_raw.decode(),
+                                  'custody.acceptance': value.acceptance_raw.decode(), 'literal.name': 'ordinary-value'},
+                       'guests': {'mariadb': {'config': {'coordinated_custody': selected,
+                                             'paths': {'coordinated_custody_inputs': '${inputs}'}}}}}
+            with patch.object(compiler, 'CATALOGUE', {'mariadb': compiler.CATALOGUE['mariadb']}):
+                packet = compiler.compile_stack(source, overlay)['mariadb']
+                changed = copy.deepcopy(overlay)
+                if mode == 'central-value': changed['values']['custody.catalogue'] += ' '
+                else:
+                    bad_profile = copy.deepcopy(profile); bad_profile['files']['catalogue.json'] += ' '
+                    save(source / 'guests/mariadb/profile.json', bad_profile)
+                with self.assertRaisesRegex(ValueError, 'custody.*proof'):
+                    compiler.compile_stack(source, changed)
+            self.assertEqual(packet['files']['catalogue.json'].encode(), value.catalogue_raw)
+            self.assertEqual(packet['files']['acceptance.json'].encode(), value.acceptance_raw)
+            bound = '/var/lib/homelab-inputs/ordinary/mariadb/' + packet['identity']
+            self.assertEqual(packet['files']['ordinary.txt'], 'directory=' + bound + ';value=ordinary-value')
+            # Rehome only the configured materialization path into this test's
+            # temporary directory; proof and ordinary-file bytes stay unchanged.
+            prepared_cfg = records.decode(packet['files']['site.json'])
+            base = value.root / 'packet-inputs'
+            destination = base / 'mariadb' / packet['identity']
+            prepared_cfg['paths']['coordinated_custody_inputs'] = str(destination)
+            packet['files']['site.json'] = io.encoded(prepared_cfg).decode()
+            packet_path = value.root / 'packet.json'; save(packet_path, packet)
+            observed, site = inputs.prepare(packet_path, base)
+            self.assertEqual(site, destination / 'site.json')
+            proofs, _, _ = evidence.inspect(observed)
+            self.assertEqual(proofs[str(destination / 'catalogue.json')], value.group['catalogue']['sha256'])
+            self.assertEqual((destination / 'acceptance.json').read_bytes(), value.acceptance_raw)
+            bad = copy.deepcopy(packet); bad['files']['acceptance.json'] += ' '
+            save(value.root / 'changed-packet.json', bad)
+            with self.assertRaisesRegex(ValueError, 'custody source proof bytes'):
+                inputs.prepare(value.root / 'changed-packet.json', base)
+            self.assertEqual((destination / 'acceptance.json').read_bytes(), value.acceptance_raw)
+        with self.assertRaisesRegex(ValueError, 'custody.*proof'):
+            compiler.custody_text('${inputs}', 'f' * 64, {'inputs': 'not-a-proof'})
+        with self.assertRaisesRegex(ValueError, 'custody.*proof'):
+            compiler.custody_text('${numeric}', 'f' * 64, {'numeric': 1})
+        with self.assertRaisesRegex(ValueError, 'custody.*proof'):
+            compiler._compile_guest('mariadb', value.cfgs['mariadb'], None, {'catalogue.json': 'changed'}, ['mariadb'])

@@ -28,7 +28,7 @@ def backend(vmid, serial=2):
 
 
 class CompletedGroup:
-    def __init__(self, root, *, postgres=False):
+    def __init__(self, root, *, postgres=False, proof_literal=None):
         self.root = Path(root).resolve()
         self.root.chmod(0o700)
         self.state = self.root / 'state'
@@ -45,6 +45,8 @@ class CompletedGroup:
         self.local = self.state / self.directory
         self.remote = self.backups / self.directory
         self.catalogue = {'schema': 'homelab-database-networks-v1', 'networks': {r: {} for r in ('postgresql', 'mariadb', 'influxdb')}}
+        if proof_literal is not None:
+            self.catalogue['note'] = proof_literal
         self.catalogue_raw = io.encoded(self.catalogue)
         self.cfgs, members, requested = {}, {}, {}
         for index, role in enumerate(self.roles):
@@ -81,7 +83,7 @@ class CompletedGroup:
                       'apply_helper_sha256': 'c' * 64, 'allow_guest_restart': True}
             requested[role] = {'vmid': vmid, 'installer_revision': 'd' * 40, 'adapter_revision': 'e' * 40,
                                'plan_directory': plan_directory, 'network_packet': packet,
-                               'runtime_packet': {'fixture': True},
+                               'runtime_packet': {'fixture': True, 'note': proof_literal},
                                'startup': {'gate_sha256': 'f' * 64, 'dependency_sha256': '1' * 64}}
             overlay_dir = 'database-network-apply-' + review_hash
             overlay = {'schema': 'homelab-database-network-overlay-v1', 'status': 'network_overlay_verified',
