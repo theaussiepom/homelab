@@ -198,6 +198,12 @@ def validate_deployment(cfg, stack):
         raise ValueError(
             "The trusted ingress proxy must have an admitted management client allowance"
         )
+    if any(
+        ipaddress.IPv4Network(rule["source"]) != proxy for rule in client_rules
+    ):
+        raise ValueError(
+            "Admit only the trusted ingress proxy to the management HTTP listener"
+        )
     if (
         stack["guest_memory_mib"] != app["memory_mib"]
         or stack["bind_address"] != app["address"]

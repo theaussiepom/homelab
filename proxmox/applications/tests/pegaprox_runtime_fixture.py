@@ -145,8 +145,15 @@ def main():
         for field in ('User','Image','Entrypoint','Cmd'):
             assert current['Config'][field] == old['Config'][field]
         for field in ('ReadonlyRootfs','CapDrop','SecurityOpt','Memory','NanoCpus','PidsLimit',
-                      'RestartPolicy','LogConfig','PortBindings','NetworkMode','Tmpfs','Binds'):
-            assert current['HostConfig'][field] == old['HostConfig'][field]
+                      'RestartPolicy','LogConfig','PortBindings','NetworkMode','Tmpfs'):
+            assert current['HostConfig'][field] == old['HostConfig'][field], (
+                f"Retained HostConfig {field} changed: "
+                f"{old['HostConfig'][field]!r} -> {current['HostConfig'][field]!r}"
+            )
+        # Docker may reorder Binds; retain exact source, destination, mode and multiplicity.
+        assert sorted(current['HostConfig']['Binds']) == sorted(old['HostConfig']['Binds']), (
+            'Retained bind sources, destinations or access modes changed'
+        )
         assert current['HostConfig']['ReadonlyRootfs'] is True
         assert current['HostConfig']['CapDrop'] == ['ALL']
         assert not current['HostConfig']['PortBindings']

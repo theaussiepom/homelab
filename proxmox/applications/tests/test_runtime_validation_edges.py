@@ -172,13 +172,26 @@ class ValidationEdges(unittest.TestCase):
                         "direction": "in",
                         "proto": "tcp",
                         "port": "5000",
-                        "source": "198.18.25.0/24",
+                        "source": stack["trusted_proxy"],
                         "destination": stack["bind_address"] + "/32",
                     },
                 ],
             },
         }
         pegaprox.validate_deployment(cfg, stack)
+        for sources in (
+            ["198.18.25.0/24"],
+            [stack["trusted_proxy"], "198.18.25.35/32"],
+            [stack["trusted_proxy"], "198.18.25.0/24"],
+        ):
+            value = copy.deepcopy(cfg)
+            value["guest"]["rules"] = [value["guest"]["rules"][0]] + [
+                dict(cfg["guest"]["rules"][1], source=source) for source in sources
+            ]
+            with self.subTest(sources=sources), self.assertRaisesRegex(
+                ValueError, "Admit only the trusted ingress proxy"
+            ):
+                pegaprox.validate_deployment(value, stack)
         for change in (
             "capture",
             "key",

@@ -160,7 +160,7 @@ class CompositionTests(unittest.TestCase):
                     "direction": "in",
                     "proto": "tcp",
                     "port": "5000",
-                    "source": "198.18.25.0/24",
+                    "source": stack["trusted_proxy"],
                     "destination": stack["bind_address"] + "/32",
                 },
             ],

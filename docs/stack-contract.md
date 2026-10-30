@@ -125,7 +125,8 @@ Its app job retains the pre-start schema query and observed image ID check.
 PegaProx requires the existing database key and initial account; it verifies the
 retained key and runs its bounded, read-only HTTP loopback health helper without
 replaying bootstrap. Its runtime requires one canonical private IPv4 `trusted_proxy`
-`/32`, covered by an admitted TCP5000 client rule. The renderer selects HTTP proxy
+`/32`. Every inbound TCP5000 allowance must equal that proxy `/32`; covering
+subnets and additional direct clients are refused. The renderer selects HTTP proxy
 mode, listens on all container interfaces behind the existing bounded host port,
 and sets that ingress address as its explicit forwarded-header trust. Traefik owns automatic
 browser HTTPS. The normal application reconcile replaces the container to apply
