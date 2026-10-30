@@ -52,7 +52,10 @@ def run(remote, updates):
 
 if __name__ == '__main__':
     try:
-        result = run(sys.argv[1], sys.stdin.read(65536))
+        updates = sys.stdin.read(65537)
+        if len(updates.encode("utf-8")) > 65536:
+            raise Refused('push_update_input_too_large')
+        result = run(sys.argv[1], updates)
         result['elapsed_seconds'] = round(time.monotonic() - START, 3)
         print(json.dumps(result))
     except Exception as exc:

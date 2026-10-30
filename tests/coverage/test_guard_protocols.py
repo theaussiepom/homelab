@@ -248,3 +248,39 @@ def test_staged_scan_refuses_corrupt_metadata_and_untrusted_scanner_responses(
         else:
             with pytest.raises(module.Blocked):
                 check.scan()
+
+
+def test_push_cli_rejects_oversized_input_before_accepting_a_valid_prefix(tmp_path):
+    """A valid 64 KiB deletion prefix must not hide unchecked suffix refs."""
+    import subprocess
+    import sys
+
+    zero = "0" * 40
+    remote = "a" * 40
+    padding = 128 - len(f"(delete) {zero} refs/heads/0000 {remote}\n")
+    prefix = "".join(f"(delete) {zero} refs/heads/{i:04d}{'x' * padding} {remote}\n" for i in range(512))
+    assert len(prefix.encode("utf-8")) == 65536
+    suffix = f"refs/heads/unsigned {'1' * 40} refs/heads/unsigned {zero}\n"
+    marker = tmp_path / "git-calls"
+    executable = tmp_path / "git"
+    executable.write_text(
+        "#!" + sys.executable + "\n"
+        "import os,sys\n"
+        "with open(os.environ['HOMELAB_TEST_GIT_CALLS'],'a') as calls: calls.write('call\\n')\n"
+        "values={'user.name':'fixture','user.email':'123+fixture@users.noreply.github.com'}\n"
+        "if len(sys.argv)!=3 or sys.argv[1]!='config': raise SystemExit(2)\n"
+        "print(values[sys.argv[2]])\n"
+    )
+    executable.chmod(0o700)
+    environment = dict(os.environ, PATH=str(tmp_path) + os.pathsep + os.environ['PATH'], HOMELAB_TEST_GIT_CALLS=str(marker))
+    for payload, accepted in [(prefix, True), (prefix + suffix, False), (prefix.replace('x', 'é'), False)]:
+        marker.unlink(missing_ok=True)
+        result = subprocess.run([sys.executable, str(ROOT / '.githooks/push_guard.py'), 'origin'], input=payload, capture_output=True, text=True, env=environment, timeout=15)
+        if accepted:
+            assert result.returncode == 0, result.stderr
+            assert json.loads(result.stdout)['commits_checked'] == 0
+            assert marker.is_file()
+        else:
+            assert result.returncode != 0
+            assert json.loads(result.stderr)['reason'] == 'push_update_input_too_large'
+            assert not marker.exists()
