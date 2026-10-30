@@ -31,7 +31,7 @@ def has_unknown(value):
 
 
 def allowed_guest_drift(rows, node, vmid, serial_device):
-    """Reconcile active state and the registered host-owned device, preserving all else."""
+    """Reconcile active/device drift and bpg 0.117.0 top-level computed IP maps."""
     if not rows:
         return True
     if not isinstance(rows, list) or len(rows) != 1:
@@ -50,10 +50,10 @@ def allowed_guest_drift(rows, node, vmid, serial_device):
         or {
             k: v
             for k, v in before.items()
-            if k not in {"started", "device_passthrough"}
+            if k not in {"started", "device_passthrough", "ipv4", "ipv6"}
         }
         != {
-            k: v for k, v in after.items() if k not in {"started", "device_passthrough"}
+            k: v for k, v in after.items() if k not in {"started", "device_passthrough", "ipv4", "ipv6"}
         }
     ):
         return False
@@ -71,7 +71,12 @@ def allowed_guest_drift(rows, node, vmid, serial_device):
     was, now = before.get("started"), after.get("started")
     if was != now and not (type(was) is bool and type(now) is bool):
         return False
-    return was != now or old_devices != new_devices
+    return (
+        was != now
+        or old_devices != new_devices
+        or before.get("ipv4") != after.get("ipv4")
+        or before.get("ipv6") != after.get("ipv6")
+    )
 
 
 def check_plan(value, node, vmid, *, existing, serial_device=None):
