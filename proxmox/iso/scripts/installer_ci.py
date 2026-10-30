@@ -179,10 +179,15 @@ def evidence(root):
                     'build/single-usb-*/native-validation.txt', 'build/single-usb-*/boot-record.txt',
                     'build/vm-tests/*/receipt.json', 'build/vm-tests/*/argv.json', 'build/vm-tests/*/console.log'):
         for path in sorted(root.glob(pattern)):
-            regular(path, 16 * 1024**2)
+            try:
+                regular(path, 16 * 1024**2)
+                with path.open('rb') as stream:
+                    data = stream.read(256 * 1024)
+            except (OSError, ValueError) as error:
+                print('Evidence unavailable (' + type(error).__name__ + '): ' + str(path.relative_to(root)))
+                continue
             print('Evidence: ' + str(path.relative_to(root)))
-            with path.open('rb') as stream:
-                print(stream.read(256 * 1024).decode(errors='replace'))
+            print(data.decode(errors='replace'))
 
 
 def main():

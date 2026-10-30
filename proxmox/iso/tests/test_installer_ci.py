@@ -188,6 +188,26 @@ class InputAndCliTests(unittest.TestCase):
             self.assertIn('receipt',output.getvalue()); self.assertIn('console',output.getvalue())
             self.assertNotIn('PRIVATE_',output.getvalue())
 
+    def test_unavailable_diagnostics_do_not_hide_later_evidence(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for name in ('a-empty', 'b-large', 'c-directory', 'd-symlink', 'e-valid'):
+                folder = root / ('build/vm-tests/' + name); folder.mkdir(parents=True)
+                path = folder / 'console.log'
+                if name == 'c-directory': path.mkdir()
+                elif name == 'd-symlink': path.symlink_to(root / 'missing')
+                else: path.write_bytes(b'later evidence' if name == 'e-valid' else b'')
+                if name == 'b-large':
+                    with path.open('wb') as stream: stream.truncate(16 * 1024**2 + 1)
+            with redirect_stdout(io.StringIO()) as output:
+                ci.evidence(root)
+            self.assertIn('later evidence', output.getvalue())
+            self.assertEqual(output.getvalue().count('Evidence unavailable'), 4)
+            with patch.object(ci, 'regular', side_effect=PermissionError('UNSAFE_RAW_MESSAGE')), redirect_stdout(io.StringIO()) as output:
+                ci.evidence(root)
+            self.assertNotIn('UNSAFE_RAW_MESSAGE', output.getvalue())
+            self.assertIn('PermissionError', output.getvalue())
+
     def test_cli_routes_the_five_actions_without_changing_their_inputs(self):
         for action, method in [('custom-inputs','custom_inputs'),('stage','stage'),('restore','restore'),('verify','verify'),('evidence','evidence')]:
             namespace = {'__name__':'import_fixture'}
