@@ -128,3 +128,68 @@ brief exclusive-to-shared lock transition does not establish that window. There 
 no `writers_fenced` flag, group release, new controller, all-member lock or global
 exclusive serialization in this contract. Missing window or live starting facts
 remain prerequisites; synthetic validation cannot supply them.
+
+
+## Standalone Influx initial ordinary receipt
+
+A standalone Influx guest whose exact original ordinary success lacks the later
+workflow fields can explicitly select `initial_ordinary` in its source config.
+This is a separate closed contract, mutually exclusive with `coordinated_custody`;
+existing coordinated ownership or failure markers still block admission. Only
+an `influxdb` profile can select it. No values are inferred, and no receipt,
+backend, group or claim is rewritten or released.
+
+The object requires exactly these fields:
+
+| Field | Binding |
+| --- | --- |
+| `schema` | `homelab-influx-initial-ordinary-v1` |
+| `vmid`, `node` | The exact configured and installed Influx identity |
+| `installed_site` | Canonical absolute path of the retained original site JSON |
+| `installed_site_sha256` | Its exact raw hash, also equal to the old receipt's `binding.site_sha256` |
+| `initial_state_sha256` | The independently qualified initial backend raw hash |
+| `receipt.operation` | Exact existing `ordinary-<run-id>-<attempt>` directory name |
+| `receipt.sha256` | Exact raw canonical `ordinary-complete.json` hash |
+| `receipt.immutable_sha256` | Exact raw hash of that operation's `complete.json` |
+| `receipt.source_sha256` | Independently qualified original producer source hash |
+
+All digests are required lowercase SHA256 values, and `receipt` permits exactly
+its four listed fields. The private owner must independently qualify the selected
+success, original source and installed site, complete typed equality of the two
+receipt records, current backend, original GitHub run/job evidence and absence of
+legacy group ownership and failure holds. A different historical operation is not
+an interchangeable initial anchor. This framework does not choose private pins.
+
+The original site must retain the selected guest/node/kind and local/recovery
+paths. Its receipt's CA input hash must match current CA bytes; existing guest
+host trust is required and read without creating it. Management SSH endpoints and
+database listener addresses retain their distinct roles. The immutable site,
+operation copy and guest trust are bound into current input hashes; the canonical
+pointer and backend remain mutable generation evidence.
+
+After locks and existing hold checks, the first entry requires both selected raw
+receipt pins, exact four-field success shape, source/site/VMID/state bindings and
+full type-sensitive decoded equality. The current backend must match the initial
+hash. This anchor starts a new ordinary run; it is never treated as a completed
+current run and receives no fabricated workflow fields.
+
+The new binding includes `initial_ordinary_sha256`. Existing infrastructure and
+phase receipt writers record actual current workflow, run sequence, source
+revision, backend hash and identity. Later immutable successes outrank the old
+anchor; removing or restoring the canonical pointer cannot fall back to it.
+Same-run continuation still requires the exact owned hold and completed
+infrastructure state/identity. Older runs, source rollback, changed bindings,
+failed or pending evidence and dropped selection are refused. Existing historical
+records remain byte-for-byte intact; private adoption, continuation and deployment
+are separate operations.
+
+## Optional empty provider refresh values
+
+For pinned bpg/proxmox 0.117.0, only the following explicitly present optional
+refresh leaves compare `null` as their typed empty value: `tags` as `[]`,
+`environment_variables` as `{}`, and each `disk[].mount_options`,
+`mount_point[].mount_options` and `features[].mount` as `[]`. Missing fields,
+wrong empty types, nonempty values and all other fields retain exact comparison.
+This normalization applies only to refresh drift. Desired-plan disk/mount
+immutability, configured networking, identity and unknown-value checks are
+unchanged. Top-level computed address observation handling remains separate.

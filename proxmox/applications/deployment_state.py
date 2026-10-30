@@ -10,6 +10,7 @@ import stat
 import coordinated_contract
 import coordinated_evidence
 import coordinated_generation
+import initial_ordinary
 from custody_records import no_markers, read_existing
 from private_io import (
     require,
@@ -77,9 +78,10 @@ class DeploymentAttempt:
     def __init__(self, cfg, binding, phases):
         self.cfg = cfg
         self.custody = coordinated_contract.selection(cfg)
+        self.initial_selection = initial_ordinary.selection(cfg)
         self.custody_identity = None
         self.initial_ordinary = None
-        self.receipt_checked = self.custody is None
+        self.receipt_checked = self.custody is None and self.initial_selection is None
         self.vmid = cfg["guest"]["vmid"]
         self.root = Path(cfg["paths"]["state_root"])
         self.work = self.root / str(cfg["guest"]["vmid"])
@@ -152,6 +154,19 @@ class DeploymentAttempt:
                 guest_trust(self.cfg, self.work, persist=False)
                 member = self.custody["members"][self.cfg["app"]["kind"]]
                 self.custody_identity = coordinated_generation.classify(self, member, lineage, self.initial_ordinary)
+            elif self.initial_selection is not None:
+                proofs, member, baseline = initial_ordinary.inspect(self.cfg)
+                require(all(self.binding["input_hashes"].get(path) == value for path, value in proofs.items())
+                        and self.binding.get(initial_ordinary.BINDING) == initial_ordinary.selection_digest(self.cfg),
+                        "Initial ordinary immutable evidence changed before admission")
+                from proxmox_guest import guest_trust
+                read_existing(Path(self.cfg["paths"]["known_hosts"]))
+                guest_trust(self.cfg, self.work, persist=False)
+                _, identity = coordinated_generation.backend(self.work, member)
+                # The exact initial state hash binds first-entry lineage. Later
+                # immutable receipts or same-run readiness bind its continuation.
+                self.custody_identity = coordinated_generation.classify(
+                    self, member, identity["lineage"], baseline, binding_key=initial_ordinary.BINDING)
             return self
         except BaseException:
             self.locks.close()
@@ -197,6 +212,10 @@ class DeploymentAttempt:
         if self.receipt.exists() or self.receipt.is_symlink():
             self._select_run()
             old = json.loads(regular(self.receipt, private=True))
+            require(not isinstance(old.get("binding"), dict)
+                    or initial_ordinary.BINDING not in old["binding"]
+                    or self.initial_selection is not None,
+                    "Keep the selected initial ordinary custody contract")
             require(
                 old.get("workflow") == self.workflow
                 and type(old.get("run_number")) is int
@@ -291,7 +310,8 @@ class DeploymentAttempt:
 
     def infrastructure_complete(self, result):
         if self.custody_identity is not None:
-            member = self.custody["members"][self.cfg["app"]["kind"]]
+            member = (self.initial_selection if self.custody is None
+                      else self.custody["members"][self.cfg["app"]["kind"]])
             state_hash, identity = coordinated_generation.backend(self.work, member)
             require(identity == self.custody_identity and result["state_sha256"] == state_hash,
                     "The applied backend differs from its admitted identity")

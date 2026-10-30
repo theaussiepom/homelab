@@ -21,6 +21,7 @@ import guest_contract as contract
 import runtime_secrets
 import coordinated_contract
 import coordinated_evidence
+import initial_ordinary
 
 
 def prepare(
@@ -132,6 +133,8 @@ def binding(cfg, site):
     }
     if coordinated_contract.selection(cfg) is not None:
         result["coordinated_custody_sha256"] = coordinated_contract.selection_digest(cfg)
+    if initial_ordinary.selection(cfg) is not None:
+        result[initial_ordinary.BINDING] = initial_ordinary.selection_digest(cfg)
     return result
 
 
@@ -169,4 +172,6 @@ def input_hashes(cfg):
     result = {path: sha(path) for path in sorted(set(paths))}
     proofs, _, _ = coordinated_evidence.inspect(cfg)
     result.update(proofs)
+    initial_proofs, _, _ = initial_ordinary.inspect(cfg)
+    result.update(initial_proofs)
     return result

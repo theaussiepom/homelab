@@ -292,3 +292,80 @@ class ComputedAddressDriftTests(unittest.TestCase):
             mutate(value)
             with self.subTest(mutate=mutate), self.assertRaises(ValueError):
                 plan.check_plan(value, "pve-lab", 6100, existing=True)
+
+
+class OptionalEmptyRefreshTests(unittest.TestCase):
+    def observed_plan(self, *, addresses=True):
+        value = ComputedAddressDriftTests().observed_plan()
+        change = value["resource_drift"][0]["change"]
+        before = change["before"]
+        before["disk"][0]["mount_options"] = None
+        before.update(
+            mount_point=[{"path": "/data", "volume": "fixture", "mount_options": None}],
+            features=[{"nesting": True, "mount": None}],
+            tags=None, environment_variables=None,
+        )
+        after = copy.deepcopy(before)
+        after["disk"][0]["mount_options"] = []
+        after["mount_point"][0]["mount_options"] = []
+        after["features"][0]["mount"] = []
+        after.update(tags=[], environment_variables={})
+        if addresses:
+            after.update(ipv4={"eth0": "198.18.0.20"}, ipv6={"eth0": "2001:db8::20"})
+        change["after"] = after
+        guest = value["resource_changes"][0]["change"]
+        guest.update(actions=["update"], before=copy.deepcopy(after), after=copy.deepcopy(after))
+        guest["after"]["description"] = "reviewed desired description"
+        guest["after"]["initialization"][0]["hostname"] = "fixture"
+        firewall = value["resource_changes"][2]["change"]
+        firewall.update(actions=["update"], before=dict(firewall["before"], rule=[]),
+                        after=dict(firewall["after"], rule=[{"action": "ACCEPT"}]))
+        return value
+
+    def test_exact_optional_empty_refresh_preserves_plan_and_desired_updates(self):
+        for addresses in (False, True):
+            value = self.observed_plan(addresses=addresses)
+            original = copy.deepcopy(value)
+            plan.check_plan(value, "pve-lab", 6100, existing=True)
+            self.assertEqual(value, original)
+        value = self.observed_plan(addresses=False)
+        change = value["resource_drift"][0]["change"]
+        change["before"], change["after"] = change["after"], change["before"]
+        plan.check_plan(value, "pve-lab", 6100, existing=True)
+
+    def test_nonempty_or_wrong_empty_values_and_desired_disk_changes_still_refuse(self):
+        changes = [
+            lambda d: d["after"]["disk"][0].update(mount_options=["noatime"]),
+            lambda d: d["after"]["mount_point"][0].update(mount_options=["ro"]),
+            lambda d: d["after"]["features"][0].update(mount=["nfs"]),
+            lambda d: d["after"].update(tags=["unreviewed"]),
+            lambda d: d["after"].update(environment_variables={"FIXTURE": "changed"}),
+            lambda d: d["after"].update(tags={}),
+            lambda d: d["after"].update(environment_variables=[]),
+            lambda d: d["after"]["disk"][0].update(mount_options=False),
+            lambda d: d["after"]["disk"][0].pop("mount_options"),
+            lambda d: d["after"].update(features=[]),
+            lambda d: d["after"].update(memory=[{"dedicated": 999}]),
+            lambda d: d["after"]["mount_point"][0].update(path="/other-data"),
+            lambda d: d["after"]["disk"][0].update(size=999),
+            lambda d: d.update(after_unknown={"disk": [{"mount_options": True}]}),
+            lambda d: d.update(after_unknown={"environment_variables": True}),
+        ]
+        for index, mutate in enumerate(changes):
+            value = self.observed_plan()
+            mutate(value["resource_drift"][0]["change"])
+            with self.subTest(index=index), self.assertRaises(ValueError):
+                plan.check_plan(value, "pve-lab", 6100, existing=True)
+        for field in ("disk", "mount_point"):
+            value = self.observed_plan()
+            value["resource_changes"][0]["change"]["after"][field][0]["mount_options"] = ["ro"]
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                plan.check_plan(value, "pve-lab", 6100, existing=True)
+        malformed = {"disk": [None, {}, {"mount_options": False}], "features": None}
+        self.assertEqual(plan.refresh_values(malformed), malformed)
+        value = self.observed_plan(addresses=False)
+        change = value["resource_drift"][0]["change"]
+        change["before"] = copy.deepcopy(change["after"])
+        change["before"]["device_passthrough"] = None
+        change["after"]["device_passthrough"] = []
+        self.assertFalse(plan.allowed_guest_drift(value["resource_drift"], "pve-lab", 6100, None))

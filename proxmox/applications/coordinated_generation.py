@@ -5,7 +5,7 @@ import json
 import re
 from private_io import require, digest, encoded, private_directory
 from plan_policy import RESOURCES
-from custody_records import decode, read_existing
+from custody_records import decode, read_existing, no_markers
 from coordinated_contract import shape
 
 
@@ -75,13 +75,15 @@ def initial_canonical(raw, member, baseline):
     return True
 
 
-def latest_success(attempt, member):
+def latest_success(attempt, member, *, binding_key="coordinated_custody_sha256"):
     """An older anchor/pointer cannot supersede any recorded later F success."""
     found = {}
     for path in attempt.work.iterdir():
         if not re.fullmatch(r"ordinary-[1-9][0-9]*-[1-9][0-9]*", path.name):
             continue
         private_directory(path)
+        if binding_key == "initial_ordinary_sha256":
+            no_markers(path)
         active = path == attempt.operation and attempt.hold.exists()
         complete = path / "complete.json"
         if active:
@@ -91,8 +93,16 @@ def latest_success(attempt, member):
         value = decode(raw)
         require(isinstance(value, dict), "Preserve unexpected ordinary operation custody")
         binding = value.get("binding", {})
-        if isinstance(binding, dict) and "coordinated_custody_sha256" in binding:
-            require(binding["coordinated_custody_sha256"] == attempt.binding["coordinated_custody_sha256"]
+        standalone = binding_key == "initial_ordinary_sha256"
+        if standalone:
+            require(isinstance(binding, dict), "Preserve malformed initial ordinary history")
+            anchor_run = int(member["initial_ordinary"]["operation"].split("-")[1])
+            require(int(path.name.split("-")[1]) <= anchor_run
+                    or binding_key in binding and "workflow" in value,
+                    "A later ordinary operation cannot become an initial legacy record")
+        if isinstance(binding, dict) and (binding_key in binding
+                or standalone and "workflow" in value):
+            require(binding.get(binding_key) == attempt.binding[binding_key]
                     and binding.get("vmid") == member["vmid"] and value.get("status") == "passed"
                     and value.get("operation") == str(path) and value.get("workflow") == attempt.workflow
                     and type(value.get("run_number")) is int and value["run_number"] > 0,
@@ -103,14 +113,16 @@ def latest_success(attempt, member):
     return found[max(found)] if found else None
 
 
-def classify(attempt, member, lineage, baseline):
+def classify(attempt, member, lineage, baseline, *, binding_key="coordinated_custody_sha256"):
     """Own-run continuation precedes latest F success, then the exact first anchor."""
+    require(binding_key in {"coordinated_custody_sha256", "initial_ordinary_sha256"},
+            "Select a closed ordinary generation binding")
     state_hash, identity = backend(attempt.work, member)
     require(identity["lineage"] == lineage, "Preserve the commissioned backend lineage")
     attempt._select_run()
     canonical = attempt.receipt
     raw = read_existing(canonical) if canonical.exists() or canonical.is_symlink() else None
-    latest = latest_success(attempt, member)
+    latest = latest_success(attempt, member, binding_key=binding_key)
     require(latest is None or raw == latest, "Preserve the latest ordinary success; no older anchor fallback")
     initial = initial_canonical(raw, member, baseline)
     if initial:
@@ -140,7 +152,7 @@ def classify(attempt, member, lineage, baseline):
                         and value["status"] == "passed" and value["state_sha256"] == state_hash
                         and value["state_identity"] == identity
                         and isinstance(value["binding"], dict) and value["binding"].get("vmid") == member["vmid"]
-                        and value["binding"].get("coordinated_custody_sha256") == attempt.binding["coordinated_custody_sha256"],
+                        and value["binding"].get(binding_key) == attempt.binding[binding_key],
                         "Preserve the latest exact ordinary success; no anchor fallback")
         else:
             require(baseline is None and state_hash == member["initial_state_sha256"],
