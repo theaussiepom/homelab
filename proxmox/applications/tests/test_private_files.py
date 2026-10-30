@@ -101,6 +101,33 @@ class PrivateFileTests(unittest.TestCase):
                 private_io.sha(link)
             self.assertTrue(link.is_symlink())
 
+    def test_child_inherits_blocking_private_log_for_both_output_streams(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence.log"
+            private_io.write_new(path, b"retained evidence\n")
+            child = (
+                "import os, sys; "
+                "assert os.get_blocking(sys.stdout.fileno()); "
+                "assert os.get_blocking(sys.stderr.fileno()); "
+                "print('stdout evidence', flush=True); "
+                "print('stderr evidence', file=sys.stderr, flush=True); "
+                "raise SystemExit(int(sys.argv[1]))"
+            )
+            for code in (0, 7):
+                with self.subTest(exit_code=code):
+                    argv = [sys.executable, "-c", child, str(code)]
+                    if code:
+                        with self.assertRaises(subprocess.CalledProcessError) as failed:
+                            commands.quiet(argv, os.environ.copy(), path)
+                        self.assertEqual(failed.exception.returncode, code)
+                    else:
+                        commands.quiet(argv, os.environ.copy(), path)
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(
+                path.read_text(),
+                "retained evidence\n" + "stdout evidence\nstderr evidence\n" * 2,
+            )
+
     def test_failed_commands_preserve_private_evidence_and_later_logs_append(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "evidence.log"
