@@ -433,3 +433,44 @@ class AdmissionTests(unittest.TestCase):
                     with a: pass
                 native.assert_not_called()
             child.unlink()
+
+    def test_real_packet_compiler_resolves_input_slot_before_runtime_validation(self):
+        import importlib.util
+        path = Path(__file__).resolve().parents[3] / 'blueprints/compile.py'
+        spec = importlib.util.spec_from_file_location('custody_slot_blueprints', path)
+        compiler = importlib.util.module_from_spec(spec); spec.loader.exec_module(compiler)
+        value = self.fixture(); cfg = value.cfgs['mariadb']
+        cfg['paths']['coordinated_custody_inputs'] = '${inputs}'
+        with self.assertRaisesRegex(ValueError, 'absolute custody paths'):
+            contract.selection(cfg)
+        contract.configured_closure(value.resolved())
+        result, packet = compiler._compile_guest('mariadb', cfg, None, value.files(), ['mariadb'])
+        directory = '/var/lib/homelab-inputs/ordinary/mariadb/' + packet['identity']
+        self.assertEqual(result['paths']['coordinated_custody_inputs'], directory)
+        self.assertEqual(contract.selection_digest(result), contract.selection_digest(cfg))
+        self.assertEqual(packet['files']['catalogue.json'], value.catalogue_raw.decode())
+        self.assertEqual(packet['files']['acceptance.json'], value.acceptance_raw.decode())
+        self.assertEqual(contract.selection(result), cfg['coordinated_custody']['group'])
+        # Exercise real source resolution too: public profile placeholders carry
+        # private proof bytes through existing central values, not a new adapter.
+        source = value.root / 'stack-source'
+        base = copy.deepcopy(cfg)
+        base.pop('deployment'); selected = base.pop('coordinated_custody')
+        base['paths'].pop('coordinated_custody_inputs')
+        base['guest'].update(dns_servers=[], rules=[])
+        save(source / 'common.json', {})
+        save(source / 'guests/mariadb/profile.json', {'config': base, 'stack': None,
+             'files': {'catalogue.json': '${custody.catalogue}', 'acceptance.json': '${custody.acceptance}'}})
+        save(source / 'stack.json', {'schema': 'homelab-stack-v2', 'values': {}, 'routes': {},
+             'guests': {'mariadb': {'depends_on': [], 'prerequisites': []}}})
+        overlay = {'schema': 'homelab-site-v3', 'common': {}, 'images': {}, 'accepted': {}, 'routes': {},
+                   'values': {'custody.catalogue': value.catalogue_raw.decode(), 'custody.acceptance': value.acceptance_raw.decode()},
+                   'guests': {'mariadb': {'config': {'coordinated_custody': selected,
+                       'paths': {'coordinated_custody_inputs': '${inputs}'}}}}}
+        with patch.object(compiler, 'CATALOGUE', {'mariadb': compiler.CATALOGUE['mariadb']}):
+            packets = compiler.compile_stack(source, overlay)
+        self.assertTrue(packets['mariadb']['enabled'])
+        self.assertEqual(packets['mariadb']['files']['acceptance.json'], value.acceptance_raw.decode())
+        self.assertEqual(records.decode(packets['mariadb']['files']['site.json'])['coordinated_custody'], selected)
+        cfg['paths']['coordinated_custody_inputs'] = '${other}'
+        with self.assertRaises(ValueError): contract.configured_closure(value.resolved())

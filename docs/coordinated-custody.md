@@ -43,7 +43,10 @@ Missing immutable legacy operation copies refuse admission. The reader recognize
 only that selected raw legacy receipt as initial provenance; it does not treat it
 as a current workflow success or implement generic legacy compatibility.
 
-The two proof files are ordinary immutable packet files. Their bounded filenames
+The two proof files are ordinary immutable packet files. Existing public profile
+`files` templates can select raw proof text from private overlay `values`; ordinary
+source resolution must preserve the exact selected bytes. No new runtime loader
+or source-file override is required. Their bounded filenames
 may differ from the names above, but must be distinct. Set
 `paths.coordinated_custody_inputs` to `${inputs}` in the composition source;
 preparation requires the exact materialized guest packet directory. The whole

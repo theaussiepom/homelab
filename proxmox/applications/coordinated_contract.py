@@ -27,7 +27,7 @@ def absolute(value):
             "Use canonical absolute custody paths")
 
 
-def selection(cfg):
+def selection(cfg, *, allow_input_slot=False):
     """Validate one full group, independently of which configured members run."""
     if "coordinated_custody" not in cfg:
         require("coordinated_custody_inputs" not in cfg.get("paths", {}),
@@ -99,7 +99,8 @@ def selection(cfg):
     for key, selected in (("backup_mount", "mount"), ("backup_directory", "directory"), ("backup_source", "source")):
         require(cfg["paths"][key] == recovery[selected], "Keep the selected recovery custody identity")
     require("coordinated_custody_inputs" in cfg["paths"], "Declare the immutable custody input directory")
-    absolute(cfg["paths"]["coordinated_custody_inputs"])
+    if not (allow_input_slot and cfg["paths"]["coordinated_custody_inputs"] == "${inputs}"):
+        absolute(cfg["paths"]["coordinated_custody_inputs"])
     return group
 
 
@@ -110,13 +111,13 @@ def selection_digest(cfg):
 def configured_closure(resolved):
     """Require every configured copy, including disabled members, without enabling it."""
     for cfg, _, files in resolved.values():
-        group = selection(cfg)
+        group = selection(cfg, allow_input_slot=True)
         if group is None:
             continue
         for role, member in group["members"].items():
             require(role in resolved, "Keep every configured group member")
             peer, _, _ = resolved[role]
-            require(selection(peer) == group and peer["guest"]["vmid"] == member["vmid"],
+            require(selection(peer, allow_input_slot=True) == group and peer["guest"]["vmid"] == member["vmid"],
                     "Configured group provenance copies must agree, including disabled members")
         for key in ("catalogue", "acceptance"):
             row = group[key]
