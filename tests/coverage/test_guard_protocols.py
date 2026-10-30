@@ -108,7 +108,7 @@ def test_push_cli_accepts_empty_update_and_reports_refusal_without_any_push():
     target = ROOT / ".githooks/push_guard.py"
     with (
         patch("sys.argv", ["push", "origin"]),
-        patch("sys.stdin", io.StringIO("")),
+        patch("sys.stdin", SimpleNamespace(buffer=io.BytesIO(b""))),
         patch(
             "subprocess.run",
             side_effect=[
@@ -124,7 +124,7 @@ def test_push_cli_accepts_empty_update_and_reports_refusal_without_any_push():
     assert json.loads(output.getvalue())["commits_checked"] == 0
     with (
         patch("sys.argv", ["push", "invalid/remote"]),
-        patch("sys.stdin", io.StringIO("")),
+        patch("sys.stdin", SimpleNamespace(buffer=io.BytesIO(b""))),
         patch("subprocess.run") as command,
         contextlib.redirect_stderr(io.StringIO()) as error,
         pytest.raises(SystemExit),
@@ -273,14 +273,21 @@ def test_push_cli_rejects_oversized_input_before_accepting_a_valid_prefix(tmp_pa
     )
     executable.chmod(0o700)
     environment = dict(os.environ, PATH=str(tmp_path) + os.pathsep + os.environ['PATH'], HOMELAB_TEST_GIT_CALLS=str(marker))
-    for payload, accepted in [(prefix, True), (prefix + suffix, False), (prefix.replace('x', 'é'), False)]:
+    for payload, reason in [
+        (prefix.encode(), None),
+        (prefix.replace('\n', '\r\n').encode(), 'push_update_input_too_large'),
+        ((prefix + suffix).encode(), 'push_update_input_too_large'),
+        (prefix.replace('x', 'é').encode(), 'push_update_input_too_large'),
+        (prefix[:128].replace('\n', '\r\n').encode(), None),
+        (prefix[:128].encode().replace(b'x', b'\xff', 1), 'UnicodeDecodeError'),
+    ]:
         marker.unlink(missing_ok=True)
-        result = subprocess.run([sys.executable, str(ROOT / '.githooks/push_guard.py'), 'origin'], input=payload, capture_output=True, text=True, env=environment, timeout=15)
-        if accepted:
+        result = subprocess.run([sys.executable, str(ROOT / '.githooks/push_guard.py'), 'origin'], input=payload, capture_output=True, env=environment, timeout=15)
+        if reason is None:
             assert result.returncode == 0, result.stderr
             assert json.loads(result.stdout)['commits_checked'] == 0
             assert marker.is_file()
         else:
             assert result.returncode != 0
-            assert json.loads(result.stderr)['reason'] == 'push_update_input_too_large'
+            assert json.loads(result.stderr)['reason'] == reason
             assert not marker.exists()
