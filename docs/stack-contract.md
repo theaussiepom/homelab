@@ -360,3 +360,23 @@ holds execution before SSH; it never rewrites trust, adopts a lease, converts th
 NIC or clears failed evidence. Existing locks, state custody and no-replay behavior
 remain in force. Hosted synthetic checks do not qualify the private endpoint or
 provide native execution authority.
+
+## Explicit reusable-workflow secret names
+
+The workflow generator owns declarations and explicit named forwarding for the
+deploy, per-guest and generic phase workflows. The selected framework revision
+remains authoritative in the generated `phase.yml`; regeneration preserves that
+exact selection. The generic framework workflow declares the same eight existing
+names: two required shared API/SSH names and six optional application names.
+Each guest workflow requires only its own selected application names in addition
+to the shared pair; SMTP remains optional. Retained PegaProx bootstrap names are
+not forwarded. No edge depends on `secrets: inherit`.
+
+The final job retains its existing private Environment and guest-only application
+secret expressions. GitHub requires Environment-secret names to be passed through
+every workflow edge; the final Environment value takes precedence. A declaration's
+`required: true` checks caller name presence, not a nonempty value. Existing local
+credential/runtime validators still reject missing selected values before target
+operations. Source contract tests do not establish actual Environment value
+availability or provide native execution authority. See [GitHub's reusable-workflow
+secret documentation](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows#using-inputs-and-secrets-in-a-reusable-workflow).

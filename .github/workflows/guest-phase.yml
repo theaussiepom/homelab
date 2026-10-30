@@ -18,6 +18,23 @@ on:
       phase:
         type: string
         required: true
+    secrets:
+      APPLICATION_SSH_KEY:
+        required: true
+      PROXMOX_APP_TOKEN:
+        required: true
+      AUTOMATION_NODE_RED_API_TOKEN:
+        required: false
+      FOUNDATION_AUTHENTIK_POSTGRES_PASSWORD:
+        required: false
+      FOUNDATION_AUTHENTIK_SECRET_KEY:
+        required: false
+      FOUNDATION_AUTHENTIK_SMTP_PASSWORD:
+        required: false
+      FOUNDATION_PGADMIN_OAUTH_SECRET:
+        required: false
+      FOUNDATION_CLOUDFLARE_DNS_TOKEN:
+        required: false
 permissions:
   contents: read
 defaults:
