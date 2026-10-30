@@ -128,11 +128,16 @@ replaying bootstrap. Its runtime requires one canonical private IPv4 `trusted_pr
 `/32`. Every inbound TCP5000 allowance must equal that proxy `/32`; covering
 subnets and additional direct clients are refused. The renderer selects HTTP proxy
 mode, listens on all container interfaces behind the existing bounded host port,
-and sets that ingress address as its explicit forwarded-header trust. Traefik owns automatic
-browser HTTPS. The normal application reconcile replaces the container to apply
-these environment settings while retaining the image, key, account and data;
-there is no separate certificate or configuration migration. Native adoption and
-browser acceptance still require separate review.
+and sets that ingress address as its explicit forwarded-header trust. Traefik
+owns automatic browser HTTPS. Existing deployments must adopt matching stack/site
+route inputs: select the PegaProx endpoint as HTTP on port 5000 and remove its
+route's optional TLS transport. Shared route validation rejects HTTP with a TLS
+transport. Frontend readiness checks separately prepared address/gateway/MAC
+reply-routing policy; it does not update backend URLs or TLS transport selections.
+Normal application reconciliation replaces the container to apply the environment
+settings while retaining the image, key, account and data. No backend certificate
+preparation or application database configuration migration is required. Native
+adoption and browser acceptance still require separate review.
 
 ## One current architecture
 
