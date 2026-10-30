@@ -2,7 +2,6 @@ import copy
 import hashlib
 import importlib.util
 import io
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -58,14 +57,15 @@ class BootstrapTests(unittest.TestCase):
 
     def setUp(self):
         """Create isolated synthetic inputs for this test case."""
-        self.catalog = bootstrap.read(bootstrap.ROOT / 'examples/site/catalog/site.json')
+        self.catalog = bootstrap.read(bootstrap.ROOT / 'proxmox/bootstrap/fixtures/site.json')
         self.settings = bootstrap.read(BASE / 'settings.example.json')
         self.catalog['site']['ssh_public_keys'] = ['ssh-ed25519 synthetic-public-fixture']
 
     def test_deploy_only(self):
         """Verify deploy only."""
+        self.catalog['guests'].insert(0, {'key': 'unrelated'})
         self.assertEqual(bootstrap.select(self.catalog)['key'], 'deploy')
-        self.assertGreater(len(self.catalog['guests']), 1)
+        self.assertEqual(len(self.catalog['guests']), 2)
 
     def test_no_missing_deploy(self):
         """Verify no missing deploy."""
@@ -231,11 +231,11 @@ class BootstrapTests(unittest.TestCase):
         """Verify snapshot excludes private inputs and refuses links."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / 'source'; root.mkdir()
-            names = ['proxmox/bootstrap', 'src/homelab', 'schemas', 'ansible/roles/homelab_admission',
-                     'examples/site/catalog', 'infrastructure/proxmox/modules/lxc', 'infrastructure/proxmox/critical']
+            names = ['proxmox/bootstrap/fixtures', 'proxmox/bootstrap/docker', 'proxmox/common/ansible', 'proxmox/applications']
             for name in names: (root / name).mkdir(parents=True, exist_ok=True)
-            for name in ['examples/site/catalog/site.json', 'infrastructure/proxmox/critical/versions.tf',
-                         'infrastructure/proxmox/critical/.terraform.lock.hcl']:
+            for name in ['proxmox/bootstrap/fixtures/site.json', 'proxmox/bootstrap/docker/versions.tf',
+                         'proxmox/bootstrap/docker/.terraform.lock.hcl', 'proxmox/common/ansible/network-ready.yml',
+                         'proxmox/applications/host_device_helper.py']:
                 (root / name).write_text('public')
             private = root / 'proxmox/bootstrap/.local'; private.mkdir()
             (private / 'private-marker').write_text('synthetic private input')
@@ -243,6 +243,8 @@ class BootstrapTests(unittest.TestCase):
                 output = Path(tmp) / 'snapshot'
                 bootstrap.snapshot(output)
                 self.assertFalse((output / 'proxmox/bootstrap/.local').exists())
+                self.assertEqual((output / 'proxmox/common/ansible/network-ready.yml').read_text(), 'public')
+                self.assertEqual((output / 'proxmox/applications/host_device_helper.py').read_text(), 'public')
                 (root / 'proxmox/bootstrap/unsafe-link').symlink_to(private / 'private-marker')
                 with self.assertRaises(ValueError): bootstrap.snapshot(Path(tmp) / 'linked-snapshot')
 

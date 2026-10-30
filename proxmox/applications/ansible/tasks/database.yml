@@ -45,6 +45,6 @@
 - name: Start and enable only the selected native database server
   ansible.builtin.systemd_service:
     name: "{{ {'mariadb': 'mariadb', 'postgresql': 'postgresql', 'influxdb': 'influxdb'}[app.kind] }}"
-    state: "{{ 'restarted' if ordinary_reconcile | default(false) | bool and database_configuration.changed else 'started' }}"
+    state: "{{ 'restarted' if application_reconcile | default(false) | bool and database_configuration.changed else 'started' }}"
     enabled: true
   when: app.start_services | default(false) | bool and not ansible_check_mode

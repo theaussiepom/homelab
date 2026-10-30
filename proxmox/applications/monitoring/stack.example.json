@@ -7,15 +7,13 @@
       "image": "zabbix/zabbix-server-pgsql:ubuntu-7.0.32@sha256:bc0505eff209ab5ca9cfb6c7363f061b03b1a31ed529102274413febae54f002",
       "memory_mib": 768,
       "cpus": 1,
-      "pids_limit": 128,
-      "restart": "no"
+      "pids_limit": 128
     },
     "zabbix_web": {
       "image": "zabbix/zabbix-web-nginx-pgsql:ubuntu-7.0.32@sha256:562b70986134a6083ba503ed5189afeda98b9b69c1960a5f0fb2faa13dfd5151",
       "memory_mib": 512,
       "cpus": 1,
-      "pids_limit": 128,
-      "restart": "no"
+      "pids_limit": 128
     }
   },
   "monitoring": {

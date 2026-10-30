@@ -1,0 +1,39 @@
+---
+- name: Inspect the retained controller database key
+  ansible.builtin.stat:
+    path: "{{ app.pegaprox.key_source }}"
+    checksum_algorithm: sha256
+    follow: false
+  delegate_to: localhost
+  become: false
+  register: pegaprox_source_key
+  no_log: true
+
+- name: Inspect the existing service database key
+  ansible.builtin.stat:
+    path: /opt/homelab-app/runtime/pegaprox-db-key
+    checksum_algorithm: sha256
+    follow: false
+  register: pegaprox_runtime_key
+  no_log: true
+
+- name: Hold on key identity or metadata drift
+  ansible.builtin.assert:
+    that:
+      - pegaprox_source_key.stat.isreg | default(false)
+      - not pegaprox_source_key.stat.islnk | default(false)
+      - pegaprox_runtime_key.stat.isreg | default(false)
+      - not pegaprox_runtime_key.stat.islnk | default(false)
+      - pegaprox_runtime_key.stat.checksum == pegaprox_source_key.stat.checksum
+      - pegaprox_runtime_key.stat.uid == 999
+      - pegaprox_runtime_key.stat.gid == 999
+      - pegaprox_runtime_key.stat.mode == '0600'
+  no_log: true
+
+- name: Reconcile the bounded runtime verification helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../pegaprox_health.py"
+    dest: /opt/homelab-app/pegaprox-health.py
+    owner: root
+    group: root
+    mode: '0700'

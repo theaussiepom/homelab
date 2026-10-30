@@ -1,287 +1,374 @@
-"""Synthetic radio deployment checks; never open a coordinator or MQTT connection."""
+"""Active Zigbee deployment preserves network identity without freezing live databases."""
+
 import copy
-import hashlib
 import io
 import json
+import os
 from pathlib import Path
+import runpy
+import stat
 import sys
-import tarfile
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import MagicMock, patch
+import yaml
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-import render
-import deploy
-from test_deploy import fixture as site_fixture
-from unittest.mock import patch
-
-DEVICE = '/dev/serial/by-id/usb-Example_Radio_123-if00'
-
-def fixture():
-    return {'kind': 'zigbee2mqtt', 'guest_memory_mib': 768, 'timezone': 'Etc/UTC',
-            'zigbee': {'serial_device': DEVICE, 'bind_address': '198.18.30.22',
-                       'frontend_port': 8080, 'adapter': 'ember',
-                       'mqtt_server': 'mqtt://broker.example.invalid:1883',
-                       'mqtt_base_topic': 'zigbee2mqtt',
-                       'state_sha256': {name: '1' * 64 for name in
-                         ('configuration.yaml', 'database.db', 'coordinator_backup.json')}},
-            'services': {'zigbee2mqtt': {'image': 'example.invalid/zigbee2mqtt@sha256:' + '2'*64,
-                        'memory_mib': 256, 'cpus': 1, 'pids_limit': 128, 'restart': 'unless-stopped'}}}
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import zigbee2mqtt as zigbee
+import plan_policy
+import guest_contract
+from fixtures import guest
+from test_plan import fixture as plan_fixture, existing_fixture
 
 
-def state():
-    return {'configuration.yaml': b"serial:\n  port: /dev/ttyACM0\n  adapter: ember\nmqtt:\n  server: mqtt://broker.example.invalid:1883\n  base_topic: zigbee2mqtt\nfrontend:\n  enabled: true\n  host: 0.0.0.0\n  port: 8080\nadvanced:\n  network_key: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]\n  pan_id: 1234\n  ext_pan_id: [1, 2, 3, 4, 5, 6, 7, 8]\n",
-            'database.db': b'{"id":1,"type":"Coordinator"}\n',
-            'coordinator_backup.json': b'{"metadata":{"format":"synthetic-only"}}'}
+def settings():
+    return {
+        "serial_device": "/dev/serial/by-id/usb-fixture",
+        "bind_address": "198.18.30.22",
+        "frontend_port": 8099,
+        "adapter": "ember",
+        "mqtt_server": "mqtt://broker.mqtt:1883",
+        "mqtt_base_topic": "home",
+    }
 
 
 class ZigbeeTests(unittest.TestCase):
-    def test_user_namespace_device_source_exists_without_a_guest_tty_alias(self):
-        """Keep runc's device source valid and bind the preserved application path."""
-        import yaml
-        import zigbee2mqtt
-        cfg = fixture()
-        original = copy.deepcopy(cfg)
-        selection = zigbee2mqtt.fingerprint(cfg['zigbee'])
-        # The parent LXC exposes only this character node, not /dev/ttyACM0.
-        guest_nodes = {DEVICE: (166, 0)}
-        application_path = yaml.safe_load(state()['configuration.yaml'])['serial']['port']
+    def test_nested_user_namespace_can_bind_the_device_without_a_guest_tty_alias(self):
+        import render
+        from test_render import fixture
+
+        stack = fixture("zigbee2mqtt")
+        original = copy.deepcopy(stack)
+        device = stack["zigbee"]["serial_device"]
+        guest_nodes = {device: (166, 0)}
+        application_path = yaml.safe_load(self.configuration.read_bytes())["serial"][
+            "port"
+        ]
         self.assertNotIn(application_path, guest_nodes)
-        service = render.compose(cfg)['services']['zigbee2mqtt']
-        self.assertEqual(len(service['devices']), 1)
-        host, container, access = service['devices'][0].split(':')
-        self.assertIn(container, guest_nodes, 'runc in a user namespace binds from the OCI device path')
-        self.assertEqual((host, container, access), (DEVICE, DEVICE, 'rw'))
-        aliases = [mount for mount in service['volumes'] if mount['target'] == application_path]
-        self.assertEqual(len(aliases), 1)
-        alias = aliases[0]
-        self.assertEqual(alias['type'], 'bind')
-        self.assertEqual(alias['source'], host)
-        self.assertEqual(guest_nodes[alias['source']], (166, 0))
-        self.assertIs(alias['read_only'], False)
-        self.assertIs(alias['bind']['create_host_path'], False)
-        self.assertEqual(cfg, original)
-        self.assertEqual(zigbee2mqtt.fingerprint(cfg['zigbee']), selection)
 
-    def test_invalid_radio_capture_cannot_create_a_guest_in_either_entry_point(self):
-        from test_rollout import RolloutTests
-        for action in ('deploy', 'apply'):
-            with self.subTest(action=action), tempfile.TemporaryDirectory() as tmp:
-                root=Path(tmp)
-                cfg, site, work, plan=RolloutTests().prepare(root)
-                stack=fixture(); stack['zigbee']['bind_address']=cfg['app']['address']
-                stack_path=root/'stack.json'; stack_path.write_text(json.dumps(stack))
-                cfg['guest']['serial_device']={'path':DEVICE}
-                cfg['guest']['interfaces'][0]['role']='backend'
-                cfg['app'].update(kind='zigbee2mqtt',stack_config=str(stack_path),usb_stage='prepare')
-                site.write_text(json.dumps(cfg))
-                receipt=json.loads((work/'plan.json').read_text())
-                receipt.update(site_sha256=deploy.sha(site), input_hashes=deploy.input_hashes(cfg))
-                deploy.write(work/'plan.json',receipt)
-                with patch.object(deploy,'_execute_step') as execute_step, self.assertRaises(ValueError):
-                    deploy.execute(action,site,plan)
-                execute_step.assert_not_called()
+        service = render.compose(stack)["services"]["zigbee2mqtt"]
+        self.assertEqual(len(service["devices"]), 1)
+        host, container, access = service["devices"][0].split(":")
+        self.assertIn(
+            container, guest_nodes, "runc binds the OCI device path from the parent LXC"
+        )
+        self.assertEqual((host, container, access), (device, device, "rw"))
+        aliases = [
+            mount for mount in service["volumes"] if mount["target"] == application_path
+        ]
+        self.assertEqual(
+            aliases,
+            [
+                {
+                    "type": "bind",
+                    "source": device,
+                    "target": application_path,
+                    "read_only": False,
+                    "bind": {"create_host_path": False},
+                }
+            ],
+        )
+        self.assertEqual(guest_nodes[aliases[0]["source"]], (166, 0))
+        self.assertEqual(
+            [mount for mount in service["volumes"] if mount["target"] == "/app/data"],
+            [
+                {
+                    "type": "bind",
+                    "source": "/srv/homelab/data/zigbee2mqtt",
+                    "target": "/app/data",
+                    "bind": {"create_host_path": False},
+                }
+            ],
+        )
+        self.assertEqual(service["restart"], "always")
+        for field in ("privileged", "cap_add", "device_cgroup_rules"):
+            self.assertNotIn(field, service)
+        self.assertEqual(stack, original)
 
-    def test_radio_uses_one_exact_device_and_one_existing_data_tree(self):
-        """Expose only the selected node and preserve the application data bind."""
-        cfg=fixture(); svc=render.compose(cfg)['services']['zigbee2mqtt']
-        self.assertEqual(svc['devices'], [DEVICE + ':' + DEVICE + ':rw'])
-        self.assertNotIn('network_mode', svc)
-        self.assertEqual(svc['ports'], ['198.18.30.22:8080:8080'])
-        self.assertEqual(svc['volumes'], [{'type':'bind', 'source':'/srv/homelab/data/zigbee2mqtt',
-             'target':'/app/data', 'bind': {'create_host_path':False}},
-             {'type':'bind', 'source':DEVICE, 'target':'/dev/ttyACM0',
-              'read_only':False, 'bind': {'create_host_path':False}}])
-        for field in ('privileged', 'cap_add', 'device_cgroup_rules'):
-            self.assertNotIn(field,svc)
+    def test_saved_plans_allow_only_the_declared_coordinator_and_preserve_existing_devices(
+        self,
+    ):
+        device = {
+            "path": "/dev/serial/by-id/usb-fixture",
+            "uid": 0,
+            "gid": 20,
+            "mode": "0660",
+            "deny_write": False,
+        }
+        selected = {"path": device["path"]}
+        for existing in (False, True):
+            value = existing_fixture() if existing else plan_fixture()
+            value["resource_changes"][0]["change"]["after"]["device_passthrough"] = []
+            plan_policy.check_plan(
+                value, "pve-lab", 6100, existing=existing, serial_device=selected
+            )
+        value = existing_fixture()
+        change = value["resource_changes"][0]["change"]
+        change["before"]["device_passthrough"] = [copy.deepcopy(device)]
+        change["after"]["device_passthrough"] = [copy.deepcopy(device)]
+        change["after_unknown"] = {"device_passthrough": [{"path": False}]}
+        plan_policy.check_plan(
+            value, "pve-lab", 6100, existing=True, serial_device=selected
+        )
+        for mutate in (
+            lambda c: c["after"]["device_passthrough"].append(dict(device)),
+            lambda c: c.update(after_unknown={"device_passthrough": True}),
+            lambda c: c.update(after_unknown={"device_passthrough": [{"path": True}]}),
+            lambda c: c["after"].update(started=False),
+            lambda c: c["after"]["device_passthrough"][0].update(mode="0666"),
+            lambda c: c["before"]["device_passthrough"][0].update(
+                path="/dev/serial/by-id/usb-other"
+            ),
+        ):
+            changed = copy.deepcopy(value)
+            mutate(changed["resource_changes"][0]["change"])
+            with self.subTest(mutate=mutate), self.assertRaises(ValueError):
+                plan_policy.check_plan(
+                    changed, "pve-lab", 6100, existing=True, serial_device=selected
+                )
 
-    def test_radio_rejects_unstable_devices_and_config_overrides(self):
-        for device in ('/dev/ttyACM0', '/dev/*', '/dev/sda', '/dev/serial/by-id/../other'):
-            cfg=fixture(); cfg['zigbee']['serial_device']=device
-            with self.subTest(device=device), self.assertRaises(ValueError): render.compose(cfg)
-        for key, value in [('environment', {'ZIGBEE2MQTT_CONFIG_ADVANCED_NETWORK_KEY':'GENERATE'}),
-                           ('extra_mounts',[{'source':'/srv/homelab/data/other','target':'/app/data'}]),
-                           ('command',['anything']), ('entrypoint',['anything']), ('user','0:0')]:
-            cfg=fixture(); cfg['services']['zigbee2mqtt'][key]=value
-            with self.subTest(key=key), self.assertRaises(ValueError): render.compose(cfg)
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.selected = settings()
+        self.value = {
+            "serial": {"port": "/dev/ttyACM0", "adapter": "ember", "baudrate": 115200},
+            "mqtt": {"server": "mqtt://broker.mqtt:1883", "base_topic": "home"},
+            "frontend": {"enabled": True, "port": 8099},
+            "advanced": {
+                "network_key": list(range(16)),
+                "pan_id": 12345,
+                "ext_pan_id": list(range(8)),
+                "channel": 20,
+            },
+        }
+        self.configuration = self.root / "configuration.yaml"
+        (self.root / "database.db").write_text("retained devices")
+        (self.root / "coordinator_backup.json").write_text('{"retained":true}')
+        self.receipt = self.root / "identity.json"
+        self.save()
+        native_stat = os.stat
 
-    def test_radio_needs_matching_guest_device_and_listener(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp); cfg=site_fixture(root); stack=fixture()
-            stack['zigbee']['bind_address']=cfg['app']['address']
-            path=root/'stack.json'; path.write_text(json.dumps(stack))
-            cfg['app'].update(kind='zigbee2mqtt', stack_config=str(path),usb_stage='prepare')
-            cfg['guest']['serial_device']={'path':DEVICE}
-            cfg['guest']['interfaces'][0]['role']='backend'
-            self.assertEqual(deploy.validate(cfg),6101)
-            for wrong in ({'path':DEVICE+'-other'}, None):
-                bad=copy.deepcopy(cfg); bad['guest']['serial_device']=wrong
-                with self.assertRaises(ValueError): deploy.validate(bad)
-            cfg['app']['kind']='dns'
-            with self.assertRaises(ValueError): deploy.validate(cfg)
+        def device_stat(path, *args, **kwargs):
+            if str(path).startswith("/dev/serial/by-id/usb-") and kwargs.get(
+                "follow_symlinks", True
+            ):
+                return SimpleNamespace(st_mode=stat.S_IFCHR)
+            return native_stat(path, *args, **kwargs)
 
-    def test_radio_listener_requires_one_explicit_backend_interface(self):
-        """Check synthetic role selection only, never native deployment acceptance."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp); cfg=site_fixture(root); stack=fixture()
-            cfg['guest']['interfaces'][0]['role']='management'
-            backend={'role':'backend', 'ipv4':'198.18.30.22/24', 'mac':'02:00:00:00:61:02'}
-            cfg['guest']['interfaces'].append(backend)
-            cfg['guest']['serial_device']={'path':DEVICE}
-            path=root/'stack.json'; path.write_text(json.dumps(stack))
-            cfg['app'].update(kind='zigbee2mqtt', stack_config=str(path),usb_stage='prepare')
-            self.assertEqual(deploy.validate(cfg),6101)
-            for mode in ('management-listener','missing-role','duplicate-role'):
-                bad=copy.deepcopy(cfg)
-                if mode=='management-listener':
-                    stack['zigbee']['bind_address']=cfg['app']['address']
-                elif mode=='missing-role':
-                    bad['guest']['interfaces'][1].pop('role')
-                else:
-                    bad['guest']['interfaces'][0]['role']='backend'
-                path.write_text(json.dumps(stack))
-                with self.subTest(mode=mode), self.assertRaises(ValueError): deploy.validate(bad)
-                stack['zigbee']['bind_address']='198.18.30.22'
+        patcher = patch.object(zigbee.os, "stat", side_effect=device_stat)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
-    def test_preserved_network_identity_rejects_malformed_values(self):
-        import yaml
-        import zigbee2mqtt
-        for key, invalid in (
-                ('network_key', [[], [1]*15, [1]*17, [True]*16, [1.5]*16, [-1]*16,
-                                 [256]*16, {}, 'not-a-key', '!secret.yaml', '!secret.yaml ',
-                                 '!../secret.yaml network_key', '!sub/secret.yaml network_key']),
-                ('pan_id', [True, 0, -1, 65535, 1.5, [], {}, '1234', '!secret.yaml pan_id']),
-                ('ext_pan_id', [[], [1]*7, [1]*9, [True]*8, [1.5]*8, [-1]*8,
-                                [256]*8, {}, 1234, '!secret.yaml ext_pan_id'])):
-            for selected in invalid:
-                value=yaml.safe_load(state()['configuration.yaml'])
-                value['advanced'][key]=selected
-                with self.subTest(key=key,selected=selected), self.assertRaises(ValueError):
-                    zigbee2mqtt.check_configuration(yaml.safe_dump(value),fixture()['zigbee'])
+    def save(self):
+        self.configuration.write_text(yaml.safe_dump(self.value))
 
-    def test_preserved_network_identity_accepts_boundaries_and_key_reference(self):
-        import yaml
-        import zigbee2mqtt
-        for key in ([0]*16, [255]*16, '!secret.yaml network_key', '!secret network_key'):
-            for pan_id in (1,65534):
-                value=yaml.safe_load(state()['configuration.yaml'])
-                value['advanced'].update(network_key=key,pan_id=pan_id,ext_pan_id=[0,255]*4)
-                zigbee2mqtt.check_configuration(yaml.safe_dump(value),fixture()['zigbee'])
+    def check(self, healthy=False):
+        return zigbee.check(self.root, self.selected, self.receipt, healthy)
 
-    def test_referenced_key_must_be_captured_hashed_and_a_valid_preserved_key(self):
-        import yaml
-        import zigbee2mqtt
-        for reference in ('!secret.yaml network_key','!secret network_key'):
-            value=yaml.safe_load(state()['configuration.yaml'])
-            value['advanced']['network_key']=reference
-            files=state();files['configuration.yaml']=yaml.safe_dump(value).encode()
-            cfg=fixture()['zigbee'];cfg['state_sha256']={n:hashlib.sha256(v).hexdigest() for n,v in files.items()}
-            with self.assertRaises(ValueError):zigbee2mqtt.check_bytes(files,cfg)
-            files['secret.yaml']=b'network_key: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]\n'
-            cfg['state_sha256']={n:hashlib.sha256(v).hexdigest() for n,v in files.items()}
-            zigbee2mqtt.check_bytes(files,cfg)
-            with tempfile.TemporaryDirectory() as tmp:
-                root=Path(tmp)
-                for name,data in files.items():(root/name).write_bytes(data)
-                zigbee2mqtt.check_directory(root,cfg)
-                capture=root/'capture.tar'
-                with tarfile.open(capture,'w') as archive:
-                    for name,data in files.items():
-                        member=tarfile.TarInfo('zigbee2mqtt/'+name);member.size=len(data)
-                        archive.addfile(member,io.BytesIO(data))
-                zigbee2mqtt.check_archive(capture,cfg)
-                (root/'secret.yaml').write_bytes(b'network_key: GENERATE\n')
-                with self.assertRaises(ValueError):zigbee2mqtt.check_directory(root,cfg)
-                (root/'secret.yaml').unlink();(root/'secret.yaml').symlink_to(root/'configuration.yaml')
-                with self.assertRaises(ValueError):zigbee2mqtt.check_directory(root,cfg)
-            for data in (b'network_key: []\n',b'network_key: GENERATE\n',b'other: [1,2]\n'):
-                files['secret.yaml']=data
-                cfg['state_sha256']['secret.yaml']=hashlib.sha256(data).hexdigest()
-                with self.assertRaises(ValueError):zigbee2mqtt.check_bytes(files,cfg)
+    def test_prepared_network_is_recorded_and_mutable_state_can_change(self):
+        self.assertTrue(self.check()["healthy"])
+        before = self.receipt.read_bytes()
+        self.assertEqual(self.receipt.stat().st_mode & 0o777, 0o600)
+        self.assertNotIn(b"network_key", before)
+        for name in ("database.db", "coordinator_backup.json"):
+            (self.root / name).write_text("new legitimate live counters")
+        self.assertTrue(self.check()["healthy"])
+        self.assertEqual(self.receipt.read_bytes(), before)
 
-    def test_archive_and_restored_state_are_checked_without_modification(self):
-        import zigbee2mqtt
-        files=state(); cfg=fixture()['zigbee']
-        cfg['state_sha256']={name:hashlib.sha256(value).hexdigest() for name,value in files.items()}
-        with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp); archive=root/'capture.tar'
-            with tarfile.open(archive,'w') as tar:
-                for name,value in files.items():
-                    member=tarfile.TarInfo('zigbee2mqtt/'+name); member.size=len(value)
-                    tar.addfile(member,io.BytesIO(value))
-            zigbee2mqtt.check_archive(archive,cfg)
-            data=root/'data'; data.mkdir()
-            for name,value in files.items(): (data/name).write_bytes(value)
-            before={p.name:p.read_bytes() for p in data.iterdir()}
-            zigbee2mqtt.check_directory(data,cfg)
-            self.assertEqual(before,{p.name:p.read_bytes() for p in data.iterdir()})
-            (data/'database.db').write_bytes(b'other state')
-            with self.assertRaises(ValueError): zigbee2mqtt.check_directory(data,cfg)
+    def test_network_key_pan_channel_and_coordinator_drift_preserve_original_record(
+        self,
+    ):
+        self.check()
+        before = self.receipt.read_bytes()
+        original = copy.deepcopy(self.value)
+        for field, value in (
+            ("network_key", [1] * 16),
+            ("pan_id", 54321),
+            ("ext_pan_id", [1] * 8),
+            ("channel", 25),
+        ):
+            with self.subTest(field=field):
+                self.value = copy.deepcopy(original)
+                self.value["advanced"][field] = value
+                self.save()
+                with self.assertRaisesRegex(ValueError, "recorded Zigbee"):
+                    self.check()
+                self.assertEqual(self.receipt.read_bytes(), before)
+        self.value = original
+        self.save()
+        self.selected["serial_device"] = "/dev/serial/by-id/usb-different"
+        with self.assertRaisesRegex(ValueError, "recorded Zigbee"):
+            self.check()
 
-    def test_missing_or_generated_network_identity_is_held(self):
-        import zigbee2mqtt
-        cfg=fixture()['zigbee']; original=state()['configuration.yaml']
-        for data in (b'', original.replace(b'pan_id: 1234',b'pan_id: GENERATE'),
-                     original.replace(b'port: /dev/ttyACM0',b'port: /dev/ttyUSB0'),
-                     original.replace(b'base_topic: zigbee2mqtt',b'base_topic: other'),
-                     original.replace(b'host: 0.0.0.0',b'host: 127.0.0.1')):
-            with self.subTest(data=data), self.assertRaises(ValueError): zigbee2mqtt.check_configuration(data,cfg)
+    def test_existing_private_receipt_permissions_and_ownership_are_preserved(self):
+        self.check()
+        before = self.receipt.read_bytes()
+        self.receipt.chmod(0o644)
+        with self.assertRaises(ValueError):
+            self.check()
+        self.assertEqual(self.receipt.stat().st_mode & 0o777, 0o644)
+        self.receipt.chmod(0o600)
+        with (
+            patch.object(zigbee.os, "geteuid", return_value=os.geteuid() + 1),
+            self.assertRaises(ValueError),
+        ):
+            self.check()
+        self.assertEqual(self.receipt.read_bytes(), before)
 
-    def test_missing_or_duplicate_archive_state_and_links_are_held(self):
-        import zigbee2mqtt
-        files=state(); cfg=fixture()['zigbee']
-        cfg['state_sha256']={name:hashlib.sha256(value).hexdigest() for name,value in files.items()}
-        for mode in ('missing','duplicate','link','other-service'):
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
-                archive=Path(tmp)/'capture.tar'
-                with tarfile.open(archive,'w') as tar:
-                    for name,value in files.items():
-                        if mode=='missing' and name=='database.db': continue
-                        member=tarfile.TarInfo('zigbee2mqtt/'+name); member.size=len(value)
-                        if mode=='link' and name=='database.db':
-                            member.type=tarfile.SYMTYPE; member.linkname='configuration.yaml'; member.size=0
-                            tar.addfile(member)
-                        else: tar.addfile(member,io.BytesIO(value))
-                    if mode in ('duplicate','other-service'):
-                        member=tarfile.TarInfo('zigbee2mqtt/database.db' if mode=='duplicate' else 'homeassistant/configuration.yaml')
-                        member.size=1; tar.addfile(member,io.BytesIO(b'x'))
-                with self.assertRaises(ValueError): zigbee2mqtt.check_archive(archive,cfg)
+    def test_private_key_reference_is_read_without_execution(self):
+        key = self.root / "secrets.yaml"
+        key.write_text(yaml.safe_dump({"network_key": list(range(16))}))
+        self.value["advanced"]["network_key"] = "!secrets.yaml network_key"
+        self.save()
+        self.check()
+        for value in ("GENERATE", "!../secret.yaml key", "!secret.yaml key", [1] * 15):
+            self.value["advanced"]["network_key"] = value
+            self.save()
+            with self.subTest(value=value), self.assertRaises((ValueError, OSError)):
+                self.check()
+        self.value["advanced"]["network_key"] = "!secrets.yaml network_key"
+        self.save()
+        key.write_text("network_key: GENERATE\n")
+        with self.assertRaises(ValueError):
+            self.check()
 
-    def test_first_start_admission_preserves_live_state_and_refuses_identity_or_receipt_drift(self):
-        import os,yaml
-        import zigbee2mqtt as radio
-        from test_zigbee_first_start_approval import approval_for
-        files=state();cfg=fixture()['zigbee']
-        cfg['state_sha256']={n:hashlib.sha256(v).hexdigest() for n,v in files.items()}
-        with tempfile.TemporaryDirectory() as tmp:
-            base=Path(tmp);root=base/'data/zigbee2mqtt';root.mkdir(parents=True)
-            for n,v in files.items():(root/n).write_bytes(v)
-            receipt=base/'admission.json';restore=base/'restore.json';capture='1'*64
-            restore.write_text(json.dumps({'state':'complete','sha256':capture,'destination':str(root.parent)}));os.chmod(restore,0o600)
-            self.assertFalse(radio.check_start(root,cfg,receipt,restore,capture,False))
-            self.assertFalse(receipt.exists())
-            (root/'database.db').write_bytes(b'changed before first start')
-            with self.assertRaises(ValueError):radio.check_start(root,cfg,receipt,restore,capture,True,approval_for(cfg,capture,restore))
-            self.assertFalse(receipt.exists());(root/'database.db').write_bytes(files['database.db'])
-            self.assertTrue(radio.check_start(root,cfg,receipt,restore,capture,True,approval_for(cfg,capture,restore)))
-            sealed=receipt.read_bytes();self.assertEqual(receipt.stat().st_mode&0o777,0o600)
-            self.assertNotIn('network_key',sealed.decode())
-            (root/'database.db').write_bytes(b'updated live database')
-            (root/'coordinator_backup.json').write_bytes(b'{"updated":"live counters"}')
-            config=yaml.safe_load(files['configuration.yaml']);config['friendly_name']='legitimate live setting'
-            (root/'configuration.yaml').write_text(yaml.safe_dump(config))
-            before={p.name:p.read_bytes() for p in root.iterdir()}
-            self.assertFalse(radio.check_start(root,cfg,receipt,restore,capture,True,approval_for(cfg,capture,restore)))
-            self.assertEqual(before,{p.name:p.read_bytes() for p in root.iterdir()});self.assertEqual(receipt.read_bytes(),sealed)
-            receipt.unlink()
-            with self.assertRaises(ValueError):radio.check_start(root,cfg,receipt,restore,capture,True,approval_for(cfg,capture,restore))
-            self.assertFalse(receipt.exists());receipt.write_bytes(sealed);os.chmod(receipt,0o600)
-            config['advanced']['pan_id']=4321;(root/'configuration.yaml').write_text(yaml.safe_dump(config))
-            with self.assertRaises(ValueError):radio.check_start(root,cfg,receipt,restore,capture,True,approval_for(cfg,capture,restore))
-            config['advanced']['pan_id']=1234;(root/'configuration.yaml').write_text(yaml.safe_dump(config))
-            restore.write_text(json.dumps({'state':'complete','sha256':'2'*64,'destination':str(root.parent)}))
-            with self.assertRaises(ValueError):radio.check_start(root,cfg,receipt,restore,capture,True,approval_for(cfg,capture,restore))
-            restore.write_text(json.dumps({'state':'complete','sha256':capture,'destination':str(root.parent)}))
-            receipt.write_text('{}')
-            with self.assertRaises(ValueError):radio.check_start(root,cfg,receipt,restore,capture,True,approval_for(cfg,capture,restore))
+    def test_missing_changed_or_generated_configuration_is_not_normalized(self):
+        original = copy.deepcopy(self.value)
+        for section, key, value in (
+            ("serial", "port", "/dev/ttyUSB1"),
+            ("serial", "adapter", "zstack"),
+            ("mqtt", "server", "mqtt://wrong:1883"),
+            ("mqtt", "base_topic", "other"),
+            ("frontend", "enabled", False),
+            ("frontend", "port", 8080),
+            ("advanced", "pan_id", 0),
+            ("advanced", "ext_pan_id", [0] * 7),
+        ):
+            self.value = copy.deepcopy(original)
+            self.value[section][key] = value
+            self.save()
+            before = self.configuration.read_bytes()
+            with self.subTest(section=section, key=key), self.assertRaises(ValueError):
+                self.check()
+            self.assertEqual(self.configuration.read_bytes(), before)
+        self.configuration.write_text("advanced: !execute secret\n")
+        with self.assertRaises(ValueError):
+            self.check()
+        for name in ("database.db", "coordinator_backup.json"):
+            path = self.root / name
+            before = path.read_bytes()
+            path.write_bytes(b"")
+            with self.assertRaisesRegex(ValueError, "database and coordinator"):
+                self.check()
+            path.write_bytes(before)
+
+    def test_only_the_declared_character_device_and_live_frontend_succeed(self):
+        with (
+            patch.object(zigbee.stat, "S_ISCHR", return_value=False),
+            self.assertRaises(ValueError),
+        ):
+            self.check()
+        self.assertFalse(self.receipt.exists())
+        with self.assertRaisesRegex(ValueError, "before starting"):
+            self.check(healthy=True)
+        self.check()
+        response = MagicMock()
+        response.__enter__.return_value.status = 200
+        with patch.object(
+            zigbee.urllib.request, "urlopen", return_value=response
+        ) as request:
+            self.assertTrue(self.check(healthy=True)["healthy"])
+        request.assert_called_once_with("http://198.18.30.22:8099/", timeout=5)
+        response.__enter__.return_value.status = 503
+        with (
+            patch.object(zigbee.urllib.request, "urlopen", return_value=response),
+            self.assertRaises(ValueError),
+        ):
+            self.check(healthy=True)
+
+    def test_settings_and_deployment_bind_one_device_and_backend(self):
+        for patch_value in (
+            {"extra": True},
+            {"serial_device": "/dev/ttyACM0"},
+            {"adapter": "x y"},
+            {"frontend_port": True},
+            {"frontend_port": 0},
+            {"bind_address": "127.0.0.1"},
+            {"mqtt_server": "mqtt://user:secret@broker.mqtt:1883"},
+            {"mqtt_server": "http://broker.mqtt:1883"},
+            {"mqtt_base_topic": "#"},
+            {"adapter": None},
+        ):
+            with self.subTest(value=patch_value), self.assertRaises(ValueError):
+                zigbee.validate(dict(self.selected, **patch_value))
+        with self.assertRaises(ValueError):
+            zigbee.validate(None)
+        cfg = {
+            "guest": {
+                "serial_device": {"path": self.selected["serial_device"]},
+                "interfaces": [{"ipv4": "198.18.30.22/24"}],
+            }
+        }
+        stack = {"zigbee": self.selected, "services": {"zigbee2mqtt": {}}}
+        zigbee.validate_deployment(cfg, stack)
+        for changed in (
+            dict(cfg["guest"], serial_device={"path": "/dev/serial/by-id/usb-other"}),
+            dict(cfg["guest"], interfaces=[{"ipv4": "198.18.30.99/24"}]),
+        ):
+            with self.assertRaises(ValueError):
+                zigbee.validate_deployment({"guest": changed}, stack)
+
+    def test_file_boundaries_and_cli_never_emit_configuration_or_key(self):
+        cfg = guest(self.root)
+        cfg["guest"]["started"] = False
+        with self.assertRaisesRegex(ValueError, "active guest"):
+            guest_contract.validate(cfg)
+        selected = self.root / "settings.json"
+        selected.write_text(json.dumps(self.selected))
+        argv = [
+            "zigbee2mqtt.py",
+            "validate",
+            "--settings",
+            str(selected),
+            "--data",
+            str(self.root),
+            "--identity",
+            str(self.receipt),
+        ]
+        with (
+            patch.object(sys, "argv", argv),
+            patch("sys.stdout", new_callable=io.StringIO) as output,
+        ):
+            runpy.run_path(str(Path(zigbee.__file__)), run_name="__main__")
+        self.assertEqual(
+            json.loads(output.getvalue()), {"healthy": True, "radio_opened": False}
+        )
+        selected.write_text("invalid JSON")
+        with patch.object(sys, "argv", argv), self.assertRaises(SystemExit):
+            zigbee.main()
+        for value in (b"", b"x" * (1024 * 1024 + 1)):
+            selected.write_bytes(value)
+            with self.assertRaises(ValueError):
+                zigbee.read(selected)
+        link = self.root / "link"
+        link.symlink_to(self.configuration)
+        with self.assertRaises(OSError):
+            zigbee.read(link)
+        with self.assertRaises(ValueError):
+            zigbee.configuration(link, self.selected)
+        stream = MagicMock()
+        stream.__enter__.return_value.read.return_value = b"x" * (1024 * 1024 + 1)
+        with (
+            patch.object(zigbee.os, "open", return_value=123),
+            patch.object(zigbee.os, "fdopen", return_value=stream),
+            patch.object(
+                zigbee.os,
+                "fstat",
+                return_value=SimpleNamespace(st_mode=stat.S_IFREG, st_size=1),
+            ),
+            self.assertRaises(ValueError),
+        ):
+            zigbee.read(selected)

@@ -1,0 +1,103 @@
+name: Run guest phase
+on:
+  workflow_call:
+    inputs:
+      disabled:
+        type: string
+        required: false
+        default: '[]'
+      runner_labels:
+        type: string
+        required: true
+      environment_name:
+        type: string
+        required: true
+      guest:
+        type: string
+        required: true
+      phase:
+        type: string
+        required: true
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  run:
+    name: Run
+    if: github.event.repository.private == true && github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(fromJSON(inputs.disabled || '[]'), inputs.guest)
+    environment: ${{ inputs.environment_name }}
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    timeout-minutes: 45
+    env:
+      HOMELAB_DEPLOYMENT_WORKFLOW: ${{ github.workflow_ref }}
+    steps:
+      - name: Preserve bootstrap custody
+        run: |
+          test ! -e /var/lib/homelab-bootstrap/CONFIGURING
+          test ! -e /var/lib/homelab-bootstrap/BOOTSTRAP-CD-HOLD.json
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Read the private stack selection
+        id: stack
+        run: |
+          python3 - <<'PYCODE' >> "$GITHUB_OUTPUT"
+          import pathlib, re
+          text = pathlib.Path('.github/workflows/deploy.yml').read_text()
+          pins = re.findall(r'^\s*uses: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/\.github/workflows/deploy\.yml@([0-9a-f]{40})\s*$', text, re.M)
+          if len(pins) != 1: raise SystemExit('Select one immutable stack workflow')
+          print('repository='+pins[0][0]); print('revision='+pins[0][1])
+          PYCODE
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ steps.stack.outputs.repository }}
+          ref: ${{ steps.stack.outputs.revision }}
+          path: stack-source
+          persist-credentials: false
+      - name: Read the framework selection
+        id: framework
+        run: |
+          python3 - <<'PYCODE' >> "$GITHUB_OUTPUT"
+          import pathlib, re
+          text = pathlib.Path('stack-source/.github/workflows/phase.yml').read_text()
+          pins = re.findall(r'^\s*uses: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/\.github/workflows/guest-phase\.yml@([0-9a-f]{40})\s*$', text, re.M)
+          if len(pins) != 1: raise SystemExit('Select one immutable framework workflow')
+          print('repository='+pins[0][0]); print('revision='+pins[0][1])
+          PYCODE
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ steps.framework.outputs.repository }}
+          ref: ${{ steps.framework.outputs.revision }}
+          path: framework-source
+          persist-credentials: false
+      - name: Compile the admitted guest
+        env:
+          GUEST: ${{ inputs.guest }}
+          PHASE: ${{ inputs.phase }}
+          DISABLED: ${{ inputs.disabled }}
+        run: |
+          umask 077
+          python3 framework-source/blueprints/compile.py --stack stack-source --site site.json \
+            --guest "$GUEST" --disabled "$DISABLED" --admit \
+            --output "$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json"
+      - name: Bind existing credentials
+        env:
+          GUEST: ${{ inputs.guest }}
+          PHASE: ${{ inputs.phase }}
+          PROXMOX_APP_TOKEN: ${{ secrets.PROXMOX_APP_TOKEN }}
+          APPLICATION_SSH_KEY: ${{ secrets.APPLICATION_SSH_KEY }}
+        run: python3 framework-source/blueprints/credentials.py --packet "$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json"
+      - name: Reconcile this phase
+        env:
+          GUEST: ${{ inputs.guest }}
+          PHASE: ${{ inputs.phase }}
+          NODE_RED_API_TOKEN: ${{ inputs.guest == 'automation' && secrets.AUTOMATION_NODE_RED_API_TOKEN || '' }}
+          AUTHENTIK_SECRET_KEY: ${{ inputs.guest == 'identity' && secrets.FOUNDATION_AUTHENTIK_SECRET_KEY || '' }}
+          AUTHENTIK_POSTGRES_PASSWORD: ${{ inputs.guest == 'identity' && secrets.FOUNDATION_AUTHENTIK_POSTGRES_PASSWORD || '' }}
+          AUTHENTIK_SMTP_PASSWORD: ${{ inputs.guest == 'identity' && secrets.FOUNDATION_AUTHENTIK_SMTP_PASSWORD || '' }}
+          PGADMIN_OAUTH_SECRET: ${{ inputs.guest == 'db-tools' && secrets.FOUNDATION_PGADMIN_OAUTH_SECRET || '' }}
+          CLOUDFLARE_DNS_TOKEN: ${{ inputs.guest == 'ingress' && secrets.FOUNDATION_CLOUDFLARE_DNS_TOKEN || '' }}
+        run: python3 framework-source/proxmox/applications/deploy.py --phase "$PHASE" --packet "$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json"

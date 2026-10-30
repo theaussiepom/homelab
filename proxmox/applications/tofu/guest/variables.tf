@@ -7,10 +7,9 @@ variable "guest" {
     started        = bool, start_on_boot = bool, boot_order = number,
     nesting        = bool, keyctl = bool, dns_servers = list(string),
     routing_labels = optional(map(string), {}),
-    serial_device  = optional(object({ path = string })),
     interfaces = list(object({
       bridge  = string, vlan = optional(number), mac = string, ipv4 = string,
-      gateway = optional(string), ipv6 = optional(string), role = optional(string)
+      gateway = optional(string), ipv6 = optional(string)
     })),
     volumes = map(object({ path = string, size_gib = number })),
     rules = list(object({
@@ -19,15 +18,15 @@ variable "guest" {
     }))
   })
   validation {
-    condition     = var.guest.serial_device == null ? true : can(regex("^/dev/serial/by-id/usb-[A-Za-z0-9_-]+$", var.guest.serial_device.path))
-    error_message = "Select one stable USB serial by-id path, without wildcards or other host devices."
+    condition     = var.guest.started
+    error_message = "Deploy active guests."
   }
   validation {
     condition = alltrue([for key, value in var.guest.routing_labels :
       can(regex("^traefik\\.[A-Za-z0-9_.-]+$", key)) && length(value) <= 2048 &&
       length(regexall("[\r\n]", value)) == 0
     ])
-    error_message = "Discovery labels must be single-line Traefik routing facts generated from typed app routes."
+    error_message = "Discovery labels must be single-line Traefik facts generated from resolved stack routes."
   }
   validation {
     condition = (

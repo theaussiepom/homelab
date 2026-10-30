@@ -1,19 +1,4 @@
 ---
-- name: Require guest networking before Docker and application startup
-  ansible.builtin.import_tasks: ../../../common/ansible/network-ready.yml
-  vars:
-    network_ready_unit: docker.service
-
-- name: Prepare frontend reply routing for the selected multihomed guest
-  ansible.builtin.import_tasks: ingress-routing.yml
-  when: app.kind in ['ingress', 'automation'] and app.frontend_routing is defined and not ansible_check_mode
-
-- name: Enable the isolated guest Docker service
-  ansible.builtin.systemd_service:
-    name: docker
-    enabled: true
-    state: started
-
 - name: Read this guest stack from private controller inputs
   ansible.builtin.set_fact:
     stack: "{{ lookup('ansible.builtin.file', app.stack_config) | from_json }}"
@@ -45,20 +30,11 @@
   no_log: true
   when: not ansible_check_mode
 
-- name: Install PegaProx's first-start stack without a host listener
-  ansible.builtin.copy:
-    src: "{{ app.render_dir }}/compose-bootstrap.yml"
-    dest: /opt/homelab-app/compose-bootstrap.yml
-    owner: root
-    group: root
-    mode: '0600'
-  when: app.kind == 'pegaprox' and not ansible_check_mode
-
 - name: Read the generated foundation runtime file list
   ansible.builtin.set_fact:
     foundation_runtime_files: "{{ lookup('ansible.builtin.file', app.render_dir + '/runtime-files.json') | from_json }}"
   no_log: true
-  when: (stack.foundation is defined or app.kind == 'monitoring') and not ansible_check_mode
+  when: stack.foundation is defined and not ansible_check_mode
 
 - name: Prepare the private foundation runtime directory
   ansible.builtin.file:
@@ -67,7 +43,7 @@
     owner: root
     group: root
     mode: '0700'
-  when: (stack.foundation is defined or app.kind == 'monitoring') and not ansible_check_mode
+  when: stack.foundation is defined and not ansible_check_mode
 
 - name: Install only the selected service-readable foundation files
   ansible.builtin.copy:
@@ -77,35 +53,14 @@
     group: "{{ item.gid }}"
     mode: "{{ item.mode }}"
   loop: "{{ foundation_runtime_files | default([]) }}"
+  register: foundation_runtime_install
   no_log: true
-  when: (stack.foundation is defined or app.kind == 'monitoring') and not ansible_check_mode
-
-- name: Prepare the directory for generated ingress routes
-  ansible.builtin.file:
-    path: /srv/homelab/data/traefik/dynamic
-    state: directory
-  when: app.kind == 'ingress' and stack.foundation is not defined and not ansible_check_mode
-
-- name: Validate the selected Proxmox CA before building its trust directory
-  ansible.builtin.command:
-    argv: [openssl, x509, -in, /opt/homelab-app/runtime/proxmox-ca.pem, -noout]
-  changed_when: false
-  when: app.kind == 'monitoring' and not ansible_check_mode
-
-- name: Install only the new ingress routes into the restored Traefik file directory
-  ansible.builtin.copy:
-    src: "{{ app.render_dir }}/routes.yml"
-    dest: /srv/homelab/data/traefik/dynamic/homelab-applications.yml
-    owner: root
-    group: root
-    mode: '0600'
-    backup: true
-  when: app.kind == 'ingress' and stack.foundation is not defined and not ansible_check_mode
-  no_log: true
+  when: stack.foundation is defined and not ansible_check_mode
 
 - name: Load preserved custom images by verified archive
   ansible.builtin.include_tasks: image.yml
-  loop: "{{ stack.services | default({}) | dict2items | selectattr('value.archive', 'defined') | list }}"
+  loop: "{{ app.image_archives | dict2items }}"
+  when: app.kind not in ['automation', 'dns'] or image_input.key == application_service
   loop_control:
     loop_var: image_input
     label: "{{ image_input.key }}"
@@ -117,56 +72,39 @@
   no_log: true
   when: not ansible_check_mode
 
+- name: Install the owned DNS record selection
+  ansible.builtin.copy:
+    src: "{{ app.render_dir }}/dns-records.json"
+    dest: /opt/homelab-app/dns-records.json
+    owner: root
+    group: root
+    mode: '0600'
+  when: app.kind == 'dns' and application_service == 'pihole'
+
+- name: Install the direct local DNS record checker
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../dns_records.py"
+    dest: /opt/homelab-app/dns_records.py
+    owner: root
+    group: root
+    mode: '0700'
+  when: app.kind == 'dns' and application_service == 'pihole'
+
+- name: Check the existing Zigbee configuration and coordinator before startup
+  ansible.builtin.import_tasks: zigbee-runtime.yml
+  when: app.kind == 'zigbee2mqtt'
+
 - name: Preserve Bitwarden image identity and install its health helper
   ansible.builtin.include_tasks: bitwarden.yml
   when: app.kind == 'bitwarden'
-
-- name: Prepare the directory for the selected HA helper
-  ansible.builtin.file:
-    path: /srv/homelab/data/ha-startup
-    state: directory
-  when: app.kind == 'automation' and stack.services.homeassistant.environment.HOMELAB_HA_IPV4 is defined
-
-- name: Adapt the existing HA helper to the selected rehearsal or production address
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../mdns-route.sh"
-    dest: /srv/homelab/data/ha-startup/mdns-route.sh
-    owner: root
-    group: root
-    mode: '0750'
-    backup: true
-  when: app.kind == 'automation' and stack.services.homeassistant.environment.HOMELAB_HA_IPV4 is defined
 
 - name: Require the explicit start step and retired old writers
   ansible.builtin.assert:
     that:
       - app.start_services | default(false) | bool
-      - app.exclusive_writer_confirmed | default(false) | bool or (app.kind == 'monitoring' and app.installation | default('') == 'clean')
+      - app.exclusive_writer_confirmed | default(false) | bool
     fail_msg: 'Data is staged. Start requires the selected cutover and exclusive-writer confirmation.'
   when: app.start_services | default(false) | bool and not ansible_check_mode
-
-- name: Validate only the selected Zigbee admission before startup
-  ansible.builtin.import_tasks: zigbee-admission.yml
-  when: app.kind == 'zigbee2mqtt'
-
-- name: Install the native Node-RED OIDC wrapper without replacing restored settings
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../node-red-settings.js"
-    dest: /srv/homelab/data/node-red/runtime-settings.js
-    owner: root
-    group: root
-    mode: '0644'
-  when: app.kind == 'automation' and stack.node_red_oidc is defined
-
-- name: Adapt the Node-RED image health check to its current guest loopback listener
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../node-red-healthcheck.js"
-    dest: /srv/homelab/data/node-red/healthcheck.js
-    owner: root
-    group: root
-    mode: '0644'
-    backup: true
-  when: app.kind == 'automation'
 
 - name: Install the bounded automation service probes
   ansible.builtin.copy:
@@ -179,12 +117,20 @@
 
 - name: Start exactly this guest stack
   ansible.builtin.command:
-    argv: "{{ ['docker', 'compose', '-f', ('/opt/homelab-app/compose-bootstrap.yml' if app.kind == 'pegaprox' else '/opt/homelab-app/compose.yml'), 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--pull', 'never'] if app.kind == 'bitwarden' else []) + (['--no-deps', ordinary_service] if ordinary_service is defined else []) }}"
+    argv: "{{ ['docker', 'compose', '-f', '/opt/homelab-app/compose.yml', 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--force-recreate'] if foundation_runtime_install.changed | default(false) else []) + (['--pull', 'never'] if app.kind == 'bitwarden' else []) + (['--no-deps', application_service] if app.kind in ['automation', 'dns'] else []) }}"
   register: compose_start
   changed_when: "'Started' in compose_start.stderr or 'Created' in compose_start.stderr or 'Recreated' in compose_start.stderr"
   no_log: true
   when: app.start_services | default(false) | bool and not ansible_check_mode
 
-- name: Initialise the clean PegaProx account after its first start
-  ansible.builtin.import_tasks: pegaprox-bootstrap.yml
-  when: app.kind == 'pegaprox'
+- name: Reconcile owned Pi-hole records while retaining unrelated names
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/dns_records.py, reconcile, --records, /opt/homelab-app/dns-records.json, --compose, /opt/homelab-app/compose.yml]
+  register: dns_record_reconcile
+  changed_when: (dns_record_reconcile.stdout | from_json).changed
+  when: app.kind == 'dns' and application_service == 'pihole' and not ansible_check_mode
+
+- name: Reload only Pi-hole after its owned DNS records change
+  ansible.builtin.command:
+    argv: [docker, compose, -f, /opt/homelab-app/compose.yml, restart, --no-deps, pihole]
+  when: app.kind == 'dns' and application_service == 'pihole' and not ansible_check_mode and dns_record_reconcile.changed

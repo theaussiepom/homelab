@@ -22,7 +22,7 @@ class IdentityTests(unittest.TestCase):
     def setup_fixture(self, root):
         cfg = {'site': {'node': 'practice-pve'},
                'guest': {'vmid': 6101, 'hostname': 'practice-dns', 'interfaces': [
-                   {'mac': '02:00:00:00:61:01', 'bridge': 'vmbr0', 'vlan': 40}]},
+                   {'mac': '02:00:00:00:61:01', 'bridge': 'vmbr0', 'vlan': 40, 'ipv4': '198.18.100.42/24'}]},
                'app': {'mac': '02:00:00:00:61:01'},
                'paths': {'known_hosts': str(root / 'hosts'), 'api_token': str(root / 'api')}}
         (root / 'hosts').touch(mode=0o600)
@@ -136,6 +136,50 @@ class IdentityTests(unittest.TestCase):
     def test_incomplete_fingerprint_and_invalid_key_blob_are_refused(self):
         self.assertRaises(ValueError, identity.creation_fingerprint, [])
         self.assertRaises(ValueError, identity.fingerprint, base64.b64encode(b'not-an-SSH-key').decode())
+
+
+    def test_hardlinked_host_trust_cannot_be_mutated_by_new_guest_pinning(self):
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = self.setup_fixture(root)
+            original = b"198.18.100.99 ssh-ed25519 " + public_key(2).encode() + b"\n"
+            hosts = root / "hosts"
+            hosts.write_bytes(original)
+            os.link(hosts, root / "retained-trust")
+            with (
+                patch.object(identity.subprocess, "run", side_effect=self.command),
+                self.assertRaises(ValueError),
+            ):
+                identity.pin(cfg, root, "198.18.100.42", self.fetch, self.persist)
+            self.assertEqual(hosts.read_bytes(), original)
+            self.assertEqual((root / "retained-trust").read_bytes(), original)
+            self.assertFalse((root / "host-key-evidence.json").exists())
+
+    def test_removed_or_replaced_host_trust_is_never_recreated_or_appended(self):
+        for replace in (False, True):
+            with self.subTest(replace=replace), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                cfg = self.setup_fixture(root)
+                hosts = root/'hosts'
+                original = ('198.18.100.99 ssh-ed25519 '+public_key(2)+'\n').encode()
+                hosts.write_bytes(original)
+                def replace_during_scan(argv, **kwargs):
+                    result = self.command(argv, **kwargs)
+                    if argv[0] == 'ssh-keyscan':
+                        hosts.rename(root/'retained-trust')
+                        if replace:
+                            hosts.write_bytes(b'')
+                            hosts.chmod(0o600)
+                    return result
+                with patch.object(identity.subprocess,'run',side_effect=replace_during_scan), self.assertRaises((ValueError, FileNotFoundError)):
+                    identity.pin(cfg, root, '198.18.100.42', self.fetch, self.persist)
+                self.assertEqual((root/'retained-trust').read_bytes(), original)
+                self.assertEqual(hosts.exists(), replace)
+                if replace:
+                    self.assertEqual(hosts.read_bytes(), b'')
+                self.assertFalse((root/'host-key-evidence.json').exists())
 
 
 if __name__ == '__main__':

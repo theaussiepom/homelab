@@ -118,11 +118,11 @@ affected images/cases were checked again.
 
 ## Technical detail and limits
 
-The packaged review fixes covered optimised-Python trust checks, stale metadata,
-ordinary guard failures, unsupported legacy mirror compilation, captured
-signature bytes, output creation and consistent single-render manifests.
-The observer was unchanged. The later malformed-catalogue regression brought
-the source suite from 29 to 30 tests.
+The earlier packaged review covered optimised-Python trust checks, stale metadata
+and ordinary guard failures. Its historical test counts included an older compiler
+that has since been removed, together with its tests. Current source coverage is
+measured by the framework coverage command with enforced per-file thresholds; these historical boot
+results do not qualify later source changes. The observer remains unchanged.
 
 The generated network file intentionally uses Proxmox's conventional `0644`
 mode and contains no credentials. See the [technical reference](../docs/technical-reference.md)
