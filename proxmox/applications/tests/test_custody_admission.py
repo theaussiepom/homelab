@@ -531,7 +531,7 @@ class AdmissionTests(unittest.TestCase):
                 inputs.prepare(value.root / 'changed-packet.json', base)
             self.assertEqual((destination / 'acceptance.json').read_bytes(), value.acceptance_raw)
         with self.assertRaisesRegex(ValueError, 'custody.*proof'):
-            compiler.custody_text('${inputs}', 'f' * 64, {'inputs': 'not-a-proof'})
+            compiler.custody_text('${inputs}', io.digest(b'not-a-proof'), {'inputs': 'not-a-proof'})
         with self.assertRaisesRegex(ValueError, 'custody.*proof'):
             compiler.custody_text('${numeric}', 'f' * 64, {'numeric': 1})
         with self.assertRaisesRegex(ValueError, 'custody.*proof'):

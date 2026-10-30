@@ -49,7 +49,10 @@ source resolution selects one complete central value or an exact literal proof.
 Proof contents are never interpolated, including literal `${inputs}` or other
 central-value tokens; ordinary runtime files retain their normal substitution.
 No new runtime loader
-or source-file override is required. Their bounded filenames
+or source-file override is required. Before private adoption, require explicit
+human review of this proof-integrity control across source resolution, packet
+compilation, preparation and admission; public tests provide source evidence and
+do not establish deployment acceptance. Their bounded filenames
 may differ from the names above, but must be distinct. Set
 `paths.coordinated_custody_inputs` to `${inputs}` in the composition source;
 preparation requires the exact materialized guest packet directory. The whole
