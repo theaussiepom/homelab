@@ -172,7 +172,7 @@ class ValidationEdges(unittest.TestCase):
                         "direction": "in",
                         "proto": "tcp",
                         "port": "5000",
-                        "source": "198.18.0.0/24",
+                        "source": "198.18.25.0/24",
                         "destination": stack["bind_address"] + "/32",
                     },
                 ],
@@ -188,6 +188,7 @@ class ValidationEdges(unittest.TestCase):
             "management-subnet",
             "destination",
             "no-client",
+            "proxy-not-admitted",
             "budget",
         ):
             value = copy.deepcopy(cfg)
@@ -207,6 +208,8 @@ class ValidationEdges(unittest.TestCase):
                 value["guest"]["rules"][1]["destination"] = "198.18.0.99/32"
             elif change == "no-client":
                 value["guest"]["rules"] = []
+            elif change == "proxy-not-admitted":
+                value["guest"]["rules"][1]["source"] = "198.18.0.0/24"
             else:
                 value["app"]["memory_mib"] += 1
             with self.subTest(change=change), self.assertRaises(ValueError):

@@ -6,12 +6,14 @@ from pathlib import Path
 
 from resources import positive
 from container_policy import restart_policy
+from discovery import PRIVATE_BACKENDS
 
 KEY_SOURCE = "/opt/homelab-app/runtime/pegaprox-db-key"
 FIELDS = {
     "kind",
     "image",
     "bind_address",
+    "trusted_proxy",
     "guest_memory_mib",
     "container_memory_mib",
     "cpus",
@@ -39,6 +41,18 @@ def compose(cfg):
     ):
         raise ValueError(
             "Select a management IPv4 address, never a wildcard or public listener"
+        )
+    if not isinstance(cfg["trusted_proxy"], str):
+        raise ValueError("Select one canonical private ingress IPv4 /32")
+    proxy = ipaddress.IPv4Network(cfg["trusted_proxy"], strict=True)
+    if (
+        str(proxy) != cfg["trusted_proxy"]
+        or proxy.prefixlen != 32
+        or proxy.network_address == address
+        or not any(proxy.subnet_of(network) for network in PRIVATE_BACKENDS)
+    ):
+        raise ValueError(
+            "Select one canonical private ingress IPv4 /32 distinct from PegaProx"
         )
     memory = positive(cfg["container_memory_mib"], "container_memory_mib", 1024)
     budget = positive(cfg["guest_memory_mib"], "guest_memory_mib", 2048)
@@ -98,6 +112,9 @@ def compose(cfg):
                 "ports": [f"{address}:5000:5000/tcp"],
                 "volumes": mounts,
                 "environment": {
+                    "PEGAPROX_BEHIND_PROXY": "true",
+                    "PEGAPROX_HOST": "0.0.0.0",
+                    "PEGAPROX_TRUSTED_PROXIES": cfg["trusted_proxy"],
                     "PEGAPROX_KEY_FILE": "/run/secrets/pegaprox-db-key",
                     "PEGAPROX_SUPERVISED": "1",
                     "PEGAPROX_SSH_STRICT_HOST_KEYS": "1",
@@ -151,7 +168,7 @@ def validate_deployment(cfg, stack):
             continue
         if rule.get("proto") != "tcp" or rule.get("port") not in {"22", "5000"}:
             raise ValueError(
-                "Initial PegaProx ingress admits only runner SSH and management HTTPS"
+                "Initial PegaProx ingress admits only runner SSH and the management HTTP listener"
             )
         source = ipaddress.IPv4Network(rule.get("source", ""), strict=True)
         if rule["port"] == "22" and source.prefixlen != 32:
@@ -173,6 +190,13 @@ def validate_deployment(cfg, stack):
     if not 1 <= len(client_rules) <= 8:
         raise ValueError(
             "Select the finite management client allowance before deployment"
+        )
+    proxy = ipaddress.IPv4Network(stack["trusted_proxy"])
+    if not any(
+        proxy.subnet_of(ipaddress.IPv4Network(rule["source"])) for rule in client_rules
+    ):
+        raise ValueError(
+            "The trusted ingress proxy must have an admitted management client allowance"
         )
     if (
         stack["guest_memory_mib"] != app["memory_mib"]

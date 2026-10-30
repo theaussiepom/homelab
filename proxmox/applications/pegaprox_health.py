@@ -3,22 +3,18 @@
 import subprocess
 
 CONTAINER_CODE = r"""
-import json, ssl, sys, time
+import json, sys, time
 from urllib.error import HTTPError
-from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHandler, ProxyHandler
+from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args):
         raise RuntimeError('Unexpected local redirect')
 def require(condition, message='Local setup verification failed'):
     if not condition: raise RuntimeError(message)
 def call(path):
-    headers = {'X-Requested-With': 'XMLHttpRequest', 'Origin': 'https://127.0.0.1:5000'}
-    req = Request('https://127.0.0.1:5000' + path, headers=headers)
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_REQUIRED
-    context.load_verify_locations(cafile='/app/config/ssl/cert.pem')
-    opener = build_opener(ProxyHandler({}), HTTPSHandler(context=context), NoRedirect())
+    headers = {'X-Requested-With': 'XMLHttpRequest', 'Origin': 'http://127.0.0.1:5000'}
+    req = Request('http://127.0.0.1:5000' + path, headers=headers)
+    opener = build_opener(ProxyHandler({}), NoRedirect())
     try: response = opener.open(req, timeout=4 if path == '/api/health' else 8)
     except HTTPError as error: response = error
     with response:
@@ -29,14 +25,14 @@ deadline = time.monotonic() + 65
 while True:
     try:
         status, body = call('/api/health')
-        if status == 200 and body.get('status') == 'ok' and isinstance(body.get('version'), str) and body['version']: break
+        if status == 200 and isinstance(body, dict) and body.get('status') == 'ok' and isinstance(body.get('version'), str) and body['version']: break
     except (OSError, ValueError, RuntimeError):
         pass
     if time.monotonic() >= deadline:
         raise RuntimeError('PegaProx did not become ready')
     time.sleep(2)
 status, state = call('/api/auth/check')
-require(status == 401 and state.get('authenticated') is False)
+require(status == 401 and isinstance(state, dict) and state.get('authenticated') is False)
 require(state.get('initialized') is True)
 print('PegaProx verification passed')
 """

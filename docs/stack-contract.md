@@ -123,7 +123,15 @@ file must already contain the final commissioned database endpoint and identity;
 ordinary deployment performs no endpoint conversion and reads no restore receipts.
 Its app job retains the pre-start schema query and observed image ID check.
 PegaProx requires the existing database key and initial account; it verifies the
-retained key and runs its bounded health helper without replaying bootstrap.
+retained key and runs its bounded, read-only HTTP loopback health helper without
+replaying bootstrap. Its runtime requires one canonical private IPv4 `trusted_proxy`
+`/32`, covered by an admitted TCP5000 client rule. The renderer selects HTTP proxy
+mode, listens on all container interfaces behind the existing bounded host port,
+and sets that ingress address as its explicit forwarded-header trust. Traefik owns automatic
+browser HTTPS. The normal application reconcile replaces the container to apply
+these environment settings while retaining the image, key, account and data;
+there is no separate certificate or configuration migration. Native adoption and
+browser acceptance still require separate review.
 
 ## One current architecture
 
@@ -320,9 +328,11 @@ Additional current behavioral coverage uses only disposable synthetic resources:
 `package_install_fixture.py` exercises both real shared APT tasks against a stale
 local index, exact version selection, no vendor start, unchanged repeat and absent
 pin refusal. `pegaprox_runtime_fixture.py` exercises the pinned current renderer,
-separate key, encrypted database row and restart through the current passwordless
-health verifier. Its initial synthetic account exists only in a fresh isolated
-fixture volume; no setup helper is restored to ordinary CD.
+retained TLS-to-HTTP container replacement, separate key, existing account,
+encrypted database row and restart through the current passwordless health
+verifier. An internal disposable Docker network with no published ports permits
+separate trusted and untrusted clients to check Secure cookies and Origin guards.
+Its initial synthetic account exists only in a fresh isolated fixture volume; no setup helper is restored to ordinary CD.
 `pgadmin_runtime_fixture.py` starts the selected immutable image from an existing
 synthetic profile without default credentials, preserves the complete profile
 projection and verifies trusted OIDC discovery and the selected callback. Its old
