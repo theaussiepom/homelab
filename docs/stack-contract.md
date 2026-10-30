@@ -45,22 +45,40 @@ The private site's `.github/workflows/deploy.yml` has one literal external stack
 workflow reference. That SHA is the adopted stack version. There are no competing
 JSON pins. Image entries have a repository, recorded tag (or null), and digest;
 a retained local image instead has a local ID, archive path and archive hash.
-The existing Bitwarden operator-selected `latest` policy is a documented exception
-with a separate observed image ID checked at runtime; this work does not change it.
+The existing Bitwarden `latest` source selection requires its separately selected
+retained local image ID. Ordinary deployment does not pull or retag mutable
+`latest`: rendering uses that exact ID, and runtime inspection must confirm it
+before start. Missing or mismatched local content fails closed. Explicit immutable
+registry digests and verified archive selections keep their existing behavior.
 
 GitHub requires literal reusable workflow references. The stack uses static guest
 workflows and explicit `needs`, and the reusable phase runner explicitly checks out
-the caller site, selected stack and selected framework. Workflow nesting stays
-within GitHub's supported limits. References: [reuse workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows),
+the caller site, selected stack and selected framework. Each guest workflow now
+contains its actual separate phase jobs directly; the generator materializes the
+selected framework checkout's authoritative leaf recipe. All nine step bodies,
+runner/environment/permissions/timeout/conditions, logical phase IDs, explicit
+`needs` and step-only credential scopes are preserved. Only constant guest/phase
+bindings and display labels change. Undeclared, unrelated application-secret
+operands whose guest guard is provably false bind to the explicit empty value
+previously supplied by the removed forwarding wrappers; declarations are not
+broadened and selected credentials are never folded away. Labels are Infra,
+Prepare, and Deployment for a single
+application; DNS and Automation retain their separate application labels.
+Unsupported recipe policies or new context dependencies require explicit review.
+Workflow nesting stays within GitHub's supported limits. References: [reuse workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows),
 [caller checkout behavior](https://docs.github.com/en/actions/concepts/workflows-and-actions/reusing-workflow-configurations).
 `blueprints/workflows.py` generates the checked-in stack entry workflow and one
-permanent workflow per guest. Application phases and display names come from the
+permanent workflow per guest. Application phases and multi-application display names come from the
 blueprint catalogue; cross-guest dependencies come from `stack.json`. Source CI
 runs the same generator with `--check` and rejects missing, changed or obsolete
 generated paths without rewriting them. Generation happens during development;
 GitHub executes the explicit checked-in graph. There is no runtime DAG executor.
-The framework selection in `phase.yml`, source CI and private exclusions/version
-selection remain explicit controls outside the generator.
+The framework selection in `phase.yml` remains an uncalled immutable selection
+anchor for existing source/CI/runtime parsers. Guest jobs do not call that wrapper,
+so it adds no per-phase visual nesting. Source CI and private exclusions/version
+selection remain explicit controls. Source equivalence checks establish the graph,
+command bytes and effective secret values; the next authorized native CD must
+verify actual Actions grouping and the private workflow/receipt binding.
 
 ## Custody and phase behavior
 
@@ -380,9 +398,10 @@ provide native execution authority.
 ## Explicit reusable-workflow secret names
 
 The workflow generator owns declarations and explicit named forwarding for the
-deploy, per-guest and generic phase workflows. The selected framework revision
-remains authoritative in the generated `phase.yml`; regeneration preserves that
-exact selection. The generic framework workflow declares the same eight existing
+deploy and per-guest workflow calls, and step-only secret expressions in the
+materialized jobs. The uncalled generic phase selection anchor remains unchanged.
+The selected framework revision remains authoritative in generated `phase.yml`;
+regeneration preserves that exact selection. Its generic workflow declares the same eight existing
 names: two required shared API/SSH names and six optional application names.
 Each guest workflow requires only its own selected application names in addition
 to the shared pair; SMTP remains optional. Retained PegaProx bootstrap names are

@@ -86,6 +86,10 @@ def latest_success(attempt, member, *, binding_key="coordinated_custody_sha256")
             no_markers(path)
         active = path == attempt.operation and attempt.hold.exists()
         complete = path / "complete.json"
+        if binding_key == "initial_ordinary_sha256" and path.name in member.get("incomplete_operations", []):
+            require(path != attempt.operation and not complete.exists() and not complete.is_symlink(),
+                    "Preserve qualified historical incompletion; no replay or success claim")
+            continue
         if active:
             require(not complete.exists() and not complete.is_symlink(), "Preserve interrupted final receipt custody")
             continue

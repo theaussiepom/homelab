@@ -183,6 +183,37 @@ failed or pending evidence and dropped selection are refused. Existing historica
 records remain byte-for-byte intact; private adoption, continuation and deployment
 are separate operations.
 
+## Standalone Automation initial ordinary receipt
+
+An `automation` profile can select the separate schema
+`homelab-automation-initial-ordinary-v1`. It requires the same explicit identity,
+installed-site, initial-state and four receipt pins as the Influx contract above,
+plus a mandatory `incomplete_operations` list. Influx rejects this extra field;
+its existing selection bytes and digest remain unchanged.
+
+The list contains at most 16 unique exact `ordinary-<run-id>-<attempt>` directory
+names, each from a run strictly earlier than the selected successful anchor.
+The private owner must independently qualify those failed operations and their
+immediate marker scopes. An overall failed workflow can supply an anchor only
+when the exact selected Automation job and its retained success records have
+been qualified independently.
+
+Every selected directory must already exist as a private regular directory,
+with no immediate control markers and no `complete.json`, including a dangling
+completion symlink. Admission rechecks those conditions before omitting only
+these directories from the successful-generation search. Their records stay
+incomplete and untouched; they cannot be replayed as the active attempt or
+represented as successes. Unknown or later incomplete operations still refuse
+admission. Cached historical source is neither recursively scanned for control
+markers nor imported or executed.
+
+The original producer, site, receipt bytes, backend, CA input hash and guest
+trust retain the checks described above. Existing holds and ownership checks
+remain mandatory. Modern successes must carry the selected binding and advance
+normally; a missing canonical pointer cannot fall back to the initial anchor.
+This contract does not select private pins or authorize private adoption or a
+native operation.
+
 ## Optional empty provider refresh values
 
 For pinned bpg/proxmox 0.117.0, only the following explicitly present optional
