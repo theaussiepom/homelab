@@ -1,0 +1,99 @@
+name: Installer config validation
+on:
+  workflow_call:
+    outputs:
+      qualified:
+        description: All applicable synthetic build and VM checks passed
+        value: ${{ jobs.complete.outputs.qualified }}
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Build test ISO
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
+      image: ${{ steps.packet.outputs.image_sha256 }}
+      manifest: ${{ steps.packet.outputs.manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Explain this suite
+        run: echo 'Build invented machine/site inputs once and verify wrong-machine refusal. Synthetic VMs only; no physical installation qualification.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Build pinned Docker tools and run source tests
+        working-directory: proxmox/iso
+        run: make tools unit
+      - name: Create invented machine and site inputs
+        run: python3 proxmox/iso/scripts/installer_ci.py custom-inputs
+      - name: Build the selected synthetic image once
+        working-directory: proxmox/iso
+        run: make fetch build
+      - name: Bind the immutable same-run image packet
+        id: packet
+        run: python3 proxmox/iso/scripts/installer_ci.py stage --profile custom --packet "$RUNNER_TEMP/installer-packet" >> "$GITHUB_OUTPUT"
+      - name: Share only the synthetic image packet for one day
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: installer-config-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/installer-packet/
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - name: Show bounded build evidence
+        if: always()
+        run: python3 proxmox/iso/scripts/installer_ci.py evidence
+  scenarios:
+    needs: build
+    name: Wrong machine
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CASE: profile-wrong-machine
+      IMAGE_SHA: ${{ needs.build.outputs.image }}
+      MANIFEST_SHA: ${{ needs.build.outputs.manifest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Download this run's exact immutable artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact }}
+          path: ${{ runner.temp }}/installer-packet
+          digest-mismatch: error
+      - name: Verify source, run, profile and image before VM execution
+        run: python3 proxmox/iso/scripts/installer_ci.py restore --profile custom --packet "$RUNNER_TEMP/installer-packet" --manifest-sha "$MANIFEST_SHA" --image-sha "$IMAGE_SHA"
+      - name: Build the pinned bounded VM tools
+        working-directory: proxmox/iso
+        run: docker build -f docker/Dockerfile.test -t homelab-proxmox-iso-test:9.2-1 .
+      - name: Run the selected isolated VM case
+        working-directory: proxmox/iso
+        run: ./scripts/run.sh test-case "$CASE"
+      - name: Require the expected stop or refusal and zero disk writes
+        run: |
+          python3 proxmox/iso/scripts/installer_ci.py verify --case "$CASE" --image-sha "$IMAGE_SHA"
+          echo "Passed $CASE against image $IMAGE_SHA; no target disk writes." >> "$GITHUB_STEP_SUMMARY"
+      - name: Show bounded VM evidence
+        if: always()
+        run: python3 proxmox/iso/scripts/installer_ci.py evidence
+  complete:
+    name: Require all suite checks
+    if: always()
+    needs: [build, scenarios]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      qualified: ${{ steps.required.outputs.qualified }}
+    steps:
+      - id: required
+        env:
+          BUILD: ${{ needs.build.result }}
+          SCENARIOS: ${{ needs.scenarios.result }}
+        run: |
+          test "$BUILD" = success
+          test "$SCENARIOS" = success
+          echo 'qualified=true' >> "$GITHUB_OUTPUT"
+          echo 'Installer config validation: build and every applicable scenario passed.' >> "$GITHUB_STEP_SUMMARY"

@@ -8,6 +8,8 @@ import subprocess
 
 ISO_INPUTS = {
     '.github/workflows/ci.yml',
+    '.github/workflows/installer-disk-safety.yml',
+    '.github/workflows/installer-config-validation.yml',
     '.github/scripts/ci_changes.py',
     '.github/scripts/test_ci_changes.py',
     'tests/test_boundaries.py',

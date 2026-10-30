@@ -13,9 +13,11 @@ class ChangeSelectionTests(unittest.TestCase):
         head, base = 'a' * 40, 'b' * 40
         for event_name, event in [('push', {'before': base}),
                                   ('pull_request', {'pull_request': {'base': {'sha': base}}})]:
-            for path in ['proxmox/iso/README.md', '.github/workflows/ci.yml',
+            for path in ['proxmox/iso/README.md', 'proxmox/iso/scripts/installer_ci.py',
+                         'proxmox/iso/tests/test_installer_ci.py', '.github/workflows/ci.yml',
                          '.github/scripts/ci_changes.py', '.github/scripts/test_ci_changes.py',
-                         'tests/test_boundaries.py']:
+                         'tests/test_boundaries.py', '.github/workflows/installer-disk-safety.yml',
+                         '.github/workflows/installer-config-validation.yml']:
                 git = Mock(return_value=(path + '\0').encode())
                 self.assertTrue(needs_iso(event_name, event, head, git))
                 self.assertIn('--no-renames', git.call_args.args[0])

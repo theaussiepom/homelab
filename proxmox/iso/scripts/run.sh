@@ -28,9 +28,9 @@ case "$action" in
     fetch) docker run "${base[@]}" --platform linux/amd64 --network bridge "$BUILDER_IMAGE" python3 scripts/prepare-vendor.py --fetch ;;
     prepare) docker run "${base[@]}" --platform linux/amd64 --network none "$BUILDER_IMAGE" python3 scripts/prepare-vendor.py ;;
     unit|fixture|build-production|qualify) docker run "${base[@]}" --platform linux/amd64 --network none "$BUILDER_IMAGE" python3 scripts/workflow.py "$action" ;;
-    test-boot|test-profile)
+    test-boot|test-profile|test-case)
         vm=(--rm --user "$(id -u):$(id -g)" --cap-drop ALL --security-opt no-new-privileges --cpus 2 --memory 4g --network none -e PYTHONDONTWRITEBYTECODE=1 --mount "type=bind,src=$ROOT,dst=/work,readonly" --mount "type=bind,src=$ROOT/build,dst=/work/build" --mount "type=bind,src=$ROOT/evidence,dst=/work/evidence")
-        docker run "${vm[@]}" "$TEST_IMAGE" python3 scripts/workflow.py "$action"
+        docker run "${vm[@]}" "$TEST_IMAGE" python3 scripts/workflow.py "$action" ${2:+"$2"}
         ;;
     password-hash) docker run "${base[@]}" --platform linux/amd64 --network none -it --mount "type=bind,src=$ROOT/.local,dst=/work/.local" "$BUILDER_IMAGE" python3 scripts/password-hash.py ;;
     *) echo "Unknown action: $action" >&2;exit 2 ;;

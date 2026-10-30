@@ -389,3 +389,16 @@ CD does not adopt, release or continue that operation. Changed, malformed or
 unrecognized custody fails closed. Recognized unrelated members do not retire an
 unrelated guest's ordinary path. Request, claim and backend bytes stay untouched,
 and the existing same-run ordinary hold/replay guards remain enforced.
+
+Installer CI uses two purpose-specific reusable templates. Installer disk safety
+builds one practice ISO, then independently checks matching hardware, wrong machine,
+missing disk, duplicate disk and cancelled installation. Installer config validation
+builds one image from invented machine/site inputs and checks wrong-machine refusal.
+Each same-run image packet lasts one day; artifact ID, source/run/profile identity
+and independent manifest/image digests are checked before a bounded synthetic VM.
+Only the image, build receipt and required invented readback travel between jobs.
+Coverage reports, local inputs, VM disks and logs are never uploaded. Expected
+refusal/stop, unchanged image and zero target disk writes are required per case.
+Repository validation requires both complete suites when installer inputs change
+or manual validation is selected; otherwise it explains the whole-suite skip.
+These checks do not qualify physical installation or private configuration.
