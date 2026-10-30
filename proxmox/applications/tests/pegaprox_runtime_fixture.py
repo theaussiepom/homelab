@@ -73,7 +73,12 @@ print('proxy-account-cookie-origin-passed')
 
 
 def run(*args):
-    return subprocess.check_output(['docker', *args], text=True, stderr=subprocess.PIPE, timeout=90).strip()
+    try:
+        return subprocess.check_output(['docker', *args], text=True, stderr=subprocess.PIPE, timeout=90).strip()
+    except subprocess.CalledProcessError as error:
+        # This fixture owns only invented disposable state; preserve bounded CLI diagnostics.
+        print((error.stderr or 'Docker fixture command failed')[:2048], file=sys.stderr)
+        raise
 
 
 def main():
@@ -86,11 +91,15 @@ def main():
     created_network = False
     outcome = {'image':IMAGE, 'native_verified':False, 'network':'disposable-internal', 'published_ports':[]}
     try:
-        run('network', 'create', '--internal', network)
+        # Static client IPs require an explicitly configured subnet on hosted Docker.
+        # Select one small synthetic block; Docker refuses any collision without retry.
+        subnet = ipaddress.IPv4Network((int(ipaddress.IPv4Address('198.18.0.0'))
+                                       + (int(name[-4:], 16) % 16384) * 8, 29))
+        run('network', 'create', '--internal', '--subnet', str(subnet), network)
         created_network = True
         net = json.loads(run('network', 'inspect', network))[0]
         assert net['Internal'] is True
-        subnet = ipaddress.IPv4Network(net['IPAM']['Config'][0]['Subnet'])
+        assert ipaddress.IPv4Network(net['IPAM']['Config'][0]['Subnet']) == subnet
         backend, proxy, stranger = [str(subnet.network_address + n) for n in (2, 3, 4)]
         runtime = {'kind':'pegaprox', 'image':IMAGE, 'bind_address':backend, 'trusted_proxy':proxy+'/32',
                    'guest_memory_mib':2048, 'container_memory_mib':1024, 'cpus':1, 'pids_limit':256}
