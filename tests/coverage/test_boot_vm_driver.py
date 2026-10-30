@@ -60,7 +60,12 @@ def test_boot_driver_journals_native_verdict_without_starting_a_vm(tmp_path, cas
         "profile-wrong-machine": "wrong machine UUID",
     }
     menu = b"Proxmox: CHECK ONLY - serial console\nProxmox: INSTALL - serial console; confirmation required\nThe highlighted entry will be executed automatically\n"
-    data = menu + b"HOMELAB_CHECK_PASS:\n"
+    menu += b"*Proxmox: CHECK ONLY - no installation\n"
+    frames = [menu, b"*Proxmox: INSTALL - two NEW SSDs; confirmation required\n",
+              b"*Proxmox: CHECK ONLY - serial console\n"]
+    if case == "cancel-install":
+        frames.append(b"*Proxmox: INSTALL - serial console; confirmation required\n")
+    data = b"HOMELAB_CHECK_PASS:\n"
     if selected == "matching-check":
         data += b"CHECK ONLY selected; installation cannot continue\n"
     else:
@@ -166,12 +171,12 @@ def test_boot_driver_journals_native_verdict_without_starting_a_vm(tmp_path, cas
             side_effect=(
                 [
                     b"booting\n",
-                    menu,
+                    *frames,
                     b"HOMELAB_CHECK_PASS:\n",
                     b"CHECK ONLY selected; installation cannot continue\n",
                 ]
                 if case == "streaming"
-                else lambda *args: b"" if case == "timeout" else data
+                else [b""] if case == "timeout" else [*frames, data]
             ),
         ),
         patch.object(module.time, "sleep"),
@@ -214,3 +219,68 @@ def test_qmp_command_ignores_events_and_refuses_error_messages():
     sock.makefile.return_value = io.BytesIO(b'{"error":"fixture failure"}\n')
     with pytest.raises(RuntimeError):
         module.command(sock, "query-status")
+
+
+def test_menu_selection_waits_for_each_highlight_before_entering_serial_mode():
+    module = load()
+    ready = b'\n'.join(module.MenuSelection.entries) + b'\nThe highlighted entry will be executed automatically\n'
+    for cancel in (False, True):
+        selector = module.MenuSelection(cancel)
+        stream = Mock()
+        assert not selector.choose(stream, b'booting')
+        assert not selector.choose(stream, ready)
+        stream.write.assert_not_called()
+        data = ready
+        for index in range(selector.target + 1):
+            data += b'*Proxmox: ' + selector.entries[index] + b'\n'
+            done = selector.choose(stream, data)
+            assert done == (index == selector.target)
+            if not done:
+                count = stream.write.call_count
+                assert not selector.choose(stream, data)  # stale echo cannot trigger another arrow or Enter
+                assert stream.write.call_count == count
+                assert all(call.args[0] != b'\r' for call in stream.write.call_args_list)
+        assert [call.args[0] for call in stream.write.call_args_list] == [b'\x1b[B'] * selector.target + [b'\r']
+        assert selector.choose(stream, data)
+        assert stream.write.call_count == selector.target + 1
+    selector = module.MenuSelection(False)
+    stream = Mock()
+    assert not selector.choose(stream, ready + b'*Proxmox: INSTALL - serial console; confirmation required')
+    stream.write.assert_not_called()
+
+
+def test_shell_wrapper_forwards_all_arguments_to_the_case_validator(tmp_path):
+    import os
+    import shutil
+
+    root = tmp_path / 'fixture'
+    scripts = root / 'scripts'; scripts.mkdir(parents=True)
+    for name in ('run.sh', 'workflow.py'):
+        shutil.copyfile(ROOT / 'scripts' / name, scripts / name)
+    commands = tmp_path / 'commands'; commands.mkdir()
+    marker = tmp_path / 'vm-call.json'
+    docker = commands / 'docker'
+    docker.write_text(
+        '#!' + sys.executable + '\n'
+        'import importlib.util,json,os,pathlib,sys\n'
+        'if sys.argv[1] == "info": raise SystemExit(0)\n'
+        'args=sys.argv[sys.argv.index("python3")+1:]\n'
+        'spec=importlib.util.spec_from_file_location("fixture_workflow",pathlib.Path(os.environ["FIXTURE_ROOT"])/args[0])\n'
+        'module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)\n'
+        'def run(*args): pathlib.Path(os.environ["FIXTURE_MARKER"]).write_text(json.dumps([str(v) for v in args]))\n'
+        'module.run=run;sys.argv=args\n'
+        'try: module.main()\n'
+        'except ValueError: raise SystemExit(2)\n'
+    )
+    docker.chmod(0o700)
+    env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ['PATH'],
+               FIXTURE_ROOT=str(root), FIXTURE_MARKER=str(marker))
+    for arguments, accepted in [(['test-case','wrong-machine'],True),
+                                (['test-case','wrong-machine','extra'],False),
+                                (['test-case'],False),(['test-case','unknown'],False)]:
+        marker.unlink(missing_ok=True)
+        result = subprocess.run(['bash',str(scripts / 'run.sh'),*arguments],env=env,capture_output=True,timeout=10)
+        assert (result.returncode == 0) == accepted, (arguments,result.stderr)
+        assert marker.exists() == accepted
+        if accepted:
+            assert json.loads(marker.read_text()) == ['/work/scripts/boot_test.py','wrong-machine']

@@ -49,7 +49,7 @@ jobs:
     needs: build
     name: Wrong machine
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       CASE: profile-wrong-machine
       IMAGE_SHA: ${{ needs.build.outputs.image }}

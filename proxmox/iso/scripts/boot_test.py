@@ -31,6 +31,36 @@ def command(qmp, name):
         if 'error' in row:raise RuntimeError(row['error'])
 
 
+class MenuSelection:
+    """Send one arrow per observed GRUB highlight, then enter the exact serial item."""
+    entries = (b'CHECK ONLY - no installation', b'INSTALL - two NEW SSDs; confirmation required',
+               b'CHECK ONLY - serial console', b'INSTALL - serial console; confirmation required')
+
+    def __init__(self, cancel):
+        self.target = 3 if cancel else 2
+        self.waiting = None
+        self.done = False
+
+    def choose(self, stream, plain):
+        if self.done:
+            return True
+        if not all(entry in plain for entry in self.entries[2:]) or b'The highlighted entry will be executed automatically' not in plain:
+            return False
+        highlighted = re.findall(rb'\*Proxmox: (' + b'|'.join(re.escape(entry) for entry in self.entries) + rb')', plain)
+        if not highlighted:
+            return False
+        index = self.entries.index(highlighted[-1])
+        if index > self.target or (self.waiting is not None and index != self.waiting):
+            return False
+        stream.write(b'\r' if index == self.target else b'\x1b[B')
+        stream.flush()
+        if index == self.target:
+            self.done = True
+        else:
+            self.waiting = index + 1
+        return self.done
+
+
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('case',choices=['matching-check','wrong-machine','missing-member','ambiguous-member','cancel-install','profile-wrong-machine'])
@@ -75,6 +105,7 @@ def main():
         (case/'argv.json').write_text(json.dumps(argv,indent=2)+'\n')
         started=time.monotonic();proc=subprocess.Popen(argv,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,bufsize=0)
         data=b'';menu=False;cancelled=False;matched=False;stop=None
+        selector=MenuSelection(args.case=='cancel-install')
         print('Boot test started:',args.case,flush=True)
         try:
             with (case/'console.log').open('wb') as log:
@@ -84,14 +115,9 @@ def main():
                     if not chunk:break
                     log.write(chunk);log.flush();data+=chunk
                     plain=re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]',b'',data)
-                    if not menu and b'Proxmox: CHECK ONLY - serial console' in plain and b'Proxmox: INSTALL - serial console; confirmation required' in plain and b'The highlighted entry will be executed automatically' in plain:
-                        # Wait for the complete menu, then separate terminal key
-                        # sequences so GRUB cannot consume a burst as one key.
-                        time.sleep(0.25)
-                        for _ in range(3 if args.case=='cancel-install' else 2):
-                            proc.stdin.write(b'\x1b[B');proc.stdin.flush();time.sleep(0.25)
-                        proc.stdin.write(b'\r');proc.stdin.flush();menu=True
-                        print('Selected guarded serial entry:',args.case,flush=True)
+                    if not menu and selector.choose(proc.stdin, plain):
+                        menu=True
+                        print('Confirmed guarded serial entry:',args.case,flush=True)
                     if b'HOMELAB_CHECK_PASS:' in plain and not matched:
                         matched=True;print('Reached successful live guard:',args.case,flush=True)
                     if args.case=='cancel-install' and b'Type exactly:' in plain and not cancelled:

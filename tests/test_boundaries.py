@@ -157,7 +157,7 @@ def test_iso_ci_reuses_docker_commands_and_reports_only_bounded_test_evidence():
         build, scenarios, gate = (workflow["jobs"][key] for key in ("build", "scenarios", "complete"))
         assert build["name"] == "Build test ISO"
         assert scenarios["needs"] == "build"
-        assert scenarios["timeout-minutes"] == "10"
+        assert scenarios["timeout-minutes"] == "15"
         if matrix:
             assert scenarios["strategy"] == {"fail-fast": "false", "matrix": {"include": matrix}}
             assert scenarios["name"] == "${{ matrix.title }}"
