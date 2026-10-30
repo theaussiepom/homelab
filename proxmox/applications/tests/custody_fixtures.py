@@ -1,6 +1,8 @@
 """Entirely synthetic retained commissioning records; no native resources."""
 
 import copy
+import io as streams
+import json
 from pathlib import Path
 import private_io as io
 from fixtures import guest
@@ -27,8 +29,21 @@ def backend(vmid, serial=2):
     }
 
 
+def legacy_immutable(value):
+    """The pinned 1d12379 ordinary_cd.encoded serializer, without running it."""
+    return (json.dumps(value, sort_keys=True, indent=2) + '\n').encode()
+
+
+def legacy_canonical(value):
+    """The pinned deploy.write serializer's insertion-order JSON and newline."""
+    stream = streams.StringIO()
+    json.dump(value, stream, indent=2)
+    stream.write('\n')
+    return stream.getvalue().encode()
+
+
 class CompletedGroup:
-    def __init__(self, root, *, postgres=False, proof_literal=None):
+    def __init__(self, root, *, postgres=False, proof_literal=None, legacy_serializers=True):
         self.root = Path(root).resolve()
         self.root.chmod(0o700)
         self.state = self.root / 'state'
@@ -41,7 +56,7 @@ class CompletedGroup:
         self.roles = ROLES[self.schema]
         engine = self.roles[0]
         self.operation = engine + '-fixture'
-        self.directory = ('database-network-cutover-' if postgres else 'database-server-cutover-') + self.operation
+        self.directory = 'database-network-cutover-' + self.operation
         self.local = self.state / self.directory
         self.remote = self.backups / self.directory
         self.catalogue = {'schema': 'homelab-database-networks-v1', 'networks': {r: {} for r in ('postgresql', 'mariadb', 'influxdb')}}
@@ -99,9 +114,12 @@ class CompletedGroup:
             if later:
                 baseline = {'status': 'passed', 'binding': {'vmid': vmid, 'source_sha256': source_hash},
                             'state_sha256': current_hash, 'result': {'status': 'passed'}}
-                initial_hash = save(work / 'ordinary-100-1/complete.json', baseline)
-                save(work / 'ordinary-complete.json', baseline)
-                initial = {'operation': 'ordinary-100-1', 'sha256': initial_hash, 'source_sha256': source_hash}
+                immutable_hash = save(work / 'ordinary-100-1/complete.json', legacy_immutable(baseline))
+                canonical_hash = save(work / 'ordinary-complete.json',
+                                      legacy_canonical(baseline) if legacy_serializers else legacy_immutable(baseline))
+                initial = {'operation': 'ordinary-100-1', 'sha256': canonical_hash, 'source_sha256': source_hash}
+                if legacy_serializers:
+                    initial['immutable_sha256'] = immutable_hash
             members[role] = {'vmid': vmid, 'node': 'fixture-pve', 'installed_site': str(installed),
                              'overlay': {'directory': overlay_dir, 'sha256': overlay_hash},
                              'initial_state_sha256': current_hash, 'initial_ordinary': initial}

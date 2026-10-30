@@ -1,6 +1,7 @@
 """Closed backend identity and ordinary receipt relationships; no state writes."""
 
 from pathlib import Path
+import json
 import re
 from private_io import require, digest, encoded, private_directory
 from plan_policy import RESOURCES
@@ -50,14 +51,28 @@ def initial_copy(work, member, *, raw=None):
     if initial is None:
         return None
     raw = read_existing(work / initial["operation"] / "complete.json") if raw is None else raw
-    require(digest(raw) == initial["sha256"], "Preserve the exact initial immutable ordinary copy")
+    require(digest(raw) == initial.get("immutable_sha256", initial["sha256"]),
+            "Preserve the exact initial immutable ordinary copy")
     value = decode(raw)
     shape(value, {"status", "binding", "state_sha256", "result"})
     require(value["status"] == "passed" and value["state_sha256"] == member["initial_state_sha256"]
-            and isinstance(value["binding"], dict) and value["binding"].get("vmid") == member["vmid"]
+            and isinstance(value["binding"], dict) and type(value["binding"].get("vmid")) is int
+            and value["binding"]["vmid"] == member["vmid"]
             and value["binding"].get("source_sha256") == initial["source_sha256"],
             "Bind only the exact qualified initial ordinary success")
     return raw
+
+
+def initial_canonical(raw, member, baseline):
+    """Recognize only the separately pinned initial pointer and full typed record."""
+    if baseline is None or raw is None or digest(raw) != member["initial_ordinary"]["sha256"]:
+        return False
+    value = decode(raw)
+    shape(value, {"status", "binding", "state_sha256", "result"})
+    require(json.dumps(value, sort_keys=True, allow_nan=False)
+            == json.dumps(decode(baseline), sort_keys=True, allow_nan=False),
+            "Preserve the complete typed initial ordinary record")
+    return True
 
 
 def latest_success(attempt, member):
@@ -97,6 +112,9 @@ def classify(attempt, member, lineage, baseline):
     raw = read_existing(canonical) if canonical.exists() or canonical.is_symlink() else None
     latest = latest_success(attempt, member)
     require(latest is None or raw == latest, "Preserve the latest ordinary success; no older anchor fallback")
+    initial = initial_canonical(raw, member, baseline)
+    if initial:
+        attempt.initial_ordinary = raw
     if attempt.hold.exists() or attempt.hold.is_symlink():
         held = decode(read_existing(attempt.hold))
         require(isinstance(held, dict), "Preserve malformed ordinary custody")
@@ -109,7 +127,7 @@ def classify(attempt, member, lineage, baseline):
     else:
         previous = None if raw is None else digest(raw)
         if raw is not None:
-            if baseline is not None and raw == baseline:
+            if initial:
                 require(state_hash == member["initial_state_sha256"], "The initial backend has unproven changes")
             else:
                 value = decode(raw)

@@ -14,7 +14,7 @@ exactly these fields:
 
 | Field | Required value |
 | --- | --- |
-| `directory` | Existing `database-network-cutover-<operation>` for PostgreSQL, or `database-server-cutover-<operation>` for MariaDB. |
+| `directory` | Existing `database-network-cutover-<operation>` for both supported schemas, as written by the original producer. |
 | `schema` | `homelab-postgresql-cutover-v1` or `homelab-database-server-cutover-v1`. |
 | `operation` | Original operation, prefixed `postgresql-` or `mariadb-`. |
 | `records` | Exact raw SHA256 values keyed by `request.json`, `claim.json`, `complete.json`. Request and claim must be identical. |
@@ -34,9 +34,19 @@ existing `database-network-apply-<review SHA256>/overlay.json`.
 
 - `null`: the starting canonical ordinary receipt must be absent and the starting
   state must be exactly the accepted network overlay's state; or
-- `{ "operation": "ordinary-<run ID>-<attempt>", "sha256": "<raw receipt SHA256>",
+- `{ "operation": "ordinary-<run ID>-<attempt>", "sha256": "<raw canonical SHA256>",
   "source_sha256": "<qualified old source SHA256>" }`: require the already existing
   immutable operation copy of the exact reviewed four-field legacy receipt.
+  Optional `immutable_sha256` pins that copy's raw bytes separately. When omitted,
+  it defaults to `sha256`, preserving the closed same-byte selection format.
+
+The original producer sorts keys in the immutable copy but preserves insertion
+order in the canonical pointer; both serializers append a newline. When their
+bytes differ, independently pin both raw hashes. After both pins pass, the complete
+decoded four-field records must have identical canonical JSON, including nested
+values and types; booleans cannot equal integers and integers cannot equal floats.
+These reads never normalize or rewrite either file. Later framework receipts
+still require exact raw canonical/immutable equality and latest-success custody.
 
 Unknown starting receipt dispositions cannot be represented as accepted facts.
 Missing immutable legacy operation copies refuse admission. The reader recognizes
