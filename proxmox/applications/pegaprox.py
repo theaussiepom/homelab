@@ -114,7 +114,7 @@ def compose(cfg):
                 "environment": {
                     "PEGAPROX_BEHIND_PROXY": "true",
                     "PEGAPROX_HOST": "0.0.0.0",
-                    "PEGAPROX_TRUSTED_PROXIES": cfg["trusted_proxy"],
+                    "PEGAPROX_TRUSTED_PROXIES": str(proxy),
                     "PEGAPROX_KEY_FILE": "/run/secrets/pegaprox-db-key",
                     "PEGAPROX_SUPERVISED": "1",
                     "PEGAPROX_SSH_STRICT_HOST_KEYS": "1",
