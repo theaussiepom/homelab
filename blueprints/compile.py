@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "proxmox/applications"))
 sys.path.insert(0, str(ROOT / "blueprints"))
 import connections
 import network_endpoints
+import coordinated_contract
 import guest_contract
 import service_bindings
 import routes
@@ -320,6 +321,7 @@ def compile_stack(root, overlay, disabled=None, *, admit=False):
         "Record explicit prerequisite acceptance",
     )
     resolved = {name: _resolve_guest(root, overlay, name, spec) for name in CATALOGUE}
+    coordinated_contract.configured_closure(resolved)
     route_records = routes.bind(
         resolved,
         substitute(

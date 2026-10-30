@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 import discovery
 import foundation
 import ingress_routing
+import coordinated_contract
 from private_io import require
 
 SOURCE = Path(__file__).resolve().parent
@@ -63,6 +64,7 @@ def data_bind_sources(document):
 
 
 def validate(cfg, stack=None):
+    coordinated_contract.selection(cfg)
     app, guest = cfg["app"], cfg["guest"]
     addresses = network_endpoints.addresses(guest)
     require(

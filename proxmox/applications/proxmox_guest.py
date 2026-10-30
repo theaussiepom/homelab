@@ -85,7 +85,7 @@ def dhcp_admission(cfg):
         guest_identity.verify_network(cfg, cfg["app"]["address"], lambda p: api_get(cfg, p))
 
 
-def guest_trust(cfg, work):
+def guest_trust(cfg, work, *, persist=True):
     """Pin this guest after creation; unrelated known_hosts additions are harmless."""
     address = cfg["app"]["address"]
     instruction = "Verify the new guest SSH host key using the trusted Proxmox route, then supply its private known_hosts entry before Ansible"
@@ -128,6 +128,7 @@ def guest_trust(cfg, work):
                 "Guest host trust changed; preserve the old binding for review"
             )
     else:
+        require(persist, "The existing commissioned guest trust record is required")
         write_new(path, encoded(binding))
 
 
@@ -224,7 +225,7 @@ def backup(cfg, state, label):
         write_new(f"{stamp}.json", encoded(receipt), dir_fd=directory)
 
 
-def infrastructure(cfg, site, work, operation, expected):
+def infrastructure(cfg, site, work, operation, expected, *, state_identity=None):
     """Plan the existing backend; apply only this reviewed guest's safe delta."""
     from deployment_inputs import binding
 
@@ -293,6 +294,9 @@ def infrastructure(cfg, site, work, operation, expected):
         existing=existing,
         serial_device=cfg["guest"].get("serial_device"),
     )
+    if state_identity is not None:
+        from coordinated_generation import plan_identity
+        plan_identity(value, state_identity)
     require(binding(cfg, site) == expected, "Approved inputs changed while planning")
     changed = any(
         row["change"]["actions"] != ["no-op"] for row in value["resource_changes"]

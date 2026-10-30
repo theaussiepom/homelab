@@ -400,8 +400,9 @@ secret documentation](https://docs.github.com/en/actions/how-tos/reuse-automatio
 Coordinated database requests remain durable custody even when a separate HOLD or
 VERIFYING marker is absent. Before ordinary target mutation, the state admission
 reader validates owned private request/claim records and finite member identities.
-A selected member stays held even when a historical completion exists; ordinary
-CD does not adopt, release or continue that operation. Changed, malformed or
+A member stays held even when a historical completion exists unless the exact
+reviewed [completed-custody selection](coordinated-custody.md) admits its ordinary
+work. Ordinary CD never releases or continues the historical operation. Changed, malformed or
 unrecognized custody fails closed. Recognized unrelated members do not retire an
 unrelated guest's ordinary path. Request, claim and backend bytes stay untouched,
 and the existing same-run ordinary hold/replay guards remain enforced.
