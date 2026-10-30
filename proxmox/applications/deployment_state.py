@@ -7,6 +7,10 @@ import os
 from pathlib import Path
 import re
 import stat
+import coordinated_contract
+import coordinated_evidence
+import coordinated_generation
+from custody_records import no_markers, read_existing
 from private_io import (
     require,
     regular,
@@ -61,23 +65,21 @@ def coordinated_members(directory):
     return set(ids)
 
 
-def bootstrap_closed():
-    require(
-        not any(
-            p.exists() or p.is_symlink()
-            for p in (
-                Path("/var/lib/homelab-bootstrap/CONFIGURING"),
-                Path("/var/lib/homelab-bootstrap/BOOTSTRAP-CD-HOLD.json"),
-            )
-        ),
-        "Preserve bootstrap maintenance custody",
-    )
+def bootstrap_closed(root=Path("/var/lib/homelab-bootstrap")):
+    if root.exists() or root.is_symlink():
+        require(root.is_dir() and not root.is_symlink(), "Preserve bootstrap maintenance custody")
+        no_markers(root, bootstrap=True)
 
 
 class DeploymentAttempt:
     """Own an existing state directory and one GitHub run's ordered phase evidence."""
 
     def __init__(self, cfg, binding, phases):
+        self.cfg = cfg
+        self.custody = coordinated_contract.selection(cfg)
+        self.custody_identity = None
+        self.initial_ordinary = None
+        self.receipt_checked = self.custody is None
         self.vmid = cfg["guest"]["vmid"]
         self.root = Path(cfg["paths"]["state_root"])
         self.work = self.root / str(cfg["guest"]["vmid"])
@@ -104,6 +106,8 @@ class DeploymentAttempt:
             coordinated = [*self.root.glob("database-network-cutover-*"),
                            *self.root.glob("database-server-cutover-*")]
             for directory in [self.work, *coordinated]:
+                private_directory(directory)
+                no_markers(directory, own_ordinary=directory == self.work)
                 require(
                     not any(
                         p.exists() or p.is_symlink()
@@ -120,14 +124,34 @@ class DeploymentAttempt:
                     ),
                     "Preserve an unresolved operation or verification hold",
                 )
+            for child in self.work.iterdir():
+                if child.name.startswith("database-"):
+                    require(not child.is_symlink(), "Preserve unexpected nested custody")
+                    if child.is_dir():
+                        private_directory(child)
+                        no_markers(child)
             require(
                 not any(self.work.glob("database-*/*HOLD.json")),
                 "Preserve a nested database operation hold",
             )
+            matched = False
             for directory in coordinated:
-                require(self.vmid not in coordinated_members(directory),
-                        "This guest belongs to coordinated maintenance; preserve its custody before mutation")
+                if self.vmid in coordinated_members(directory):
+                    require(self.custody is not None and directory.name == self.custody["directory"] and not matched,
+                            "This guest belongs to coordinated maintenance; preserve its custody before mutation")
+                    matched = True
             self._require_backend()
+            if self.custody is not None:
+                require(matched, "The selected completed group is missing")
+                proofs, lineage, self.initial_ordinary = coordinated_evidence.inspect(self.cfg)
+                require(all(self.binding["input_hashes"].get(path) == value for path, value in proofs.items())
+                        and self.binding.get("coordinated_custody_sha256") == coordinated_contract.selection_digest(self.cfg),
+                        "Coordinated immutable evidence changed before admission")
+                from proxmox_guest import guest_trust
+                read_existing(Path(self.cfg["paths"]["known_hosts"]))
+                guest_trust(self.cfg, self.work, persist=False)
+                member = self.custody["members"][self.cfg["app"]["kind"]]
+                self.custody_identity = coordinated_generation.classify(self, member, lineage, self.initial_ordinary)
             return self
         except BaseException:
             self.locks.close()
@@ -166,6 +190,10 @@ class DeploymentAttempt:
             )
 
     def completed(self, is_ancestor):
+        if self.initial_ordinary is not None and (self.receipt.exists() or self.receipt.is_symlink()):
+            if read_existing(self.receipt) == self.initial_ordinary:
+                self.receipt_checked = True
+                return False
         if self.receipt.exists() or self.receipt.is_symlink():
             self._select_run()
             old = json.loads(regular(self.receipt, private=True))
@@ -184,6 +212,7 @@ class DeploymentAttempt:
                 "Never roll back an already deployed private-source revision",
             )
             if old["run_number"] != self.run_number:
+                self.receipt_checked = True
                 return False
             require(
                 old.get("operation") == str(self.operation)
@@ -199,7 +228,9 @@ class DeploymentAttempt:
                     not self.hold.exists() and not self.hold.is_symlink(),
                     "Preserve an interrupted deployment",
                 )
+                self.receipt_checked = True
                 return True
+        self.receipt_checked = True
         return False
 
     def _select_run(self):
@@ -243,8 +274,11 @@ class DeploymentAttempt:
             "run_number": self.run_number,
             "site_revision": self.site_revision,
         }
+        if hasattr(self, "previous_ordinary_sha256"):
+            self.marker["previous_ordinary_sha256"] = self.previous_ordinary_sha256
 
     def begin_infrastructure(self):
+        require(self.receipt_checked, "Validate ordinary receipt provenance before mutation")
         self._select_run()
         require(
             not self.hold.exists()
@@ -256,12 +290,19 @@ class DeploymentAttempt:
         write_new(self.hold, encoded(self.marker))
 
     def infrastructure_complete(self, result):
+        if self.custody_identity is not None:
+            member = self.custody["members"][self.cfg["app"]["kind"]]
+            state_hash, identity = coordinated_generation.backend(self.work, member)
+            require(identity == self.custody_identity and result["state_sha256"] == state_hash,
+                    "The applied backend differs from its admitted identity")
+            result = dict(result, state_identity=identity)
         write_new(
             self.operation / "infrastructure-complete.json",
             encoded({"binding": self.binding, **result}),
         )
 
     def begin_phase(self, phase):
+        require(self.receipt_checked, "Validate ordinary receipt provenance before mutation")
         self._select_run()
         require(
             regular(self.hold, private=True) == encoded(self.marker),
@@ -316,6 +357,8 @@ class DeploymentAttempt:
             "site_revision": self.site_revision,
             "operation": str(self.operation),
         }
+        if self.custody_identity is not None:
+            receipt["state_identity"] = ready["state_identity"]
         write_new(self.operation / "complete.json", encoded(receipt))
         replace_receipt(self.receipt, receipt)
         require(

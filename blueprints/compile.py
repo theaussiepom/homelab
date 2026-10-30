@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "proxmox/applications"))
 sys.path.insert(0, str(ROOT / "blueprints"))
 import connections
 import network_endpoints
+import coordinated_contract
 import guest_contract
 import service_bindings
 import routes
@@ -196,6 +197,24 @@ def image(value):
     }
 
 
+def custody_proofs(cfg):
+    """Identify exact proof bytes before resolving the compiler input slot."""
+    group = coordinated_contract.selection(cfg, allow_input_slot=True)
+    return {} if group is None else {group[k]["file"]: group[k]["sha256"] for k in ("catalogue", "acceptance")}
+
+
+def custody_text(raw, expected, values):
+    """Retain a literal proof, or select its complete raw central value once."""
+    if hashlib.sha256(raw.encode()).hexdigest() != expected:
+        token = TOKEN.fullmatch(raw)
+        require(token and token[1] != "inputs" and isinstance(values.get(token[1]), str),
+                "Select exact raw custody proof text or one complete central value")
+        raw = values[token[1]]
+    require(hashlib.sha256(raw.encode()).hexdigest() == expected,
+            "Preserve exact custody source proof bytes during resolution")
+    return raw
+
+
 def _resolve_guest(root, overlay, name, spec):
     values = merge(spec["values"], overlay["values"])
     profile = read(root / "guests" / name / "profile.json")
@@ -259,14 +278,16 @@ def _resolve_guest(root, overlay, name, spec):
         and all(cfg["app"]["service_health_checks"].values()),
         "Every application needs a bounded health check",
     )
-    files = {k: substitute(v, values) for k, v in profile["files"].items()}
     require(
         all(
             re.fullmatch(r"[a-z][a-z0-9_.-]{0,63}", k) and isinstance(v, str)
-            for k, v in files.items()
+            for k, v in profile["files"].items()
         ),
         "Use bounded text input files",
     )
+    proofs = custody_proofs(cfg)
+    files = {k: custody_text(v, proofs[k], values) if k in proofs else substitute(v, values)
+             for k, v in profile["files"].items()}
     stack = substitute(
         (
             merge(profile["stack"], overrides.get("stack", {}))
@@ -288,8 +309,11 @@ def _compile_guest(name, cfg, stack, files, enabled):
     # The identity hashes the abstract input slot before binding absolute paths.
     identity = hashlib.sha256(encoded({"config": cfg, "files": files})).hexdigest()
     destination = "/var/lib/homelab-inputs/ordinary/" + name + "/" + identity
+    proofs = custody_proofs(cfg)
+    require(all(name in files and hashlib.sha256(files[name].encode()).hexdigest() == expected
+                for name, expected in proofs.items()), "Preserve exact custody source proof bytes before packet binding")
     cfg = substitute(cfg, {"inputs": destination})
-    files = {k: v.replace("${inputs}", destination) for k, v in files.items()}
+    files = {k: v if k in proofs else v.replace("${inputs}", destination) for k, v in files.items()}
     guest_contract.validate(
         cfg, json.loads(files["stack.json"]) if "stack.json" in files else None
     )
@@ -320,6 +344,7 @@ def compile_stack(root, overlay, disabled=None, *, admit=False):
         "Record explicit prerequisite acceptance",
     )
     resolved = {name: _resolve_guest(root, overlay, name, spec) for name in CATALOGUE}
+    coordinated_contract.configured_closure(resolved)
     route_records = routes.bind(
         resolved,
         substitute(

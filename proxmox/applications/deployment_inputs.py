@@ -19,6 +19,8 @@ from private_io import (
 )
 import guest_contract as contract
 import runtime_secrets
+import coordinated_contract
+import coordinated_evidence
 
 
 def prepare(
@@ -54,6 +56,14 @@ def prepare(
     )
     stack = json.loads(payload["stack.json"]) if "stack.json" in payload else None
     contract.validate(cfg, stack)
+    group = coordinated_contract.selection(cfg)
+    if group is not None:
+        require(cfg["paths"]["coordinated_custody_inputs"] == str(destination),
+                "Bind custody source evidence to this immutable packet directory")
+        for name in ("catalogue", "acceptance"):
+            proof = group[name]
+            require(proof["file"] in payload and digest(payload[proof["file"]]) == proof["sha256"],
+                    "Preserve custody source proof bytes before preparation")
     require(
         "docker" not in cfg["deployment"]["capabilities"]
         or cfg["app"]["exclusive_writer_confirmed"] is True,
@@ -111,7 +121,7 @@ def prepare(
 
 
 def binding(cfg, site):
-    return {
+    result = {
         "vmid": cfg["guest"]["vmid"],
         "site_sha256": sha(site),
         "source_sha256": source_hash(),
@@ -120,6 +130,9 @@ def binding(cfg, site):
         ),
         "input_hashes": input_hashes(cfg),
     }
+    if coordinated_contract.selection(cfg) is not None:
+        result["coordinated_custody_sha256"] = coordinated_contract.selection_digest(cfg)
+    return result
 
 
 def source_hash():
@@ -153,4 +166,7 @@ def input_hashes(cfg):
     paths.extend(
         item["source"] for item in app.get("database", {}).get("config_files", [])
     )
-    return {path: sha(path) for path in sorted(set(paths))}
+    result = {path: sha(path) for path in sorted(set(paths))}
+    proofs, _, _ = coordinated_evidence.inspect(cfg)
+    result.update(proofs)
+    return result

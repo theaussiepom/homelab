@@ -399,11 +399,11 @@ class DeploymentResilienceTests(unittest.TestCase):
                             "HOMELAB_DEPLOYMENT_WORKFLOW": "example/private-site/.github/workflows/deploy.yml@refs/heads/main",
                         },
                     ),
-                    state.DeploymentAttempt(
-                        cfg, self.binding, self.phases
-                    ) as next_attempt,
+                    self.assertRaisesRegex(ValueError, "pending custody|existing attempt"),
                 ):
-                    with self.assertRaisesRegex(ValueError, "existing attempt"):
+                    # A retained .pending now refuses at admission; a completed
+                    # rename with a hold still refuses before any new attempt.
+                    with state.DeploymentAttempt(cfg, self.binding, self.phases) as next_attempt:
                         next_attempt.begin_infrastructure()
                 self.assertEqual((work / "ORDINARY-HOLD.json").read_bytes(), hold)
 
