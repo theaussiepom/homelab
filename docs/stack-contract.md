@@ -380,3 +380,12 @@ credential/runtime validators still reject missing selected values before target
 operations. Source contract tests do not establish actual Environment value
 availability or provide native execution authority. See [GitHub's reusable-workflow
 secret documentation](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows#using-inputs-and-secrets-in-a-reusable-workflow).
+
+Coordinated database requests remain durable custody even when a separate HOLD or
+VERIFYING marker is absent. Before ordinary target mutation, the state admission
+reader validates owned private request/claim records and finite member identities.
+A selected member stays held even when a historical completion exists; ordinary
+CD does not adopt, release or continue that operation. Changed, malformed or
+unrecognized custody fails closed. Recognized unrelated members do not retire an
+unrelated guest's ordinary path. Request, claim and backend bytes stay untouched,
+and the existing same-run ordinary hold/replay guards remain enforced.

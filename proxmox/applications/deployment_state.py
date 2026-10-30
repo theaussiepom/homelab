@@ -29,6 +29,38 @@ HOLDS = {
 }
 
 
+def coordinated_members(directory):
+    """Read durable legacy ownership; completion never releases it implicitly."""
+    private_directory(directory)
+    raw = regular(directory / "request.json", private=True)
+
+    def unique(pairs):
+        result = dict(pairs)
+        require(len(result) == len(pairs), "Preserve duplicate coordinated custody fields")
+        return result
+
+    value = json.loads(raw, object_pairs_hook=unique)
+    require(isinstance(value, dict) and isinstance(value.get("members"), dict),
+            "Preserve unrecognized coordinated maintenance custody")
+    members = value["members"]
+    if value.get("schema") == "homelab-postgresql-cutover-v1":
+        require(set(members) == {"postgresql", "identity", "db-tools"},
+                "Preserve unrecognized coordinated member roles")
+    else:
+        require(value.get("schema") == "homelab-database-server-cutover-v1"
+                and len(members) == 1 and set(members) <= {"mariadb", "influxdb"},
+                "Preserve unrecognized coordinated member roles")
+    require(all(isinstance(member, dict) and type(member.get("vmid")) is int
+                and member["vmid"] >= 100 and member["vmid"] not in {900, 4914, 4915, 4920}
+                for member in members.values()), "Preserve unrecognized coordinated member identities")
+    ids = [member["vmid"] for member in members.values()]
+    require(len(ids) == len(set(ids)), "Preserve ambiguous coordinated member identities")
+    claim = directory / "claim.json"
+    if claim.exists() or claim.is_symlink():
+        require(regular(claim, private=True) == raw, "Preserve changed coordinated request/claim custody")
+    return set(ids)
+
+
 def bootstrap_closed():
     require(
         not any(
@@ -46,6 +78,7 @@ class DeploymentAttempt:
     """Own an existing state directory and one GitHub run's ordered phase evidence."""
 
     def __init__(self, cfg, binding, phases):
+        self.vmid = cfg["guest"]["vmid"]
         self.root = Path(cfg["paths"]["state_root"])
         self.work = self.root / str(cfg["guest"]["vmid"])
         self.binding = binding
@@ -68,11 +101,9 @@ class DeploymentAttempt:
                 fcntl.flock(
                     stream, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB
                 )
-            for directory in [
-                self.work,
-                *self.root.glob("database-network-cutover-*"),
-                *self.root.glob("database-server-cutover-*"),
-            ]:
+            coordinated = [*self.root.glob("database-network-cutover-*"),
+                           *self.root.glob("database-server-cutover-*")]
+            for directory in [self.work, *coordinated]:
                 require(
                     not any(
                         p.exists() or p.is_symlink()
@@ -93,6 +124,9 @@ class DeploymentAttempt:
                 not any(self.work.glob("database-*/*HOLD.json")),
                 "Preserve a nested database operation hold",
             )
+            for directory in coordinated:
+                require(self.vmid not in coordinated_members(directory),
+                        "This guest belongs to coordinated maintenance; preserve its custody before mutation")
             self._require_backend()
             return self
         except BaseException:
