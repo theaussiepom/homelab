@@ -43,6 +43,10 @@ class WorkflowGenerationTests(unittest.TestCase):
         self.catalogue = copy.deepcopy(CATALOGUE)
         self.manifest = manifest()
         self.write_manifest()
+        directory = self.root / ".github/workflows"
+        directory.mkdir(parents=True)
+        self.phase = directory / "phase.yml"
+        self.phase.write_text("jobs:\n  run:\n    uses: example/framework/.github/workflows/guest-phase.yml@" + "1" * 40 + "\n")
         patcher = patch.object(workflows.compiler, "CATALOGUE", self.catalogue)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -145,7 +149,7 @@ class WorkflowGenerationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "stale"):
             workflows.synchronize(self.root, check=True)
         result = workflows.synchronize(self.root, check=False)
-        self.assertEqual(result, {"workflows": 3, "changed": 3})
+        self.assertEqual(result, {"workflows": 4, "changed": 4})
         self.assertEqual(workflows.synchronize(self.root, check=False)["changed"], 0)
         directory = self.root / ".github/workflows"
         path = directory / "guest-web.yml"
@@ -165,7 +169,8 @@ class WorkflowGenerationTests(unittest.TestCase):
         del self.catalogue["web"]["name"]
         with self.assertRaisesRegex(ValueError, "current blueprint metadata"):
             workflows.synchronize(self.root, check=False)
-        self.assertFalse((self.root / ".github").exists())
+        self.assertFalse((self.root / ".github/workflows/deploy.yml").exists())
+        self.assertTrue(self.phase.is_file())
 
     def test_generated_paths_cannot_overwrite_symlink_targets(self):
         workflows.synchronize(self.root, check=False)
@@ -202,3 +207,17 @@ class WorkflowGenerationTests(unittest.TestCase):
             patch.object(workflows.compiler, "CATALOGUE", self.catalogue),
         ):
             runpy.run_path(str(Path(workflows.__file__)), run_name="__main__")
+
+    def test_phase_selection_is_preserved_and_required_without_guessing_a_pin(self):
+        current = workflows.models(self.root)
+        self.assertEqual(current["phase.yml"]["jobs"]["run"]["uses"],
+                         "example/framework/.github/workflows/guest-phase.yml@" + "1" * 40)
+        self.phase.unlink()
+        with self.assertRaisesRegex(ValueError, "regular selected framework phase"):
+            workflows.models(self.root)
+        outside = self.root / "outside-phase.yml"
+        outside.write_text("preserve source")
+        self.phase.symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, "regular selected framework phase"):
+            workflows.models(self.root)
+        self.assertEqual(outside.read_text(), "preserve source")
