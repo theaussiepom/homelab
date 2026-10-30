@@ -116,7 +116,7 @@ jobs:
         run: |
           docker pull --platform linux/amd64 ghcr.io/pegaprox/pegaprox@sha256:8d295a524a52f0b923616a3eb415ff6422fe62beba5bb441f35c75d8985f1add
           docker pull --platform linux/amd64 dpage/pgadmin4@sha256:cefc4cc6b7d9d71a9e81e76fb9d7e14038ab5661b539a190eea1b63fa612589a
-      - name: Preserve the separate PegaProx key and encrypted data through restart
+      - name: Replace retained PegaProx TLS with HTTP and verify proxy trust and restart
         run: python3 proxmox/applications/tests/pegaprox_runtime_fixture.py
       - name: Start the retained pgAdmin profile without bootstrap credentials and check OIDC
         run: python3 proxmox/applications/tests/pgadmin_runtime_fixture.py

@@ -260,3 +260,16 @@ class RoutingTests(unittest.TestCase):
             self.assertIn(
                 "nas", json.loads(artifacts["shared.yml"]["content"])["http"]["routers"]
             )
+
+    def test_pegaprox_http_backend_keeps_automatic_browser_https(self):
+        selected = {'host':'pega.example.invalid', 'url':'http://198.18.25.34:5000'}
+        cfg = {'guest':{'interfaces':[{'ipv4':'198.18.25.34/24'}]},
+               'routes':{'pegaprox':selected}}
+        labels = d.labels(cfg)
+        self.assertEqual(labels['traefik.http.services.pegaprox.loadbalancer.server.url'], selected['url'])
+        self.assertEqual(labels['traefik.http.routers.pegaprox.entrypoints'], 'websecure')
+        self.assertEqual(labels['traefik.http.routers.pegaprox.tls'], 'true')
+        self.assertEqual(labels['traefik.http.routers.pegaprox.tls.certresolver'], 'letsencrypt')
+        self.assertNotIn('traefik.http.services.pegaprox.loadbalancer.serverstransport', labels)
+        with self.assertRaises(ValueError):
+            d.validate_routes({'pegaprox':dict(selected, transport='obsolete-backend-ca')})

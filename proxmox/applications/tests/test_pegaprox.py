@@ -13,6 +13,7 @@ def stack():
         "kind": "pegaprox",
         "image": "ghcr.io/pegaprox/pegaprox:fixture@sha256:" + "1" * 64,
         "bind_address": "198.18.25.34",
+        "trusted_proxy": "198.18.25.33/32",
         "guest_memory_mib": 2048,
         "container_memory_mib": 1024,
         "cpus": 1,
@@ -75,3 +76,34 @@ class PegaProxTests(unittest.TestCase):
             value.update(change)
             with self.assertRaises(ValueError):
                 pegaprox.compose(value)
+
+
+class ProxyModeTests(unittest.TestCase):
+    def test_explicit_http_mode_keeps_outer_bind_and_protected_runtime_policy(self):
+        service = pegaprox.compose(stack())['services']['pegaprox']
+        self.assertEqual(service['environment'], {
+            'PEGAPROX_BEHIND_PROXY':'true', 'PEGAPROX_HOST':'0.0.0.0',
+            'PEGAPROX_TRUSTED_PROXIES':'198.18.25.33/32',
+            'PEGAPROX_KEY_FILE':'/run/secrets/pegaprox-db-key', 'PEGAPROX_SUPERVISED':'1',
+            'PEGAPROX_SSH_STRICT_HOST_KEYS':'1', 'PEGAPROX_PW_HASH_CONCURRENCY':'2', 'TZ':'Etc/UTC'})
+        self.assertEqual(service['ports'], ['198.18.25.34:5000:5000/tcp'])
+        self.assertTrue(service['read_only'])
+        self.assertEqual(service['cap_drop'], ['ALL'])
+        self.assertEqual(service['security_opt'], ['no-new-privileges:true'])
+        self.assertEqual(service['restart'], 'always')
+        self.assertEqual(service['mem_limit'], '1024m')
+        self.assertEqual(service['stop_grace_period'], '60s')
+        self.assertTrue(service['volumes'][-1]['read_only'])
+        self.assertFalse(any(key.startswith('PEGAPROX_ADMIN') for key in service['environment']))
+
+    def test_trust_requires_one_explicit_private_host_not_a_list_subnet_or_self(self):
+        for proxy in [None, [], True, '', '198.18.25.33', '198.18.25.33/24', '198.18.25.0/24',
+                      '198.18.25.33/32,198.18.25.35/32', ' 198.18.25.33/32',
+                      '0.0.0.0/32','0.0.0.0/0','127.0.0.1/32','8.8.8.8/32','224.0.0.1/32',
+                      '192.0.2.1/32','::1/128','198.18.25.34/32']:
+            with self.subTest(proxy=proxy), self.assertRaises(ValueError):
+                pegaprox.compose(dict(stack(), trusted_proxy=proxy))
+        missing = stack(); del missing['trusted_proxy']
+        with self.assertRaises(ValueError): pegaprox.compose(missing)
+        for proxy in ['10.1.2.3/32','172.20.1.2/32','192.168.1.3/32','198.19.1.2/32']:
+            self.assertEqual(pegaprox.compose(dict(stack(),trusted_proxy=proxy))['services']['pegaprox']['environment']['PEGAPROX_TRUSTED_PROXIES'],proxy)
