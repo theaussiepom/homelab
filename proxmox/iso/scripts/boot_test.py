@@ -22,13 +22,32 @@ def image_sha(path):
     return digest.hexdigest()
 
 
-def command(qmp, name):
-    qmp.sendall((json.dumps({'execute':name})+'\n').encode())
+def command(qmp, name, arguments=None):
+    request={'execute':name}
+    if arguments is not None:request['arguments']=arguments
+    qmp.sendall((json.dumps(request)+'\n').encode())
     stream=qmp.makefile('rb')
     while True:
         row=json.loads(stream.readline())
         if 'return' in row:return row['return']
         if 'error' in row:raise RuntimeError(row['error'])
+
+
+def menu_key(qmp_path, key):
+    """Inject one bounded emulated menu key, avoiding serial escape-sequence loss."""
+    if key not in {'down', 'ret'}:
+        raise ValueError('Unsupported synthetic menu key')
+    with socket.socket(socket.AF_UNIX) as qmp:
+        qmp.settimeout(10)
+        qmp.connect(qmp_path)
+        greeting=json.loads(qmp.makefile('rb').readline(8193))
+        if not isinstance(greeting, dict) or 'QMP' not in greeting:
+            raise ValueError('Expected the local synthetic VM QMP greeting')
+        command(qmp, 'qmp_capabilities')
+        command(qmp, 'input-send-event', {'events': [
+            {'type': 'key', 'data': {'down': down, 'key': {'type': 'qcode', 'data': key}}}
+            for down in (True, False)
+        ]})
 
 
 class MenuSelection:
@@ -41,7 +60,7 @@ class MenuSelection:
         self.waiting = None
         self.done = False
 
-    def choose(self, stream, plain):
+    def choose(self, send, plain):
         if self.done:
             return True
         if not all(entry in plain for entry in self.entries[2:]) or b'The highlighted entry will be executed automatically' not in plain:
@@ -52,8 +71,7 @@ class MenuSelection:
         index = self.entries.index(highlighted[-1])
         if index > self.target or (self.waiting is not None and index != self.waiting):
             return False
-        stream.write(b'\r' if index == self.target else b'\x1b[B')
-        stream.flush()
+        send('ret' if index == self.target else 'down')
         if index == self.target:
             self.done = True
         else:
@@ -115,7 +133,7 @@ def main():
                     if not chunk:break
                     log.write(chunk);log.flush();data+=chunk
                     plain=re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]',b'',data)
-                    if not menu and selector.choose(proc.stdin, plain):
+                    if not menu and selector.choose(lambda key: menu_key(qmp_path, key), plain):
                         menu=True
                         print('Confirmed guarded serial entry:',args.case,flush=True)
                     if b'HOMELAB_CHECK_PASS:' in plain and not matched:

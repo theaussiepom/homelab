@@ -76,6 +76,9 @@ def test_boot_driver_journals_native_verdict_without_starting_a_vm(tmp_path, cas
             + b"\n"
         )
     proc = MagicMock(returncode=None)
+    qmp_socket = MagicMock()
+    qmp_socket.__enter__.return_value = qmp_socket
+    qmp_socket.makefile.side_effect = lambda *args: io.BytesIO(b'{"QMP":{}}\n')
     proc.stdout.fileno.return_value = 99999
 
     def poll():
@@ -143,7 +146,11 @@ def test_boot_driver_journals_native_verdict_without_starting_a_vm(tmp_path, cas
 
     size = 4 if case == "ambiguous-member" else 3
 
-    def command(sock, name):
+    def command(sock, name, arguments=None):
+        if name == 'input-send-event':
+            events = arguments['events']
+            assert [event['data']['down'] for event in events] == [True, False]
+            assert all(event['data']['key']['data'] in {'down','ret'} for event in events)
         return (
             [{"device": "disk" + str(i), "stats": {"wr_bytes": 0}} for i in range(size)]
             if name == "query-blockstats"
@@ -181,7 +188,7 @@ def test_boot_driver_journals_native_verdict_without_starting_a_vm(tmp_path, cas
         ),
         patch.object(module.time, "sleep"),
         patch.object(module.time, "monotonic", side_effect=lambda: next(ticks)),
-        patch.object(module.socket, "socket", return_value=MagicMock()),
+        patch.object(module.socket, "socket", return_value=qmp_socket),
         patch.object(module, "command", side_effect=command),
         patch.object(sys, "argv", ["boot", selected, "--seconds", "10"]),
     ):
@@ -226,27 +233,27 @@ def test_menu_selection_waits_for_each_highlight_before_entering_serial_mode():
     ready = b'\n'.join(module.MenuSelection.entries) + b'\nThe highlighted entry will be executed automatically\n'
     for cancel in (False, True):
         selector = module.MenuSelection(cancel)
-        stream = Mock()
-        assert not selector.choose(stream, b'booting')
-        assert not selector.choose(stream, ready)
-        stream.write.assert_not_called()
+        send = Mock()
+        assert not selector.choose(send, b'booting')
+        assert not selector.choose(send, ready)
+        send.assert_not_called()
         data = ready
         for index in range(selector.target + 1):
             data += b'*Proxmox: ' + selector.entries[index] + b'\n'
-            done = selector.choose(stream, data)
+            done = selector.choose(send, data)
             assert done == (index == selector.target)
             if not done:
-                count = stream.write.call_count
-                assert not selector.choose(stream, data)  # stale echo cannot trigger another arrow or Enter
-                assert stream.write.call_count == count
-                assert all(call.args[0] != b'\r' for call in stream.write.call_args_list)
-        assert [call.args[0] for call in stream.write.call_args_list] == [b'\x1b[B'] * selector.target + [b'\r']
-        assert selector.choose(stream, data)
-        assert stream.write.call_count == selector.target + 1
+                count = send.call_count
+                assert not selector.choose(send, data)  # stale echo cannot trigger another arrow or Enter
+                assert send.call_count == count
+                assert all(call.args[0] != 'ret' for call in send.call_args_list)
+        assert [call.args[0] for call in send.call_args_list] == ['down'] * selector.target + ['ret']
+        assert selector.choose(send, data)
+        assert send.call_count == selector.target + 1
     selector = module.MenuSelection(False)
-    stream = Mock()
-    assert not selector.choose(stream, ready + b'*Proxmox: INSTALL - serial console; confirmation required')
-    stream.write.assert_not_called()
+    send = Mock()
+    assert not selector.choose(send, ready + b'*Proxmox: INSTALL - serial console; confirmation required')
+    send.assert_not_called()
 
 
 def test_shell_wrapper_forwards_all_arguments_to_the_case_validator(tmp_path):
@@ -284,3 +291,44 @@ def test_shell_wrapper_forwards_all_arguments_to_the_case_validator(tmp_path):
         assert marker.exists() == accepted
         if accepted:
             assert json.loads(marker.read_text()) == ['/work/scripts/boot_test.py','wrong-machine']
+
+
+def test_menu_keys_use_bounded_local_qmp_events_without_terminal_escape_bytes():
+    import socket
+    import tempfile
+    from concurrent.futures import ThreadPoolExecutor
+
+    module = load()
+    for key in ('down', 'ret'):
+        with tempfile.TemporaryDirectory(prefix='menu-qmp-') as temp:
+            path = str(Path(temp) / 'qmp.sock')
+            received = []
+            with socket.socket(socket.AF_UNIX) as server:
+                server.settimeout(5)
+                server.bind(path); server.listen(1)
+                def respond():
+                    peer, _ = server.accept()
+                    with peer:
+                        peer.settimeout(5)
+                        peer.sendall(b'{"QMP":{}}\n')
+                        stream = peer.makefile('rb')
+                        for _ in range(2):
+                            received.append(json.loads(stream.readline()))
+                            peer.sendall(b'{"return":{}}\n')
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    result = pool.submit(respond)
+                    module.menu_key(path, key)
+                    result.result(timeout=5)
+            assert received == [{'execute':'qmp_capabilities'}, {'execute':'input-send-event','arguments':{'events':[
+                {'type':'key','data':{'down':True,'key':{'type':'qcode','data':key}}},
+                {'type':'key','data':{'down':False,'key':{'type':'qcode','data':key}}}
+            ]}}]
+    with patch.object(module.socket, 'socket') as connect, pytest.raises(ValueError):
+        module.menu_key('/unused', 'unsupported')
+    connect.assert_not_called()
+    for greeting in (b'[]\n', b'{}\n'):
+        sock = MagicMock(); sock.__enter__.return_value = sock
+        sock.makefile.return_value = io.BytesIO(greeting)
+        with patch.object(module.socket, 'socket', return_value=sock), patch.object(module, 'command') as command, pytest.raises(ValueError):
+            module.menu_key('/synthetic', 'down')
+        command.assert_not_called()
