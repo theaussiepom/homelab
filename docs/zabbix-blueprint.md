@@ -40,6 +40,9 @@ The compiler derives host names, template selections, exact firewall connections
 the dedicated PostgreSQL storage allowance, DNS and the Traefik route. The new
 server depends on PostgreSQL and ingress. Neither PostgreSQL nor any other guest
 depends on the monitoring server. Existing disabled-leaf selection remains valid.
+The browser route uses ACME HTTPS, security headers and Zabbix's native login.
+It has no Traefik client IP allowlist; network access policy is left to the
+site's firewall controls. Other management routes keep their selected policies.
 With the root property present, an active deployment cannot disable just the
 monitoring server while leaving its agents selected. An entirely disabled
 inventory remains available for read-only compilation and cannot admit deployment.

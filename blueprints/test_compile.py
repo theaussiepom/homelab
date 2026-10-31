@@ -170,4 +170,4 @@ class CompilerTests(unittest.TestCase):
                 else:
                     packets=c.compile_stack(Path('/synthetic'),selected)
                     self.assertTrue(packets['monitoring']['enabled'])
-                    self.assertEqual(routes.call_args.args[1]['zabbix'],{'target':{'endpoint':'monitoring.zabbix.web'},'host':'zabbix.example.invalid','middlewares':['security-headers','management-clients']})
+                    self.assertEqual(routes.call_args.args[1]['zabbix'],{'target':{'endpoint':'monitoring.zabbix.web'},'host':'zabbix.example.invalid','middlewares':['security-headers']})

@@ -357,7 +357,7 @@ def compile_stack(root, overlay, disabled=None, *, admit=False):
         require("zabbix" not in declared_routes, "Zabbix route is derived from its root feature")
         declared_routes["zabbix"] = {"target": {"endpoint": "monitoring.zabbix.web"},
                                      "host": "${domains.monitoring}",
-                                     "middlewares": ["security-headers", "management-clients"]}
+                                      "middlewares": ["security-headers"]}
     route_records = routes.bind(
         resolved, substitute(declared_routes, merge(spec["values"], overlay["values"])),
     )
