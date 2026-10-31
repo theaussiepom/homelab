@@ -43,6 +43,17 @@ depends on the monitoring server. Existing disabled-leaf selection remains valid
 The browser route uses ACME HTTPS, security headers and Zabbix's native login.
 It has no Traefik client IP allowlist; network access policy is left to the
 site's firewall controls. Other management routes keep their selected policies.
+
+An existing SAML identity provider can be connected without Traefik authentication
+middleware. The private monitoring stack may select `monitoring.saml` with only
+`public_url` (the external HTTPS origin) and `idp_signing_certificate` (one public
+PEM certificate). The frontend receives strict SAML validation, the fixed public
+base URL, proxy-header support and the pinned IdP signing certificate through the
+official image's `ZBX_SSO_SETTINGS`. No IdP private key is copied. Updating this
+container configuration requires normal CD. Provider URLs, signed-assertion
+requirements and user mappings are configured in Zabbix and the existing IdP;
+retain a working local administrator login and verify the real SSO flow.
+
 With the root property present, an active deployment cannot disable just the
 monitoring server while leaving its agents selected. An entirely disabled
 inventory remains available for read-only compilation and cannot admit deployment.

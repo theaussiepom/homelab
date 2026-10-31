@@ -6,6 +6,8 @@ import json
 import math
 from pathlib import Path
 import re
+import ssl
+from urllib.parse import urlsplit
 from private_io import regular
 from container_policy import restart_policy
 
@@ -28,6 +30,34 @@ def text(value):
     return value
 
 
+def saml_settings(value):
+    """Supply only the public SAML trust and external HTTPS origin."""
+    require(isinstance(value, dict) and set(value) == {
+        "public_url", "idp_signing_certificate"},
+        "Select the public SAML URL and one IdP signing certificate")
+    url = urlsplit(text(value["public_url"]))
+    require(url.scheme == "https" and url.hostname
+            and url.netloc == url.hostname
+            and re.fullmatch(r"[a-z0-9][a-z0-9.-]*", url.hostname)
+            and url.path in {"", "/"} and not url.query and not url.fragment,
+            "Use the external HTTPS Zabbix origin without credentials or parameters")
+    cert = value["idp_signing_certificate"]
+    require(isinstance(cert, str) and len(cert.encode()) <= 65536
+            and cert.count("-----BEGIN CERTIFICATE-----") == 1
+            and cert.count("-----END CERTIFICATE-----") == 1
+            and cert.strip().startswith("-----BEGIN CERTIFICATE-----")
+            and cert.strip().endswith("-----END CERTIFICATE-----")
+            and "PRIVATE KEY" not in cert and "\x00" not in cert,
+            "Provide one public IdP certificate, never a private key")
+    try:
+        ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).load_verify_locations(cadata=cert)
+    except ssl.SSLError:
+        raise ValueError("Provide a valid X509 IdP signing certificate") from None
+    return {"strict": True, "baseurl": value["public_url"].rstrip("/") + "/",
+            "use_proxy_headers": True,
+            "idp": {"x509certMulti": {"signing": [cert]}}}
+
+
 def validate(cfg):
     require(
         set(cfg) <= {"kind", "guest_memory_mib", "timezone", "services", "monitoring"}
@@ -36,7 +66,7 @@ def validate(cfg):
     )
     m = cfg["monitoring"]
     require(
-        set(m)
+        set(m) - {"saml"}
         == {
             "version",
             "bind_address",
@@ -48,6 +78,8 @@ def validate(cfg):
         and m["version"] == VERSIONS["version"],
         "Select the tested matching Zabbix release",
     )
+    if "saml" in m:
+        saml_settings(m["saml"])
     address = ipaddress.IPv4Address(m["bind_address"])
     require(
         not (
@@ -219,6 +251,9 @@ def compose(cfg):
             "ZBX_DB_ENCRYPTION": "true",
         }
     )
+    if "saml" in m:
+        web["environment"]["ZBX_SSO_SETTINGS"] = json.dumps(
+            saml_settings(m["saml"]), sort_keys=True, separators=(",", ":"))
     web["ports"] = [m["bind_address"] + ":8080:8080", "127.0.0.1:8081:8080"]
     web["depends_on"] = {"zabbix_server": {"condition": "service_started"}}
     return result

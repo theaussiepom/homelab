@@ -2,6 +2,7 @@
 
 import copy
 import json
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -135,6 +136,70 @@ class MonitoringTests(unittest.TestCase):
 
     def test_template_hashes_and_full_tls_are_pinned(self):
         monitoring.check_templates()
+
+
+class SamlFrontendTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.directory = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.directory.cleanup)
+        root = Path(cls.directory.name)
+        subprocess.run([
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-sha256",
+            "-nodes", "-days", "1", "-subj", "/CN=fixture-saml-idp",
+            "-keyout", str(root / "idp.key"), "-out", str(root / "idp.crt"),
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cls.certificate = (root / "idp.crt").read_text()
+
+    def selected(self):
+        return {"public_url": "https://zabbix.example.invalid",
+                "idp_signing_certificate": self.certificate}
+
+    def test_strict_certificate_trust_changes_only_frontend_SSO_environment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = fixture(Path(tmp))
+            original = monitoring.compose(cfg)
+            self.assertNotIn("ZBX_SSO_SETTINGS", original["services"]["zabbix_web"]["environment"])
+            self.assertEqual(len(monitoring.source_files(cfg)), 2)
+            cfg["monitoring"]["saml"] = self.selected()
+            actual = monitoring.compose(cfg)
+            value = actual["services"]["zabbix_web"]["environment"].pop("ZBX_SSO_SETTINGS")
+            settings = json.loads(value)
+            self.assertIs(settings["strict"], True)
+            self.assertIs(settings["use_proxy_headers"], True)
+            self.assertEqual(settings["baseurl"], "https://zabbix.example.invalid/")
+            self.assertEqual(settings["idp"]["x509certMulti"]["signing"], [self.certificate])
+            self.assertEqual(actual, original)
+            self.assertEqual(len(monitoring.source_files(cfg)), 2)
+            self.assertNotIn("PRIVATE KEY", value)
+            with_slash = self.selected()
+            with_slash["public_url"] += "/"
+            self.assertEqual(monitoring.saml_settings(with_slash), settings)
+
+    def test_unknown_SAML_knobs_and_untrusted_public_origins_refuse(self):
+        for bad in [None, False, [], {}, dict(self.selected(), strict=False),
+                    dict(self.selected(), private_key="unapproved")]:
+            with self.subTest(shape=bad), self.assertRaises(ValueError):
+                monitoring.saml_settings(bad)
+        for url in [None, "", "http://zabbix.example.invalid", "https://",
+                    "https://user:password@zabbix.example.invalid",
+                    "https://zabbix.example.invalid:443", "https://bad_host.example.invalid",
+                    "https://zabbix.example.invalid/subpath", "https://zabbix.example.invalid/?x=1",
+                    "https://zabbix.example.invalid/#fragment", "https://zabbix.example.invalid\n"]:
+            bad = self.selected();bad["public_url"] = url
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                monitoring.saml_settings(bad)
+
+    def test_malformed_multiple_or_private_certificates_refuse(self):
+        for certificate in [None, "x" * 65537, self.certificate * 2,
+                self.certificate.replace("-----END CERTIFICATE-----", ""),
+                "annotation\n" + self.certificate, self.certificate + "annotation",
+                self.certificate.replace("-----END CERTIFICATE-----", "PRIVATE KEY\n-----END CERTIFICATE-----"),
+                self.certificate.replace("-----END CERTIFICATE-----", "\x00-----END CERTIFICATE-----"),
+                "-----BEGIN CERTIFICATE-----\nZml4dHVyZQ==\n-----END CERTIFICATE-----\n"]:
+            bad = self.selected();bad["idp_signing_certificate"] = certificate
+            with self.subTest(certificate_type=type(certificate).__name__), self.assertRaises(ValueError):
+                monitoring.saml_settings(bad)
 
 
 if __name__ == "__main__":
