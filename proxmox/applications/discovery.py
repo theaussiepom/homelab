@@ -12,6 +12,9 @@ PRIVATE_BACKENDS = tuple(
     for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15")
 )
 DEFAULT_MIDDLEWARES = {"security-headers": {"headers": {"contentTypeNosniff": True}}}
+AUTHENTIK_PREFIX = "/outpost.goauthentik.io/"
+AUTHENTIK_AUTH_PATH = AUTHENTIK_PREFIX + "auth/traefik"
+CALLBACK_FIELDS = {"host", "aliases", "middlewares", "authentik_forward_auth"}
 
 
 def require(condition, message):
@@ -81,7 +84,7 @@ def validate_routes(routes, addresses=None):
             isinstance(route, dict)
             and {"host", "url"} <= route.keys()
             and not route.keys()
-            - {"host", "url", "aliases", "middlewares", "transport"},
+            - {"host", "url", "aliases", "middlewares", "transport", "authentik_forward_auth"},
             "Use only the resolved routing contract fields",
         )
         aliases = route.get("aliases", [])
@@ -105,12 +108,57 @@ def validate_routes(routes, addresses=None):
             len({name(value) for value in middleware}) == len(middleware),
             "Middleware references must be unique",
         )
+        if "authentik_forward_auth" in route:
+            reference = name(route["authentik_forward_auth"])
+            require(reference in middleware, "Apply the selected Authentik middleware to the app route")
+            require(callback_name(key) not in routes, "Preserve unique generated Authentik callback names")
         if "transport" in route:
             name(route["transport"])
             require(
                 backend.scheme == "https", "A TLS transport requires an HTTPS backend"
             )
     return hosts
+
+
+def callback_name(key):
+    return name(key + "-authentik-callback")
+
+
+def callback_fields(route):
+    return {key: copy.deepcopy(value) for key, value in route.items() if key in CALLBACK_FIELDS}
+
+
+def authentik_outpost(route, settings):
+    reference = name(route["authentik_forward_auth"])
+    selected = settings.get("middlewares", {}).get(reference)
+    require(isinstance(selected, dict) and set(selected) == {"forwardAuth"}
+            and isinstance(selected["forwardAuth"], dict),
+            "Select one defined Authentik forwardAuth provider")
+    auth = selected["forwardAuth"]
+    address = auth.get("address")
+    require(isinstance(address, str) and not any(c.isspace() for c in address)
+            and "\\" not in address and "tls" not in auth,
+            "Use the fixed Authentik endpoint with verified default backend TLS")
+    try:
+        parsed = urlsplit(address)
+    except ValueError:
+        raise ValueError("Use the fixed Authentik forwardAuth endpoint") from None
+    require(parsed.path == AUTHENTIK_AUTH_PATH and not parsed.query and not parsed.fragment,
+            "Use the fixed Authentik forwardAuth endpoint")
+    backend = parsed._replace(path="").geturl()
+    origin(backend)
+    middleware = route.get("middlewares", ["security-headers"])
+    require(isinstance(middleware, list) and reference in middleware,
+            "Apply the selected Authentik middleware to the app route")
+    for key in middleware:
+        name(key)
+        if key == reference:
+            continue
+        definition = DEFAULT_MIDDLEWARES.get(key, settings.get("middlewares", {}).get(key))
+        require(isinstance(definition, dict) and len(definition) == 1
+                and set(definition) <= {"headers", "ipAllowList", "rateLimit", "compress"},
+                "Callbacks retain direct non-auth security middleware; no extra auth or chains")
+    return backend.rstrip("/")
 
 
 def router(key, route):
@@ -169,7 +217,7 @@ def ca_path(key):
 def validate_ingress(settings):
     require(
         isinstance(settings, dict)
-        and not settings.keys() - {"routes", "middlewares", "transports"},
+        and not settings.keys() - {"routes", "middlewares", "transports", "authentik_callbacks"},
         "Use the ingress routing contract",
     )
     validate_routes(settings.get("routes", {}))
@@ -208,7 +256,17 @@ def validate_ingress(settings):
                 and not any(c.isspace() for c in path),
                 "Use an absolute public CA file path",
             )
-    for route in settings.get("routes", {}).values():
+    callbacks = settings.get("authentik_callbacks", {})
+    require(isinstance(callbacks, dict) and len(callbacks) <= 64,
+            "Use bounded compiler-derived Authentik callbacks")
+    combined = dict(settings.get("routes", {}))
+    for key, route in callbacks.items():
+        require(isinstance(route, dict) and {"host", "authentik_forward_auth"} <= route.keys()
+                and not route.keys() - CALLBACK_FIELDS and key not in combined,
+                "Use only compiler-derived Authentik callback fields")
+        combined[key] = dict(route, url=authentik_outpost(route, settings))
+    validate_routes(combined)
+    for route in combined.values():
         references(route, settings)
     return settings
 
@@ -224,6 +282,8 @@ def references(route, settings):
         or route["transport"] in settings.get("transports", {}),
         "Select a declared TLS transport",
     )
+    if "authentik_forward_auth" in route:
+        authentik_outpost(route, settings)
 
 
 def shared(settings):
@@ -243,6 +303,19 @@ def shared(settings):
         if "transport" in route:
             backend["serversTransport"] = route["transport"] + "@file"
         http["services"][key] = {"loadBalancer": backend}
+    callbacks = {key: route for key, route in settings.get("routes", {}).items()
+                 if "authentik_forward_auth" in route}
+    callbacks.update(settings.get("authentik_callbacks", {}))
+    for key, route in callbacks.items():
+        selected = callback_name(key)
+        callback = router(selected, route)
+        callback["rule"] += " && PathPrefix(`" + AUTHENTIK_PREFIX + "`)"
+        callback["priority"] = 15
+        callback["middlewares"] = [value for value in callback["middlewares"]
+                                   if value != route["authentik_forward_auth"] + "@file"]
+        http["routers"][selected] = callback
+        http["services"][selected] = {"loadBalancer": {"servers": [
+            {"url": authentik_outpost(route, settings)}]}}
     for key, definition in settings.get("transports", {}).items():
         http["serversTransports"][key] = {
             **(
