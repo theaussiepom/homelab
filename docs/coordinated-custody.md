@@ -214,6 +214,40 @@ normally; a missing canonical pointer cannot fall back to the initial anchor.
 This contract does not select private pins or authorize private adoption or a
 native operation.
 
+## Standalone Zigbee initial ordinary receipt
+
+A `zigbee2mqtt` profile can explicitly select the closed
+`homelab-zigbee-initial-ordinary-v1` schema. It requires the same exact identity,
+installed-site, initial-state and four receipt pins as the Influx contract, plus
+the mandatory bounded `incomplete_operations` list. Canonical and immutable raw
+hashes can differ only with complete type-sensitive record equality. The
+original producer, successful guest job, exact immutable copy and current
+backend must be independently qualified before private adoption.
+
+Only this Zigbee schema orders incomplete operations by the numeric pair
+`(run ID, attempt)`, strictly before the selected successful anchor. This permits
+an explicitly qualified earlier attempt of the same run. For example, an anchor
+`ordinary-200-3` permits a selected `ordinary-200-2`, but never the anchor itself,
+a later attempt or a later run. Every selected directory must already exist as
+private and non-symlink, with no immediate control markers and no completion
+record or dangling completion link. The records remain incomplete and untouched;
+unknown or later incomplete operations still block admission. No directory is
+created, relabelled successful or replayed by this exception. Automation retains
+its stricter earlier-run-only ordering; Influx still rejects this list field.
+
+The retained original site's complete `guest.serial_device` selection must match
+the current coordinator selection. Existing site, recovery-path, CA and guest
+SSH trust checks remain mandatory. The old receipt does not establish the newer
+restricted helper's trust: current helper credentials and host trust require
+independent qualification and retain current input hashing, private-file checks,
+pinned SSH, registered-policy and helper-response verification. No legacy input
+hashes are invented and no old controller is imported or executed.
+
+The existing generation binding and latest-success/no-rollback/hold/ownership
+rules apply unchanged. This schema repairs a concrete legacy receipt admission
+blocker; it does not establish that earlier input preparation succeeded, open a
+coordinator, release a hold or authorize native continuation.
+
 ## Optional empty provider refresh values
 
 For pinned bpg/proxmox 0.117.0, only the following explicitly present optional

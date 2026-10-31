@@ -74,11 +74,12 @@ runs the same generator with `--check` and rejects missing, changed or obsolete
 generated paths without rewriting them. Generation happens during development;
 GitHub executes the explicit checked-in graph. There is no runtime DAG executor.
 The framework selection in `phase.yml` remains an uncalled immutable selection
-anchor for existing source/CI/runtime parsers. Guest jobs do not call that wrapper,
-so it adds no per-phase visual nesting. Source CI and private exclusions/version
-selection remain explicit controls. Source equivalence checks establish the graph,
-command bytes and effective secret values; the next authorized native CD must
-verify actual Actions grouping and the private workflow/receipt binding.
+anchor for existing source/CI/runtime parsers. Guest jobs do not call that wrapper. Source CI and private exclusions/version
+selection remain explicit controls. Source equivalence checks establish the source graph, command bytes and effective
+secret values. They do not prove native guest-container rendering: the observed
+run still displayed a flat map, so the requested guest-container presentation
+remains unachieved pending an explicit layout choice. Actual Actions rendering
+and private workflow/receipt binding require separate native qualification.
 
 ## Custody and phase behavior
 

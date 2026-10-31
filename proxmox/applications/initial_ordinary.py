@@ -1,4 +1,4 @@
-"""Closed initial ordinary selection for qualified Influx and Automation profiles."""
+"""Closed initial ordinary selection for qualified standalone profiles."""
 
 from pathlib import Path
 import re
@@ -9,7 +9,8 @@ from private_io import digest, encoded, private_directory, require
 
 SCHEMA = "homelab-influx-initial-ordinary-v1"
 AUTOMATION_SCHEMA = "homelab-automation-initial-ordinary-v1"
-KINDS = {SCHEMA: "influxdb", AUTOMATION_SCHEMA: "automation"}
+ZIGBEE_SCHEMA = "homelab-zigbee-initial-ordinary-v1"
+KINDS = {SCHEMA: "influxdb", AUTOMATION_SCHEMA: "automation", ZIGBEE_SCHEMA: "zigbee2mqtt"}
 BINDING = "initial_ordinary_sha256"
 
 
@@ -20,8 +21,9 @@ def selection(cfg):
     value = cfg["initial_ordinary"]
     require(isinstance(value, dict), "Use a closed initial ordinary selection")
     automation = value.get("schema") == AUTOMATION_SCHEMA
+    zigbee = value.get("schema") == ZIGBEE_SCHEMA
     shape(value, {"schema", "vmid", "node", "installed_site", "installed_site_sha256",
-                  "initial_state_sha256", "receipt"} | ({"incomplete_operations"} if automation else set()))
+                  "initial_state_sha256", "receipt"} | ({"incomplete_operations"} if automation or zigbee else set()))
     require(isinstance(value["schema"], str) and value["schema"] in KINDS
             and cfg["app"]["kind"] == KINDS[value["schema"]]
             and "coordinated_custody" not in cfg
@@ -46,13 +48,15 @@ def selection(cfg):
         fingerprint(receipt[key])
     member = dict(vmid=value["vmid"], node=value["node"],
                   initial_state_sha256=value["initial_state_sha256"], initial_ordinary=receipt)
-    if automation:
+    if automation or zigbee:
         operations = value["incomplete_operations"]
         require(isinstance(operations, list) and len(operations) <= 16
                 and all(isinstance(name, str) and re.fullmatch(r"ordinary-[1-9][0-9]*-[1-9][0-9]*", name)
                         for name in operations)
                 and len(set(operations)) == len(operations)
-                and all(int(name.split("-")[1]) < int(receipt["operation"].split("-")[1]) for name in operations),
+                and all((tuple(map(int, name.split("-")[1:])) < tuple(map(int, receipt["operation"].split("-")[1:])))
+                        if zigbee else int(name.split("-")[1]) < int(receipt["operation"].split("-")[1])
+                        for name in operations),
                 "Select only exact unique qualified pre-anchor incomplete operations")
         member["incomplete_operations"] = operations
     return member
@@ -93,6 +97,10 @@ def inspect(cfg):
             and all(installed["paths"][key] == cfg["paths"][key]
                     for key in ("state_root", "backup_mount", "backup_directory", "backup_source")),
             "Preserve installed identity and custody paths")
+    if selected["schema"] == ZIGBEE_SCHEMA:
+        require(isinstance(installed["guest"].get("serial_device"), dict)
+                and installed["guest"]["serial_device"] == cfg["guest"].get("serial_device"),
+                "Preserve the qualified original Zigbee coordinator selection")
     previous_inputs = old["binding"].get("input_hashes")
     require(isinstance(previous_inputs, dict)
             and previous_inputs.get(installed["paths"]["ca_file"])
