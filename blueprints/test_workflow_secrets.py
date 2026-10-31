@@ -93,7 +93,7 @@ class NamedSecretWorkflowTests(unittest.TestCase):
                     self.assertEqual(set(guest_model['jobs']), {'deploy'})
                     job = guest_model['jobs']['deploy']
                     for index, phase in enumerate(['infrastructure', 'preparation', *blueprint['applications']]):
-                        steps = job['steps'][6 + index * 3:9 + index * 3]
+                        steps = [step for step in job['steps'] if step.get('env', {}).get('PHASE') == phase]
                         self.assertNotIn('secrets', job)
                         self.assertEqual(set(job['env']), {'HOMELAB_DEPLOYMENT_WORKFLOW'})
                         credential = steps[1]['env']

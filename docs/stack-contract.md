@@ -58,14 +58,20 @@ preparation and application phases run as ordered steps in that job. There is
 one additional selection-validation job before the eleven guest deployment jobs.
 
 The generator reads the selected framework checkout's authoritative phase recipe.
-Its first six steps perform readiness checks and the pinned private/stack/framework
-checkouts once per guest. An exact digest guard permits sharing only the reviewed
+Five checkout and selection steps run once per guest, using the pinned
+private/stack/framework sources. The original readiness command runs before
+every phase. An exact digest guard permits sharing only the reviewed
 common setup; changed commands, action pins, output IDs or policies require review.
 The existing stack/framework output IDs occur once. The compiler, credential binding
 and deployment commands then run separately for every phase with unchanged command
 bodies and phase-specific packet paths. Each compiler creates a new packet
 exclusively; phases do not reuse another phase's packet or environment secrets.
-The deployment entry point rechecks bootstrap custody on every phase.
+The original readiness command checks bootstrap custody before each phase's
+compilation and credential binding; only checkout and selection work is shared.
+A hold present at that phase readiness check stops the phase before its packet
+or missing retained credentials can be written. This restores the original
+boundary check; it does not make an entire phase atomic. The deployment entry point also
+rechecks bootstrap custody before target access on every phase.
 
 The selected runner, protected Environment, contents-read permission and workflow
 identity apply to the guest job. Its budget is the original 45-minute phase

@@ -60,15 +60,17 @@ class GuestJobExecutionTests(unittest.TestCase):
             target = work / 'framework-source' / path; target.parent.mkdir(parents=True, exist_ok=True); target.write_text(STUB)
         runner_temp = work / 'temp'; runner_temp.mkdir(mode=0o700)
         trace = work / 'trace.jsonl'
+        bootstrap = work / 'bootstrap'; bootstrap.mkdir()
         workflow = self.models['guest-' + guest + '.yml']
         values = {key: 'invented-' + key for key in workflow['on']['workflow_call']['secrets']}
         job = workflow['jobs']['deploy']; returncode = 0
         for step in job['steps'][6:]:
             self.assertNotIn('if', step); self.assertNotIn('continue-on-error', step)
-            environment = self.environment(step['env'], values)
+            environment = self.environment(step.get('env', {}), values)
+            script = step['run'].replace('/var/lib/homelab-bootstrap', str(bootstrap)) if step['name'] == 'Check readiness' else step['run']
             environment.update(RUNNER_TEMP=str(runner_temp), GITHUB_RUN_ID='900', GITHUB_RUN_ATTEMPT='1',
                 STUB_TRACE=str(trace), STUB_SECRET_NAMES=json.dumps(sorted(self.known)), STUB_FAIL=fail or '')
-            result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', step['run']], cwd=work,
+            result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script], cwd=work,
                                     env=environment, capture_output=True, text=True, timeout=15)
             if result.returncode:
                 returncode = result.returncode

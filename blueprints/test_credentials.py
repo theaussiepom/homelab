@@ -97,6 +97,51 @@ class CredentialTests(unittest.TestCase):
         self.assertNotEqual(failed.returncode, 0)
         self.assertIn("Credential binding held", failed.stderr)
 
+    def test_late_bootstrap_hold_stops_next_phase_before_packet_or_actual_credential_writes(self):
+        import workflows
+        import test_workflow_materialization as oracle
+        from deployment_state import bootstrap_closed
+
+        stack = self.root / "stack"; stack.mkdir(); oracle.fixture(stack)
+        job = workflows.models(stack)["guest-automation.yml"]["jobs"]["deploy"]
+        for marker in ("CONFIGURING", "BOOTSTRAP-CD-HOLD.json"):
+            for phase in oracle.PHASES["automation"][1:]:
+                with self.subTest(marker=marker, phase=phase):
+                    case = self.root / (marker + "-" + phase); case.mkdir()
+                    bootstrap = case / "bootstrap"; bootstrap.mkdir()
+                    initial = job["steps"][0]["run"].replace("/var/lib/homelab-bootstrap", str(bootstrap))
+                    self.assertEqual(subprocess.run(["bash", "-e", "-c", initial], capture_output=True).returncode, 0)
+                    (bootstrap / marker).write_text("synthetic late hold")
+                    self.packet = case / "packet.json"
+                    self.directory = case / "credentials"; self.directory.mkdir(mode=0o700)
+                    self.token, self.key = self.directory / "token", self.directory / "key"
+                    cfg = json.loads(self.value["files"]["site.json"])
+                    cfg["paths"] = {"api_token": str(self.token), "private_key": str(self.key)}
+                    self.value["files"]["site.json"] = json.dumps(cfg)
+                    index = next(i for i, step in enumerate(job["steps"])
+                                 if step["name"] == "Check inputs" and step["env"]["PHASE"] == phase)
+                    start = index - 1 if job["steps"][index - 1]["name"] == "Check readiness" else index
+                    events = []; blocked = False
+                    for step in job["steps"][start:index + 3]:
+                        if step["name"] == "Check readiness":
+                            # Only remap the fixed marker directory into this temporary fixture.
+                            script = step["run"].replace("/var/lib/homelab-bootstrap", str(bootstrap))
+                            if subprocess.run(["bash", "-e", "-c", script], capture_output=True).returncode:
+                                blocked = True; break
+                        elif step["name"] == "Check inputs":
+                            events.append("compile"); self.save()
+                        elif step["name"] == "Load credentials":
+                            events.append("credentials"); credentials.bind(self.packet, self.environment)
+                        else:
+                            events.append("deploy")
+                            try: bootstrap_closed(bootstrap)
+                            except ValueError: blocked = True; break
+                    self.assertTrue(blocked)
+                    self.assertEqual({"events": events, "packet": self.packet.exists(),
+                                      "token": self.token.exists(), "key": self.key.exists()},
+                                     {"events": [], "packet": False, "token": False, "key": False})
+                    self.assertEqual((bootstrap / marker).read_text(), "synthetic late hold")
+
     def test_matching_key_binds_once_without_rotation(self):
         self.save()
         self.assertEqual(

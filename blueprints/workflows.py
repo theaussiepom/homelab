@@ -288,6 +288,8 @@ PYCODE
             step["name"] = name
             step["timeout-minutes"] = recipe["timeout-minutes"]
         for phase, display in phases.items():
+            if phase != "infrastructure":
+                job["steps"].append(copy.deepcopy(job["steps"][0]))
             steps = bind_phase(recipe, guest, phase)["steps"][6:]
             for step, name in zip(steps, ("Check inputs", "Load credentials", display)):
                 step["name"] = name

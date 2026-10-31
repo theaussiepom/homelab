@@ -113,6 +113,8 @@ class MaterializationTests(unittest.TestCase):
                 step["name"] = name
                 step["timeout-minutes"] = 45
             for phase in phases:
+                if phase != "infrastructure":
+                    expected["steps"].append(copy.deepcopy(expected["steps"][0]))
                 display = {"infrastructure": "Update container", "preparation": "Prepare service"}.get(phase)
                 if display is None:
                     display = ({"unbound": "Deploy resolver", "pihole": "Deploy DNS", "mqtt": "Deploy MQTT", "homeassistant": "Deploy Home Assistant", "node_red": "Deploy Node-RED"}[phase] if len(phases) > 3 else "Deploy service")
@@ -121,7 +123,7 @@ class MaterializationTests(unittest.TestCase):
             self.assertEqual(job, expected)
             self.assertFalse({"uses", "with", "secrets", "needs"} & set(job))
             self.assertEqual([s["id"] for s in job["steps"] if "id" in s], ["stack", "framework"])
-            self.assertEqual(len(job["steps"]), 6 + 3 * len(phases))
+            self.assertEqual(len(job["steps"]), 5 + 4 * len(phases))
             self.assertTrue(all("if" not in s and "continue-on-error" not in s for s in job["steps"]))
             jobs += 1
         self.assertEqual((jobs, phases_count, phase_bodies), (11, 36, 108))
@@ -129,7 +131,7 @@ class MaterializationTests(unittest.TestCase):
     def test_all11_guest_jobs_preserve36_ordered_phases_and_qualified_setup(self):
         self.assertEqual(hashlib.sha256(workflows.PHASE_RECIPE.read_bytes()).hexdigest(), FROZEN_LEAF_SHA256)
         self.verify(self.models)
-        self.assertEqual(sum(sum("run" in s for s in w["jobs"]["deploy"]["steps"]) for n, w in self.models.items() if n.startswith("guest-")), 141)
+        self.assertEqual(sum(sum("run" in s for s in w["jobs"]["deploy"]["steps"]) for n, w in self.models.items() if n.startswith("guest-")), 166)
 
     def test_all2048_exclusion_subsets_match_the_existing_selection_gate(self):
         step = self.models["deploy.yml"]["jobs"]["selection"]["steps"][0]
@@ -167,6 +169,10 @@ class MaterializationTests(unittest.TestCase):
             lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][-1].update(run="true"),
             lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][-1]["env"].update(PHASE="unbound"),
             lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"].pop(),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"].pop(9),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][9].update(run="true"),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][9].update(env={"PROXMOX_APP_TOKEN": "unexpected"}),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"].insert(10, m["guest-dns.yml"]["jobs"]["deploy"]["steps"].pop(9)),
             lambda m: m["deploy.yml"]["jobs"]["automation"].update(needs=["selection"]),
             lambda m: m["guest-automation.yml"]["jobs"]["deploy"]["env"].update(NODE_RED_API_TOKEN="unexpected"),
             lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][2].update(id="other"),

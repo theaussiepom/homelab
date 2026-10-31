@@ -76,7 +76,7 @@ class WorkflowGenerationTests(unittest.TestCase):
         jobs = current["guest-web.yml"]["jobs"]
         self.assertEqual(list(jobs), ["deploy"])
         steps = jobs["deploy"]["steps"]
-        self.assertEqual([step["env"]["PHASE"] for step in steps[6::3]], ["infrastructure", "preparation", "web", "verify"])
+        self.assertEqual([step["env"]["PHASE"] for step in steps if step["name"] == "Check inputs"], ["infrastructure", "preparation", "web", "verify"])
         self.assertEqual(steps[-3]["env"]["PHASE"], "verify")
         self.assertEqual(steps[-3]["env"]["GUEST"], "web")
         self.assertNotIn("uses", jobs["deploy"])
