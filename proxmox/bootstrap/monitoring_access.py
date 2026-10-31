@@ -31,6 +31,19 @@ def validate(c):
     require(c['endpoint'].startswith('https://') and c['endpoint'].endswith(':8006/'), 'Use the trusted Proxmox API endpoint')
 
 
+def bootstrap_configuration(c):
+    """Derive the existing access transaction from one declared new guest."""
+    selected = c['monitoring']
+    require(isinstance(selected, dict) and set(selected) == {'vmid', 'address'}
+            and type(selected['vmid']) is int
+            and {'vmid': selected['vmid'], 'hostname': 'zabbix'} in c['applications'],
+            'Bind monitoring access to the declared Zabbix guest')
+    value = {key: c[key] for key in ('endpoint', 'node', 'backup_source')}
+    value.update(schema='homelab-zabbix-access-v1', address=selected['address'])
+    validate(value)
+    return value
+
+
 def rule(c):
     from urllib.parse import urlsplit
     return {'type': 'in', 'action': 'ACCEPT', 'enable': 1, 'source': address(c['address']) + '/32',

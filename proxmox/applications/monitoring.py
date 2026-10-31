@@ -217,7 +217,7 @@ def compose(cfg):
             "PHP_TZ": cfg.get("timezone", "Etc/UTC"),
         }
     )
-    web["ports"] = [m["bind_address"] + ":8080:8080"]
+    web["ports"] = [m["bind_address"] + ":8080:8080", "127.0.0.1:8081:8080"]
     web["depends_on"] = {"zabbix_server": {"condition": "service_started"}}
     return result
 

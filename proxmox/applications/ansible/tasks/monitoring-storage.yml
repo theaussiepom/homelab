@@ -1,0 +1,90 @@
+---
+# Called only by the PostgreSQL guest, after its ordinary service health checks.
+- name: Inspect ownership of the dedicated Zabbix database
+  ansible.builtin.stat:
+    path: /var/lib/homelab-monitoring/storage.json
+    follow: false
+  register: monitoring_storage_receipt
+
+- name: Inspect the dedicated storage role and database
+  ansible.builtin.command:
+    argv: [psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SELECT (SELECT count(*) FROM pg_roles WHERE rolname='zabbix') || ':' || (SELECT count(*) FROM pg_database WHERE datname='zabbix')"]
+  become_user: postgres
+  register: monitoring_storage_before
+  changed_when: false
+
+- name: Refuse unknown or partially created monitoring storage
+  ansible.builtin.assert:
+    that:
+      - not monitoring_storage_receipt.stat.islnk | default(false)
+      - not monitoring_storage_receipt.stat.exists or (monitoring_storage_receipt.stat.isreg | default(false) and monitoring_storage_receipt.stat.uid == 0 and monitoring_storage_receipt.stat.mode == '0600' and monitoring_storage_receipt.stat.nlink == 1)
+      - monitoring_storage_before.stdout == ('1:1' if monitoring_storage_receipt.stat.exists else '0:0')
+
+- name: Read the retained storage ownership receipt
+  ansible.builtin.slurp:
+    src: /var/lib/homelab-monitoring/storage.json
+  register: monitoring_storage_owner
+  when: monitoring_storage_receipt.stat.exists
+
+- name: Verify retained database ownership
+  ansible.builtin.assert:
+    that: >-
+      (monitoring_storage_owner.content | b64decode | from_json) == {'database': 'zabbix', 'role': 'zabbix', 'server_vmid': app.monitoring.server_vmid}
+  when: monitoring_storage_receipt.stat.exists
+
+- name: Create only the dedicated monitoring database owner
+  ansible.builtin.command:
+    argv: [psql, -X, -v, ON_ERROR_STOP=1, -d, postgres]
+    stdin: 'CREATE ROLE zabbix LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;'
+  become_user: postgres
+  when: not monitoring_storage_receipt.stat.exists
+  no_log: true
+
+- name: Set the initial storage password with client-side SCRAM encryption
+  ansible.builtin.command:
+    argv: [setsid, --wait, psql, -X, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SET password_encryption='scram-sha-256'", -c, '\password zabbix']
+    stdin: "{{ lookup('ansible.builtin.file', app.monitoring.storage_password_file) | trim }}\n{{ lookup('ansible.builtin.file', app.monitoring.storage_password_file) | trim }}\n"
+  become_user: postgres
+  when: not monitoring_storage_receipt.stat.exists
+  no_log: true
+
+- name: Create the new empty monitoring database
+  ansible.builtin.command:
+    argv: [createdb, --owner=zabbix, zabbix]
+  become_user: postgres
+  when: not monitoring_storage_receipt.stat.exists
+
+- name: Verify the storage owner retains no cluster administration privileges
+  ansible.builtin.command:
+    argv: [psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SELECT count(*) FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba WHERE d.datname='zabbix' AND r.rolname='zabbix' AND r.rolcanlogin AND NOT r.rolsuper AND NOT r.rolcreatedb AND NOT r.rolcreaterole AND NOT r.rolreplication AND NOT r.rolbypassrls"]
+  become_user: postgres
+  register: monitoring_storage_privileges
+  changed_when: false
+  failed_when: monitoring_storage_privileges.stdout != '1'
+
+- name: Verify storage authentication without resetting its credential
+  ansible.builtin.command:
+    argv: [psql, -X, -At, -v, ON_ERROR_STOP=1, -h, '127.0.0.1', -U, zabbix, -d, zabbix, -c, SELECT current_user]
+  environment:
+    PGPASSWORD: "{{ lookup('ansible.builtin.file', app.monitoring.storage_password_file) | trim }}"
+  register: monitoring_storage_authentication
+  changed_when: false
+  failed_when: monitoring_storage_authentication.stdout != 'zabbix'
+  no_log: true
+
+- name: Create private PostgreSQL-owned monitoring evidence storage
+  ansible.builtin.file:
+    path: /var/lib/homelab-monitoring
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Record completed storage ownership
+  ansible.builtin.copy:
+    content: "{{ {'database': 'zabbix', 'role': 'zabbix', 'server_vmid': app.monitoring.server_vmid} | to_json }}\n"
+    dest: /var/lib/homelab-monitoring/storage.json
+    owner: root
+    group: root
+    mode: '0600'
+    force: false

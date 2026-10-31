@@ -22,6 +22,7 @@ import runtime_secrets
 import coordinated_contract
 import coordinated_evidence
 import initial_ordinary
+import monitoring_inputs
 
 
 def prepare(
@@ -70,6 +71,9 @@ def prepare(
         or cfg["app"]["exclusive_writer_confirmed"] is True,
         "Complete separate data/configuration preparation and writer fencing",
     )
+    extra_monitoring = monitoring_inputs.prepare(cfg, stack, destination)
+    require(not extra_monitoring.keys() & payload.keys(), "Monitoring secrets cannot replace source files")
+    payload.update(extra_monitoring)
     if "stack.json" in payload:
         require(
             cfg["app"]["stack_config"] == str(destination / "stack.json"),
@@ -157,10 +161,17 @@ def input_hashes(cfg):
             cfg["paths"][name] for name in ("host_device_key", "host_known_hosts")
         )
     app = cfg["app"]
+    if "monitoring" in app:
+        paths.extend(monitoring_inputs.source_files())
+        paths.append(app["monitoring"]["credential_file"])
+        paths.extend(app["monitoring"][key] for key in ("database_password_file", "storage_password_file", "server_file") if key in app["monitoring"])
     if "stack_config" in app:
         paths.append(app["stack_config"])
-        stack = json.loads(Path(app["stack_config"]).read_text())
-        paths.extend(foundation.source_files(stack))
+        if app.get("kind") == "monitoring":
+            import monitoring
+            paths.extend(monitoring.source_files(read_json(Path(app["stack_config"]), private=True)))
+        else:
+            paths.extend(foundation.source_files(json.loads(Path(app["stack_config"]).read_text())))
         if app.get("kind") == "bitwarden":
             paths.append(app["bitwarden"]["runtime_env_file"])
     if app.get("kind") == "pegaprox":

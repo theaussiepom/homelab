@@ -1,0 +1,46 @@
+---
+- name: Create private server configuration storage
+  ansible.builtin.file:
+    path: /var/lib/homelab-monitoring
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install the pinned server API configurator
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../monitoring_configure.py"
+    dest: /var/lib/homelab-monitoring/configure.py
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install private server inputs and pinned templates
+  ansible.builtin.copy:
+    content: "{{ monitoring_server_configuration | to_json }}"
+    dest: /var/lib/homelab-monitoring/configure.json
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+
+- name: Configure templates and host linkage through the guest-local API
+  ansible.builtin.command:
+    argv: [python3, -I, -S, -B, /var/lib/homelab-monitoring/configure.py, --input, /var/lib/homelab-monitoring/configure.json]
+  no_log: true
+
+- name: Publish the frontend after the initial password and host configuration are complete
+  ansible.builtin.copy:
+    src: "{{ app.render_dir }}/compose.yml"
+    dest: /opt/homelab-app/compose.yml
+    owner: root
+    group: root
+    mode: '0600'
+  when: monitoring_first_install | default(false)
+  no_log: true
+
+- name: Start the configured browser listener
+  ansible.builtin.command:
+    argv: [docker, compose, -f, /opt/homelab-app/compose.yml, up, -d, --wait, --wait-timeout, '180', --remove-orphans=false]
+  when: monitoring_first_install | default(false)
+  no_log: true

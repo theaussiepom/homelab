@@ -1,0 +1,156 @@
+---
+- name: Check existing agent configuration and ownership
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - /etc/zabbix/zabbix_agent2.conf
+    - /var/lib/homelab-monitoring/agent.json
+  register: monitoring_agent_before
+
+- name: Refuse an unowned existing agent or missing commissioned configuration
+  ansible.builtin.assert:
+    that:
+      - monitoring_agent_before.results[0].stat.exists == monitoring_agent_before.results[1].stat.exists
+      - not monitoring_agent_before.results[0].stat.islnk | default(false)
+      - not monitoring_agent_before.results[1].stat.islnk | default(false)
+      - not monitoring_agent_before.results[1].stat.exists or (monitoring_agent_before.results[1].stat.isreg | default(false) and monitoring_agent_before.results[1].stat.uid == 0 and monitoring_agent_before.results[1].stat.mode == '0600' and monitoring_agent_before.results[1].stat.nlink == 1)
+      - not monitoring_agent_before.results[0].stat.exists or monitoring_agent_before.results[0].stat.isreg | default(false)
+    fail_msg: 'Existing monitoring needs its ownership receipt; do not adopt or replace it.'
+
+- name: Create the private guest monitoring directory
+  ansible.builtin.file:
+    path: /var/lib/homelab-monitoring
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Read an existing agent ownership receipt
+  ansible.builtin.slurp:
+    src: /var/lib/homelab-monitoring/agent.json
+  register: monitoring_agent_owner
+  when: monitoring_agent_before.results[1].stat.exists
+
+- name: Preserve the commissioned agent identity and version
+  ansible.builtin.assert:
+    that:
+      - >-
+        (monitoring_agent_owner.content | b64decode | from_json) == {'hostname': app.monitoring.hostname, 'psk_identity': app.monitoring.psk_identity, 'version': monitoring_agent_package.version}
+  when: monitoring_agent_before.results[1].stat.exists
+
+- name: Download the exact Agent 2 package into private guest storage
+  ansible.builtin.get_url:
+    url: "{{ monitoring_agent_package.url }}"
+    checksum: "sha256:{{ monitoring_agent_package.sha256 }}"
+    dest: /var/lib/homelab-monitoring/agent.deb
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Install Agent 2 without starting vendor configuration
+  ansible.builtin.apt:
+    deb: /var/lib/homelab-monitoring/agent.deb
+    policy_rc_d: 101
+    allow_downgrade: false
+    fail_on_autoremove: true
+
+- name: Download the matching PostgreSQL plugin
+  ansible.builtin.get_url:
+    url: "{{ monitoring_postgresql_package.url }}"
+    checksum: "sha256:{{ monitoring_postgresql_package.sha256 }}"
+    dest: /var/lib/homelab-monitoring/postgresql-plugin.deb
+    owner: root
+    group: root
+    mode: '0600'
+  when: "'postgresql' in app.monitoring.profiles"
+
+- name: Install the matching PostgreSQL plugin
+  ansible.builtin.apt:
+    deb: /var/lib/homelab-monitoring/postgresql-plugin.deb
+    policy_rc_d: 101
+    allow_downgrade: false
+    fail_on_autoremove: true
+  when: "'postgresql' in app.monitoring.profiles"
+
+- name: Verify the installed agent version
+  ansible.builtin.command:
+    argv: [dpkg-query, -W, '-f=${Version}', zabbix-agent2]
+  register: monitoring_agent_installed
+  changed_when: false
+  failed_when: monitoring_agent_installed.stdout != monitoring_agent_package.version
+
+- name: Check the guest-local Docker socket
+  ansible.builtin.stat:
+    path: /var/run/docker.sock
+  register: monitoring_docker
+  when: "'docker' in app.monitoring.profiles"
+
+- name: Require the normal local Docker socket without changing its permissions
+  ansible.builtin.assert:
+    that:
+      - monitoring_docker.stat.issock | default(false)
+      - monitoring_docker.stat.uid == 0
+      - monitoring_docker.stat.gr_name == 'docker'
+      - monitoring_docker.stat.mode == '0660'
+  when: "'docker' in app.monitoring.profiles"
+
+- name: Give only the guest-local agent its declared Docker access
+  ansible.builtin.user:
+    name: zabbix
+    groups: docker
+    append: true
+  register: monitoring_docker_access
+  when: "'docker' in app.monitoring.profiles"
+
+- name: Install the retained individual PSK once
+  ansible.builtin.copy:
+    content: "{{ (lookup('ansible.builtin.file', app.monitoring.credential_file) | from_json).psk }}\n"
+    dest: /etc/zabbix/agent.psk
+    owner: zabbix
+    group: zabbix
+    mode: '0400'
+    force: false
+  no_log: true
+
+- name: Read back the installed PSK
+  ansible.builtin.slurp:
+    src: /etc/zabbix/agent.psk
+  register: monitoring_agent_key
+  no_log: true
+
+- name: Refuse credential replacement or implicit rotation
+  ansible.builtin.assert:
+    that: (monitoring_agent_key.content | b64decode | trim) == (lookup('ansible.builtin.file', app.monitoring.credential_file) | from_json).psk
+  no_log: true
+
+- name: Install the complete active-only agent and local workload configuration
+  ansible.builtin.copy:
+    content: "{{ monitoring_agent_configuration }}"
+    dest: /etc/zabbix/zabbix_agent2.conf
+    owner: root
+    group: zabbix
+    mode: '0640'
+    backup: true
+  register: monitoring_agent_changed
+  no_log: true
+
+- name: Start the agent without waiting for Zabbix server availability
+  ansible.builtin.systemd_service:
+    name: zabbix-agent2
+    enabled: true
+    state: "{{ 'restarted' if monitoring_agent_changed.changed or monitoring_docker_access.changed | default(false) else 'started' }}"
+
+- name: Check the local agent service
+  ansible.builtin.command:
+    argv: [systemctl, is-active, --quiet, zabbix-agent2]
+  changed_when: false
+
+- name: Record successful agent ownership without storing a key in the receipt
+  ansible.builtin.copy:
+    content: "{{ {'hostname': app.monitoring.hostname, 'psk_identity': app.monitoring.psk_identity, 'version': monitoring_agent_package.version} | to_json }}\n"
+    dest: /var/lib/homelab-monitoring/agent.json
+    owner: root
+    group: root
+    mode: '0600'
+    force: false

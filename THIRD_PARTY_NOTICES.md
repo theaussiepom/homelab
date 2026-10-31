@@ -14,3 +14,9 @@ Source: https://github.com/zabbix/zabbix/tree/0d6fa36d0a0df4552d8df07e5b13deb664
 They are distributed under the GNU Affero General Public License v3.0;
 the upstream licence text is retained beside them as `templates/COPYING`.
 The repository's MIT licence does not replace that licence.
+
+Zabbix workload templates in proxmox/applications/monitoring/templates retain the
+upstream Zabbix AGPLv3 license and vendor metadata. The Docker template is prepared
+as a separately named active-only derivative with deterministic noncolliding UUIDs;
+PostgreSQL/MySQL active derivatives and the InfluxDB template retain their source
+provenance. All selected source bytes are pinned in monitoring/versions.json.

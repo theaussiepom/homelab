@@ -52,6 +52,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install pinned blueprint fixture dependencies
+        run: python3 -m pip install --require-hashes -r requirements.lock.txt
       - name: Build the existing pinned application test tools
         run: docker build --platform linux/amd64 -t homelab-app-test -f proxmox/bootstrap/docker/Dockerfile proxmox/bootstrap/docker
       - name: Install only verified upstream Zabbix API collections
@@ -74,6 +79,16 @@ jobs:
           docker run --rm --platform linux/amd64 --network none -v "$PWD:/src:ro" \
             -v "$RUNNER_TEMP/zabbix-agent2.deb:/fixture-agent.deb:ro" homelab-app-test \
             python3 /src/proxmox/applications/tests/native_agent_fixture.py /fixture-agent.deb
+      - name: Test root blueprint API, active Docker data and native database plugins
+        run: |
+          curl --fail --silent --show-error --max-time 120 \
+            'https://repo.zabbix.com/zabbix/7.0/debian/pool/main/z/zabbix-agent2-plugin-postgresql/zabbix-agent2-plugin-postgresql_7.0.32-1%2Bdebian13_amd64.deb' \
+            --output "$RUNNER_TEMP/zabbix-postgresql.deb"
+          python3 proxmox/applications/tests/monitoring_blueprint_fixture.py \
+            --output "$RUNNER_TEMP/zabbix-blueprint-evidence"
+          python3 proxmox/applications/tests/monitoring_workload_fixture.py \
+            --agent "$RUNNER_TEMP/zabbix-agent2.deb" --postgresql "$RUNNER_TEMP/zabbix-postgresql.deb" \
+            --output "$RUNNER_TEMP/zabbix-workload-evidence"
   bitwarden-runtime:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     name: Bitwarden startup and attachment persistence (Docker)

@@ -6,6 +6,10 @@
   "fixture_postgresql": "postgres:16@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74",
   "templates": {
     "template_app_proxmox.yaml": "0cc620659d2c1cbb6d84555907a0fba27917edfe6f1a0de8ebd84a5e9a590344",
-    "template_os_linux_active.yaml": "ab9fc4e0e55ceec898cdd39de8601cf012922453a6f2871173d03da9b09cde6a"
+    "template_os_linux_active.yaml": "ab9fc4e0e55ceec898cdd39de8601cf012922453a6f2871173d03da9b09cde6a",
+    "template_app_docker.yaml": "da58e4ee27782c5997d50da0366e886249925e3595c60b25c14b4a67d446b0ff",
+    "template_db_postgresql_agent2_active.yaml": "b24306f2bb899f990cc47d4300835d1ff6856b196af1320e6d541302565a0890",
+    "template_db_mysql_agent2_active.yaml": "e02ffdb85e799ef407c2fbcd284794415c482885ac6f81343e125fad57e55298",
+    "template_db_influxdb_http.yaml": "7177d4649f62cf78367b990943a54d2d33e48fbe8a36bb38c2bd120a9677bd8b"
   }
 }

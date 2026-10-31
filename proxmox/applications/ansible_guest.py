@@ -44,10 +44,31 @@ def run_phase(cfg, site, work, operation, expected, phase):
         app["health_checks"] = cfg["app"]["service_health_checks"][phase]
     if preparation:
         app["start_services"] = False
+    monitoring = {}
+    if "monitoring" in app:
+        import monitoring_agent
+        selected = monitoring_agent.validate(cfg)
+        monitoring = {"monitoring_agent_package": monitoring_agent.AGENT_PACKAGE,
+                      "monitoring_postgresql_package": monitoring_agent.POSTGRESQL_PACKAGE}
+        if phase != "preparation":
+            password = None
+            if "database_password_file" in selected:
+                from private_io import regular
+                password = regular(Path(selected["database_password_file"]), private=True).decode()
+            monitoring["monitoring_agent_configuration"] = monitoring_agent.configuration(cfg, password)
+        if app["kind"] == "monitoring" and phase != "preparation":
+            import monitoring_templates
+            value = read_json(Path(selected["server_file"]), private=True)
+            value["owner"] = {"node": cfg["site"]["node"], "vmid": cfg["guest"]["vmid"],
+                              "hostname": cfg["guest"]["hostname"]}
+            value["templates"] = [monitoring_templates.prepared(name)
+                                  for name in monitoring_templates.monitoring.VERSIONS["templates"]]
+            monitoring["monitoring_server_configuration"] = value
     write(
         phase_work / "variables.json",
         {
             "app": app,
+            **monitoring,
             "network_ready_interfaces": required_network_interfaces(cfg),
             **({"application_service": phase} if not preparation else {}),
             "preparation_capabilities": cfg["deployment"]["capabilities"],

@@ -23,6 +23,7 @@ import coordinated_contract
 import guest_contract
 import service_bindings
 import routes
+import zabbix
 
 CATALOGUE = guest_contract.BLUEPRINTS
 PIN = re.compile(
@@ -110,7 +111,7 @@ def manifest(root):
     )
     guests = spec["guests"]
     require(
-        set(guests) == set(CATALOGUE), "Keep a permanent path for every prepared guest"
+        set(guests) in (set(CATALOGUE), {k for k, v in CATALOGUE.items() if "feature" not in v}), "Keep a permanent path for every prepared guest"
     )
     for name, row in guests.items():
         require(
@@ -150,7 +151,7 @@ def selection(spec, disabled=None):
         isinstance(disabled, list)
         and all(isinstance(name, str) for name in disabled)
         and len(set(disabled)) == len(disabled)
-        and set(disabled) <= set(spec["guests"]),
+        and set(disabled) <= set(spec["guests"]) | set(spec.get("_inactive_guests", [])),
         "Disable only unique known guest names",
     )
     enabled = [name for name in spec["guests"] if name not in disabled]
@@ -329,10 +330,10 @@ def _compile_guest(name, cfg, stack, files, enabled):
 
 def compile_stack(root, overlay, disabled=None, *, admit=False):
     """Resolve the composition once; reject identity collisions before admission."""
-    spec = manifest(root)
+    spec = zabbix.selected(manifest(root), overlay)
     enabled = selection(spec, disabled)
     require(
-        set(overlay)
+        set(overlay) - {"zabbix"}
         == {"schema", "values", "common", "guests", "images", "accepted", "routes"}
         and overlay["schema"] == "homelab-site-v3"
         and set(overlay["guests"]) <= set(CATALOGUE),
@@ -343,14 +344,18 @@ def compile_stack(root, overlay, disabled=None, *, admit=False):
         and set(overlay["accepted"]) <= set(CATALOGUE),
         "Record explicit prerequisite acceptance",
     )
-    resolved = {name: _resolve_guest(root, overlay, name, spec) for name in CATALOGUE}
+    resolved = {name: _resolve_guest(root, overlay, name, spec) for name in spec["guests"]}
+    if zabbix.enabled(overlay):
+        zabbix.bind(resolved, enabled, merge(spec["values"], overlay["values"]))
     coordinated_contract.configured_closure(resolved)
+    declared_routes = merge(spec["routes"], overlay["routes"])
+    if zabbix.enabled(overlay):
+        require("zabbix" not in declared_routes, "Zabbix route is derived from its root feature")
+        declared_routes["zabbix"] = {"target": {"endpoint": "monitoring.zabbix.web"},
+                                     "host": "${domains.monitoring}",
+                                     "middlewares": ["security-headers", "management-clients"]}
     route_records = routes.bind(
-        resolved,
-        substitute(
-            merge(spec["routes"], overlay["routes"]),
-            merge(spec["values"], overlay["values"]),
-        ),
+        resolved, substitute(declared_routes, merge(spec["values"], overlay["values"])),
     )
     service_bindings.bind(resolved, route_records)
     compiled = {
