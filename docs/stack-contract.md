@@ -474,3 +474,19 @@ refusal/stop, unchanged image and zero target disk writes are required per case.
 Repository validation requires both complete suites when installer inputs change
 or manual validation is selected; otherwise it explains the whole-suite skip.
 These checks do not qualify physical installation or private configuration.
+
+### Private Actions job names
+
+A private consumer can materialize the pinned public guest recipes directly with
+`python3 framework-source/blueprints/private_workflows.py --stack stack-source --site .`.
+The deployment file declares its immutable `HOMELAB_STACK_SOURCE`, private repository,
+runner labels and Environment prefix in root `env`. Validation regenerates the
+complete workflow in memory and rejects any job, command, dependency or secret-scope
+drift. The default disabled list remains `[]`.
+
+Each native job is named only for its guest. Ordered phase commands, budgets,
+main-only admission and the global deployment queue remain the public recipe's.
+Provision one main-only Environment named `<prefix>-<guest>` per selected guest,
+containing only that guest's explicitly declared secrets. Existing shared
+Environments and credentials remain unchanged. Do not point these native jobs at
+an Environment containing all application credentials; that would expand access.

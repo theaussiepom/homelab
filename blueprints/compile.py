@@ -55,7 +55,10 @@ def encoded(value):
 
 
 def workflow_selection(path, workflow):
-    pins = PIN.findall(path.read_text())
+    text = path.read_text()
+    pins = PIN.findall(text)
+    if workflow == "deploy.yml":
+        pins += re.findall(r"^  HOMELAB_STACK_SOURCE: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/\.github/workflows/(deploy\.yml)@([0-9a-f]{40})\s*$", text, re.M)
     require(
         len(pins) == 1 and pins[0][1] == workflow,
         "Use one immutable workflow selection",

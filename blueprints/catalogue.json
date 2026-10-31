@@ -218,7 +218,7 @@
           "type": "file"
         }
       ],
-      "name": "Automation",
+      "name": "Home Automation",
       "application_names": {
         "mqtt": "MQTT",
         "homeassistant": "Home Assistant",
