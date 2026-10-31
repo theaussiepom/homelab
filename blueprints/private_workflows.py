@@ -57,8 +57,20 @@ def bind(value, disabled):
     return disabled if value == '${{ inputs.disabled }}' else value
 
 
+def validation_workflow(site):
+    path = site / '.github/workflows/ci.yml'
+    compiler.require(path.is_file() and not path.is_symlink(), 'Use a reusable local CI workflow')
+    value = yaml.safe_load(path.read_text())
+    # PyYAML's YAML 1.1 loader reads an unquoted GitHub "on" key as True.
+    events = value.get('on', value.get(True)) if isinstance(value, dict) else None
+    events = [events] if isinstance(events, str) else events
+    compiler.require(isinstance(events, (dict, list)) and 'workflow_call' in events,
+                     'Use a reusable local CI workflow with workflow_call')
+
+
 def model(stack, site):
     env, labels = settings(site)
+    validation_workflow(site)
     selected_source = compiler.workflow_selection(site / '.github/workflows/deploy.yml', 'deploy.yml')
     compiler.check_revision(stack, selected_source['revision'])
     compiler.require(not subprocess.check_output(

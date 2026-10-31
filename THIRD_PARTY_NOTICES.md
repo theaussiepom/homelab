@@ -25,7 +25,10 @@ commit, verified byte-for-byte against these sources:
 
 All six source files retain Zabbix's AGPLv3 licence and their exact SHA256 pins in
 `monitoring/versions.json`. Prepared copies change the Proxmox template's HTTP TLS
-and resource-history settings, derive a separately named active-only Docker
+and resource-history settings. The Proxmox availability item is converted from a
+script to a verified HTTP agent using the existing API endpoint, response headers
+and status-line extraction without redirects; unsupported or transport errors map
+to status 520. Its script parameters are removed. Prepared copies also derive a separately named active-only Docker
 template with deterministic noncolliding UUIDs, and remove organization discovery
 and its API-token macro from InfluxDB. PostgreSQL/MySQL active templates and the
 Linux template are passed through unchanged. The vendored source files themselves

@@ -31,6 +31,7 @@ class PrivateWorkflowTests(unittest.TestCase):
                     'HOMELAB_REPOSITORY':'owner/site'}
         (self.stack/'.github/workflows/phase.yml').write_text('jobs:\n  run:\n    uses: owner/framework/.github/workflows/guest-phase.yml@'+'b'*40+'\n')
         (self.site/'site.json').write_text('{}')
+        (self.site/'.github/workflows/ci.yml').write_text('on:\n  workflow_call:\njobs: {}\n')
         (self.stack/'stack.json').write_text(json.dumps(self.spec))
         subprocess.run(['git', 'init', '-q', str(self.stack)], check=True)
         self.freeze_stack()
@@ -68,6 +69,29 @@ class PrivateWorkflowTests(unittest.TestCase):
             self.assertIn("github.repository == 'owner/site'",job['if'])
             self.assertNotIn('inputs.',json.dumps(job))
         self.assertEqual(value['jobs']['selection']['needs'],['validate'])
+
+    def test_missing_or_nonreusable_local_ci_refuses_before_generation(self):
+        path = self.site / '.github/workflows/ci.yml'
+        for raw in [None, '', '[]', 'on: push\n', 'on: [push]\n', 'on: {}\n',
+                    'on: null\n', 'on: 7\n', 'on: not_workflow_call\n']:
+            if raw is None:
+                path.unlink()
+            else:
+                path.write_text(raw)
+            with self.subTest(raw=raw), patch.object(workflows, 'models') as generate:
+                with self.assertRaisesRegex(ValueError, 'reusable local CI workflow'):
+                    p.model(self.stack, self.site)
+                generate.assert_not_called()
+        path.unlink()
+        path.symlink_to(self.site / 'site.json')
+        with self.assertRaisesRegex(ValueError, 'reusable local CI workflow'):
+            p.model(self.stack, self.site)
+        path.unlink()
+        for raw in ['on:\n  workflow_call:\n', "'on':\n  workflow_call: {}\n",
+                    'on: workflow_call\n', 'on: [push, workflow_call]\n']:
+            path.write_text(raw)
+            self.assertEqual(p.model(self.stack, self.site)['jobs']['validate']['uses'],
+                             './.github/workflows/ci.yml')
 
     def test_disabled_defaults_and_valid_leaf_exclusion_are_literal(self):
         self.env['HOMELAB_DISABLED']='["web"]';self.write()
