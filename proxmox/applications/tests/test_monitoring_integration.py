@@ -1,5 +1,6 @@
 """The root feature flows through ordinary immutable inputs and guest phases."""
 import copy
+import base64
 import json
 import os
 from pathlib import Path
@@ -83,6 +84,7 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(payload.stat().st_mode),0o600)
             configuration=json.loads(payload.read_text())
             self.assertEqual(configuration['owner'],{'node':'fixture','vmid':208,'hostname':'monitoring'})
+            self.assertEqual(variables['monitoring_server_owner'],configuration['owner'])
             self.assertEqual(len(configuration['templates']),6)
             self.assertNotIn('Password=',variables['monitoring_agent_configuration'])
             # Execute the actual copy action, not just a single Templar pass:
@@ -95,7 +97,10 @@ class IntegrationTests(unittest.TestCase):
             received=root/'literal-server.json'
             task=copy.deepcopy(task);task['no_log']=False
             task['ansible.builtin.copy'].update(dest=str(received),owner=str(os.getuid()),group=str(os.getgid()))
-            play=root/'copy.yml';play.write_text(yaml.safe_dump([{'hosts':'all','connection':'local','gather_facts':False,'become':False,'tasks':[task]}]))
+            compose=yaml.safe_load((ansible_guest.SOURCE/'ansible/tasks/compose.yml').read_text())
+            ownership=next(t for t in compose if t['name']=='Bind the existing server to this exact guest before publication')
+            facts={'monitoring_server_receipt':{'stat':{'exists':True}},'monitoring_owned_server':{'content':base64.b64encode(json.dumps(configuration['owner']).encode()).decode()}}
+            play=root/'copy.yml';play.write_text(yaml.safe_dump([{'hosts':'all','connection':'local','gather_facts':False,'become':False,'vars':facts,'tasks':[task,ownership]}]))
             local=Path(sys.executable).with_name('ansible-playbook')
             executable=str(local) if local.is_file() else shutil.which('ansible-playbook')
             self.assertIsNotNone(executable)

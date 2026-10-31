@@ -42,7 +42,7 @@
 
 - name: Bind the existing server to this exact guest before publication
   ansible.builtin.assert:
-    that: (monitoring_owned_server.content | b64decode | from_json) == monitoring_server_configuration.owner
+    that: (monitoring_owned_server.content | b64decode | from_json) == monitoring_server_owner
   when: app.kind == 'monitoring' and monitoring_server_receipt.stat.exists
 
 - name: Select a guest-local-only frontend for initial server configuration
