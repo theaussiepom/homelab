@@ -17,7 +17,8 @@
 
 - name: Install private server inputs and pinned templates
   ansible.builtin.copy:
-    content: "{{ monitoring_server_configuration | to_json }}"
+    # Copy literal JSON bytes; Zabbix macros are not Ansible template syntax.
+    src: "{{ monitoring_server_configuration_file }}"
     dest: /var/lib/homelab-monitoring/configure.json
     owner: root
     group: root

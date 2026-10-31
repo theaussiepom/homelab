@@ -1,10 +1,15 @@
 """The root feature flows through ordinary immutable inputs and guest phases."""
 import copy
 import json
+import os
 from pathlib import Path
+import shutil
+import stat
+import subprocess
 import sys
 import tempfile
 import unittest
+import yaml
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import ansible_guest
@@ -72,6 +77,32 @@ class IntegrationTests(unittest.TestCase):
             with patch.object(inputs,'binding',return_value={}),patch.object(ansible_guest.proxmox_guest,'guest_trust'),patch.object(ansible_guest.proxmox_guest,'dhcp_admission'),patch.object(ansible_guest,'required_network_interfaces',return_value=[]),patch.object(ansible_guest,'quiet',side_effect=quiet):
                 ansible_guest.run_phase(c,root/'site',root,root,{},'zabbix')
             variables=json.loads((root/'zabbix/variables.json').read_text())
-            self.assertEqual(variables['monitoring_server_configuration']['owner'],{'node':'fixture','vmid':208,'hostname':'monitoring'})
-            self.assertEqual(len(variables['monitoring_server_configuration']['templates']),6)
+            self.assertNotIn('monitoring_server_configuration',variables)
+            payload=Path(variables['monitoring_server_configuration_file'])
+            self.assertEqual(payload,root/'zabbix/monitoring-server.json')
+            self.assertEqual(stat.S_IMODE(payload.stat().st_mode),0o600)
+            configuration=json.loads(payload.read_text())
+            self.assertEqual(configuration['owner'],{'node':'fixture','vmid':208,'hostname':'monitoring'})
+            self.assertEqual(len(configuration['templates']),6)
             self.assertNotIn('Password=',variables['monitoring_agent_configuration'])
+            # Execute the actual copy action, not just a single Templar pass:
+            # its task-argument finalization rejects raw Zabbix macro content.
+            tasks=yaml.safe_load((ansible_guest.SOURCE/'ansible/tasks/monitoring-server.yml').read_text())
+            task=next(t for t in tasks if t['name']=='Install private server inputs and pinned templates')
+            self.assertTrue(task['no_log'])
+            self.assertEqual(task['ansible.builtin.copy']['mode'],'0600')
+            self.assertEqual(task['ansible.builtin.copy']['owner'],'root')
+            received=root/'literal-server.json'
+            task=copy.deepcopy(task);task['no_log']=False
+            task['ansible.builtin.copy'].update(dest=str(received),owner=str(os.getuid()),group=str(os.getgid()))
+            play=root/'copy.yml';play.write_text(yaml.safe_dump([{'hosts':'all','connection':'local','gather_facts':False,'become':False,'tasks':[task]}]))
+            local=Path(sys.executable).with_name('ansible-playbook')
+            executable=str(local) if local.is_file() else shutil.which('ansible-playbook')
+            self.assertIsNotNone(executable)
+            result=subprocess.run([executable,'-i','localhost,',str(play),'--extra-vars','@'+str(root/'zabbix/variables.json')],
+                env=dict(os.environ,ANSIBLE_LOCAL_TEMP=str(root/'ansible-local'),ANSIBLE_REMOTE_TEMP=str(root/'ansible-remote')),
+                capture_output=True,text=True,timeout=45)
+            self.assertEqual(result.returncode,0,result.stdout[-1200:]+result.stderr[-600:])
+            self.assertEqual(received.read_bytes(),payload.read_bytes())
+            self.assertEqual(stat.S_IMODE(received.stat().st_mode),0o600)
+            self.assertIn(b'{#',received.read_bytes())

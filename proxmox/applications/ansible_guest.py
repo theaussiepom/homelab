@@ -63,7 +63,9 @@ def run_phase(cfg, site, work, operation, expected, phase):
                               "hostname": cfg["guest"]["hostname"]}
             value["templates"] = [monitoring_templates.prepared(name)
                                   for name in monitoring_templates.monitoring.VERSIONS["templates"]]
-            monitoring["monitoring_server_configuration"] = value
+            payload = phase_work / "monitoring-server.json"
+            write(payload, value)
+            monitoring["monitoring_server_configuration_file"] = str(payload)
     write(
         phase_work / "variables.json",
         {
