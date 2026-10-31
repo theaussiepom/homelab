@@ -90,14 +90,16 @@ class NamedSecretWorkflowTests(unittest.TestCase):
                     self.assertEqual({name for name, flags in declarations.items() if flags['required']}, required_scope - {SMTP})
                     guest_values = call(aggregate, self.models['deploy.yml']['jobs'][guest], guest_model)
                     self.assertEqual(set(guest_values), required_scope)
-                    for phase in ['infrastructure', 'preparation', *blueprint['applications']]:
-                        job = guest_model['jobs'][phase]
+                    self.assertEqual(set(guest_model['jobs']), {'deploy'})
+                    job = guest_model['jobs']['deploy']
+                    for index, phase in enumerate(['infrastructure', 'preparation', *blueprint['applications']]):
+                        steps = job['steps'][6 + index * 3:9 + index * 3]
                         self.assertNotIn('secrets', job)
                         self.assertEqual(set(job['env']), {'HOMELAB_DEPLOYMENT_WORKFLOW'})
-                        credential = job['steps'][7]['env']
+                        credential = steps[1]['env']
                         self.assertEqual({key for key in credential if key not in {'GUEST', 'PHASE'}}, COMMON)
                         final_values = {key: guest_values.get(key, '') for key in COMMON}
-                        for key, expression in job['steps'][8]['env'].items():
+                        for key, expression in steps[2]['env'].items():
                             if key in {'GUEST', 'PHASE'}: continue
                             match = re.fullmatch(r"\$\{\{ '([a-z0-9-]+)' == '([a-z-]+)' && (?:secrets\.([A-Z_]+)|'') \|\| '' \}\}", expression)
                             self.assertIsNotNone(match)
@@ -117,8 +119,8 @@ class NamedSecretWorkflowTests(unittest.TestCase):
                         self.assertEqual({name for name, value in final_values.items() if value}, expected_present)
                         self.assertEqual({name: final_values[name] for name in expected_present},
                                          {name: available[name] for name in expected_present})
-                        self.assertEqual(job['steps'][6]['env']['PHASE'], phase)
-                        self.assertEqual(job['steps'][6]['env']['GUEST'], guest)
+                        self.assertEqual(steps[0]['env']['PHASE'], phase)
+                        self.assertEqual(steps[0]['env']['GUEST'], guest)
                         self.assertEqual(final_values[SMTP], available[SMTP] if smtp_present and guest == 'identity' else '')
 
     def test_missing_name_is_refused_but_empty_values_remain_runtime_admission(self):

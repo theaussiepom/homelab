@@ -51,35 +51,56 @@ retained local image ID. Ordinary deployment does not pull or retag mutable
 before start. Missing or mismatched local content fails closed. Explicit immutable
 registry digests and verified archive selections keep their existing behavior.
 
-GitHub requires literal reusable workflow references. The stack uses static guest
-workflows and explicit `needs`, and the reusable phase runner explicitly checks out
-the caller site, selected stack and selected framework. Each guest workflow now
-contains its actual separate phase jobs directly; the generator materializes the
-selected framework checkout's authoritative leaf recipe. All nine step bodies,
-runner/environment/permissions/timeout/conditions, logical phase IDs, explicit
-`needs` and step-only credential scopes are preserved. Only constant guest/phase
-bindings and display labels change. Undeclared, unrelated application-secret
-operands whose guest guard is provably false bind to the explicit empty value
-previously supplied by the removed forwarding wrappers; declarations are not
-broadened and selected credentials are never folded away. Labels are Infra,
-Prepare, and Deployment for a single
-application; DNS and Automation retain their separate application labels.
-Unsupported recipe policies or new context dependencies require explicit review.
-Workflow nesting stays within GitHub's supported limits. References: [reuse workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows),
-[caller checkout behavior](https://docs.github.com/en/actions/concepts/workflows-and-actions/reusing-workflow-configurations).
+GitHub requires literal reusable workflow references. The stack keeps one
+independently callable workflow per guest and explicit cross-guest `needs`. Each
+guest workflow contains one real deployment job named Deploy. Infrastructure,
+preparation and application phases run as ordered steps in that job. There is
+one additional selection-validation job before the eleven guest deployment jobs.
+
+The generator reads the selected framework checkout's authoritative phase recipe.
+Its first six steps perform readiness checks and the pinned private/stack/framework
+checkouts once per guest. An exact digest guard permits sharing only the reviewed
+common setup; changed commands, action pins, output IDs or policies require review.
+The existing stack/framework output IDs occur once. The compiler, credential binding
+and deployment commands then run separately for every phase with unchanged command
+bodies and phase-specific packet paths. Each compiler creates a new packet
+exclusively; phases do not reuse another phase's packet or environment secrets.
+The deployment entry point rechecks bootstrap custody on every phase.
+
+The selected runner, protected Environment, contents-read permission and workflow
+identity apply to the guest job. The existing 45-minute timeout now caps the whole
+guest job, while phase command deadlines remain unchanged. One job replaces the
+former per-phase runner and Environment boundaries. A failed step stops subsequent
+phase steps under GitHub's default success condition. Rerunning the guest starts
+at infrastructure and remains subject to existing holds and no-replay checks.
+
+Guest-only secret declarations and the original credential/deployment step scopes
+remain intact. Provably false unrelated secret operands bind to the explicit empty
+value; selected credentials cannot be folded away. All checkouts disable persisted
+credentials. The pinned checkout action removes authentication before its main step
+returns; its final cleanup remains at job end. Phase credential-key temporary files
+retain the existing cleanup within credential binding. Short labels include Update
+container, Prepare service, Deploy service, Deploy DNS, Deploy MQTT, Deploy Home
+Assistant and Deploy Node-RED.
+
+References: [workflow reuse](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows),
+[step status conditions](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions),
+[pinned checkout authentication cleanup](https://github.com/actions/checkout/blob/3d3c42e5aac5ba805825da76410c181273ba90b1/src/git-source-provider.ts#L291).
+
 `blueprints/workflows.py` generates the checked-in stack entry workflow and one
-permanent workflow per guest. Application phases and multi-application display names come from the
-blueprint catalogue; cross-guest dependencies come from `stack.json`. Source CI
-runs the same generator with `--check` and rejects missing, changed or obsolete
-generated paths without rewriting them. Generation happens during development;
-GitHub executes the explicit checked-in graph. There is no runtime DAG executor.
+permanent workflow per guest. Application phase order comes from the blueprint
+catalogue. The generator supplies short step labels and uses catalogue names for
+additional application phases; cross-guest dependencies come from `stack.json`. Source CI
+runs the same selected generator with `--check` and rejects missing, changed or
+obsolete generated paths without rewriting them. GitHub executes the explicit
+checked-in jobs and steps; there is no runtime DAG executor or phase dispatcher.
 The framework selection in `phase.yml` remains an uncalled immutable selection
-anchor for existing source/CI/runtime parsers. Guest jobs do not call that wrapper. Source CI and private exclusions/version
-selection remain explicit controls. Source equivalence checks establish the source graph, command bytes and effective
-secret values. They do not prove native guest-container rendering: the observed
-run still displayed a flat map, so the requested guest-container presentation
-remains unachieved pending an explicit layout choice. Actual Actions rendering
-and private workflow/receipt binding require separate native qualification.
+anchor for existing source/CI/runtime parsers. Guest jobs do not call that wrapper.
+The source equivalence checks establish eleven deployment jobs, all 36 ordered
+logical phases, command bytes and effective secret values. Actual Actions job names,
+step display and private workflow/receipt continuity require separate verification
+on the next authorized native CD. Static source tests do not establish native UI
+acceptance.
 
 ## Custody and phase behavior
 

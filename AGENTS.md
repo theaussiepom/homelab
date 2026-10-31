@@ -1,8 +1,8 @@
 # Deployment working agreement
 
-Keep one permanent reusable workflow per guest. Its visible jobs are Infrastructure,
-Preparation, then the application names. Reuse preparation capabilities once per
-guest; keep real dependency edges explicit. Ordinary deployment never restores
+Keep one permanent reusable workflow per guest, with one deployment job and ordered
+Infrastructure, Preparation and application phases as plainly named steps. Reuse
+preparation capabilities once per guest; keep real dependency edges explicit. Ordinary deployment never restores
 data, rewrites migration configuration or bootstraps initial application accounts.
 Keep actual credentials outside Git. Preserve all state, identity, locks, holds
 and failed evidence. No automatic retries, state adoption, replacement or rollback.

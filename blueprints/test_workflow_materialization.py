@@ -57,71 +57,75 @@ class MaterializationTests(unittest.TestCase):
         self.original = document(workflows.PHASE_RECIPE)
         self.models = workflows.models(self.root)
 
-    def expected_job(self, guest, phase, previous, display):
-        # Explicitly enumerate the approved substitutions, independently of the
-        # production recursive binder. Every other native field stays identical.
-        result = copy.deepcopy(self.original["jobs"]["run"])
-        result["name"] = display
-        result["if"] = result["if"].replace("inputs.guest", repr(guest))
-        for index in (6, 7, 8):
-            result["steps"][index]["env"].update(GUEST=guest, PHASE=phase)
-        for key, expression in result["steps"][8]["env"].items():
+    def expected_phase(self, guest, phase, display):
+        # Independent approved-substitution oracle; no production binder reuse.
+        result = copy.deepcopy(self.original["jobs"]["run"]["steps"][6:])
+        for step in result: step["env"].update(GUEST=guest, PHASE=phase)
+        for key, expression in result[2]["env"].items():
             if key not in {"GUEST", "PHASE"}:
                 owner = expression.split(" == '", 1)[1].split("'", 1)[0]
-                result["steps"][8]["env"][key] = (
+                result[2]["env"][key] = (
                     expression.replace("inputs.guest", repr(guest)) if guest == owner
                     else "${{ " + repr(guest) + " == " + repr(owner) + " && '' || '' }}"
                 )
-        result["steps"][-1]["name"] = "Deployment"
-        if previous: result["needs"] = previous
+        for step, name in zip(result, ("Check inputs", "Load credentials", display)):
+            step["name"] = name
         return result
 
     def verify(self, models):
-        count = bodies = 0
-        for name, expected in (
-            ("deploy.yml", "25e75b272d2b8ee77d72025da7af8fb69851e7749c2ad71aa58898e26015d33c"),
-            ("phase.yml", "b5b1a7ca44fbe22dbf860dc057e02154789dd68b8149161fe9c98729e501165b"),
-        ):
-            raw = workflows.HEADER + yaml.safe_dump(models[name], sort_keys=False, width=1000, allow_unicode=True)
-            self.assertEqual(hashlib.sha256(raw.encode()).hexdigest(), expected)
+        jobs = phases_count = phase_bodies = 0
         self.assertEqual(set(models), {"deploy.yml", "phase.yml"} | {"guest-" + g + ".yml" for g in PHASES})
+        deploy = copy.deepcopy(models["deploy.yml"])
+        self.assertEqual(deploy["name"], "Deployment")
+        self.assertEqual(deploy["jobs"]["selection"]["name"], "Check guests")
+        self.assertEqual(deploy["jobs"]["selection"]["steps"][0]["name"], "Check guests")
+        # Only these human labels differ from the frozen pre-fallback parent.
+        deploy["name"] = "HomeLab stack"
+        deploy["jobs"]["selection"]["name"] = "Validate guest selection"
+        deploy["jobs"]["selection"]["steps"][0]["name"] = "Reject invalid exclusions before the guest graph"
+        for name, doc, expected in (
+            ("deploy.yml", deploy, "25e75b272d2b8ee77d72025da7af8fb69851e7749c2ad71aa58898e26015d33c"),
+            ("phase.yml", models["phase.yml"], "b5b1a7ca44fbe22dbf860dc057e02154789dd68b8149161fe9c98729e501165b"),
+        ):
+            raw = workflows.HEADER + yaml.safe_dump(doc, sort_keys=False, width=1000, allow_unicode=True)
+            self.assertEqual(hashlib.sha256(raw.encode()).hexdigest(), expected, name)
+        names = ("Check readiness", "Get settings", "Choose services", "Get services", "Choose tools", "Get tools")
         for guest, phases in PHASES.items():
             workflow = models["guest-" + guest + ".yml"]
             self.assertEqual(set(workflow), {"name", "on", "permissions", "defaults", "jobs"})
             expected_call = copy.deepcopy(self.original["on"])
-            for key in ("guest", "phase"):
-                expected_call["workflow_call"]["inputs"].pop(key)
+            for key in ("guest", "phase"): expected_call["workflow_call"]["inputs"].pop(key)
             scope = {"APPLICATION_SSH_KEY", "PROXMOX_APP_TOKEN"} | OWNED_SECRETS.get(guest, set())
-            expected_call["workflow_call"]["secrets"] = {
-                key: {"required": key != "FOUNDATION_AUTHENTIK_SMTP_PASSWORD"} for key in scope
-            }
+            expected_call["workflow_call"]["secrets"] = {key: {"required": key != "FOUNDATION_AUTHENTIK_SMTP_PASSWORD"} for key in scope}
             self.assertEqual(workflow["on"], expected_call)
-            self.assertEqual(list(workflow["jobs"]), phases)
+            self.assertEqual(list(workflow["jobs"]), ["deploy"])
             self.assertEqual(workflow["defaults"], self.original["defaults"])
             self.assertEqual(workflow["permissions"], self.original["permissions"])
             self.assertEqual(models["deploy.yml"]["jobs"][guest]["needs"], ["selection", *DEPENDENCIES[guest]])
-            previous = None
+            job = workflow["jobs"]["deploy"]
+            expected = copy.deepcopy(self.original["jobs"]["run"])
+            expected["name"] = "Deploy"
+            expected["if"] = expected["if"].replace("inputs.guest", repr(guest))
+            expected["steps"] = expected["steps"][:6]
+            for step, name in zip(expected["steps"], names): step["name"] = name
             for phase in phases:
-                display = {"infrastructure": "Infra", "preparation": "Prepare"}.get(phase)
-                if display is None: display = APP_LABELS[phase] if len(phases) > 3 else "Deployment"
-                job = workflow["jobs"][phase]
-                self.assertEqual(job, self.expected_job(guest, phase, previous, display))
-                self.assertFalse({"uses", "with", "secrets"} & set(job))
-                for old, new in zip(self.original["jobs"]["run"]["steps"], job["steps"]):
-                    if "run" in old:
-                        self.assertEqual(new["run"], old["run"]); bodies += 1
-                previous = phase; count += 1
-        self.assertEqual(count, 36)
-        self.assertEqual(bodies, 216)
+                display = {"infrastructure": "Update container", "preparation": "Prepare service"}.get(phase)
+                if display is None:
+                    display = ({"unbound": "Deploy resolver", "pihole": "Deploy DNS", "mqtt": "Deploy MQTT", "homeassistant": "Deploy Home Assistant", "node_red": "Deploy Node-RED"}[phase] if len(phases) > 3 else "Deploy service")
+                expected["steps"].extend(self.expected_phase(guest, phase, display))
+                phases_count += 1; phase_bodies += 3
+            self.assertEqual(job, expected)
+            self.assertFalse({"uses", "with", "secrets", "needs"} & set(job))
+            self.assertEqual([s["id"] for s in job["steps"] if "id" in s], ["stack", "framework"])
+            self.assertEqual(len(job["steps"]), 6 + 3 * len(phases))
+            self.assertTrue(all("if" not in s and "continue-on-error" not in s for s in job["steps"]))
+            jobs += 1
+        self.assertEqual((jobs, phases_count, phase_bodies), (11, 36, 108))
 
-    def test_all11_groups_and36_jobs_preserve_every_policy_step_and_command(self):
+    def test_all11_guest_jobs_preserve36_ordered_phases_and_qualified_setup(self):
         self.assertEqual(hashlib.sha256(workflows.PHASE_RECIPE.read_bytes()).hexdigest(), FROZEN_LEAF_SHA256)
         self.verify(self.models)
-        # These two documents retain byte identity to the pre-materialization
-        # generator for this exact synthetic manifest and immutable selection.
-        rendered = workflows.rendered(self.root)
-        self.assertEqual(hashlib.sha256(rendered["deploy.yml"]).hexdigest(), "25e75b272d2b8ee77d72025da7af8fb69851e7749c2ad71aa58898e26015d33c")
-        self.assertEqual(hashlib.sha256(rendered["phase.yml"]).hexdigest(), "b5b1a7ca44fbe22dbf860dc057e02154789dd68b8149161fe9c98729e501165b")
+        self.assertEqual(sum(sum("run" in s for s in w["jobs"]["deploy"]["steps"]) for n, w in self.models.items() if n.startswith("guest-")), 141)
 
     def test_all2048_exclusion_subsets_match_the_existing_selection_gate(self):
         step = self.models["deploy.yml"]["jobs"]["selection"]["steps"][0]
@@ -138,23 +142,29 @@ class MaterializationTests(unittest.TestCase):
             self.assertEqual(actual, expected); valid += actual
         self.assertEqual(valid, 81)
 
-    def test_mutated_native_jobs_cannot_pass_the_independent_equivalence_oracle(self):
+    def test_mutations_cannot_pass_the_independent_execution_equivalence_oracle(self):
         mutations = [
-            lambda m: m["guest-dns.yml"]["jobs"]["pihole"].update(needs="infrastructure"),
-            lambda m: m["guest-dns.yml"]["jobs"]["infrastructure"].update({"if": "true"}),
-            lambda m: m["guest-dns.yml"]["jobs"]["infrastructure"].update({"runs-on": "ubuntu-latest"}),
-            lambda m: m["guest-dns.yml"]["jobs"]["infrastructure"].update(environment="other"),
-            lambda m: m["guest-dns.yml"]["jobs"]["infrastructure"].update({"timeout-minutes": 90}),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update(needs="infrastructure"),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update({"if": "true"}),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update({"runs-on": "ubuntu-latest"}),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update(environment="other"),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update({"timeout-minutes": 90}),
             lambda m: m["guest-dns.yml"]["permissions"].update(contents="write"),
             lambda m: m["guest-dns.yml"]["defaults"]["run"].update(shell="sh"),
             lambda m: m["guest-dns.yml"]["on"]["workflow_call"]["secrets"].update(UNRELATED_SECRET={"required": True}),
             lambda m: m["phase.yml"]["jobs"]["run"].update(uses="example/other@main"),
-            lambda m: m["guest-dns.yml"]["jobs"]["pihole"].update(uses="./.github/workflows/phase.yml"),
-            lambda m: m["guest-dns.yml"]["jobs"]["pihole"]["steps"][-1].update(run="true"),
-            lambda m: m["guest-dns.yml"]["jobs"]["pihole"]["steps"][-1]["env"].update(PHASE="unbound"),
-            lambda m: m["guest-dns.yml"]["jobs"].pop("unbound"),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update(uses="./.github/workflows/phase.yml"),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][-1].update(run="true"),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][-1]["env"].update(PHASE="unbound"),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"].pop(),
             lambda m: m["deploy.yml"]["jobs"]["automation"].update(needs=["selection"]),
-            lambda m: m["guest-automation.yml"]["jobs"]["mqtt"]["env"].update(NODE_RED_API_TOKEN="unexpected"),
+            lambda m: m["guest-automation.yml"]["jobs"]["deploy"]["env"].update(NODE_RED_API_TOKEN="unexpected"),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][2].update(id="other"),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][3]["with"].update(ref="main"),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][3]["with"].update({"persist-credentials": True}),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][9].update({"if": "always()"}),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][9].update({"continue-on-error": True}),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"].extend(copy.deepcopy(m["guest-dns.yml"]["jobs"]["deploy"]["steps"][:6])),
         ]
         for index, mutate in enumerate(mutations):
             model = copy.deepcopy(self.models); mutate(model)
@@ -185,6 +195,7 @@ class MaterializationTests(unittest.TestCase):
             lambda d: d["jobs"]["run"]["steps"][6]["env"].update(DISABLED="${{ needs.previous.outputs.value }}"),
             lambda d: d["jobs"]["run"]["steps"][6]["env"].update(GUEST="${{ inputs.guest[0] }}"),
             lambda d: d.update({True: d["on"]}),
+            lambda d: d["jobs"]["run"]["steps"][2].update(run="true"),
         ]
         path = self.root / "recipe.yml"
         with patch.object(workflows, "PHASE_RECIPE", path):

@@ -74,12 +74,14 @@ class WorkflowGenerationTests(unittest.TestCase):
         current = workflows.models(self.root)
         self.assertEqual(current["deploy.yml"]["jobs"]["web"]["needs"], ["selection"])
         jobs = current["guest-web.yml"]["jobs"]
-        self.assertEqual(list(jobs), ["infrastructure", "preparation", "web", "verify"])
-        self.assertEqual(jobs["verify"]["needs"], "web")
-        self.assertEqual(jobs["verify"]["steps"][6]["env"]["PHASE"], "verify")
-        self.assertEqual(jobs["verify"]["steps"][6]["env"]["GUEST"], "web")
-        self.assertNotIn("uses", jobs["verify"])
-        self.assertEqual(jobs["verify"]["name"], "Verify")
+        self.assertEqual(list(jobs), ["deploy"])
+        steps = jobs["deploy"]["steps"]
+        self.assertEqual([step["env"]["PHASE"] for step in steps[6::3]], ["infrastructure", "preparation", "web", "verify"])
+        self.assertEqual(steps[-3]["env"]["PHASE"], "verify")
+        self.assertEqual(steps[-3]["env"]["GUEST"], "web")
+        self.assertNotIn("uses", jobs["deploy"])
+        self.assertNotIn("needs", jobs["deploy"])
+        self.assertEqual(steps[-1]["name"], "Deploy Verify")
 
     def test_new_guest_metadata_adds_a_permanent_workflow_without_generator_changes(
         self,
