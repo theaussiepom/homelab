@@ -13,6 +13,8 @@ import yaml
 import private_workflows as p
 import workflows
 
+CI_JOBS = 'jobs:\n  source:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo synthetic\n'
+
 
 class PrivateWorkflowTests(unittest.TestCase):
     def setUp(self):
@@ -31,7 +33,7 @@ class PrivateWorkflowTests(unittest.TestCase):
                     'HOMELAB_REPOSITORY':'owner/site'}
         (self.stack/'.github/workflows/phase.yml').write_text('jobs:\n  run:\n    uses: owner/framework/.github/workflows/guest-phase.yml@'+'b'*40+'\n')
         (self.site/'site.json').write_text('{}')
-        (self.site/'.github/workflows/ci.yml').write_text('on:\n  workflow_call:\njobs: {}\n')
+        (self.site/'.github/workflows/ci.yml').write_text('on:\n  workflow_call:\n' + CI_JOBS)
         (self.stack/'stack.json').write_text(json.dumps(self.spec))
         subprocess.run(['git', 'init', '-q', str(self.stack)], check=True)
         self.freeze_stack()
@@ -89,9 +91,16 @@ class PrivateWorkflowTests(unittest.TestCase):
         path.unlink()
         for raw in ['on:\n  workflow_call:\n', "'on':\n  workflow_call: {}\n",
                     'on: workflow_call\n', 'on: [push, workflow_call]\n']:
-            path.write_text(raw)
+            path.write_text(raw + CI_JOBS)
             self.assertEqual(p.model(self.stack, self.site)['jobs']['validate']['uses'],
                              './.github/workflows/ci.yml')
+
+    def test_reusable_ci_requires_nonempty_job_mapping(self):
+        path = self.site / '.github/workflows/ci.yml'
+        for jobs in ['', 'jobs: {}\n', 'jobs: []\n', 'jobs: null\n']:
+            path.write_text('on:\n  workflow_call:\n' + jobs)
+            with self.subTest(jobs=jobs), self.assertRaisesRegex(ValueError, 'containing jobs'):
+                p.validation_workflow(self.site)
 
     def test_disabled_defaults_and_valid_leaf_exclusion_are_literal(self):
         self.env['HOMELAB_DISABLED']='["web"]';self.write()

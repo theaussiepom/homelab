@@ -66,6 +66,8 @@ def validation_workflow(site):
     events = [events] if isinstance(events, str) else events
     compiler.require(isinstance(events, (dict, list)) and 'workflow_call' in events,
                      'Use a reusable local CI workflow with workflow_call')
+    compiler.require(isinstance(value.get('jobs'), dict) and bool(value['jobs']),
+                     'Use a reusable local CI workflow containing jobs')
 
 
 def model(stack, site):
