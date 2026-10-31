@@ -33,6 +33,12 @@ class PrivateWorkflowTests(unittest.TestCase):
         (self.site/'site.json').write_text('{}')
         (self.stack/'stack.json').write_text(json.dumps(self.spec))
         subprocess.run(['git', 'init', '-q', str(self.stack)], check=True)
+        self.freeze_stack()
+        mock = patch.object(workflows.compiler,'CATALOGUE',self.catalogue)
+        mock.start();self.addCleanup(mock.stop)
+
+    def freeze_stack(self):
+        """Commit each synthetic revision before declaring it as runtime source."""
         subprocess.run(['git', '-C', str(self.stack), 'add', '.'], check=True)
         subprocess.run(['git', '-C', str(self.stack), '-c', 'user.name=Fixture',
                         '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false',
@@ -40,8 +46,6 @@ class PrivateWorkflowTests(unittest.TestCase):
         self.revision = subprocess.check_output(['git', '-C', str(self.stack), 'rev-parse', 'HEAD'], text=True).strip()
         self.env['HOMELAB_STACK_SOURCE'] = 'owner/stack/.github/workflows/deploy.yml@' + self.revision
         self.write()
-        mock = patch.object(workflows.compiler,'CATALOGUE',self.catalogue)
-        mock.start();self.addCleanup(mock.stop)
 
     def write(self):
         (self.site/'.github/workflows/deploy.yml').write_text(yaml.safe_dump({'env':self.env},sort_keys=False))
@@ -78,6 +82,7 @@ class PrivateWorkflowTests(unittest.TestCase):
         self.catalogue['monitoring']={'name':'Zabbix','applications':['service'],'application_names':{'service':'Zabbix'}}
         self.spec['guests']['monitoring']={'depends_on':['database'],'prerequisites':[]}
         (self.stack/'stack.json').write_text(json.dumps(self.spec))
+        self.freeze_stack()
         self.assertNotIn('monitoring',p.model(self.stack,self.site)['jobs'])
         (self.site/'site.json').write_text('{"zabbix":null}')
         self.assertEqual(p.model(self.stack,self.site)['jobs']['monitoring']['name'],'Zabbix')
@@ -144,3 +149,16 @@ class PrivateWorkflowTests(unittest.TestCase):
             path.write_text(original.replace(line, '  HOMELAB_STACK_SOURCE: ' + mark + line.split(': ',1)[1] + mark))
             with self.assertRaisesRegex(ValueError, 'one immutable workflow selection'):
                 p.settings(self.site)
+
+    def test_matching_head_with_modified_or_untracked_source_refuses(self):
+        original = (self.stack / 'stack.json').read_text()
+        for mode in ('tracked', 'untracked'):
+            if mode == 'tracked':
+                (self.stack / 'stack.json').write_text(original + '\n')
+            else:
+                (self.stack / 'stack.json').write_text(original)
+                (self.stack / 'untracked-input.json').write_text('{}')
+            with self.subTest(mode=mode), patch.object(workflows, 'models') as generate:
+                with self.assertRaisesRegex(ValueError, 'clean pinned stack source'):
+                    p.model(self.stack, self.site)
+                generate.assert_not_called()

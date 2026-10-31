@@ -9,6 +9,7 @@ import copy
 import json
 from pathlib import Path
 import re
+import subprocess
 import yaml
 
 import compile as compiler
@@ -60,6 +61,9 @@ def model(stack, site):
     env, labels = settings(site)
     selected_source = compiler.workflow_selection(site / '.github/workflows/deploy.yml', 'deploy.yml')
     compiler.check_revision(stack, selected_source['revision'])
+    compiler.require(not subprocess.check_output(
+        ['git', '-C', str(stack), 'status', '--porcelain', '--untracked-files=all'], text=True).strip(),
+        'Use clean pinned stack source for private workflow generation')
     disabled = env.get('HOMELAB_DISABLED', '[]')
     overlay = compiler.read(site / 'site.json')
     spec = compiler.zabbix.selected(compiler.manifest(stack), overlay)

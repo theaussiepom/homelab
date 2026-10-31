@@ -482,9 +482,10 @@ A private consumer can materialize the pinned public guest recipes directly with
 The deployment file declares its immutable `HOMELAB_STACK_SOURCE`, private repository,
 runner labels and Environment prefix in root `env`. Keep the generated stack-source
 marker as an unquoted scalar at two-space indentation; both the compiler and the
-pre-install CI reader deliberately require that canonical marker. Validation regenerates the
+pre-installation CI reader deliberately require that canonical marker. Validation regenerates the
 complete workflow in memory and rejects any job, command, dependency or secret-scope
-drift. The default disabled list remains `[]`.
+drift. The local stack must match its declared Git revision and have no modified or
+untracked source files before generation. The default disabled list remains `[]`.
 
 Each native job is named only for its guest. Ordered phase commands, budgets,
 main-only admission and the global deployment queue remain the public recipe's.
