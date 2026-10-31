@@ -3,6 +3,7 @@
 import argparse
 import json
 from pathlib import Path
+import re
 import ssl
 import time
 from urllib.parse import urlsplit
@@ -90,8 +91,10 @@ def _verify_once(c):
             if (
                 len(hosts) != 1
                 or hosts[0]["tls_accept"] != "2"
-                or hosts[0]["description"]
-                != "HomeLab active agent; PSK identity=" + row["psk_identity"]
+                or re.fullmatch(
+                    re.escape("HomeLab blueprint agent; identity=" + row["psk_identity"]
+                              + "; credential=") + r"[0-9a-f]{64}", hosts[0]["description"]
+                ) is None
             ):
                 raise AcceptanceFailure(
                     "An agent is missing or does not require its individual PSK"

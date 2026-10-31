@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import monitoring_verify as verification
 import monitoring_templates as templates
+from monitoring_configure import marker
 
 
 class MonitoringAcceptanceFailures(unittest.TestCase):
@@ -65,7 +66,7 @@ class MonitoringAcceptanceFailures(unittest.TestCase):
                                 {
                                     "hostid": "1",
                                     "tls_accept": "2",
-                                    "description": "HomeLab active agent; PSK identity=fixture-linux",
+                                    "description": marker("agent", "fixture-linux", "synthetic-PSK"),
                                 }
                             ]
                         else:

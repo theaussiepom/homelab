@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import monitoring_verify as verification
+from monitoring_configure import marker
 
 
 class InitialCollectionTests(unittest.TestCase):
@@ -20,16 +21,19 @@ class InitialCollectionTests(unittest.TestCase):
                       'agents': [{'hostname': 'fixture-linux', 'psk_identity': 'fixture-linux'}],
                       'proxmox_hostname': 'fixture-pve', 'commissioned_vmids': [213]}
             def response(result): return io.StringIO(json.dumps({'result': result}))
-            for outcome in ('identity', 'pending', 'passed', 'passed_outer'):
+            for outcome in ('identity', 'old-marker', 'foreign-identity', 'bad-digest', 'pending', 'passed', 'passed_outer'):
                 with self.subTest(outcome=outcome):
                     values = [response('fixture-token')]
-                    if outcome == 'identity':
-                        values.append(response([]))
+                    if outcome in {'identity', 'old-marker', 'foreign-identity', 'bad-digest'}:
+                        descriptions = {'old-marker': 'HomeLab active agent; PSK identity=fixture-linux',
+                            'foreign-identity': marker('agent', 'other', 'synthetic-PSK'),
+                            'bad-digest': 'HomeLab blueprint agent; identity=fixture-linux; credential=invalid'}
+                        values.append(response([] if outcome == 'identity' else [{'hostid': '1', 'tls_accept': '2', 'description': descriptions[outcome]}]))
                         expected, message = verification.AcceptanceFailure, 'individual PSK'
                     else:
                         values.extend([
                             response([{'hostid': '1', 'tls_accept': '2',
-                                       'description': 'HomeLab active agent; PSK identity=fixture-linux'}]),
+                                       'description': marker('agent', 'fixture-linux', 'synthetic-PSK')}]),
                             response([{'type': '7', 'state': '0',
                                        'lastclock': str(0 if outcome == 'pending' else now), 'lastvalue': '1'}]),
                             response([{'hostid': '2', 'macros': [{'macro': '{$HTTP.TLS.VERIFY}', 'value': 'full'}]}]),
