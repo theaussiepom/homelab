@@ -92,24 +92,32 @@ def main(args):
             command=['psql','-U','postgres','-v','ON_ERROR_STOP=1'] if kind=='postgresql' else ['mariadb','-uroot','-psynthetic-admin']
             wait(lambda:docker('exec',container,*( ['pg_isready','-h','127.0.0.1','-U','postgres'] if kind=='postgresql' else [*command,'--protocol=TCP','-h','127.0.0.1','-e','SELECT 1']),capture_output=True,check=False).returncode==0)
             uri='tcp://127.0.0.1:5432' if kind=='postgresql' else 'tcp://'+address+':3306'
+            if kind=='postgresql':
+                # Native Debian database guests have runuser, not sudo. Execute
+                # the exact root-to-postgres command from the deployment task.
+                docker('exec',container,'sh','-ec','! command -v sudo; command -v runuser',capture_output=True)
+                tls_task=next(t for t in tasks if t['name'].startswith('Require retained PostgreSQL TLS'))
+                assert 'become_user' not in tls_task
+                assert docker('exec',container,*tls_task['ansible.builtin.command']['argv'],capture_output=True,text=True).stdout.strip()=='on'
             task=next(t for t in tasks if t['name'].startswith('Create the dedicated PostgreSQL' if kind=='postgresql' else 'Create the MySQL statistics'))
             variables={'monitoring_db_config':{'uri':uri,'password_file':str(root/'password')}}
             sql=Templar(loader=DataLoader(),variables=variables).template(trust_as_template(task['ansible.builtin.command']['stdin']))
-            docker('exec','-i',container,*command,input=sql,text=True,capture_output=True)
+            create_argv=task['ansible.builtin.command']['argv'] if kind=='postgresql' else command
+            docker('exec','-i',container,*create_argv,input=sql,text=True,capture_output=True)
             if kind=='postgresql':
                 task=next(t for t in tasks if t['name'].startswith('Set the new PostgreSQL'))
                 argv=list(task['ansible.builtin.command']['argv']);position=argv.index('psql')+1;argv[position:position]=['-U','postgres']
                 docker('exec','-i',container,*argv,input=password+'\n'+password+'\n',text=True,capture_output=True)
                 task=next(t for t in tasks if t['name'].startswith('Verify the statistics role'))
-                sql=task['ansible.builtin.command']['argv'][-1]
-                assert docker('exec',container,*command,'-At','-c',sql,capture_output=True,text=True).stdout.strip()=='1'
+                assert docker('exec',container,*task['ansible.builtin.command']['argv'],capture_output=True,text=True).stdout.strip()=='1'
                 docker('exec',container,*command,'-c','CREATE TABLE private_application(secret text);',capture_output=True)
                 create=next(t for t in storage if t['name']=='Create only the dedicated monitoring database owner')
-                docker('exec','-i',container,*command,input=create['ansible.builtin.command']['stdin'],text=True,capture_output=True)
+                docker('exec','-i',container,*create['ansible.builtin.command']['argv'],input=create['ansible.builtin.command']['stdin'],text=True,capture_output=True)
                 task=next(t for t in storage if t['name'].startswith('Set the initial storage password'))
                 argv=list(task['ansible.builtin.command']['argv']);position=argv.index('psql')+1;argv[position:position]=['-U','postgres']
                 docker('exec','-i',container,*argv,input=password+'\n'+password+'\n',text=True,capture_output=True)
-                docker('exec',container,'createdb','-U','postgres','--owner=zabbix','zabbix',capture_output=True)
+                create_db=next(t for t in storage if t['name']=='Create the new empty monitoring database')
+                docker('exec',container,*create_db['ansible.builtin.command']['argv'],capture_output=True)
                 # The real derived HBA must work even when the retained body
                 # denies every TCP source. No broad loopback rule is supplied.
                 hba=zabbix.database_hba('local all postgres peer\nhost all all 0.0.0.0/0 reject\nhost all all ::/0 reject\n','198.18.157.9')

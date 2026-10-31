@@ -25,8 +25,7 @@
 
 - name: Require retained PostgreSQL TLS before creating monitoring accounts
   ansible.builtin.command:
-    argv: [psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, SHOW ssl]
-  become_user: postgres
+    argv: [runuser, -u, postgres, --, psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, SHOW ssl]
   register: monitoring_pg_tls
   changed_when: false
   failed_when: monitoring_pg_tls.stdout != 'on'
@@ -69,8 +68,7 @@
 
 - name: Inspect the fixed PostgreSQL monitoring identity
   ansible.builtin.command:
-    argv: [psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SELECT count(*) FROM pg_roles WHERE rolname='zbx_monitor'"]
-  become_user: postgres
+    argv: [runuser, -u, postgres, --, psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SELECT count(*) FROM pg_roles WHERE rolname='zbx_monitor'"]
   register: monitoring_pg_identity
   changed_when: false
   when: monitoring_db_kind == 'postgresql'
@@ -111,18 +109,16 @@
 
 - name: Create the dedicated PostgreSQL statistics reader without application ownership
   ansible.builtin.command:
-    argv: [psql, -X, -v, ON_ERROR_STOP=1, -d, postgres]
+    argv: [runuser, -u, postgres, --, psql, -X, -v, ON_ERROR_STOP=1, -d, postgres]
     stdin: "CREATE ROLE zbx_monitor LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS; GRANT pg_monitor TO zbx_monitor;"
-  become_user: postgres
   when: monitoring_db_kind == 'postgresql' and not monitoring_db_state.results[0].stat.exists
   no_log: true
 
 - name: Set the new PostgreSQL monitor password using client-side encryption
   ansible.builtin.command:
     # Detach any SSH controlling terminal so psql reads the private stdin pipe.
-    argv: [setsid, --wait, psql, -X, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SET password_encryption='scram-sha-256'", -c, '\password zbx_monitor']
+    argv: [runuser, -u, postgres, --, setsid, --wait, psql, -X, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SET password_encryption='scram-sha-256'", -c, '\password zbx_monitor']
     stdin: "{{ lookup('ansible.builtin.file', monitoring_db_config.password_file) | trim }}\n{{ lookup('ansible.builtin.file', monitoring_db_config.password_file) | trim }}\n"
-  become_user: postgres
   when: monitoring_db_kind == 'postgresql' and not monitoring_db_state.results[0].stat.exists
   no_log: true
 
@@ -135,8 +131,7 @@
 
 - name: Verify the statistics role has no PostgreSQL administration privileges
   ansible.builtin.command:
-    argv: [psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SELECT count(*) FROM pg_roles r WHERE rolname='zbx_monitor' AND rolcanlogin AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls AND (SELECT array_agg(p.rolname::text ORDER BY p.rolname) FROM pg_auth_members m JOIN pg_roles p ON p.oid=m.roleid WHERE m.member=r.oid)=ARRAY['pg_monitor']::text[]"]
-  become_user: postgres
+    argv: [runuser, -u, postgres, --, psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SELECT count(*) FROM pg_roles r WHERE rolname='zbx_monitor' AND rolcanlogin AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls AND (SELECT array_agg(p.rolname::text ORDER BY p.rolname) FROM pg_auth_members m JOIN pg_roles p ON p.oid=m.roleid WHERE m.member=r.oid)=ARRAY['pg_monitor']::text[]"]
   register: monitoring_pg_privileges
   changed_when: false
   failed_when: monitoring_pg_privileges.stdout != '1'

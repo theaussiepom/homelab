@@ -120,3 +120,19 @@ package-account mode records the vendor-created identity rather than renumbering
 it. SQL import, database contents and writer handover are separate prerequisites;
 ordinary deployment never restores or imports them. Database backend NICs and
 listener substitutions come from the reviewed stack/site definitions.
+
+### Reviewed failure after infrastructure succeeds
+
+A failed application step does not make its infrastructure update a completed
+application deployment. For a separately reviewed own failure, a private guest
+configuration may select `reviewed_ordinary_failures`: exact operation and phase,
+SHA256 pins for the preserved failed hold, completed infrastructure and failed
+log, plus the prior ordinary receipt and resulting backend digest. The operator
+must preserve that exact active hold inside its failed operation first. CD never
+releases it. Changed, foreign, unselected, pending or already completed attempts
+still refuse. A selected checkpoint admits only its verified backend identity;
+application steps execute in a new workflow run and must earn a real new final
+receipt. Original commissioning groups and failed records remain intact.
+
+PostgreSQL monitoring commands use `runuser -u postgres --` from the existing root
+connection. They do not assume that minimal Debian guests have `sudo` installed.

@@ -8,8 +8,7 @@
 
 - name: Inspect the dedicated storage role and database
   ansible.builtin.command:
-    argv: [psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SELECT (SELECT count(*) FROM pg_roles WHERE rolname='zabbix') || ':' || (SELECT count(*) FROM pg_database WHERE datname='zabbix')"]
-  become_user: postgres
+    argv: [runuser, -u, postgres, --, psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SELECT (SELECT count(*) FROM pg_roles WHERE rolname='zabbix') || ':' || (SELECT count(*) FROM pg_database WHERE datname='zabbix')"]
   register: monitoring_storage_before
   changed_when: false
 
@@ -34,30 +33,26 @@
 
 - name: Create only the dedicated monitoring database owner
   ansible.builtin.command:
-    argv: [psql, -X, -v, ON_ERROR_STOP=1, -d, postgres]
+    argv: [runuser, -u, postgres, --, psql, -X, -v, ON_ERROR_STOP=1, -d, postgres]
     stdin: 'CREATE ROLE zabbix LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;'
-  become_user: postgres
   when: not monitoring_storage_receipt.stat.exists
   no_log: true
 
 - name: Set the initial storage password with client-side SCRAM encryption
   ansible.builtin.command:
-    argv: [setsid, --wait, psql, -X, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SET password_encryption='scram-sha-256'", -c, '\password zabbix']
+    argv: [runuser, -u, postgres, --, setsid, --wait, psql, -X, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SET password_encryption='scram-sha-256'", -c, '\password zabbix']
     stdin: "{{ lookup('ansible.builtin.file', app.monitoring.storage_password_file) | trim }}\n{{ lookup('ansible.builtin.file', app.monitoring.storage_password_file) | trim }}\n"
-  become_user: postgres
   when: not monitoring_storage_receipt.stat.exists
   no_log: true
 
 - name: Create the new empty monitoring database
   ansible.builtin.command:
-    argv: [createdb, --owner=zabbix, zabbix]
-  become_user: postgres
+    argv: [runuser, -u, postgres, --, createdb, --owner=zabbix, zabbix]
   when: not monitoring_storage_receipt.stat.exists
 
 - name: Verify the storage owner retains no cluster administration privileges
   ansible.builtin.command:
-    argv: [psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SELECT count(*) FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba WHERE d.datname='zabbix' AND r.rolname='zabbix' AND r.rolcanlogin AND NOT r.rolsuper AND NOT r.rolcreatedb AND NOT r.rolcreaterole AND NOT r.rolreplication AND NOT r.rolbypassrls"]
-  become_user: postgres
+    argv: [runuser, -u, postgres, --, psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SELECT count(*) FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba WHERE d.datname='zabbix' AND r.rolname='zabbix' AND r.rolcanlogin AND NOT r.rolsuper AND NOT r.rolcreatedb AND NOT r.rolcreaterole AND NOT r.rolreplication AND NOT r.rolbypassrls"]
   register: monitoring_storage_privileges
   changed_when: false
   failed_when: monitoring_storage_privileges.stdout != '1'

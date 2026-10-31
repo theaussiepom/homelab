@@ -7,6 +7,7 @@ from private_io import require, digest, encoded, private_directory
 from plan_policy import RESOURCES
 from custody_records import decode, read_existing, no_markers
 from coordinated_contract import shape
+import ordinary_failure
 
 
 def backend(work, member):
@@ -78,10 +79,15 @@ def initial_canonical(raw, member, baseline):
 def latest_success(attempt, member, *, binding_key="coordinated_custody_sha256"):
     """An older anchor/pointer cannot supersede any recorded later F success."""
     found = {}
+    reviewed = (ordinary_failure.inspect(attempt, member, binding_key)
+                if binding_key == "coordinated_custody_sha256" else {})
+    attempt.reviewed_failures = reviewed
     for path in attempt.work.iterdir():
         if not re.fullmatch(r"ordinary-[1-9][0-9]*-[1-9][0-9]*", path.name):
             continue
         private_directory(path)
+        if path.name in reviewed:
+            continue
         if binding_key == "initial_ordinary_sha256":
             no_markers(path)
         active = path == attempt.operation and attempt.hold.exists()
@@ -152,9 +158,13 @@ def classify(attempt, member, lineage, baseline, *, binding_key="coordinated_cus
                 require(isinstance(operation, str) and Path(operation).parent == attempt.work
                         and re.fullmatch(r"ordinary-[1-9][0-9]*-[1-9][0-9]*", Path(operation).name),
                         "Keep this member's immutable ordinary operation")
+                checkpoints = [row for row in attempt.reviewed_failures.values()
+                               if row["previous_ordinary_sha256"] == digest(raw)
+                               and row["state_sha256"] == state_hash and row["identity"] == identity]
                 require(read_existing(Path(operation) / "complete.json") == raw
-                        and value["status"] == "passed" and value["state_sha256"] == state_hash
-                        and value["state_identity"] == identity
+                        and value["status"] == "passed"
+                        and (value["state_sha256"] == state_hash and value["state_identity"] == identity
+                             or len(checkpoints) == 1)
                         and isinstance(value["binding"], dict) and value["binding"].get("vmid") == member["vmid"]
                         and value["binding"].get(binding_key) == attempt.binding[binding_key],
                         "Preserve the latest exact ordinary success; no anchor fallback")

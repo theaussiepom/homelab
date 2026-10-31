@@ -20,6 +20,7 @@ import deployment_state as state
 import deploy
 import private_io as io
 import proxmox_guest as pve
+import ordinary_failure
 from fixtures import github_source
 from custody_fixtures import CompletedGroup, save, backend
 
@@ -67,6 +68,76 @@ class AdmissionTests(unittest.TestCase):
         import guest_contract
         for phase in ['infrastructure', *guest_contract.phases(runtime.cfg)]:
             deploy.run(phase, runtime.site)
+
+    def test_exact_reviewed_failed_infrastructure_can_advance_without_fabricating_application_success(self):
+        value = self.fixture()
+        real = subprocess.run
+        def output(argv, **kwargs):
+            if argv[0] == 'findmnt': return 'nfs4 nas.example.invalid:/backups\n'
+            return real(argv, check=True, stdout=subprocess.PIPE, **kwargs).stdout
+        with patch.object(subprocess, 'check_output', side_effect=output):
+            runtime = self.runtime(value)
+            self.all_phases(runtime)
+            previous = (runtime.work / 'ordinary-complete.json').read_bytes()
+            with patch.dict(os.environ, {'GITHUB_RUN_ID': '778', 'GITHUB_RUN_NUMBER': '778',
+                                         'GITHUB_SHA': runtime.revisions[1]}):
+                deploy.run('infrastructure', runtime.site)
+                deploy.run('preparation', runtime.site)
+                runtime.app.side_effect = RuntimeError('synthetic missing sudo before account writes')
+                with self.assertRaises(RuntimeError): deploy.run('mariadb', runtime.site)
+                runtime.app.side_effect = None
+            operation = runtime.work / 'ordinary-778-1'
+            hold = (runtime.work / 'ORDINARY-HOLD.json').read_bytes()
+            log = operation / 'mariadb/application.log'
+            save(log, b'synthetic fixed failure before account writes\n')
+            row = {'operation': operation.name, 'phase': 'mariadb', 'hold_sha256': io.digest(hold),
+                   'infrastructure_sha256': io.sha(operation / 'infrastructure-complete.json'),
+                   'log_sha256': io.sha(log), 'previous_ordinary_sha256': io.digest(previous),
+                   'state_sha256': io.sha(runtime.work / 'terraform.tfstate')}
+            runtime.cfg['reviewed_ordinary_failures'] = [row]
+            self.assertEqual((runtime.work / 'ordinary-complete.json').read_bytes(), previous)
+            with patch.dict(os.environ, {'GITHUB_RUN_ID': '779', 'GITHUB_RUN_NUMBER': '779',
+                                         'GITHUB_SHA': runtime.revisions[1]}):
+                with self.assertRaises((ValueError, OSError)): deploy.run('infrastructure', runtime.site)
+                # Operator preservation is explicit, never performed by CD.
+                (runtime.work / 'ORDINARY-HOLD.json').rename(operation / 'preserved-failed-hold.json')
+                for change in ('log', 'started', 'infra', 'foreign', 'complete', 'unselected'):
+                    originals = {p: p.read_bytes() for p in (log, operation / 'mariadb-started.json', operation / 'infrastructure-complete.json')}
+                    if change in ('log', 'started', 'infra'):
+                        target = {'log': log, 'started': operation / 'mariadb-started.json', 'infra': operation / 'infrastructure-complete.json'}[change]
+                        save(target, originals[target] + b' ')
+                    if change == 'foreign': row['previous_ordinary_sha256'] = 'f' * 64
+                    if change == 'complete': save(operation / 'complete.json', {})
+                    if change == 'unselected': runtime.cfg.pop('reviewed_ordinary_failures')
+                    with self.subTest(change=change), self.assertRaises((ValueError, OSError)):
+                        deploy.run('infrastructure', runtime.site)
+                    for p, raw in originals.items(): save(p, raw)
+                    row['previous_ordinary_sha256'] = io.digest(previous)
+                    (operation / 'complete.json').unlink(missing_ok=True)
+                    runtime.cfg['reviewed_ordinary_failures'] = [row]
+                self.all_phases(runtime)
+            with patch.dict(os.environ, {'GITHUB_RUN_ID': '780', 'GITHUB_RUN_NUMBER': '780',
+                                         'GITHUB_SHA': runtime.revisions[1]}): self.all_phases(runtime)
+            self.assertEqual((operation / 'preserved-failed-hold.json').read_bytes(), hold)
+            self.assertFalse((operation / 'complete.json').exists())
+            self.assertEqual(records.decode((runtime.work / 'ordinary-complete.json').read_bytes())['run_number'], 780)
+
+    def test_reviewed_failure_source_is_closed_bounded_and_cannot_select_paths_or_unknown_digests(self):
+        row = {'operation': 'ordinary-100-1', 'phase': 'postgresql',
+               **{k: 'a' * 64 for k in ('hold_sha256', 'infrastructure_sha256', 'log_sha256', 'previous_ordinary_sha256', 'state_sha256')}}
+        self.assertEqual(ordinary_failure.selection({}), [])
+        for change in ('type', 'bound', 'group', 'extra', 'path', 'duplicate', 'phase', 'digest'):
+            cfg = {'coordinated_custody': {}, 'reviewed_ordinary_failures': [copy.deepcopy(row)]}
+            selected = cfg['reviewed_ordinary_failures']
+            if change == 'type': cfg['reviewed_ordinary_failures'] = {}
+            if change == 'bound': cfg['reviewed_ordinary_failures'] = [row] * 17
+            if change == 'group': cfg.pop('coordinated_custody')
+            if change == 'extra': selected[0]['unknown'] = True
+            if change == 'path': selected[0]['operation'] = '../ordinary-100-1'
+            if change == 'duplicate': selected.append(copy.deepcopy(row))
+            if change == 'phase': selected[0]['phase'] = '../postgresql'
+            if change == 'digest': selected[0]['hold_sha256'] = 'unknown'
+            with self.subTest(change=change), self.assertRaises(ValueError): ordinary_failure.selection(cfg)
 
     def test_complete_local_and_nas_provenance_includes_disabled_members(self):
         value = self.fixture(postgres=True)
