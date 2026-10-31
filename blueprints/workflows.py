@@ -231,7 +231,9 @@ PYCODE
             "with open(os.environ['GITHUB_OUTPUT'], 'a') as output:\n"
             "    print('zabbix=' + str(monitoring).lower(), file=output)\n"
             "active = set(spec) - set(disabled)\n"
-            "if not monitoring: active.discard('monitoring')")
+            "if not monitoring: active.discard('monitoring')\n"
+            "if monitoring and active and 'monitoring' not in active:\n"
+            "    raise SystemExit('Keep Zabbix enabled while deploying its monitored guests')")
     for guest in spec["guests"]:
         blueprint = compiler.CATALOGUE[guest]
         compiler.require(

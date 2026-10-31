@@ -69,6 +69,13 @@ class ZabbixTests(unittest.TestCase):
         self.assertNotIn('secret', json.dumps(members).lower())
         self.assertEqual(list(zabbix.connections_for({})), [])
 
+    def test_disabled_server_refuses_active_agents_but_preserves_inventory_only_empty_selection(self):
+        for overlay, guests in [({}, ['dns']), ({'zabbix': None}, []),
+                                ({'zabbix': None}, ['monitoring', 'dns'])]:
+            zabbix.selection(overlay, guests)
+        with self.assertRaisesRegex(ValueError, 'Keep Zabbix enabled'):
+            zabbix.selection({'zabbix': None}, ['dns'])
+
     def test_disabled_execution_does_not_remove_profiles_from_configured_guests(self):
         resolved = composition()
         zabbix.bind(resolved, ['monitoring', 'postgresql'], VALUES)

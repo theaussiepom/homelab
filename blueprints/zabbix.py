@@ -32,6 +32,12 @@ def selected(spec, overlay):
     return result
 
 
+def selection(overlay, guests):
+    """Do not deploy active agents against a disabled first-install server."""
+    require(not enabled(overlay) or not guests or GUEST in guests,
+            "Keep Zabbix enabled while deploying its monitored guests")
+
+
 def rule(direction, source, destination, port):
     return {"direction": direction, "source": source + "/32",
             "destination": destination + "/32", "proto": "tcp",

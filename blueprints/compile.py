@@ -332,6 +332,7 @@ def compile_stack(root, overlay, disabled=None, *, admit=False):
     """Resolve the composition once; reject identity collisions before admission."""
     spec = zabbix.selected(manifest(root), overlay)
     enabled = selection(spec, disabled)
+    zabbix.selection(overlay, enabled)
     require(
         set(overlay) - {"zabbix"}
         == {"schema", "values", "common", "guests", "images", "accepted", "routes"}
