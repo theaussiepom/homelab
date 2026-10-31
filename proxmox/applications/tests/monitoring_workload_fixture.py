@@ -66,6 +66,9 @@ def main(args):
     root=args.output.resolve()/prefix;root.mkdir(mode=0o700,parents=True)
     password=secrets.token_hex(32);(root/'password').write_text(password);(root/'password').chmod(0o600)
     tasks=yaml.safe_load((Path(__file__).resolve().parents[1]/'ansible/tasks/monitoring-database-account.yml').read_text())
+    storage=yaml.safe_load((Path(__file__).resolve().parents[1]/'ansible/tasks/monitoring-storage.yml').read_text())
+    sys.path.insert(0,str(Path(__file__).resolve().parents[3]/'blueprints'))
+    import zabbix
     def docker(*cmd,check=True,**kw):
         try:return subprocess.run(['docker',*map(str,cmd)],timeout=180,check=check,**kw)
         except subprocess.CalledProcessError as error:
@@ -97,6 +100,19 @@ def main(args):
                 sql=task['ansible.builtin.command']['argv'][-1]
                 assert docker('exec',container,*command,'-At','-c',sql,capture_output=True,text=True).stdout.strip()=='1'
                 docker('exec',container,*command,'-c','CREATE TABLE private_application(secret text);',capture_output=True)
+                create=next(t for t in storage if t['name']=='Create only the dedicated monitoring database owner')
+                docker('exec','-i',container,*command,input=create['ansible.builtin.command']['stdin'],text=True,capture_output=True)
+                task=next(t for t in storage if t['name'].startswith('Set the initial storage password'))
+                argv=list(task['ansible.builtin.command']['argv']);position=argv.index('psql')+1;argv[position:position]=['-U','postgres']
+                docker('exec','-i',container,*argv,input=password+'\n'+password+'\n',text=True,capture_output=True)
+                docker('exec',container,'createdb','-U','postgres','--owner=zabbix','zabbix',capture_output=True)
+                # The real derived HBA must work even when the retained body
+                # denies every TCP source. No broad loopback rule is supplied.
+                hba=zabbix.database_hba('local all postgres peer\nhost all all 0.0.0.0/0 reject\nhost all all ::/0 reject\n','198.18.157.9')
+                docker('exec','-i','--user','postgres',container,'sh','-c','cat > /var/lib/postgresql/data/pg_hba.conf',input=hba,text=True,capture_output=True)
+                docker('exec','--user','postgres',container,'psql','-U','postgres','-At','-c','SELECT pg_reload_conf()',capture_output=True)
+                auth=docker('exec','-e','PGPASSWORD='+password,container,'psql','-h','127.0.0.1','-U','zabbix','-d','zabbix','-At','-c','SELECT current_user',capture_output=True,text=True)
+                assert auth.stdout.strip()=='zabbix'
                 for sql in ['CREATE DATABASE forbidden','CREATE ROLE forbidden','SELECT * FROM private_application']:
                     denied=docker('exec','-e','PGPASSWORD='+password,container,'psql','-h','127.0.0.1','-U','zbx_monitor','-d','postgres','-v','ON_ERROR_STOP=1','-c',sql,check=False,capture_output=True)
                     assert denied.returncode and b'permission denied' in denied.stderr
@@ -112,7 +128,7 @@ def main(args):
                        'homelab-app-test','python3','/src/proxmox/applications/tests/monitoring_workload_fixture.py','--client',kind,capture_output=True,text=True)
             (root/(kind+'-client.log')).write_text(run.stdout+run.stderr)
             results[kind]=json.loads(run.stdout.splitlines()[-1])
-        (root/'result.json').write_text(json.dumps({'metrics':results,'postgresql_no_admin_or_application_rows':True,'mariadb_finite_statistics_grants':True,'scope':'Disposable owning-network namespaces and pinned Agent2 plugins; no native rollout.'},indent=2)+'\n')
+        (root/'result.json').write_text(json.dumps({'metrics':results,'derived_HBA_stats_and_storage_loopback_auth':True,'postgresql_no_admin_or_application_rows':True,'mariadb_finite_statistics_grants':True,'scope':'Disposable owning-network namespaces and pinned Agent2 plugins; no native rollout.'},indent=2)+'\n')
         print((root/'result.json').read_text())
     finally:
         for kind in ('postgresql','mysql'):

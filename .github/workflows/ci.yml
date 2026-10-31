@@ -81,6 +81,8 @@ jobs:
             python3 /src/proxmox/applications/tests/native_agent_fixture.py /fixture-agent.deb
       - name: Test root blueprint API, active Docker data and native database plugins
         run: |
+          docker run --rm --platform linux/amd64 --network none -v "$PWD:/src:ro" homelab-app-test \
+            python3 /src/proxmox/applications/tests/monitoring_agent_guard_fixture.py
           curl --fail --silent --show-error --max-time 120 \
             'https://repo.zabbix.com/zabbix/7.0/debian/pool/main/z/zabbix-agent2-plugin-postgresql/zabbix-agent2-plugin-postgresql_7.0.32-1%2Bdebian13_amd64.deb' \
             --output "$RUNNER_TEMP/zabbix-postgresql.deb"

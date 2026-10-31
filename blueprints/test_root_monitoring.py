@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import sys
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'proxmox/applications'))
 
 import zabbix
 import connections
@@ -59,7 +61,7 @@ class ZabbixTests(unittest.TestCase):
         self.assertEqual(members['influxdb']['url'], 'http://198.18.33.26:8086')
         self.assertEqual(len({m['psk_identity'] for m in members.values()}), len(members))
         hba = resolved['postgresql'][2]['pg_hba.conf']
-        self.assertEqual(hba, 'local all postgres peer\nhost zabbix zabbix 198.18.31.36/32 scram-sha-256\n')
+        self.assertEqual(hba, zabbix.database_hba('local all postgres peer\n', '198.18.31.36'))
         cfgs = {k: v[0] for k, v in resolved.items()}
         for edge in zabbix.connections_for(cfgs):
             self.assertTrue(connections.permits(cfgs[edge.source]['guest']['rules'], 'out', edge))
@@ -91,3 +93,12 @@ class ZabbixTests(unittest.TestCase):
         zabbix.bind(resolved,list(resolved),VALUES)
         members=resolved['monitoring'][0]['app']['monitoring']['members']
         self.assertNotIn('mysql',[p for m in members for p in m['profiles']])
+
+    def test_narrow_monitoring_authentication_precedes_retained_denies(self):
+        original='local all postgres peer\nhost all all 0.0.0.0/0 reject\n'
+        value=zabbix.database_hba(original,'198.18.31.36')
+        self.assertTrue(value.endswith(original))
+        self.assertEqual(value.splitlines()[:4],['# Root Zabbix: dedicated storage and local statistics only',
+            'host postgres zbx_monitor 127.0.0.1/32 scram-sha-256','host zabbix zabbix 127.0.0.1/32 scram-sha-256',
+            'host zabbix zabbix 198.18.31.36/32 scram-sha-256'])
+        with self.assertRaises(ValueError):zabbix.database_hba(original,'8.8.8.8')

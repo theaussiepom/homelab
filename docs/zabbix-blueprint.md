@@ -81,6 +81,15 @@ bootstrap owner/READY/token before creating a key or changing a guest. Those fil
 join normal input identity hashes. A missing/held/foreign bootstrap result stops
 CD before any monitoring agent or database reader is installed.
 
+Before native commissioning, review the actual access impact: the dedicated
+Proxmox identity has nonexpiring, cluster-wide `Sys.Audit`, `VM.Audit` and
+`Datastore.Audit` grants, plus one server-address `/32` host API allowance.
+Docker monitoring grants the guest-local agent root-equivalent Docker engine
+access on each Docker-capable guest. The root property selects these defaults;
+there are no extra per-guest user flags. Source publication does not approve or
+perform those native grants. Their actual commissioning and the private CD
+selection remain separately reviewed before activation.
+
 All native steps remain within existing per-guest locks, ordered phases, failure
 holds and the private reviewed-main deployment queue. There is no second
 monitoring deployment controller, automatic failed-attempt replay or rollback.

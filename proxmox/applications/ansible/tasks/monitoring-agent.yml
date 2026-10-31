@@ -8,6 +8,17 @@
     - /var/lib/homelab-monitoring/agent.json
   register: monitoring_agent_before
 
+- name: Inspect an interrupted agent installation
+  ansible.builtin.stat:
+    path: /var/lib/homelab-monitoring/AGENT-HOLD
+    follow: false
+  register: monitoring_agent_hold
+
+- name: Refuse an interrupted agent installation without retrying packages or keys
+  ansible.builtin.assert:
+    that: not monitoring_agent_hold.stat.exists and not monitoring_agent_hold.stat.islnk | default(false)
+    fail_msg: 'Agent installation is held; preserve the original guest attempt and credentials for review.'
+
 - name: Refuse an unowned existing agent or missing commissioned configuration
   ansible.builtin.assert:
     that:
@@ -38,6 +49,16 @@
       - >-
         (monitoring_agent_owner.content | b64decode | from_json) == {'hostname': app.monitoring.hostname, 'psk_identity': app.monitoring.psk_identity, 'version': monitoring_agent_package.version}
   when: monitoring_agent_before.results[1].stat.exists
+
+- name: Record an interrupted first installation before package changes
+  ansible.builtin.copy:
+    content: "{{ {'hostname': app.monitoring.hostname, 'psk_identity': app.monitoring.psk_identity, 'version': monitoring_agent_package.version} | to_json }}\n"
+    dest: /var/lib/homelab-monitoring/AGENT-HOLD
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
+  when: not monitoring_agent_before.results[1].stat.exists
 
 - name: Download the exact Agent 2 package into private guest storage
   ansible.builtin.get_url:
@@ -154,3 +175,8 @@
     group: root
     mode: '0600'
     force: false
+
+- name: Complete the owned first agent installation
+  ansible.builtin.file:
+    path: /var/lib/homelab-monitoring/AGENT-HOLD
+    state: absent

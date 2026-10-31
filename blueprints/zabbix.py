@@ -38,6 +38,16 @@ def rule(direction, source, destination, port):
             "port": str(port), "comment": "Blueprint Zabbix monitoring"}
 
 
+def database_hba(original, source):
+    """Admit only the owned monitoring accounts before existing deny rules."""
+    require(ipaddress.IPv4Address(source).is_private,
+            "Use the declared private monitoring database source")
+    return ('# Root Zabbix: dedicated storage and local statistics only\n'
+            'host postgres zbx_monitor 127.0.0.1/32 scram-sha-256\n'
+            'host zabbix zabbix 127.0.0.1/32 scram-sha-256\n'
+            'host zabbix zabbix ' + source + '/32 scram-sha-256\n' + original)
+
+
 def bind(resolved, enabled_guests, values):
     """Derive one agent per guest, its workload profiles and exact TCP edges."""
     server_cfg, server_stack, _ = resolved[GUEST]
@@ -98,7 +108,7 @@ def bind(resolved, enabled_guests, values):
         if name == 'postgresql':
             files = resolved[name][2]
             require('pg_hba.conf' in files, 'Declare PostgreSQL HBA before adding the monitoring database')
-            files['pg_hba.conf'] += 'host zabbix zabbix ' + source + '/32 scram-sha-256\n'
+            files['pg_hba.conf'] = database_hba(files['pg_hba.conf'], source)
         else:
             for member in members:
                 if member['guest'] == name:
