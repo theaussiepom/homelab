@@ -25,10 +25,10 @@ from custody_fixtures import CompletedGroup, save, backend
 
 
 class AdmissionTests(unittest.TestCase):
-    def fixture(self, postgres=False, proof_literal=None):
+    def fixture(self, postgres=False, proof_literal=None, legacy_serializers=True):
         td = tempfile.TemporaryDirectory()
         self.addCleanup(td.cleanup)
-        value = CompletedGroup(td.name, postgres=postgres, proof_literal=proof_literal)
+        value = CompletedGroup(td.name, postgres=postgres, proof_literal=proof_literal, legacy_serializers=legacy_serializers)
         mount = patch.object(records.os.path, 'ismount', return_value=True)
         findmnt = patch.object(records.subprocess, 'check_output', return_value='nfs4 nas.example.invalid:/backups\n')
         mount.start(); findmnt.start()

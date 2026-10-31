@@ -54,7 +54,7 @@ def main():
     args = parser.parse_args()
     if args.inside:
         return inside()
-    # Evidence of this invocation's pull; the deployment reference remains latest.
+    # This source fixture observes its fetched image; rendering pins that local ID.
     docker('image', 'inspect', '--format', '{{json .RepoDigests}}', IMAGE)
     project = 'homelab-bitwarden-fixture-' + uuid.uuid4().hex[:10]
     with tempfile.TemporaryDirectory(prefix=project) as temporary:

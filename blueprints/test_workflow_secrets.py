@@ -19,6 +19,14 @@ OWNED = {
 }
 SMTP = 'FOUNDATION_AUTHENTIK_SMTP_PASSWORD'
 ALL_NAMES = COMMON | set().union(*OWNED.values())
+ALIASES = {
+    'NODE_RED_API_TOKEN': 'AUTOMATION_NODE_RED_API_TOKEN',
+    'AUTHENTIK_SECRET_KEY': 'FOUNDATION_AUTHENTIK_SECRET_KEY',
+    'AUTHENTIK_POSTGRES_PASSWORD': 'FOUNDATION_AUTHENTIK_POSTGRES_PASSWORD',
+    'AUTHENTIK_SMTP_PASSWORD': 'FOUNDATION_AUTHENTIK_SMTP_PASSWORD',
+    'PGADMIN_OAUTH_SECRET': 'FOUNDATION_PGADMIN_OAUTH_SECRET',
+    'CLOUDFLARE_DNS_TOKEN': 'FOUNDATION_CLOUDFLARE_DNS_TOKEN',
+}
 
 
 def call(values, job, target):
@@ -64,33 +72,56 @@ class NamedSecretWorkflowTests(unittest.TestCase):
         self.assertNotIn('secrets', self.models['deploy.yml']['jobs']['selection'])
         self.assertNotIn('environment', self.models['deploy.yml']['jobs']['selection'])
 
-    def test_all_declared_guests_forward_only_their_values_through_every_phase(self):
+    def test_all_declared_guests_keep_effective_step_only_secret_values(self):
         self.assertEqual(set(self.models) - {"deploy.yml", "phase.yml"},
                          {"guest-" + name + ".yml" for name in workflows.compiler.CATALOGUE})
-        available = {name: 'invented-' + name for name in ALL_NAMES}
-        available.update(PEGAPROX_ADMIN_PASSWORD='unselected', PEGAPROX_DB_KEY='unselected')
-        # The private caller currently selects seven existing names; SMTP stays optional.
-        private_map = {name: '${{ secrets.' + name + ' }}' for name in ALL_NAMES - {SMTP}}
-        aggregate = call(available, {'secrets': private_map}, self.models['deploy.yml'])
-        for guest, blueprint in workflows.compiler.CATALOGUE.items():
-            with self.subTest(guest=guest):
-                required_scope = COMMON | OWNED.get(guest, set())
-                guest_model = self.models['guest-' + guest + '.yml']
-                declarations = guest_model['on']['workflow_call']['secrets']
-                self.assertEqual(set(declarations), required_scope)
-                self.assertEqual({name for name, flags in declarations.items() if flags['required']}, required_scope - {SMTP})
-                guest_values = call(aggregate, self.models['deploy.yml']['jobs'][guest], guest_model)
-                self.assertEqual(set(guest_values), required_scope)
-                for phase in ['infrastructure', 'preparation', *blueprint['applications']]:
-                    phase_values = call(guest_values, guest_model['jobs'][phase], self.models['phase.yml'])
-                    final_values = call(phase_values, self.models['phase.yml']['jobs']['run'], self.framework)
-                    self.assertEqual(set(final_values), ALL_NAMES)
-                    self.assertEqual({name for name, value in final_values.items() if value}, required_scope - {SMTP})
-                    self.assertEqual({name: final_values[name] for name in required_scope - {SMTP}},
-                                     {name: available[name] for name in required_scope - {SMTP}})
-                    self.assertEqual(guest_model['jobs'][phase]['with']['phase'], phase)
-                    self.assertEqual(guest_model['jobs'][phase]['with']['guest'], guest)
-                    self.assertEqual(phase_values.get(SMTP, ''), '')
+        for smtp_present in (False, True):
+            available = {name: 'invented-' + name for name in ALL_NAMES}
+            available.update(PEGAPROX_ADMIN_PASSWORD='unselected', PEGAPROX_DB_KEY='unselected')
+            names = ALL_NAMES if smtp_present else ALL_NAMES - {SMTP}
+            private_map = {name: '${{ secrets.' + name + ' }}' for name in names}
+            aggregate = call(available, {'secrets': private_map}, self.models['deploy.yml'])
+            for guest, blueprint in workflows.compiler.CATALOGUE.items():
+                with self.subTest(guest=guest, smtp_present=smtp_present):
+                    required_scope = COMMON | OWNED.get(guest, set())
+                    guest_model = self.models['guest-' + guest + '.yml']
+                    declarations = guest_model['on']['workflow_call']['secrets']
+                    self.assertEqual(set(declarations), required_scope)
+                    self.assertEqual({name for name, flags in declarations.items() if flags['required']}, required_scope - {SMTP})
+                    guest_values = call(aggregate, self.models['deploy.yml']['jobs'][guest], guest_model)
+                    self.assertEqual(set(guest_values), required_scope)
+                    self.assertEqual(set(guest_model['jobs']), {'deploy'})
+                    job = guest_model['jobs']['deploy']
+                    for index, phase in enumerate(['infrastructure', 'preparation', *blueprint['applications']]):
+                        steps = [step for step in job['steps'] if step.get('env', {}).get('PHASE') == phase]
+                        self.assertNotIn('secrets', job)
+                        self.assertEqual(set(job['env']), {'HOMELAB_DEPLOYMENT_WORKFLOW'})
+                        credential = steps[1]['env']
+                        self.assertEqual({key for key in credential if key not in {'GUEST', 'PHASE'}}, COMMON)
+                        final_values = {key: guest_values.get(key, '') for key in COMMON}
+                        for key, expression in steps[2]['env'].items():
+                            if key in {'GUEST', 'PHASE'}: continue
+                            match = re.fullmatch(r"\$\{\{ '([a-z0-9-]+)' == '([a-z-]+)' && (?:secrets\.([A-Z_]+)|'') \|\| '' \}\}", expression)
+                            self.assertIsNotNone(match)
+                            actual_guest, owner, selected_name = match.groups()
+                            name = ALIASES[key]
+                            self.assertEqual(actual_guest, guest)
+                            self.assertIn(name, OWNED[owner])
+                            if selected_name is None:
+                                self.assertNotEqual(actual_guest, owner)
+                                self.assertNotIn(name, required_scope)
+                            else:
+                                self.assertEqual(selected_name, name)
+                                self.assertIn(name, required_scope)
+                            final_values[name] = guest_values.get(name, '') if actual_guest == owner else ''
+                        self.assertEqual(set(final_values), ALL_NAMES)
+                        expected_present = required_scope & names
+                        self.assertEqual({name for name, value in final_values.items() if value}, expected_present)
+                        self.assertEqual({name: final_values[name] for name in expected_present},
+                                         {name: available[name] for name in expected_present})
+                        self.assertEqual(steps[0]['env']['PHASE'], phase)
+                        self.assertEqual(steps[0]['env']['GUEST'], guest)
+                        self.assertEqual(final_values[SMTP], available[SMTP] if smtp_present and guest == 'identity' else '')
 
     def test_missing_name_is_refused_but_empty_values_remain_runtime_admission(self):
         guest = self.models['guest-automation.yml']

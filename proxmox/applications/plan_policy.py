@@ -30,8 +30,26 @@ def has_unknown(value):
     return value is not None and value is not False
 
 
+def refresh_values(value):
+    """Normalize only bpg 0.117.0 optional null/empty refresh representations."""
+    result = dict(value)
+    for name, empty in (("tags", []), ("environment_variables", {})):
+        if name in result and result[name] is None:
+            result[name] = empty
+    for block, field in (("disk", "mount_options"),
+                         ("mount_point", "mount_options"), ("features", "mount")):
+        rows = result.get(block)
+        if isinstance(rows, list):
+            result[block] = [
+                dict(row, **{field: []})
+                if isinstance(row, dict) and field in row and row[field] is None
+                else row for row in rows
+            ]
+    return result
+
+
 def allowed_guest_drift(rows, node, vmid, serial_device):
-    """Reconcile active state and the registered host-owned device, preserving all else."""
+    """Reconcile active/device drift and bpg 0.117.0 top-level computed IP maps."""
     if not rows:
         return True
     if not isinstance(rows, list) or len(rows) != 1:
@@ -43,17 +61,18 @@ def allowed_guest_drift(rows, node, vmid, serial_device):
     before, after = change.get("before"), change.get("after")
     if not isinstance(before, dict) or not isinstance(after, dict):
         return False
+    old, new = refresh_values(before), refresh_values(after)
     if (
         before.get("vm_id") != vmid
         or before.get("node_name") != node
         or has_unknown(change.get("after_unknown", {}))
         or {
             k: v
-            for k, v in before.items()
-            if k not in {"started", "device_passthrough"}
+            for k, v in old.items()
+            if k not in {"started", "device_passthrough", "ipv4", "ipv6"}
         }
         != {
-            k: v for k, v in after.items() if k not in {"started", "device_passthrough"}
+            k: v for k, v in new.items() if k not in {"started", "device_passthrough", "ipv4", "ipv6"}
         }
     ):
         return False
@@ -71,7 +90,13 @@ def allowed_guest_drift(rows, node, vmid, serial_device):
     was, now = before.get("started"), after.get("started")
     if was != now and not (type(was) is bool and type(now) is bool):
         return False
-    return was != now or old_devices != new_devices
+    return (
+        was != now
+        or old_devices != new_devices
+        or before.get("ipv4") != after.get("ipv4")
+        or before.get("ipv6") != after.get("ipv6")
+        or (before != after and old == new)
+    )
 
 
 def check_plan(value, node, vmid, *, existing, serial_device=None):

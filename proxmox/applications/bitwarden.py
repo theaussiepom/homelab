@@ -123,6 +123,8 @@ def validate_stack(cfg):
 def configure(cfg, document):
     address = validate(cfg)
     service = document["services"]["bitwarden"]
+    if cfg["services"]["bitwarden"]["image"] == "ghcr.io/bitwarden/lite:latest":
+        service["image"] = cfg["bitwarden"]["image_id"]
     del service["network_mode"]
     original = cfg["services"]["bitwarden"].get("environment", {})
     if "TZ" in original:

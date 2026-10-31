@@ -45,8 +45,7 @@ def selection(cfg, *, allow_input_slot=False):
     operation = group["operation"]
     require(isinstance(operation, str) and re.fullmatch(engine + r"-[a-z0-9][a-z0-9-]{0,63}", operation),
             "Bind the original commissioning operation")
-    prefix = "database-network-cutover-" if engine == "postgresql" else "database-server-cutover-"
-    require(group["directory"] == prefix + operation,
+    require(group["directory"] == "database-network-cutover-" + operation,
             "Bind the exact existing group directory")
     shape(group["records"], RECORDS)
     for value_hash in group["records"].values():
@@ -86,10 +85,13 @@ def selection(cfg, *, allow_input_slot=False):
         fingerprint(member["initial_state_sha256"])
         initial = member["initial_ordinary"]
         if initial is not None:
-            shape(initial, {"operation", "sha256", "source_sha256"})
+            require(isinstance(initial, dict), "Use a closed selected initial receipt")
+            shape(initial, {"operation", "sha256", "source_sha256"}
+                  | ({"immutable_sha256"} if "immutable_sha256" in initial else set()))
             require(isinstance(initial["operation"], str) and re.fullmatch(r"ordinary-[1-9][0-9]*-[1-9][0-9]*", initial["operation"]),
                     "Name the existing immutable initial operation copy")
             fingerprint(initial["sha256"])
+            fingerprint(initial.get("immutable_sha256", initial["sha256"]))
             fingerprint(initial["source_sha256"])
     require(len(ids) == len(set(ids)), "Keep group member identities distinct")
     role = cfg["app"]["kind"]

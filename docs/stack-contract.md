@@ -45,22 +45,76 @@ The private site's `.github/workflows/deploy.yml` has one literal external stack
 workflow reference. That SHA is the adopted stack version. There are no competing
 JSON pins. Image entries have a repository, recorded tag (or null), and digest;
 a retained local image instead has a local ID, archive path and archive hash.
-The existing Bitwarden operator-selected `latest` policy is a documented exception
-with a separate observed image ID checked at runtime; this work does not change it.
+The existing Bitwarden `latest` source selection requires its separately selected
+retained local image ID. Ordinary deployment does not pull or retag mutable
+`latest`: rendering uses that exact ID, and runtime inspection must confirm it
+before start. Missing or mismatched local content fails closed. Explicit immutable
+registry digests and verified archive selections keep their existing behavior.
 
-GitHub requires literal reusable workflow references. The stack uses static guest
-workflows and explicit `needs`, and the reusable phase runner explicitly checks out
-the caller site, selected stack and selected framework. Workflow nesting stays
-within GitHub's supported limits. References: [reuse workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows),
-[caller checkout behavior](https://docs.github.com/en/actions/concepts/workflows-and-actions/reusing-workflow-configurations).
+GitHub requires literal reusable workflow references. The stack keeps one
+independently callable workflow per guest and explicit cross-guest `needs`. Each
+guest workflow contains one real deployment job named Deploy. Infrastructure,
+preparation and application phases run as ordered steps in that job. There is
+one additional selection-validation job before the eleven guest deployment jobs.
+
+The generator reads the selected framework checkout's authoritative phase recipe.
+Five checkout and selection steps run once per guest, using the pinned
+private/stack/framework sources. The original readiness command runs before
+every phase. An exact digest guard permits sharing only the reviewed
+common setup; changed commands, action pins, output IDs or policies require review.
+The existing stack/framework output IDs occur once. The compiler, credential binding
+and deployment commands then run separately for every phase with unchanged command
+bodies and phase-specific packet paths. Each compiler creates a new packet
+exclusively; phases do not reuse another phase's packet or environment secrets.
+The original readiness command checks bootstrap custody before each phase's
+compilation and credential binding; only checkout and selection work is shared.
+A hold present at that phase readiness check stops the phase before its packet
+or missing retained credentials can be written. This restores the original
+boundary check; it does not make an entire phase atomic. The deployment entry point also
+rechecks bootstrap custody before target access on every phase.
+
+The selected runner, protected Environment, contents-read permission and workflow
+identity apply to the guest job. Its budget is the original 45-minute phase
+allowance multiplied by the phase count: 135 minutes for three-phase guests,
+180 for DNS and 225 for Automation. Every setup, compile, credential and deployment
+step also has an explicit 45-minute cap. The standalone phase recipe retains its
+45-minute job budget, and command-internal deadlines remain unchanged. Generation
+refuses an aggregate above 360 minutes, keeping the budget within the portable
+GitHub-hosted job limit. Self-hosted runners have a higher platform limit; this
+framework deliberately retains the portable bound. One job replaces the former
+per-phase runner and Environment boundaries. A failed step stops subsequent
+phase steps under GitHub's default success condition. Rerunning the guest starts
+at infrastructure and remains subject to existing holds and no-replay checks.
+
+Guest-only secret declarations and the original credential/deployment step scopes
+remain intact. Provably false unrelated secret operands bind to the explicit empty
+value; selected credentials cannot be folded away. All checkouts disable persisted
+credentials. The pinned checkout action removes authentication before its main step
+returns; its final cleanup remains at job end. Phase credential-key temporary files
+retain the existing cleanup within credential binding. Short labels include Update
+container, Prepare service, Deploy service, Deploy DNS, Deploy MQTT, Deploy Home
+Assistant and Deploy Node-RED.
+
+References: [workflow reuse](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows),
+[step status conditions](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions),
+[runner execution limits](https://docs.github.com/en/actions/reference/limits),
+[step timeout limits](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepstimeout-minutes),
+[pinned checkout authentication cleanup](https://github.com/actions/checkout/blob/3d3c42e5aac5ba805825da76410c181273ba90b1/src/git-source-provider.ts#L291).
+
 `blueprints/workflows.py` generates the checked-in stack entry workflow and one
-permanent workflow per guest. Application phases and display names come from the
-blueprint catalogue; cross-guest dependencies come from `stack.json`. Source CI
-runs the same generator with `--check` and rejects missing, changed or obsolete
-generated paths without rewriting them. Generation happens during development;
-GitHub executes the explicit checked-in graph. There is no runtime DAG executor.
-The framework selection in `phase.yml`, source CI and private exclusions/version
-selection remain explicit controls outside the generator.
+permanent workflow per guest. Application phase order comes from the blueprint
+catalogue. The generator supplies short step labels and uses catalogue names for
+additional application phases; cross-guest dependencies come from `stack.json`. Source CI
+runs the same selected generator with `--check` and rejects missing, changed or
+obsolete generated paths without rewriting them. GitHub executes the explicit
+checked-in jobs and steps; there is no runtime DAG executor or phase dispatcher.
+The framework selection in `phase.yml` remains an uncalled immutable selection
+anchor for existing source/CI/runtime parsers. Guest jobs do not call that wrapper.
+The source equivalence checks establish eleven deployment jobs, all 36 ordered
+logical phases, command bytes and effective secret values. Actual Actions job names,
+step display and private workflow/receipt continuity require separate verification
+on the next authorized native CD. Static source tests do not establish native UI
+acceptance.
 
 ## Custody and phase behavior
 
@@ -380,9 +434,10 @@ provide native execution authority.
 ## Explicit reusable-workflow secret names
 
 The workflow generator owns declarations and explicit named forwarding for the
-deploy, per-guest and generic phase workflows. The selected framework revision
-remains authoritative in the generated `phase.yml`; regeneration preserves that
-exact selection. The generic framework workflow declares the same eight existing
+deploy and per-guest workflow calls, and step-only secret expressions in the
+materialized jobs. The uncalled generic phase selection anchor remains unchanged.
+The selected framework revision remains authoritative in generated `phase.yml`;
+regeneration preserves that exact selection. Its generic workflow declares the same eight existing
 names: two required shared API/SSH names and six optional application names.
 Each guest workflow requires only its own selected application names in addition
 to the shared pair; SMTP remains optional. Retained PegaProx bootstrap names are
