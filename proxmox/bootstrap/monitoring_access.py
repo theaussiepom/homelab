@@ -83,7 +83,11 @@ def verify(api, c, saved, before_rules):
     reader = API.__new__(API)
     reader.configure(c['endpoint'], saved['token'], api.ca)
     effective = {p: v for p, v in reader.call('/access/permissions')['data'].items() if v}
-    require(set(effective) == {'/'} and set(effective['/']) == PRIVILEGES, 'Effective monitoring permissions differ')
+    # Proxmox expands a propagated root ACL over existing child ACL paths.
+    # Every reported path must retain exactly the three audit privileges.
+    require('/' in effective and all(set(privileges) == PRIVILEGES
+            and all(flag == 1 for flag in privileges.values())
+            for privileges in effective.values()), 'Effective monitoring permissions differ')
     return after
 
 
