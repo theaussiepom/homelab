@@ -34,7 +34,8 @@ def bind(resolved, routes):
     if "ingress" in resolved:
         settings = resolved["ingress"][1].setdefault("routing", {})
         discovery.require(
-            "routes" not in settings, "Declare routes only in the stack routes map"
+            not {"routes", "authentik_callbacks"} & settings.keys(),
+            "Declare routes only in the stack routes map; callbacks are compiler-derived"
         )
         discovery.validate_ingress(settings)
     if not routes:
@@ -83,5 +84,10 @@ def bind(resolved, routes):
     for route in all_routes.values():
         discovery.references(route, settings)
     settings["routes"] = external
+    callbacks = {key: discovery.callback_fields(route) for key, route in all_routes.items()
+                 if key not in external and "authentik_forward_auth" in route}
+    if callbacks:
+        settings["authentik_callbacks"] = callbacks
+    discovery.validate_ingress(settings)
     frontend = stack["foundation"]["bind_address"]
     return {host: frontend for host in hosts}
