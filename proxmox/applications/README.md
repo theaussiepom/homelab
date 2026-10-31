@@ -121,6 +121,11 @@ it. SQL import, database contents and writer handover are separate prerequisites
 ordinary deployment never restores or imports them. Database backend NICs and
 listener substitutions come from the reviewed stack/site definitions.
 
+Home Assistant readiness requires its web page and initial WebSocket
+`auth_required` challenge, then closes without sending credentials. It does not
+request an unauthenticated REST response: repeated HTTP 401 responses can trigger
+the retained application's IP-ban policy. Authentication and banning stay enabled.
+
 ### Reviewed failure after infrastructure succeeds
 
 A failed application step does not make its infrastructure update a completed

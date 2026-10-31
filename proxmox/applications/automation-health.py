@@ -1,6 +1,10 @@
 """Read-only application probes; never publish MQTT or log private credentials."""
 import argparse
+import base64
+import hashlib
+from http.client import HTTPConnection
 import json
+import os
 from pathlib import Path
 import socket
 import struct
@@ -76,12 +80,58 @@ def http(port, path):
         return response.code, b''
 
 
+def homeassistant_auth_challenge():
+    """Check the API's initial challenge without submitting a failed login."""
+    key = base64.b64encode(os.urandom(16)).decode('ascii')
+    connection = HTTPConnection('127.0.0.1', 8123, timeout=5)
+    try:
+        connection.request('GET', '/api/websocket', headers={
+            'Upgrade': 'websocket', 'Connection': 'Upgrade',
+            'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': key,
+        })
+        response = connection.getresponse()
+        accept = base64.b64encode(hashlib.sha1(
+            (key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode('ascii'),
+            usedforsecurity=False,
+        ).digest()).decode('ascii')
+        if (response.status != 101
+                or response.getheader('Upgrade', '').lower() != 'websocket'
+                or 'upgrade' not in {part.strip().lower() for part in response.getheader('Connection', '').split(',')}
+                or response.getheader('Sec-WebSocket-Accept') != accept):
+            raise ValueError('HA WebSocket upgrade differs')
+
+        def receive(size):
+            data = response.fp.read(size)
+            if len(data) != size:
+                raise ValueError('Incomplete HA authentication challenge')
+            return data
+
+        header = receive(2)
+        if header[0] != 0x81 or header[1] & 0x80 or header[1] == 127:
+            raise ValueError('Unexpected HA authentication frame')
+        size = int.from_bytes(receive(2), 'big') if header[1] == 126 else header[1]
+        if size > 4096:
+            raise ValueError('HA authentication challenge exceeds its bound')
+        challenge = json.loads(receive(size))
+        if (not isinstance(challenge, dict) or challenge.get('type') != 'auth_required'
+                or not isinstance(challenge.get('ha_version'), str)
+                or not challenge['ha_version']):
+            raise ValueError('HA API must require authentication')
+        mask = os.urandom(4)
+        connection.sock.sendall(b'\x88\x82' + mask + bytes(
+            value ^ mask[index] for index, value in enumerate(b'\x03\xe8')
+        ))
+    finally:
+        connection.close()
+
+
 def probe(service):
     if service == 'mqtt':
         mqtt()
     elif service == 'homeassistant':
-        if http(8123, '/')[0] != 200 or http(8123, '/api/')[0] != 401:
+        if http(8123, '/')[0] != 200:
             raise ValueError('HA web/API login boundary is not ready')
+        homeassistant_auth_challenge()
     elif service == 'node_red':
         status, body = http(1880, '/auth/login')
         if status != 200 or json.loads(body).get('type') != 'strategy' or http(1880, '/flows')[0] != 401:
