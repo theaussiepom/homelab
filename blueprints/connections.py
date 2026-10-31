@@ -164,11 +164,13 @@ def permits(rules, direction, connection):
 
 def validate(configurations, external_routes=None):
     import service_bindings
+    import zabbix
 
     validate_identities(configurations)
     for connection in [
         *connections(configurations, external_routes),
         *service_bindings.connections_for(configurations),
+        *zabbix.connections_for(configurations),
     ]:
         for guest, direction in ((connection.source, "out"), (connection.target, "in")):
             if guest is None:

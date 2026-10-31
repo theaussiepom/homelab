@@ -218,7 +218,7 @@
           "type": "file"
         }
       ],
-      "name": "Automation",
+      "name": "Home Automation",
       "application_names": {
         "mqtt": "MQTT",
         "homeassistant": "Home Assistant",
@@ -308,6 +308,22 @@
       "application_names": {
         "zigbee2mqtt": "Zigbee2MQTT"
       }
+    },
+    "monitoring": {
+      "capabilities": [
+        "linux",
+        "docker"
+      ],
+      "applications": [
+        "zabbix"
+      ],
+      "platform": "debian-lxc",
+      "required_paths": [],
+      "name": "Zabbix",
+      "application_names": {
+        "zabbix": "Zabbix"
+      },
+      "feature": "zabbix"
     }
   }
 }

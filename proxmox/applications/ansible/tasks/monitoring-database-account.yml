@@ -1,0 +1,175 @@
+---
+# Optional native-DB dependency owned by that database guest's CD, never server CD.
+- name: Require one explicitly selected native database account operation
+  ansible.builtin.assert:
+    that:
+      - zabbix_agent.manage_database_accounts | bool
+      - (zabbix_agent.workloads.keys() | intersect(['postgresql', 'mysql']) | length) == 1
+
+- name: Select the local database and the controller-held monitoring password
+  ansible.builtin.set_fact:
+    monitoring_db_kind: "{{ 'postgresql' if zabbix_agent.workloads.postgresql is defined else 'mysql' }}"
+    monitoring_db_config: "{{ zabbix_agent.workloads.postgresql if zabbix_agent.workloads.postgresql is defined else zabbix_agent.workloads.mysql }}"
+  no_log: true
+
+- name: Require loopback PostgreSQL commissioning until database CD owns remote HBA admission
+  ansible.builtin.assert:
+    that: monitoring_db_kind != 'postgresql' or monitoring_db_config.uri == 'tcp://127.0.0.1:5432'
+    fail_msg: 'PostgreSQL account commissioning requires the preapproved loopback session.'
+
+- name: Verify the local PostgreSQL TCP listener before creating any account hold
+  ansible.builtin.command:
+    argv: [pg_isready, -h, '127.0.0.1', -p, '5432', -d, postgres]
+  changed_when: false
+  when: monitoring_db_kind == 'postgresql'
+
+- name: Require retained PostgreSQL TLS before creating monitoring accounts
+  ansible.builtin.command:
+    argv: [psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, SHOW ssl]
+  become_user: postgres
+  register: monitoring_pg_tls
+  changed_when: false
+  failed_when: monitoring_pg_tls.stdout != 'on'
+  when: monitoring_db_kind == 'postgresql'
+
+- name: Inspect the retained database monitoring receipt and interruption hold
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: [/var/lib/homelab-monitoring/database-account.json, /var/lib/homelab-monitoring/ACCOUNT-HOLD]
+  register: monitoring_db_state
+
+- name: Refuse an interrupted account operation
+  ansible.builtin.assert:
+    that: not monitoring_db_state.results[1].stat.exists
+    fail_msg: 'Database monitoring account setup is held; preserve the original credential and investigate.'
+
+- name: Inspect the existing private account state directory
+  ansible.builtin.stat:
+    path: /var/lib/homelab-monitoring
+    follow: false
+  register: monitoring_db_directory
+
+- name: Refuse unsafe retained database monitoring state
+  ansible.builtin.assert:
+    that:
+      - not monitoring_db_directory.stat.exists or (not monitoring_db_directory.stat.islnk | default(false) and monitoring_db_directory.stat.isdir | default(false) and monitoring_db_directory.stat.uid == 0 and monitoring_db_directory.stat.mode == '0700')
+      - not monitoring_db_state.results[0].stat.exists or (not monitoring_db_state.results[0].stat.islnk | default(false) and monitoring_db_state.results[0].stat.nlink == 1 and monitoring_db_state.results[0].stat.isreg | default(false) and monitoring_db_state.results[0].stat.uid == 0 and monitoring_db_state.results[0].stat.mode == '0600')
+
+- name: Read the nonsecret retained account ownership receipt
+  ansible.builtin.slurp:
+    src: /var/lib/homelab-monitoring/database-account.json
+  register: monitoring_db_receipt
+  when: monitoring_db_state.results[0].stat.exists
+
+- name: Bind the retained account receipt to this exact local session
+  ansible.builtin.assert:
+    that: (monitoring_db_receipt.content | b64decode | from_json) == {'schema':'homelab-database-monitor-v1', 'kind':monitoring_db_kind, 'user':'zbx_monitor', 'uri':monitoring_db_config.uri}
+  when: monitoring_db_state.results[0].stat.exists
+
+- name: Inspect the fixed PostgreSQL monitoring identity
+  ansible.builtin.command:
+    argv: [psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SELECT count(*) FROM pg_roles WHERE rolname='zbx_monitor'"]
+  become_user: postgres
+  register: monitoring_pg_identity
+  changed_when: false
+  when: monitoring_db_kind == 'postgresql'
+
+- name: Inspect every MySQL monitoring identity before creation
+  ansible.builtin.command:
+    argv: [mariadb, --batch, --skip-column-names, -e, "SELECT count(*) FROM mysql.user WHERE User='zbx_monitor'"]
+  register: monitoring_mysql_identity
+  changed_when: false
+  when: monitoring_db_kind == 'mysql'
+
+- name: Bind account existence to this guest's retained receipt
+  ansible.builtin.assert:
+    that:
+      - account_count in ['0', '1']
+      - (account_count == '1') == monitoring_db_state.results[0].stat.exists
+    fail_msg: 'Refuse to adopt an existing account or recreate a missing commissioned identity.'
+  vars:
+    account_count: "{{ monitoring_pg_identity.stdout if monitoring_db_kind == 'postgresql' else monitoring_mysql_identity.stdout }}"
+
+- name: Create private guest-local account state
+  ansible.builtin.file:
+    path: /var/lib/homelab-monitoring
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Persist an interruption hold before a new monitoring identity
+  ansible.builtin.copy:
+    content: "No automatic credential replacement or retry.\n"
+    dest: /var/lib/homelab-monitoring/ACCOUNT-HOLD
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
+  when: not monitoring_db_state.results[0].stat.exists
+
+- name: Create the dedicated PostgreSQL statistics reader without application ownership
+  ansible.builtin.command:
+    argv: [psql, -X, -v, ON_ERROR_STOP=1, -d, postgres]
+    stdin: "CREATE ROLE zbx_monitor LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS; GRANT pg_monitor TO zbx_monitor;"
+  become_user: postgres
+  when: monitoring_db_kind == 'postgresql' and not monitoring_db_state.results[0].stat.exists
+  no_log: true
+
+- name: Set the new PostgreSQL monitor password using client-side encryption
+  ansible.builtin.command:
+    # Detach any SSH controlling terminal so psql reads the private stdin pipe.
+    argv: [setsid, --wait, psql, -X, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SET password_encryption='scram-sha-256'", -c, '\password zbx_monitor']
+    stdin: "{{ lookup('ansible.builtin.file', monitoring_db_config.password_file) | trim }}\n{{ lookup('ansible.builtin.file', monitoring_db_config.password_file) | trim }}\n"
+  become_user: postgres
+  when: monitoring_db_kind == 'postgresql' and not monitoring_db_state.results[0].stat.exists
+  no_log: true
+
+- name: Create the MySQL statistics reader restricted to this guest's source address
+  ansible.builtin.command:
+    argv: [mariadb, --batch]
+    stdin: "CREATE USER 'zbx_monitor'@'{{ monitoring_db_config.uri | urlsplit('hostname') }}' IDENTIFIED BY '{{ lookup('ansible.builtin.file', monitoring_db_config.password_file) | trim }}' WITH MAX_USER_CONNECTIONS 3; GRANT PROCESS, REPLICATION CLIENT, SHOW DATABASES, SHOW VIEW ON *.* TO 'zbx_monitor'@'{{ monitoring_db_config.uri | urlsplit('hostname') }}';"
+  when: monitoring_db_kind == 'mysql' and not monitoring_db_state.results[0].stat.exists
+  no_log: true
+
+- name: Verify the statistics role has no PostgreSQL administration privileges
+  ansible.builtin.command:
+    argv: [psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SELECT count(*) FROM pg_roles r WHERE rolname='zbx_monitor' AND rolcanlogin AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls AND (SELECT array_agg(p.rolname::text ORDER BY p.rolname) FROM pg_auth_members m JOIN pg_roles p ON p.oid=m.roleid WHERE m.member=r.oid)=ARRAY['pg_monitor']::text[]"]
+  become_user: postgres
+  register: monitoring_pg_privileges
+  changed_when: false
+  failed_when: monitoring_pg_privileges.stdout != '1'
+  when: monitoring_db_kind == 'postgresql'
+
+- name: Verify PostgreSQL monitoring authentication without resetting a password
+  ansible.builtin.command:
+    argv: [psql, -X, -At, -v, ON_ERROR_STOP=1, -h, "{{ monitoring_db_config.uri | urlsplit('hostname') }}", -p, '5432', -U, zbx_monitor, -d, postgres, -c, 'SELECT current_user']
+  environment:
+    PGPASSWORD: "{{ lookup('ansible.builtin.file', monitoring_db_config.password_file) | trim }}"
+  changed_when: false
+  when: monitoring_db_kind == 'postgresql'
+  no_log: true
+
+- name: Verify MySQL monitoring authentication without resetting a password
+  ansible.builtin.command:
+    argv: [mariadb, --batch, --skip-column-names, --protocol=TCP, -h, "{{ monitoring_db_config.uri | urlsplit('hostname') }}", -P, '3306', -u, zbx_monitor, -e, 'SELECT CURRENT_USER()']
+  environment:
+    MYSQL_PWD: "{{ lookup('ansible.builtin.file', monitoring_db_config.password_file) | trim }}"
+  changed_when: false
+  when: monitoring_db_kind == 'mysql'
+  no_log: true
+
+- name: Record ownership only after authenticated access succeeds
+  ansible.builtin.copy:
+    content: "{{ {'schema': 'homelab-database-monitor-v1', 'kind': monitoring_db_kind, 'user': 'zbx_monitor', 'uri': monitoring_db_config.uri} | to_json }}\n"
+    dest: /var/lib/homelab-monitoring/database-account.json
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
+
+- name: Complete the one-time account operation
+  ansible.builtin.file:
+    path: /var/lib/homelab-monitoring/ACCOUNT-HOLD
+    state: absent

@@ -75,6 +75,8 @@ class MonitoringTests(unittest.TestCase):
             document = render.compose(cfg)
             self.assertEqual(set(document["services"]), {"zabbix_server", "zabbix_web"})
             self.assertNotIn("synthetic-fixture-password", json.dumps(document))
+            self.assertTrue(all(s['environment']['ZBX_DBTLSCONNECT']=='required' for s in document['services'].values()))
+            self.assertEqual(document['services']['zabbix_web']['environment']['ZBX_DB_ENCRYPTION'],'true')
             server = document["services"]["zabbix_server"]
             self.assertEqual(server["ports"], ["198.18.30.50:10051:10051"])
             self.assertTrue(

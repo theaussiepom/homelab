@@ -152,3 +152,22 @@ class CompilerTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         c.compile_stack(Path("/synthetic"), overlay, admit=True)
                 links.assert_called_once_with({"dns": desired}, external_routes={})
+
+    def test_root_monitoring_route_is_derived_once_and_cannot_be_overridden(self):
+        from unittest.mock import patch
+        import copy
+        from test_root_monitoring import composition, VALUES
+        original=composition()
+        original['ingress']=(original['ingress'][0],{},original['ingress'][2])
+        spec={'guests':{name:{'depends_on':[],'prerequisites':[]} for name in original},'routes':{},'values':dict(VALUES,**{'domains.monitoring':'zabbix.example.invalid'})}
+        overlay={'schema':'homelab-site-v3','zabbix':None,'values':{},'common':{},'guests':{},'images':{},'accepted':{},'routes':{}}
+        for override in (False,True):
+            resolved=copy.deepcopy(original);selected=copy.deepcopy(overlay)
+            if override:selected['routes']['zabbix']={}
+            with patch.object(c,'manifest',return_value=spec),patch.object(c,'_resolve_guest',side_effect=lambda root,overlay,name,spec:resolved[name]),patch.object(c,'_compile_guest',side_effect=lambda name,cfg,stack,files,enabled:(cfg,{'enabled':name in enabled})),patch.object(c.routes,'bind',return_value=[]) as routes,patch.object(c.service_bindings,'bind'),patch.object(c.connections,'validate'):
+                if override:
+                    with self.assertRaisesRegex(ValueError,'derived'):c.compile_stack(Path('/synthetic'),selected)
+                else:
+                    packets=c.compile_stack(Path('/synthetic'),selected)
+                    self.assertTrue(packets['monitoring']['enabled'])
+                    self.assertEqual(routes.call_args.args[1]['zabbix'],{'target':{'endpoint':'monitoring.zabbix.web'},'host':'zabbix.example.invalid','middlewares':['security-headers','management-clients']})

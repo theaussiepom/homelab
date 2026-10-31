@@ -215,7 +215,27 @@ PYCODE
         },
     }
     result = {"deploy.yml": deploy}
-    for guest, blueprint in compiler.CATALOGUE.items():
+    if "monitoring" in spec["guests"]:
+        selector = deploy["jobs"]["selection"]
+        selector["outputs"] = {"zabbix": "${{ steps.selection.outputs.zabbix }}"}
+        selector["steps"].insert(0, {"name": "Get settings", "uses": recipe["steps"][1]["uses"],
+                                      "with": {"persist-credentials": False}})
+        step = selector["steps"][-1]
+        step["id"] = "selection"
+        step["run"] = step["run"].replace("import json, os", "import json, os\nfrom pathlib import Path")
+        step["run"] = step["run"].replace("active = set(spec) - set(disabled)",
+            "overlay = json.loads(Path('site.json').read_text())\n"
+            "if 'zabbix' in overlay and overlay['zabbix'] is not None:\n"
+            "    raise SystemExit('Use an empty root zabbix property')\n"
+            "monitoring = 'zabbix' in overlay\n"
+            "with open(os.environ['GITHUB_OUTPUT'], 'a') as output:\n"
+            "    print('zabbix=' + str(monitoring).lower(), file=output)\n"
+            "active = set(spec) - set(disabled)\n"
+            "if not monitoring: active.discard('monitoring')\n"
+            "if monitoring and active and 'monitoring' not in active:\n"
+            "    raise SystemExit('Keep Zabbix enabled while deploying its monitored guests')")
+    for guest in spec["guests"]:
+        blueprint = compiler.CATALOGUE[guest]
         compiler.require(
             re.fullmatch(r"[a-z][a-z0-9-]*", guest) and guest != "selection",
             "Use a safe guest workflow identifier",
@@ -262,6 +282,8 @@ PYCODE
             + guest
             + "')"
         )
+        if guest == "monitoring":
+            parent["if"] += " && needs.selection.outputs.zabbix == 'true'"
         parent.update(
             {
                 "uses": "./.github/workflows/guest-" + guest + ".yml",

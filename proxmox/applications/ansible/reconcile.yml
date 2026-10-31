@@ -28,7 +28,7 @@
 
     - name: Reconcile the preserved stack and its native login
       ansible.builtin.import_tasks: tasks/compose.yml
-      when: app.kind in ['identity', 'db-tools', 'automation', 'dns', 'ingress', 'bitwarden', 'pegaprox', 'zigbee2mqtt']
+      when: app.kind in ['identity', 'db-tools', 'automation', 'dns', 'ingress', 'bitwarden', 'pegaprox', 'zigbee2mqtt', 'monitoring']
 
     - name: Check this service after reconciliation
       ansible.builtin.command:
@@ -38,3 +38,19 @@
       changed_when: false
       failed_when: ordinary_health.rc != 0 or (item.expect | default('')) not in ordinary_health.stdout
       no_log: true
+
+    - name: Configure local database statistics access
+      ansible.builtin.include_tasks: tasks/monitoring-database-account.yml
+      vars:
+        zabbix_agent:
+          manage_database_accounts: true
+          workloads: "{{ {('postgresql' if app.kind == 'postgresql' else 'mysql'): {'uri': app.monitoring.database_uri, 'password_file': app.monitoring.database_password_file}} }}"
+      when: app.monitoring is defined and app.kind in ['postgresql', 'mariadb']
+
+    - name: Configure the dedicated Zabbix database through its owning PostgreSQL guest
+      ansible.builtin.include_tasks: tasks/monitoring-storage.yml
+      when: app.monitoring is defined and app.kind == 'postgresql'
+
+    - name: Configure this guest's monitoring agent
+      ansible.builtin.include_tasks: tasks/monitoring-agent.yml
+      when: app.monitoring is defined

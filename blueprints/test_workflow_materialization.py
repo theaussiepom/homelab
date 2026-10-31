@@ -80,6 +80,9 @@ class MaterializationTests(unittest.TestCase):
         self.assertEqual(deploy["name"], "Deployment")
         self.assertEqual(deploy["jobs"]["selection"]["name"], "Check guests")
         self.assertEqual(deploy["jobs"]["selection"]["steps"][0]["name"], "Check guests")
+        # The requested guest label changes no frozen deployment operation.
+        self.assertEqual(deploy["jobs"]["automation"]["name"], "Home Automation")
+        deploy["jobs"]["automation"]["name"] = "Automation"
         # Only these human labels differ from the frozen pre-fallback parent.
         deploy["name"] = "HomeLab stack"
         deploy["jobs"]["selection"]["name"] = "Validate guest selection"

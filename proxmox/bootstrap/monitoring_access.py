@@ -31,6 +31,19 @@ def validate(c):
     require(c['endpoint'].startswith('https://') and c['endpoint'].endswith(':8006/'), 'Use the trusted Proxmox API endpoint')
 
 
+def bootstrap_configuration(c):
+    """Derive the existing access transaction from one declared new guest."""
+    selected = c['monitoring']
+    require(isinstance(selected, dict) and set(selected) == {'vmid', 'address'}
+            and type(selected['vmid']) is int
+            and {'vmid': selected['vmid'], 'hostname': 'zabbix'} in c['applications'],
+            'Bind monitoring access to the declared Zabbix guest')
+    value = {key: c[key] for key in ('endpoint', 'node', 'backup_source')}
+    value.update(schema='homelab-zabbix-access-v1', address=selected['address'])
+    validate(value)
+    return value
+
+
 def rule(c):
     from urllib.parse import urlsplit
     return {'type': 'in', 'action': 'ACCEPT', 'enable': 1, 'source': address(c['address']) + '/32',
@@ -70,7 +83,11 @@ def verify(api, c, saved, before_rules):
     reader = API.__new__(API)
     reader.configure(c['endpoint'], saved['token'], api.ca)
     effective = {p: v for p, v in reader.call('/access/permissions')['data'].items() if v}
-    require(set(effective) == {'/'} and set(effective['/']) == PRIVILEGES, 'Effective monitoring permissions differ')
+    # Proxmox expands a propagated root ACL over existing child ACL paths.
+    # Every reported path must retain exactly the three audit privileges.
+    require('/' in effective and all(set(privileges) == PRIVILEGES
+            and all(flag == 1 for flag in privileges.values())
+            for privileges in effective.values()), 'Effective monitoring permissions differ')
     return after
 
 

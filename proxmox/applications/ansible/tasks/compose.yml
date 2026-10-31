@@ -20,6 +20,36 @@
   no_log: true
   when: not ansible_check_mode
 
+- name: Inspect first-install ownership before publishing a Zabbix frontend
+  ansible.builtin.stat:
+    path: /var/lib/homelab-monitoring/server.json
+    follow: false
+  register: monitoring_server_receipt
+  when: app.kind == 'monitoring'
+
+- name: Refuse an unsafe retained monitoring ownership receipt
+  ansible.builtin.assert:
+    that:
+      - not monitoring_server_receipt.stat.islnk | default(false)
+      - not monitoring_server_receipt.stat.exists or (monitoring_server_receipt.stat.isreg | default(false) and monitoring_server_receipt.stat.uid == 0 and monitoring_server_receipt.stat.mode == '0600')
+  when: app.kind == 'monitoring'
+
+- name: Read retained server ownership before publishing its listener
+  ansible.builtin.slurp:
+    src: /var/lib/homelab-monitoring/server.json
+  register: monitoring_owned_server
+  when: app.kind == 'monitoring' and monitoring_server_receipt.stat.exists
+
+- name: Bind the existing server to this exact guest before publication
+  ansible.builtin.assert:
+    that: (monitoring_owned_server.content | b64decode | from_json) == monitoring_server_configuration.owner
+  when: app.kind == 'monitoring' and monitoring_server_receipt.stat.exists
+
+- name: Select a guest-local-only frontend for initial server configuration
+  ansible.builtin.set_fact:
+    monitoring_first_install: "{{ not monitoring_server_receipt.stat.exists }}"
+  when: app.kind == 'monitoring'
+
 - name: Copy rendered stack without logging credentials
   ansible.builtin.copy:
     src: "{{ app.render_dir }}/compose.yml"
@@ -28,13 +58,25 @@
     group: root
     mode: '0600'
   no_log: true
-  when: not ansible_check_mode
+  when: not ansible_check_mode and not monitoring_first_install | default(false)
+
+- name: Keep the factory-password frontend guest-local until configured
+  ansible.builtin.copy:
+    content: "{{ initial | combine({'services': initial.services | combine({'zabbix_web': initial.services.zabbix_web | combine({'ports': ['127.0.0.1:8081:8080']})})}) | to_json }}"
+    dest: /opt/homelab-app/compose.yml
+    owner: root
+    group: root
+    mode: '0600'
+  vars:
+    initial: "{{ lookup('ansible.builtin.file', app.render_dir + '/compose.yml') | from_json }}"
+  when: not ansible_check_mode and monitoring_first_install | default(false)
+  no_log: true
 
 - name: Read the generated foundation runtime file list
   ansible.builtin.set_fact:
     foundation_runtime_files: "{{ lookup('ansible.builtin.file', app.render_dir + '/runtime-files.json') | from_json }}"
   no_log: true
-  when: stack.foundation is defined and not ansible_check_mode
+  when: (stack.foundation is defined or stack.kind == 'monitoring') and not ansible_check_mode
 
 - name: Prepare the private foundation runtime directory
   ansible.builtin.file:
@@ -43,7 +85,7 @@
     owner: root
     group: root
     mode: '0700'
-  when: stack.foundation is defined and not ansible_check_mode
+  when: (stack.foundation is defined or stack.kind == 'monitoring') and not ansible_check_mode
 
 - name: Install only the selected service-readable foundation files
   ansible.builtin.copy:
@@ -55,7 +97,7 @@
   loop: "{{ foundation_runtime_files | default([]) }}"
   register: foundation_runtime_install
   no_log: true
-  when: stack.foundation is defined and not ansible_check_mode
+  when: (stack.foundation is defined or stack.kind == 'monitoring') and not ansible_check_mode
 
 - name: Load preserved custom images by verified archive
   ansible.builtin.include_tasks: image.yml
@@ -129,6 +171,10 @@
   register: dns_record_reconcile
   changed_when: (dns_record_reconcile.stdout | from_json).changed
   when: app.kind == 'dns' and application_service == 'pihole' and not ansible_check_mode
+
+- name: Configure the dedicated Zabbix server before its browser listener is published
+  ansible.builtin.include_tasks: monitoring-server.yml
+  when: app.kind == 'monitoring' and not ansible_check_mode
 
 - name: Reload only Pi-hole after its owned DNS records change
   ansible.builtin.command:

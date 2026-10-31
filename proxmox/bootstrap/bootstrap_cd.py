@@ -36,7 +36,7 @@ def save(path, value):
 def validate(c):
     fields = {'schema', 'endpoint', 'node', 'deploy', 'bridge', 'applications',
               'existing_grants', 'backup_source'}
-    require(fields <= set(c) <= fields | {'service_discovery', 'private_bridges', 'service_discovery_extension', 'application_networks'},
+    require(fields <= set(c) <= fields | {'service_discovery', 'private_bridges', 'service_discovery_extension', 'application_networks', 'monitoring'},
             'Use the closed bootstrap CD configuration')
     require(c['schema'] == 'homelab-bootstrap-cd-v1', 'Unsupported bootstrap CD schema')
     endpoint = urlsplit(c['endpoint'])
@@ -92,6 +92,9 @@ def validate(c):
                 'Network access must select a declared application and existing VLAN bridge')
     require(len({(r['vmid'],r['bridge'],r['vlan']) for r in networks}) == len(networks),
             'Duplicate application network access')
+    if 'monitoring' in c:
+        import monitoring_access
+        monitoring_access.bootstrap_configuration(c)
 
 
 def rows(items):
@@ -297,6 +300,10 @@ def reconcile(api, c, before, evidence, root=None, backup=None):
     if 'service_discovery' in c:
         result['service_discovery'] = provider_access.reconcile(
             api, c, before['service_discovery'], root, backup)
+    if 'monitoring' in c:
+        import monitoring_access
+        result['monitoring'] = monitoring_access.initialize(
+            api, monitoring_access.bootstrap_configuration(c), root, backup)
     return result
 
 

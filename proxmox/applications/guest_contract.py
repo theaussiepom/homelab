@@ -95,10 +95,14 @@ def validate(cfg, stack=None):
         "bitwarden",
         "pegaprox",
         "required_paths",
+        "monitoring",
     }
     require(not app.keys() - allowed, "Use only current application contract fields")
     require(app["kind"] in BLUEPRINTS, "Select a supported application blueprint")
     phases(cfg)
+    if "monitoring" in app:
+        import monitoring_agent
+        monitoring_agent.validate(cfg)
     require(
         {(r["path"], r["type"]) for r in BLUEPRINTS[app["kind"]]["required_paths"]}
         <= {(r["path"], r["type"]) for r in app.get("required_paths", [])},

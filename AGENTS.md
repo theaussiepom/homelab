@@ -10,3 +10,10 @@ Public source changes validate only. Native deployment requires deliberate priva
 site adoption and a reviewed main merge through the existing global queue.
 All declared guests participate by default; only an explicit disabled list excludes
 guests. Missing prerequisites fail validation. Debian LXC is the implemented platform.
+
+The explicitly selected root Zabbix feature adds a fresh monitoring guest. Its
+first-install lifecycle may create only its own dedicated database/owner, replace
+its factory administrator password before publishing the frontend, and create
+local database statistics readers in their owning database guest. Preserve all
+existing application accounts, data and credentials. Later runs verify retained
+ownership and never reset an unknown account, rotate a key or import history.
