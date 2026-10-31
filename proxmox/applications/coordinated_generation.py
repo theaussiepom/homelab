@@ -79,8 +79,7 @@ def initial_canonical(raw, member, baseline):
 def latest_success(attempt, member, *, binding_key="coordinated_custody_sha256"):
     """An older anchor/pointer cannot supersede any recorded later F success."""
     found = {}
-    reviewed = (ordinary_failure.inspect(attempt, member, binding_key)
-                if binding_key == "coordinated_custody_sha256" else {})
+    reviewed = ordinary_failure.inspect(attempt, member, binding_key)
     attempt.reviewed_failures = reviewed
     for path in attempt.work.iterdir():
         if not re.fullmatch(r"ordinary-[1-9][0-9]*-[1-9][0-9]*", path.name):

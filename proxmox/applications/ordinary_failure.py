@@ -14,7 +14,8 @@ from private_io import digest, private_directory, require
 def selection(cfg):
     rows = cfg.get("reviewed_ordinary_failures", [])
     require(isinstance(rows, list) and len(rows) <= 16, "Use bounded reviewed ordinary failures")
-    require(not rows or "coordinated_custody" in cfg, "Reviewed failures require retained group custody")
+    require(not rows or "coordinated_custody" in cfg or "initial_ordinary" in cfg,
+            "Reviewed failures require selected ordinary custody")
     seen = set()
     for row in rows:
         shape(row, {"operation", "phase", "hold_sha256", "infrastructure_sha256", "log_sha256",

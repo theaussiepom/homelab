@@ -139,5 +139,11 @@ still refuse. A selected checkpoint admits only its verified backend identity;
 application steps execute in a new workflow run and must earn a real new final
 receipt. Original commissioning groups and failed records remain intact.
 
+The same exact failed-operation proofs apply to an explicitly selected standalone
+initial ordinary profile. Its immutable first anchor stays unchanged; this does
+not extend the exception for pre-anchor incomplete history or adopt an unknown
+failed operation. Subsequent deployment still runs every phase and must produce
+its own successful receipt.
+
 PostgreSQL monitoring commands use `runuser -u postgres --` from the existing root
 connection. They do not assume that minimal Debian guests have `sudo` installed.

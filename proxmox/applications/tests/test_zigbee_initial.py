@@ -60,7 +60,7 @@ class ZigbeeInitialTests(unittest.TestCase):
 
     def attempt(self, cfg=None):
         cfg = self.cfg if cfg is None else cfg
-        attempt = SimpleNamespace(work=self.work, operation=self.work / "ordinary-777-1",
+        attempt = SimpleNamespace(cfg=cfg, work=self.work, operation=self.work / "ordinary-777-1",
             hold=self.work / "ORDINARY-HOLD.json", receipt=self.canonical, initial_ordinary=None,
             binding={"vmid": 209, initial.BINDING: initial.selection_digest(cfg)},
             workflow=["example/private-site", "example/private-site/.github/workflows/deploy.yml"], marker={})
