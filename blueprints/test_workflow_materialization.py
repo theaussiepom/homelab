@@ -70,6 +70,7 @@ class MaterializationTests(unittest.TestCase):
                 )
         for step, name in zip(result, ("Check inputs", "Load credentials", display)):
             step["name"] = name
+            step["timeout-minutes"] = 45
         return result
 
     def verify(self, models):
@@ -105,9 +106,12 @@ class MaterializationTests(unittest.TestCase):
             job = workflow["jobs"]["deploy"]
             expected = copy.deepcopy(self.original["jobs"]["run"])
             expected["name"] = "Deploy"
+            expected["timeout-minutes"] = 45 * len(phases)
             expected["if"] = expected["if"].replace("inputs.guest", repr(guest))
             expected["steps"] = expected["steps"][:6]
-            for step, name in zip(expected["steps"], names): step["name"] = name
+            for step, name in zip(expected["steps"], names):
+                step["name"] = name
+                step["timeout-minutes"] = 45
             for phase in phases:
                 display = {"infrastructure": "Update container", "preparation": "Prepare service"}.get(phase)
                 if display is None:
@@ -149,6 +153,12 @@ class MaterializationTests(unittest.TestCase):
             lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update({"runs-on": "ubuntu-latest"}),
             lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update(environment="other"),
             lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update({"timeout-minutes": 90}),
+            lambda m: m["guest-automation.yml"]["jobs"]["deploy"].update({"timeout-minutes": 45}),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][0].pop("timeout-minutes"),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][0].update({"timeout-minutes": 90}),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][8].pop("timeout-minutes"),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][8].update({"timeout-minutes": 90}),
+            lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update({"timeout-minutes": 405}),
             lambda m: m["guest-dns.yml"]["permissions"].update(contents="write"),
             lambda m: m["guest-dns.yml"]["defaults"]["run"].update(shell="sh"),
             lambda m: m["guest-dns.yml"]["on"]["workflow_call"]["secrets"].update(UNRELATED_SECRET={"required": True}),

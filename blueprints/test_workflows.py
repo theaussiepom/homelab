@@ -83,6 +83,19 @@ class WorkflowGenerationTests(unittest.TestCase):
         self.assertNotIn("needs", jobs["deploy"])
         self.assertEqual(steps[-1]["name"], "Deploy Verify")
 
+    def test_aggregate_budget_preserves_phase_allowances_and_refuses_above_portable_limit(self):
+        for apps, expected in ((1, 135), (2, 180), (3, 225), (6, 360)):
+            phases = ["service" + str(i) for i in range(apps)]
+            self.catalogue["web"].update(applications=phases, application_names={name: name for name in phases})
+            job = workflows.models(self.root)["guest-web.yml"]["jobs"]["deploy"]
+            self.assertEqual(job["timeout-minutes"], expected)
+            self.assertTrue(all(step["timeout-minutes"] == 45 for step in job["steps"]))
+        phases = ["service" + str(i) for i in range(7)]
+        self.catalogue["web"].update(applications=phases, application_names={name: name for name in phases})
+        with self.assertRaisesRegex(ValueError, "360-minute"):
+            workflows.models(self.root)
+        self.assertFalse((self.root / ".github/workflows/guest-web.yml").exists())
+
     def test_new_guest_metadata_adds_a_permanent_workflow_without_generator_changes(
         self,
     ):

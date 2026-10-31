@@ -68,9 +68,15 @@ exclusively; phases do not reuse another phase's packet or environment secrets.
 The deployment entry point rechecks bootstrap custody on every phase.
 
 The selected runner, protected Environment, contents-read permission and workflow
-identity apply to the guest job. The existing 45-minute timeout now caps the whole
-guest job, while phase command deadlines remain unchanged. One job replaces the
-former per-phase runner and Environment boundaries. A failed step stops subsequent
+identity apply to the guest job. Its budget is the original 45-minute phase
+allowance multiplied by the phase count: 135 minutes for three-phase guests,
+180 for DNS and 225 for Automation. Every setup, compile, credential and deployment
+step also has an explicit 45-minute cap. The standalone phase recipe retains its
+45-minute job budget, and command-internal deadlines remain unchanged. Generation
+refuses an aggregate above 360 minutes, keeping the budget within the portable
+GitHub-hosted job limit. Self-hosted runners have a higher platform limit; this
+framework deliberately retains the portable bound. One job replaces the former
+per-phase runner and Environment boundaries. A failed step stops subsequent
 phase steps under GitHub's default success condition. Rerunning the guest starts
 at infrastructure and remains subject to existing holds and no-replay checks.
 
@@ -85,6 +91,8 @@ Assistant and Deploy Node-RED.
 
 References: [workflow reuse](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows),
 [step status conditions](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions),
+[runner execution limits](https://docs.github.com/en/actions/reference/limits),
+[step timeout limits](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepstimeout-minutes),
 [pinned checkout authentication cleanup](https://github.com/actions/checkout/blob/3d3c42e5aac5ba805825da76410c181273ba90b1/src/git-source-provider.ts#L291).
 
 `blueprints/workflows.py` generates the checked-in stack entry workflow and one
