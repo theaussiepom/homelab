@@ -159,7 +159,7 @@ def client():
                 token,
             )
         )
-    assert len(http_items) == 7 and all(
+    assert len(http_items) == 8 and all(
         row["verify_peer"] == "1" and row["verify_host"] == "1" for row in http_items
     )
     resources = api(

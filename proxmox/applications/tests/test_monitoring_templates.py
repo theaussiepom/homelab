@@ -12,7 +12,7 @@ class TemplateTrustTests(unittest.TestCase):
         document = templates.prepared('template_app_proxmox.yaml')
         templates.check_readback(document)
         items = list(templates.http_agents(document))
-        self.assertEqual(len(items), 7)
+        self.assertEqual(len(items), 8)
         resources = next(row for row in items if row['key'] == 'proxmox.cluster.resources')
         self.assertEqual(resources['history'], '1h')
         bad = copy.deepcopy(document)
@@ -22,6 +22,21 @@ class TemplateTrustTests(unittest.TestCase):
             bad = copy.deepcopy(document)
             next(templates.http_agents(bad))[field] = 'NO'
             with self.subTest(field=field), self.assertRaises(ValueError): templates.check_readback(bad)
+
+    def test_actual_api_status_requires_verified_http_headers_and_closed_redirects(self):
+        document = templates.prepared('template_app_proxmox.yaml')
+        status = next(row for row in templates.http_agents(document) if row['key'] == 'proxmox.api.available')
+        self.assertNotIn('params', status)
+        self.assertNotIn('parameters', status)
+        self.assertEqual(status['headers'], [{'name': 'Authorization', 'value': 'PVEAPIToken={$PVE.TOKEN.ID}={$PVE.TOKEN.SECRET}'}])
+        for field, changed in [('retrieve_mode', 'BODY'), ('follow_redirects', 'YES'),
+                               ('status_codes', '200'), ('url', 'http://untrusted/')]:
+            bad = copy.deepcopy(document)
+            next(row for row in templates.http_agents(bad) if row['key'] == 'proxmox.api.available')[field] = changed
+            with self.subTest(field=field), self.assertRaises(ValueError): templates.check_readback(bad)
+        bad = copy.deepcopy(document)
+        next(row for row in bad['zabbix_export']['templates'][0]['items'] if row['key'] == 'proxmox.api.available')['key'] = 'unselected.status'
+        with self.assertRaises(ValueError): templates.check_readback(bad)
 
     def test_official_bytes_remain_unchanged(self):
         import monitoring

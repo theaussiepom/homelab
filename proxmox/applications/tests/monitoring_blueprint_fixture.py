@@ -20,6 +20,7 @@ import monitoring_configure
 import monitoring_agent
 import monitoring_fixture_tls as fixture_tls
 import monitoring_templates
+import monitoring_proxmox_fixture
 
 
 def main(output):
@@ -50,6 +51,7 @@ def main(output):
     fixture_tls.apply(document['services']['postgres'],fixture_tls.prepare(root))
     document['services']['zabbix_server']['environment']['ZBX_DBTLSCONNECT']='required'
     document['services']['zabbix_web']['environment'].update(ZBX_DBTLSCONNECT='required',ZBX_DB_ENCRYPTION='true')
+    proxmox_fixture = monitoring_proxmox_fixture.add(document['services'], root)
     path = root/'compose.json';path.write_text(json.dumps(document));path.chmod(0o600)
     command = ['docker', 'compose', '-p', name, '-f', str(path)]
     try:
@@ -78,7 +80,7 @@ def main(output):
                              {'hostname': 'fixture-influxdb', 'psk_identity': 'fixture-influxdb',
                               'psk': secrets.token_hex(32), 'profiles': ['linux', 'influxdb'],
                               'url': 'http://198.18.33.26:8086'}],
-                 'proxmox': {'hostname': 'fixture-pve', 'endpoint': 'https://198.18.25.10:8006/',
+                 'proxmox': {'hostname': 'fixture-pve', 'endpoint': 'https://pve:8006/',
                              'token_id': 'fixture@pve!monitoring', 'token_secret': 'synthetic-token'}}
         first = monitoring_configure.configure(api, value, root/'owner.json')
         second = monitoring_configure.configure(api, value, root/'owner.json')
@@ -95,6 +97,7 @@ def main(output):
         http = api('item.get', {'hostids': [selected['fixture-pve']['hostid']],
                                'filter': {'type':19}, 'output':['verify_peer','verify_host']})
         assert http and all(r['verify_peer']=='1' and r['verify_host']=='1' for r in http)
+        proxmox_status = monitoring_proxmox_fixture.check(api, selected['fixture-pve']['hostid'], proxmox_fixture)
         # Exercise production active/Docker configuration against the actual
         # pinned Agent2. The Docker socket belongs only to a synthetic API.
         server_id=subprocess.check_output(command+['ps','-q','zabbix_server'],text=True).strip()
@@ -131,7 +134,7 @@ def main(output):
         result = {'fixture':name, 'zabbix_version':version, 'first_install':first['first_install'],
                   'second_install_preserved':not second['first_install'], 'managed_hosts':len(selected),
                   'all_selected_templates_linked':True, 'agent_PSK_only':True,
-                  'proxmox_full_TLS_items':True, 'server_and_frontend_database_TLS':True, 'fresh_active_Linux_and_Docker_metrics':True,
+                  'proxmox_full_TLS_items':True, 'proxmox_actual_HTTP_status_and_closed_TLS':proxmox_status, 'server_and_frontend_database_TLS':True, 'fresh_active_Linux_and_Docker_metrics':True,
                   'limits':'Real API/linkage, repeatability and Agent2 PSK Linux/Docker synthetic data. No production/native guest acceptance.'}
         (root/'result.json').write_text(json.dumps(result,indent=2)+'\n')
         print(json.dumps(result))
