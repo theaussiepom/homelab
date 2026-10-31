@@ -38,6 +38,8 @@ def inspect(attempt, member, binding_key):
                 "A reviewed failure cannot replay as the current operation")
         private_directory(path)
         no_markers(path)
+        private_directory(path / row["phase"])
+        no_markers(path / row["phase"])
         require(not any((path / name).exists() or (path / name).is_symlink()
                         for name in ("complete.json", row["phase"] + "-complete.json")),
                 "A failed checkpoint cannot replace a completed operation")

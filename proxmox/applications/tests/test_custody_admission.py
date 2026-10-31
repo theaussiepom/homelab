@@ -101,19 +101,21 @@ class AdmissionTests(unittest.TestCase):
                 with self.assertRaises((ValueError, OSError)): deploy.run('infrastructure', runtime.site)
                 # Operator preservation is explicit, never performed by CD.
                 (runtime.work / 'ORDINARY-HOLD.json').rename(operation / 'preserved-failed-hold.json')
-                for change in ('log', 'started', 'infra', 'foreign', 'complete', 'unselected'):
+                for change in ('log', 'started', 'infra', 'foreign', 'complete', 'nested-hold', 'unselected'):
                     originals = {p: p.read_bytes() for p in (log, operation / 'mariadb-started.json', operation / 'infrastructure-complete.json')}
                     if change in ('log', 'started', 'infra'):
                         target = {'log': log, 'started': operation / 'mariadb-started.json', 'infra': operation / 'infrastructure-complete.json'}[change]
                         save(target, originals[target] + b' ')
                     if change == 'foreign': row['previous_ordinary_sha256'] = 'f' * 64
                     if change == 'complete': save(operation / 'complete.json', {})
+                    if change == 'nested-hold': save(log.parent / '.pending-HOLD.json', {})
                     if change == 'unselected': runtime.cfg.pop('reviewed_ordinary_failures')
                     with self.subTest(change=change), self.assertRaises((ValueError, OSError)):
                         deploy.run('infrastructure', runtime.site)
                     for p, raw in originals.items(): save(p, raw)
                     row['previous_ordinary_sha256'] = io.digest(previous)
                     (operation / 'complete.json').unlink(missing_ok=True)
+                    (log.parent / '.pending-HOLD.json').unlink(missing_ok=True)
                     runtime.cfg['reviewed_ordinary_failures'] = [row]
                 self.all_phases(runtime)
             with patch.dict(os.environ, {'GITHUB_RUN_ID': '780', 'GITHUB_RUN_NUMBER': '780',
