@@ -4,6 +4,7 @@ import io
 import json
 from pathlib import Path
 import runpy
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -31,6 +32,13 @@ class PrivateWorkflowTests(unittest.TestCase):
         (self.stack/'.github/workflows/phase.yml').write_text('jobs:\n  run:\n    uses: owner/framework/.github/workflows/guest-phase.yml@'+'b'*40+'\n')
         (self.site/'site.json').write_text('{}')
         (self.stack/'stack.json').write_text(json.dumps(self.spec))
+        subprocess.run(['git', 'init', '-q', str(self.stack)], check=True)
+        subprocess.run(['git', '-C', str(self.stack), 'add', '.'], check=True)
+        subprocess.run(['git', '-C', str(self.stack), '-c', 'user.name=Fixture',
+                        '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false',
+                        'commit', '-qm', 'Synthetic source fixture'], check=True)
+        self.revision = subprocess.check_output(['git', '-C', str(self.stack), 'rev-parse', 'HEAD'], text=True).strip()
+        self.env['HOMELAB_STACK_SOURCE'] = 'owner/stack/.github/workflows/deploy.yml@' + self.revision
         self.write()
         mock = patch.object(workflows.compiler,'CATALOGUE',self.catalogue)
         mock.start();self.addCleanup(mock.stop)
@@ -49,7 +57,7 @@ class PrivateWorkflowTests(unittest.TestCase):
             self.assertEqual(job['runs-on'],['self-hosted','linux'])
             self.assertEqual(job['needs'],public['deploy.yml']['jobs'][guest]['needs'])
             self.assertEqual(job['timeout-minutes'],old['timeout-minutes'])
-            for actual,expected in zip(job['steps'],old['steps']):
+            for actual,expected in zip(job['steps'],old['steps'],strict=True):
                 if actual['name']=='Choose services':
                     self.assertEqual(actual['run'],p.CHOOSE_STACK)
                 else:self.assertEqual(actual,p.bind(expected,'[]'))
@@ -116,6 +124,23 @@ class PrivateWorkflowTests(unittest.TestCase):
 
     def test_metadata_source_selection_rejects_two_pins(self):
         path=self.site/'.github/workflows/deploy.yml'
-        self.assertEqual(p.compiler.workflow_selection(path,'deploy.yml')['revision'],'a'*40)
+        self.assertEqual(p.compiler.workflow_selection(path,'deploy.yml')['revision'],self.revision)
         path.write_text(path.read_text()+'jobs:\n  other:\n    uses: owner/stack/.github/workflows/deploy.yml@'+'c'*40+'\n')
         with self.assertRaises(ValueError):p.compiler.workflow_selection(path,'deploy.yml')
+
+    def test_stack_pin_mismatch_refuses_before_recipe_generation(self):
+        self.env['HOMELAB_STACK_SOURCE'] = 'owner/stack/.github/workflows/deploy.yml@' + 'f'*40
+        self.write()
+        with patch.object(workflows, 'models') as generate:
+            with self.assertRaisesRegex(ValueError, 'Checked out source differs'):
+                p.model(self.stack, self.site)
+            generate.assert_not_called()
+
+    def test_quoted_metadata_refuses_the_noncanonical_source_selection(self):
+        path = self.site / '.github/workflows/deploy.yml'
+        original = path.read_text()
+        line = '  HOMELAB_STACK_SOURCE: owner/stack/.github/workflows/deploy.yml@' + self.revision
+        for mark in ("'", '"'):
+            path.write_text(original.replace(line, '  HOMELAB_STACK_SOURCE: ' + mark + line.split(': ',1)[1] + mark))
+            with self.assertRaisesRegex(ValueError, 'one immutable workflow selection'):
+                p.settings(self.site)

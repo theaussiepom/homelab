@@ -480,7 +480,9 @@ These checks do not qualify physical installation or private configuration.
 A private consumer can materialize the pinned public guest recipes directly with
 `python3 framework-source/blueprints/private_workflows.py --stack stack-source --site .`.
 The deployment file declares its immutable `HOMELAB_STACK_SOURCE`, private repository,
-runner labels and Environment prefix in root `env`. Validation regenerates the
+runner labels and Environment prefix in root `env`. Keep the generated stack-source
+marker as an unquoted scalar at two-space indentation; both the compiler and the
+pre-install CI reader deliberately require that canonical marker. Validation regenerates the
 complete workflow in memory and rejects any job, command, dependency or secret-scope
 drift. The default disabled list remains `[]`.
 

@@ -58,6 +58,8 @@ def bind(value, disabled):
 
 def model(stack, site):
     env, labels = settings(site)
+    selected_source = compiler.workflow_selection(site / '.github/workflows/deploy.yml', 'deploy.yml')
+    compiler.check_revision(stack, selected_source['revision'])
     disabled = env.get('HOMELAB_DISABLED', '[]')
     overlay = compiler.read(site / 'site.json')
     spec = compiler.zabbix.selected(compiler.manifest(stack), overlay)
