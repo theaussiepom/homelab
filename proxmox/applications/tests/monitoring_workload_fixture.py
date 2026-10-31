@@ -31,13 +31,25 @@ def client(kind):
         subprocess.run(['dpkg-deb','-x',str(path),'/'],check=True,stdout=subprocess.DEVNULL)
     cfg=json.loads((root/(kind+'-config.json')).read_text())
     password=(root/'password').read_text()
-    config=Path('/tmp/agent.conf');config.write_text(monitoring_agent.configuration(cfg,password).replace('LogType=system','LogType=console'))
+    configuration=monitoring_agent.configuration(cfg,password).replace('LogType=system','LogType=console').encode()
+    def invoke(arguments):
+        # The short-lived plugin test needs no persisted database credential.
+        # Pass the complete configuration through an inherited anonymous pipe.
+        reader,writer=os.pipe()
+        try:
+            assert len(configuration)<4096
+            os.write(writer,configuration);os.close(writer);writer=None
+            return subprocess.run(['/usr/sbin/zabbix_agent2','-c','/proc/self/fd/'+str(reader),*arguments],
+                                  pass_fds=(reader,),capture_output=True,text=True,check=True)
+        finally:
+            os.close(reader)
+            if writer is not None:os.close(writer)
     Path('/etc/zabbix').mkdir(exist_ok=True);Path('/etc/zabbix/agent.psk').write_text('a'*64+'\n')
-    subprocess.run(['/usr/sbin/zabbix_agent2','-T','-c',str(config)],check=True,stdout=subprocess.DEVNULL)
+    invoke(['-T'])
     prefix='pgsql' if kind=='postgresql' else 'mysql'
     result={}
     for key in [prefix+'.ping[homelab]',prefix+('.dbstat.sum[homelab]' if kind=='postgresql' else '.get_status_variables[homelab]')]:
-        run=subprocess.run(['/usr/sbin/zabbix_agent2','-c',str(config),'-t',key],capture_output=True,text=True,check=True)
+        run=invoke(['-t',key])
         assert 'ZBX_NOTSUPPORTED' not in run.stdout and '"error"' not in run.stdout
         if '.ping[' in key:assert float(run.stdout.rsplit('|',1)[1].strip().rstrip(']'))==1
         result[key]=True
