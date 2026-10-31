@@ -45,7 +45,8 @@ def database_hba(original, source):
     return ('# Root Zabbix: dedicated storage and local statistics only\n'
             'host postgres zbx_monitor 127.0.0.1/32 scram-sha-256\n'
             'host zabbix zabbix 127.0.0.1/32 scram-sha-256\n'
-            'host zabbix zabbix ' + source + '/32 scram-sha-256\n' + original)
+            'hostssl zabbix zabbix ' + source + '/32 scram-sha-256\n'
+            'hostnossl zabbix zabbix ' + source + '/32 reject\n' + original)
 
 
 def bind(resolved, enabled_guests, values):

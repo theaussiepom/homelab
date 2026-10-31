@@ -17,6 +17,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import monitoring
+import monitoring_fixture_tls as fixture_tls
 import render
 
 
@@ -358,6 +359,7 @@ def main(args):
             "retries": 60,
         },
     }
+    fixture_tls.apply(document["services"]["postgres"],fixture_tls.prepare(root))
     (root / "agent.psk").write_text(secrets.token_hex(32) + "\n")
     (root / "wrong.psk").write_text(secrets.token_hex(32) + "\n")
     (root / "wrong-expected.psk").write_text(secrets.token_hex(32) + "\n")
@@ -379,7 +381,7 @@ def main(args):
     )
     # Container users need read access only to synthetic fixture files.
     for file in root.iterdir():
-        file.chmod(0o644)
+        if file.is_file(): file.chmod(0o644)
     compose = root / "compose.json"
     compose.write_text(json.dumps(document))
     command = ["compose", "-p", project, "-f", str(compose)]

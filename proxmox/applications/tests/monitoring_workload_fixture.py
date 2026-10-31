@@ -17,6 +17,7 @@ import uuid
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import monitoring
 import monitoring_agent
+import monitoring_fixture_tls as fixture_tls
 
 MARIA='mariadb:12.3.3@sha256:71541e69e0a1fbec2fa57d6b3b30d751c7847ca77ce66f5af4ffff48060c37c8'
 
@@ -80,11 +81,14 @@ def main(args):
             if time.monotonic()>=deadline:raise RuntimeError('Synthetic database readiness timed out')
             time.sleep(1)
     results={}
+    tls=fixture_tls.prepare(root)
     try:
         docker('network','create','--internal','--subnet','198.18.157.0/24',prefix,stdout=subprocess.DEVNULL)
         for kind,image,address,env in [('postgresql',monitoring.VERSIONS['fixture_postgresql'],'198.18.157.2','POSTGRES_PASSWORD=synthetic-admin'),('mysql',MARIA,'198.18.157.3','MARIADB_ROOT_PASSWORD=synthetic-admin')]:
             container=prefix+'-'+kind
-            docker('run','-d','--platform','linux/amd64','--network',prefix,'--ip',address,'--name',container,'-e',env,image,stdout=subprocess.DEVNULL)
+            options=['-v',str(tls)+':/fixture-tls:ro','--entrypoint','sh'] if kind=='postgresql' else []
+            arguments=['-eu','-c',fixture_tls.ENTRYPOINT] if kind=='postgresql' else []
+            docker('run','-d','--platform','linux/amd64','--network',prefix,'--ip',address,'--name',container,'-e',env,*options,image,*arguments,stdout=subprocess.DEVNULL)
             command=['psql','-U','postgres','-v','ON_ERROR_STOP=1'] if kind=='postgresql' else ['mariadb','-uroot','-psynthetic-admin']
             wait(lambda:docker('exec',container,*( ['pg_isready','-h','127.0.0.1','-U','postgres'] if kind=='postgresql' else [*command,'--protocol=TCP','-h','127.0.0.1','-e','SELECT 1']),capture_output=True,check=False).returncode==0)
             uri='tcp://127.0.0.1:5432' if kind=='postgresql' else 'tcp://'+address+':3306'
@@ -109,13 +113,26 @@ def main(args):
                 # The real derived HBA must work even when the retained body
                 # denies every TCP source. No broad loopback rule is supplied.
                 hba=zabbix.database_hba('local all postgres peer\nhost all all 0.0.0.0/0 reject\nhost all all ::/0 reject\n','198.18.157.9')
-                docker('exec','-i','--user','postgres',container,'sh','-c','cat > /var/lib/postgresql/data/pg_hba.conf',input=hba,text=True,capture_output=True)
+                docker('exec','-i','--user','postgres',container,'sh','-c','cat > /var/lib/postgresql/tls/pg_hba.conf',input=hba,text=True,capture_output=True)
                 docker('exec','--user','postgres',container,'psql','-U','postgres','-At','-c','SELECT pg_reload_conf()',capture_output=True)
                 auth=docker('exec','-e','PGPASSWORD='+password,container,'psql','-h','127.0.0.1','-U','zabbix','-d','zabbix','-At','-c','SELECT current_user',capture_output=True,text=True)
                 assert auth.stdout.strip()=='zabbix'
                 for sql in ['CREATE DATABASE forbidden','CREATE ROLE forbidden','SELECT * FROM private_application']:
                     denied=docker('exec','-e','PGPASSWORD='+password,container,'psql','-h','127.0.0.1','-U','zbx_monitor','-d','postgres','-v','ON_ERROR_STOP=1','-c',sql,check=False,capture_output=True)
                     assert denied.returncode and b'permission denied' in denied.stderr
+                # A broad retained rule must not permit this role to downgrade
+                # its remote connection after the specific hostssl rule.
+                broad=zabbix.database_hba('local all postgres peer\nhost all all 0.0.0.0/0 scram-sha-256\n','198.18.157.9')
+                docker('exec','-i','--user','postgres',container,'sh','-c','cat > /var/lib/postgresql/tls/pg_hba.conf',input=broad,text=True,capture_output=True)
+                docker('exec','--user','postgres',container,'psql','-U','postgres','-At','-c','SELECT pg_reload_conf()',capture_output=True)
+                for mode in ('require','disable'):
+                    probe=docker('run','--rm','--platform','linux/amd64','--network',prefix,'--ip','198.18.157.9',
+                                 '-e','PGPASSWORD='+password,'-e','PGSSLMODE='+mode,monitoring.VERSIONS['fixture_postgresql'],
+                                 'psql','-h',address,'-U','zabbix','-d','zabbix','-At','-c','SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()',
+                                 check=False,capture_output=True,text=True)
+                    assert (probe.returncode==0)==(mode=='require')
+                    if mode=='require':assert probe.stdout.strip()=='t'
+                    else:assert 'pg_hba.conf rejects connection' in probe.stderr
             else:
                 grants=docker('exec',container,*command,'--batch','--skip-column-names','-e',"SELECT PRIVILEGE_TYPE FROM information_schema.USER_PRIVILEGES WHERE GRANTEE=CONCAT(CHAR(39),'zbx_monitor',CHAR(39),'@',CHAR(39),'198.18.157.3',CHAR(39));",capture_output=True,text=True).stdout.splitlines()
                 assert set(grants)=={'PROCESS','BINLOG MONITOR','SHOW DATABASES','SHOW VIEW'}
@@ -128,7 +145,7 @@ def main(args):
                        'homelab-app-test','python3','/src/proxmox/applications/tests/monitoring_workload_fixture.py','--client',kind,capture_output=True,text=True)
             (root/(kind+'-client.log')).write_text(run.stdout+run.stderr)
             results[kind]=json.loads(run.stdout.splitlines()[-1])
-        (root/'result.json').write_text(json.dumps({'metrics':results,'derived_HBA_stats_and_storage_loopback_auth':True,'postgresql_no_admin_or_application_rows':True,'mariadb_finite_statistics_grants':True,'scope':'Disposable owning-network namespaces and pinned Agent2 plugins; no native rollout.'},indent=2)+'\n')
+        (root/'result.json').write_text(json.dumps({'metrics':results,'remote_storage_TLS_and_plaintext_rejection':True,'derived_HBA_stats_and_storage_loopback_auth':True,'postgresql_no_admin_or_application_rows':True,'mariadb_finite_statistics_grants':True,'scope':'Disposable owning-network namespaces and pinned Agent2 plugins; no native rollout.'},indent=2)+'\n')
         print((root/'result.json').read_text())
     finally:
         for kind in ('postgresql','mysql'):

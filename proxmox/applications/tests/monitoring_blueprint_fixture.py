@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import monitoring
 import monitoring_configure
 import monitoring_agent
+import monitoring_fixture_tls as fixture_tls
 import monitoring_templates
 
 
@@ -46,6 +47,9 @@ def main(output):
                         'entrypoint': ['python3','-c','import sys,threading;sys.path.insert(0,"/tests");import docker_api_mock;s=docker_api_mock.start();threading.Event().wait()'],
                         'volumes': [str(Path(__file__).resolve().parent)+':/tests:ro','mock:/mock-docker']}},
         'volumes': {'mock':{}}}
+    fixture_tls.apply(document['services']['postgres'],fixture_tls.prepare(root))
+    document['services']['zabbix_server']['environment']['ZBX_DBTLSCONNECT']='required'
+    document['services']['zabbix_web']['environment'].update(ZBX_DBTLSCONNECT='required',ZBX_DB_ENCRYPTION='true')
     path = root/'compose.json';path.write_text(json.dumps(document));path.chmod(0o600)
     command = ['docker', 'compose', '-p', name, '-f', str(path)]
     try:
@@ -121,10 +125,13 @@ def main(output):
             if len(samples)==2 and all(int(row['lastclock'])>0 and row['state']=='0' and float(row['lastvalue'])>0 for row in samples):break
             if time.monotonic()>=deadline:raise RuntimeError('Fresh PSK Linux/Docker metrics did not arrive')
             time.sleep(2)
+        tls=subprocess.check_output(command+['exec','-T','--user','postgres','postgres','psql','-U','postgres','-At','-c',
+            "SELECT count(*) || ':' || bool_and(s.ssl) FROM pg_stat_activity a JOIN pg_stat_ssl s USING(pid) WHERE a.client_addr IS NOT NULL AND a.datname='zabbix'"],text=True).strip()
+        count,encrypted=tls.split(':');assert int(count)>0 and encrypted=='true'
         result = {'fixture':name, 'zabbix_version':version, 'first_install':first['first_install'],
                   'second_install_preserved':not second['first_install'], 'managed_hosts':len(selected),
                   'all_selected_templates_linked':True, 'agent_PSK_only':True,
-                  'proxmox_full_TLS_items':True, 'fresh_active_Linux_and_Docker_metrics':True,
+                  'proxmox_full_TLS_items':True, 'server_and_frontend_database_TLS':True, 'fresh_active_Linux_and_Docker_metrics':True,
                   'limits':'Real API/linkage, repeatability and Agent2 PSK Linux/Docker synthetic data. No production/native guest acceptance.'}
         (root/'result.json').write_text(json.dumps(result,indent=2)+'\n')
         print(json.dumps(result))

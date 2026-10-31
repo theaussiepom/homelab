@@ -98,7 +98,7 @@ class ZabbixTests(unittest.TestCase):
         original='local all postgres peer\nhost all all 0.0.0.0/0 reject\n'
         value=zabbix.database_hba(original,'198.18.31.36')
         self.assertTrue(value.endswith(original))
-        self.assertEqual(value.splitlines()[:4],['# Root Zabbix: dedicated storage and local statistics only',
+        self.assertEqual(value.splitlines()[:5],['# Root Zabbix: dedicated storage and local statistics only',
             'host postgres zbx_monitor 127.0.0.1/32 scram-sha-256','host zabbix zabbix 127.0.0.1/32 scram-sha-256',
-            'host zabbix zabbix 198.18.31.36/32 scram-sha-256'])
+            'hostssl zabbix zabbix 198.18.31.36/32 scram-sha-256','hostnossl zabbix zabbix 198.18.31.36/32 reject'])
         with self.assertRaises(ValueError):zabbix.database_hba(original,'8.8.8.8')

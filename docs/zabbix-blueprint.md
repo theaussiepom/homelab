@@ -51,7 +51,13 @@ concurrent key creation; it does not serialize guest deployment. Missing or
 changed credentials are not an instruction to rotate a commissioned key.
 
 PostgreSQL CD creates only the new `zabbix` database/owner and verifies its
-ownership and authentication on later runs. Existing application data is not
+ownership and authentication on later runs. Remote storage requires TLS on both
+server and frontend, with an exact `hostssl` rule and an explicit non-TLS rejection
+before retained HBA rules. Existing PostgreSQL TLS must already be enabled; its
+read-only precheck runs before account creation. This feature never creates or
+replaces production database certificates. `required` mode encrypts transport and
+does not add a new database certificate-identity/CA policy; that existing trust
+policy must be qualified before native activation. Existing application data is not
 restored, migrated or recommissioned. The new server imports the pinned templates
 and creates the inventory's hosts. Subsequent runs preserve PSKs, secret macros,
 host identities and history; no import uses destructive `deleteMissing` rules.

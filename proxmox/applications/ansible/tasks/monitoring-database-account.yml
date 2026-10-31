@@ -23,6 +23,15 @@
   changed_when: false
   when: monitoring_db_kind == 'postgresql'
 
+- name: Require retained PostgreSQL TLS before creating monitoring accounts
+  ansible.builtin.command:
+    argv: [psql, -X, -At, -v, ON_ERROR_STOP=1, -d, postgres, -c, SHOW ssl]
+  become_user: postgres
+  register: monitoring_pg_tls
+  changed_when: false
+  failed_when: monitoring_pg_tls.stdout != 'on'
+  when: monitoring_db_kind == 'postgresql'
+
 - name: Inspect the retained database monitoring receipt and interruption hold
   ansible.builtin.stat:
     path: "{{ item }}"
