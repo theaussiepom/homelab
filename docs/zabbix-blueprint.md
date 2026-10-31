@@ -112,3 +112,9 @@ complete only after actual CD creates the dedicated guest, the verified HTTPS UI
 works, Proxmox and every enabled guest report fresh data, Docker and database
 metrics are supported, and another deployment preserves identities and history.
 Notifications, remediation and custom monitoring rules are future work.
+
+The operator acceptance packet derives each agent's expected `psk_sha256` from its
+retained private commissioning record, inside the controller boundary. Verification
+compares the complete identity and digest marker; a same-name host using a different
+key refuses. These derived verification fields are internal evidence, not additional
+user configuration, and must not be exported as a private credential-hash map.

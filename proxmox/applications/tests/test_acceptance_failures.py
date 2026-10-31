@@ -2,6 +2,7 @@
 
 import io
 import json
+import hashlib
 from pathlib import Path
 import sys
 import tempfile
@@ -37,7 +38,8 @@ class MonitoringAcceptanceFailures(unittest.TestCase):
                     "password_file": str(password),
                     "not_before": 0,
                     "agents": [
-                        {"hostname": "fixture-linux", "psk_identity": "fixture-linux"}
+                        {"hostname": "fixture-linux", "psk_identity": "fixture-linux",
+                         "psk_sha256": hashlib.sha256(b"synthetic-PSK").hexdigest()}
                     ],
                     "proxmox_hostname": "fixture-pve",
                     "commissioned_vmids": [213],

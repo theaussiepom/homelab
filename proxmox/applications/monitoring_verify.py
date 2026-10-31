@@ -80,6 +80,9 @@ def _verify_once(c):
         cutoff = max(time.time() - c.get("max_age_seconds", 900), c["not_before"])
         pending = False
         for row in c["agents"]:
+            digest = row.get("psk_sha256")
+            if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise AcceptanceFailure("Bind each agent to its commissioned PSK digest")
             hosts = call(
                 "host.get",
                 {"filter": {"host": [row["hostname"]]}, "output": "extend"},
@@ -91,10 +94,10 @@ def _verify_once(c):
             if (
                 len(hosts) != 1
                 or hosts[0]["tls_accept"] != "2"
-                or re.fullmatch(
-                    re.escape("HomeLab blueprint agent; identity=" + row["psk_identity"]
-                              + "; credential=") + r"[0-9a-f]{64}", hosts[0]["description"]
-                ) is None
+                or hosts[0]["description"] != (
+                    "HomeLab blueprint agent; identity=" + row["psk_identity"]
+                    + "; credential=" + digest
+                )
             ):
                 raise AcceptanceFailure(
                     "An agent is missing or does not require its individual PSK"
