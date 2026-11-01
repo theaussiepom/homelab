@@ -138,7 +138,7 @@ def check_plan(value, node, vmid, *, existing, serial_device=None, reviewed_drif
         and value.get("complete") is not False
         and not value.get("deferred_changes")
         and (allowed_guest_drift(value.get("resource_drift"), node, vmid, serial_device)
-             or reviewed_guest_drift(value.get("resource_drift"), node, vmid, reviewed_drift)),
+             or existing and reviewed_guest_drift(value.get("resource_drift"), node, vmid, reviewed_drift)),
         "Review incomplete, deferred or drifted plans before deployment",
     )
     rows = value.get("resource_changes", [])

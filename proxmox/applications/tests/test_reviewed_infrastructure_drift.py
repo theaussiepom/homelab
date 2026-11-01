@@ -38,6 +38,11 @@ class ReviewedDriftTests(unittest.TestCase):
             plan_policy.check_plan(value, 'pve-lab', 6100, existing=True)
         plan_policy.check_plan(value, 'pve-lab', 6100, existing=True, reviewed_drift=reviewed)
         self.assertEqual(value, original)
+        fresh = copy.deepcopy(value)
+        for row in fresh['resource_changes']:
+            row['change'].update(actions=['create'], before=None)
+        with self.assertRaises(ValueError):
+            plan_policy.check_plan(fresh, 'pve-lab', 6100, existing=False, reviewed_drift=reviewed)
         for change in ('destroy', 'disk', 'foreign-resource'):
             bad = copy.deepcopy(value)
             if change == 'destroy': bad['resource_changes'][0]['change']['actions'] = ['delete', 'create']
