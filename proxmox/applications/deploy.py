@@ -13,7 +13,8 @@ import proxmox_guest
 from private_io import require
 
 PHASES = {"infrastructure", "preparation"} | {
-    p for b in guest_contract.BLUEPRINTS.values() for p in b["applications"]
+    p for b in guest_contract.BLUEPRINTS.values()
+    for p in [*b["applications"], *b.get("optional_applications", {})]
 }
 
 

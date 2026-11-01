@@ -24,6 +24,13 @@ DATABASE_KINDS = {"postgresql", "mariadb", "influxdb"}
 SCHEMA = "homelab-guest-deployment-v2"
 
 
+def applications(cfg):
+    """Optional telemetry is explicit; a Zigbee-only guest stays unchanged."""
+    selected = BLUEPRINTS[cfg["app"]["kind"]]
+    optional = selected.get("optional_applications", {})
+    return [*selected["applications"], *(name for name in optional if name in cfg["app"]["service_health_checks"])]
+
+
 def phases(cfg):
     selected = BLUEPRINTS[cfg["app"]["kind"]]
     require(
@@ -31,7 +38,7 @@ def phases(cfg):
         == {"contract": 2, "capabilities": selected["capabilities"]},
         "Use the current guest preparation contract",
     )
-    return ["preparation", *selected["applications"]]
+    return ["preparation", *applications(cfg)]
 
 
 def runtime_images(stack):
@@ -147,7 +154,7 @@ def validate(cfg, stack=None):
     )
     require(
         set(app["service_health_checks"])
-        == set(BLUEPRINTS[app["kind"]]["applications"])
+        == set(applications(cfg))
         and all(app["service_health_checks"].values()),
         "Require a health contract for each application",
     )
@@ -302,6 +309,8 @@ def validate(cfg, stack=None):
         if app["kind"] == "zigbee2mqtt":
             import zigbee2mqtt
 
+            require(set(stack["services"]) == set(applications(cfg)),
+                    "Declare every radio application and its health contract")
             zigbee2mqtt.validate_deployment(cfg, stack)
         import render
 

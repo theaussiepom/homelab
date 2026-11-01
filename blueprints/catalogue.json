@@ -307,6 +307,9 @@
       "name": "Zigbee2MQTT",
       "application_names": {
         "zigbee2mqtt": "Zigbee2MQTT"
+      },
+      "optional_applications": {
+        "winet": "WiNet"
       }
     },
     "monitoring": {

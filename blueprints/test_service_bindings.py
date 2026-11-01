@@ -87,6 +87,18 @@ class ServiceBindingsTests(unittest.TestCase):
             [("radio", "automation", "198.18.30.22", "198.18.30.21", 1883)],
         )
 
+    def test_winet_uses_the_same_broker_without_overwriting_zigbee_selection(self):
+        rows = fixture()
+        cfg, stack, _ = rows["radio"]
+        cfg["app"]["service_health_checks"]["winet"] = [{}]
+        cfg["app"]["service_connections"]["winet"] = {"service": "automation.mqtt", "address": "backend"}
+        stack["winet"] = {}
+        stack["services"]["winet"] = {}
+        service.bind(rows)
+        self.assertEqual(stack["zigbee"]["mqtt_server"], "mqtt://broker.mqtt:1883")
+        self.assertEqual(stack["winet"]["mqtt_server"], "mqtt://broker.mqtt:1883")
+        self.assertEqual(stack["services"]["winet"]["extra_hosts"], {"broker.mqtt": "198.18.30.21"})
+
     def test_invalid_or_duplicate_publications_are_refused(self):
         for mutate in (
             lambda r: r["automation"][0]["app"].update(published_services=[]),

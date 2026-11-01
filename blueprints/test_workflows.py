@@ -56,6 +56,23 @@ class WorkflowGenerationTests(unittest.TestCase):
 
         (self.root / "stack.json").write_text(json.dumps(self.manifest))
 
+    def test_optional_application_stays_in_its_guest_job_and_profile_owns_selection(self):
+        import json
+        self.catalogue["web"]["optional_applications"] = {"winet": "WiNet"}
+        profile = self.root / "guests/web/profile.json"
+        profile.parent.mkdir(parents=True)
+        for selected in (False, True):
+            profile.write_text(json.dumps({"config": {"app": {"service_health_checks":
+                               {"web": [{}], **({"winet": [{}]} if selected else {})}}}}))
+            models = workflows.models(self.root)
+            self.assertEqual(set(models["deploy.yml"]["jobs"]), {"selection", "database", "web"})
+            job = models["guest-web.yml"]["jobs"]["deploy"]
+            self.assertEqual([s["env"]["PHASE"] for s in job["steps"][8::4]],
+                             ["infrastructure", "preparation", "web", *(["winet"] if selected else [])])
+            self.assertEqual(sum(s["name"] == "Prepare service" for s in job["steps"]), 1)
+            if selected:
+                self.assertEqual(job["steps"][-1]["name"], "Deploy WiNet")
+
     def test_declarative_phase_and_dependency_edits_change_the_actual_job_graph(self):
         first = workflows.models(self.root)
         self.assertEqual(

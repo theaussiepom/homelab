@@ -3,6 +3,7 @@
 import json
 import hashlib
 import foundation
+import winet
 from guest_contract import SOURCE
 import os
 from pathlib import Path
@@ -171,7 +172,9 @@ def input_hashes(cfg):
             import monitoring
             paths.extend(monitoring.source_files(read_json(Path(app["stack_config"]), private=True)))
         else:
-            paths.extend(foundation.source_files(json.loads(Path(app["stack_config"]).read_text())))
+            stack = json.loads(Path(app["stack_config"]).read_text())
+            paths.extend(foundation.source_files(stack))
+            paths.extend(winet.source_files(stack))
         if app.get("kind") == "bitwarden":
             paths.append(app["bitwarden"]["runtime_env_file"])
     if app.get("kind") == "pegaprox":

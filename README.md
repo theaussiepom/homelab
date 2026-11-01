@@ -29,6 +29,9 @@ guest applications and Linux/Docker capabilities. Ordinary deployment reuses
 OpenTofu owns guest CPU/RAM/disks/NICs/firewall/autostart. Ansible owns packages,
 Docker/Compose where selected, and applications. A native database omits Docker.
 
+The Zigbee guest can also select [WiNet telemetry](docs/winet.md) as a separate
+application step, retaining the same guest, coordinator and preparation phase.
+
 For local source tests, use Python 3.12+ with the pinned dependencies in
 [pyproject.toml](pyproject.toml):
 

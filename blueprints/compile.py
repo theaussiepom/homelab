@@ -249,6 +249,10 @@ def _resolve_guest(root, overlay, name, spec):
         cfg["guest"].get("platform", "debian-lxc") == "debian-lxc",
         "Only Debian LXC is implemented",
     )
+    optional = set(CATALOGUE[name].get("optional_applications", {}))
+    require(set(cfg["app"]["service_health_checks"]) & optional
+            == set(profile["config"]["app"]["service_health_checks"]) & optional,
+            "Select optional application phases in the shared profile, not a private override")
     cfg["guest"].pop("platform", None)
     cfg["deployment"] = {"contract": 2, "capabilities": CATALOGUE[name]["capabilities"]}
     cfg["app"]["required_paths"] = list(
@@ -278,7 +282,7 @@ def _resolve_guest(root, overlay, name, spec):
         "Bind application SSH to an assigned interface",
     )
     require(
-        set(cfg["app"]["service_health_checks"]) == set(CATALOGUE[name]["applications"])
+        set(cfg["app"]["service_health_checks"]) == set(guest_contract.applications(cfg))
         and all(cfg["app"]["service_health_checks"].values()),
         "Every application needs a bounded health check",
     )

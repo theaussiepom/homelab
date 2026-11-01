@@ -73,7 +73,7 @@ def validate_deployment(cfg, stack):
         cfg["guest"].get("serial_device") != {"path": selected["serial_device"]}
         or selected["bind_address"]
         not in network_endpoints.addresses(cfg["guest"])
-        or set(stack["services"]) != {"zigbee2mqtt"}
+        or set(stack["services"]) != ({"zigbee2mqtt", "winet"} if "winet" in stack else {"zigbee2mqtt"})
     ):
         raise ValueError("Bind the declared coordinator and listener to this guest")
 

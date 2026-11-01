@@ -29,6 +29,11 @@ jobs:
         run: python3 -m pytest -q .github/scripts/test_coverage_metrics.py
       - name: Measure blueprint unit coverage
         run: python3 tools/measure_coverage.py --suite blueprints --output "$RUNNER_TEMP/blueprint-coverage"
+      - name: WiNet health
+        run: |
+          image='ghcr.io/theaussiepom/winet-extractor@sha256:82c6b886967995f0a3cfe6fb5e20eeef70d10aa525d5bd824064eb272e1ce51a'
+          docker pull "$image"
+          python3 proxmox/applications/tests/winet_health_fixture.py "$image"
   changes:
     name: Detect installer changes
     if: github.event_name != 'schedule'

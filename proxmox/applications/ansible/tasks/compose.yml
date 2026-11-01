@@ -76,7 +76,7 @@
   ansible.builtin.set_fact:
     foundation_runtime_files: "{{ lookup('ansible.builtin.file', app.render_dir + '/runtime-files.json') | from_json }}"
   no_log: true
-  when: (stack.foundation is defined or stack.kind == 'monitoring') and not ansible_check_mode
+  when: (stack.foundation is defined or stack.kind == 'monitoring' or (stack.winet is defined and application_service == 'winet')) and not ansible_check_mode
 
 - name: Prepare the private foundation runtime directory
   ansible.builtin.file:
@@ -85,7 +85,7 @@
     owner: root
     group: root
     mode: '0700'
-  when: (stack.foundation is defined or stack.kind == 'monitoring') and not ansible_check_mode
+  when: (stack.foundation is defined or stack.kind == 'monitoring' or (stack.winet is defined and application_service == 'winet')) and not ansible_check_mode
 
 - name: Install only the selected service-readable foundation files
   ansible.builtin.copy:
@@ -97,7 +97,7 @@
   loop: "{{ foundation_runtime_files | default([]) }}"
   register: foundation_runtime_install
   no_log: true
-  when: (stack.foundation is defined or stack.kind == 'monitoring') and not ansible_check_mode
+  when: (stack.foundation is defined or stack.kind == 'monitoring' or (stack.winet is defined and application_service == 'winet')) and not ansible_check_mode
 
 - name: Load preserved custom images by verified archive
   ansible.builtin.include_tasks: image.yml
@@ -134,7 +134,7 @@
 
 - name: Check the existing Zigbee configuration and coordinator before startup
   ansible.builtin.import_tasks: zigbee-runtime.yml
-  when: app.kind == 'zigbee2mqtt'
+  when: app.kind == 'zigbee2mqtt' and application_service == 'zigbee2mqtt'
 
 - name: Preserve Bitwarden image identity and install its health helper
   ansible.builtin.include_tasks: bitwarden.yml
@@ -159,7 +159,7 @@
 
 - name: Start exactly this guest stack
   ansible.builtin.command:
-    argv: "{{ ['docker', 'compose', '-f', '/opt/homelab-app/compose.yml', 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--force-recreate'] if foundation_runtime_install.changed | default(false) else []) + (['--pull', 'never'] if app.kind == 'bitwarden' else []) + (['--no-deps', application_service] if app.kind in ['automation', 'dns'] else []) }}"
+    argv: "{{ ['docker', 'compose', '-f', '/opt/homelab-app/compose.yml', 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--force-recreate'] if foundation_runtime_install.changed | default(false) else []) + (['--pull', 'never'] if app.kind == 'bitwarden' else []) + (['--no-deps', application_service] if app.kind in ['automation', 'dns', 'zigbee2mqtt'] else []) }}"
   register: compose_start
   changed_when: "'Started' in compose_start.stderr or 'Created' in compose_start.stderr or 'Recreated' in compose_start.stderr"
   no_log: true

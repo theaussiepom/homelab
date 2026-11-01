@@ -15,6 +15,7 @@ import monitoring
 import foundation
 import dns_records
 import zigbee2mqtt
+import winet
 
 KINDS = {
     "automation": {"homeassistant", "node_red", "mqtt"},
@@ -72,7 +73,8 @@ def compose(cfg):
             "Choose dns, identity, ingress, automation, db-tools, bitwarden or zigbee2mqtt; databases are native"
         )
     inputs = cfg.get("services", {})
-    if set(inputs) != KINDS[kind]:
+    expected = KINDS[kind] | ({"winet"} if kind == "zigbee2mqtt" and "winet" in cfg else set())
+    if set(inputs) != expected:
         raise ValueError("Supply exactly the services for this guest")
     if kind == "zigbee2mqtt":
         radio = inputs["zigbee2mqtt"]
@@ -98,6 +100,7 @@ def compose(cfg):
             "Leave at least 256 MiB for the guest OS outside container limits"
         )
     foundation.validate(cfg)
+    winet.validate(cfg)
     if kind == "bitwarden":
         bitwarden.validate(cfg)
     if kind in {"identity", "ingress", "db-tools"} and "foundation" not in cfg:
@@ -171,6 +174,7 @@ def compose(cfg):
                 ("mqtt/log", "/mosquitto/log"),
             ],
             "zigbee2mqtt": [("zigbee2mqtt", "/app/data")],
+            "winet": [],
             "server": [
                 ("authentik/media", "/media"),
                 ("authentik/templates", "/templates"),
@@ -405,7 +409,7 @@ def compose(cfg):
         ]
     if kind == "bitwarden":
         return bitwarden.configure(cfg, result)
-    return foundation.configure_compose(cfg, result)
+    return winet.configure(cfg, foundation.configure_compose(cfg, result))
 
 
 def dns_name(host):
@@ -431,12 +435,12 @@ def main():
             json.dumps(dns_records.validate(cfg.get("dns_records", {})), sort_keys=True)
             + "\n"
         ).encode()
-    if "foundation" in cfg or cfg["kind"] == "monitoring":
+    if "foundation" in cfg or cfg["kind"] == "monitoring" or "winet" in cfg:
         manifest = []
         for artifact in (
             monitoring.files(cfg)
             if cfg["kind"] == "monitoring"
-            else foundation.files(cfg)
+            else winet.files(cfg) if "winet" in cfg else foundation.files(cfg)
         ):
             artifacts[artifact["path"]] = artifact["content"].encode()
             manifest.append(

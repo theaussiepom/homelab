@@ -65,7 +65,7 @@ def bind(resolved, route_records=None):
                 connections.require(
                     endpoint["port"] == 1883, "Select the preserved MQTT listener"
                 )
-                stack["zigbee"]["mqtt_server"] = (
+                stack["winet" if application == "winet" else "zigbee"]["mqtt_server"] = (
                     "mqtt://" + endpoint["hostname"] + ":" + str(endpoint["port"])
                 )
                 aliases = stack["services"][application].setdefault("extra_hosts", {})

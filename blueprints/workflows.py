@@ -245,8 +245,18 @@ PYCODE
             and {"name", "applications", "application_names"} <= blueprint.keys(),
             "Define workflow names in the current blueprint metadata",
         )
-        apps = blueprint["applications"]
-        names = blueprint["application_names"]
+        apps = list(blueprint["applications"])
+        names = dict(blueprint["application_names"])
+        optional = blueprint.get("optional_applications", {})
+        profile_path = stack / "guests" / guest / "profile.json"
+        # Catalogue-only graph fixtures retain the mandatory phases. Real stacks
+        # always supply profiles, which the compiler separately requires.
+        if optional and profile_path.is_file():
+            profile = compiler.read(profile_path)
+            for application, title in optional.items():
+                if application in profile["config"]["app"]["service_health_checks"]:
+                    apps.append(application)
+                    names[application] = title
         compiler.require(
             isinstance(apps, list)
             and apps
