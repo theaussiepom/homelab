@@ -2,7 +2,7 @@
 import argparse
 import base64
 import hashlib
-from http.client import HTTPConnection
+from http.client import HTTPConnection, HTTPException
 import json
 import os
 from pathlib import Path
@@ -146,7 +146,7 @@ def run(service):
         try:
             probe(service)
             return {'service': service, 'read_only_probe': 'passed'}
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError, HTTPException):
             if time.monotonic() >= deadline:
                 raise ValueError('Application probe did not pass; inspect its private logs') from None
             time.sleep(2)

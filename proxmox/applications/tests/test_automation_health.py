@@ -3,6 +3,7 @@
 import importlib.util
 import base64
 import hashlib
+from http.client import BadStatusLine, IncompleteRead
 import io
 import json
 from pathlib import Path
@@ -116,6 +117,28 @@ class AutomationHealthTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Application probe did not pass"):
                 health.run("mqtt")
             sleep.assert_not_called()
+
+    def test_HTTP_protocol_errors_wait_for_readiness_but_keep_the_deadline(self):
+        for error in [BadStatusLine("truncated status"), IncompleteRead(b"partial")]:
+            with (
+                self.subTest(error=type(error).__name__, outcome="ready"),
+                patch.object(health, "probe", side_effect=[error, None]) as probe,
+                patch.object(health.time, "monotonic", side_effect=[0, 1]),
+                patch.object(health.time, "sleep") as sleep,
+            ):
+                self.assertEqual(health.run("homeassistant"),
+                                 {"service": "homeassistant", "read_only_probe": "passed"})
+                self.assertEqual(probe.call_count, 2)
+                sleep.assert_called_once_with(2)
+            with (
+                self.subTest(error=type(error).__name__, outcome="deadline"),
+                patch.object(health, "probe", side_effect=error),
+                patch.object(health.time, "monotonic", side_effect=[0, 181]),
+                patch.object(health.time, "sleep") as sleep,
+            ):
+                with self.assertRaisesRegex(ValueError, "Application probe did not pass"):
+                    health.run("homeassistant")
+                sleep.assert_not_called()
 
 
 class ProbeBoundaryTests(unittest.TestCase):
