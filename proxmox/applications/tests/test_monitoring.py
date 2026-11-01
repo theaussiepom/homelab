@@ -181,6 +181,35 @@ class SamlFrontendTests(unittest.TestCase):
                     dict(self.selected(), private_key="unapproved")]:
             with self.subTest(shape=bad), self.assertRaises(ValueError):
                 monitoring.saml_settings(bad)
+
+    def test_SAML_default_login_is_explicit_and_scoped_to_one_local_view(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = fixture(Path(tmp))
+            cfg["monitoring"]["saml"] = self.selected()
+            original = monitoring.compose(cfg)
+            original_files = monitoring.files(cfg)
+            cfg["monitoring"]["saml"]["default_login"] = "zabbix"
+            self.assertEqual(monitoring.compose(cfg), original)
+            self.assertEqual(monitoring.files(cfg), original_files)
+            cfg["monitoring"]["saml"]["default_login"] = "saml"
+            actual = monitoring.compose(cfg)
+            mount = actual["services"]["zabbix_web"]["volumes"].pop()
+            self.assertEqual(mount, {
+                "type": "bind", "source": "/opt/homelab-app/runtime/saml-login.php",
+                "target": "/usr/share/zabbix/local/app/views/general.login.php",
+                "read_only": True, "bind": {"create_host_path": False}})
+            self.assertEqual(actual, original)
+            files = monitoring.files(cfg)
+            local_view = files.pop()
+            self.assertEqual(files, original_files)
+            self.assertEqual(local_view, {
+                "path": "saml-login.php", "uid": 1997, "gid": 1995, "mode": "0400",
+                "content": (monitoring.ROOT / "saml-login.php").read_text()})
+            self.assertEqual(len(monitoring.source_files(cfg)), 2)
+        for default in [None, False, True, 1, [], {}, "", "http", "SAML"]:
+            value = dict(self.selected(), default_login=default)
+            with self.subTest(default=default), self.assertRaises(ValueError):
+                monitoring.saml_settings(value)
         for url in [None, "", "http://zabbix.example.invalid", "https://",
                     "https://user:password@zabbix.example.invalid",
                     "https://zabbix.example.invalid:443", "https://bad_host.example.invalid",

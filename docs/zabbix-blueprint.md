@@ -45,9 +45,15 @@ It has no Traefik client IP allowlist; network access policy is left to the
 site's firewall controls. Other management routes keep their selected policies.
 
 An existing SAML identity provider can be connected without Traefik authentication
-middleware. The private monitoring stack may select `monitoring.saml` with only
+middleware. The private monitoring stack may select `monitoring.saml` with
 `public_url` (the fixed external HTTPS origin, without trusting forwarded headers)
-and `idp_signing_certificate` (one public PEM certificate). The frontend receives strict SAML validation, the fixed public
+and `idp_signing_certificate` (one public PEM certificate). An optional
+`default_login: saml` bypasses the password screen through Zabbix's supported
+local login-view extension. `/index.php?form=default` retains the vendor's local
+recovery form; local submissions and a disabled SAML configuration also retain
+that form. This changes the normal entry screen, not password/API authentication,
+users, roles, or credentials. Omit `default_login` (or use `zabbix`) to keep the
+standard entry screen. The frontend receives strict SAML validation, the fixed public
 base URL, disabled proxy-header trust and the pinned IdP signing certificate through the
 official image's `ZBX_SSO_SETTINGS`. No IdP private key is copied. Updating this
 container configuration requires normal CD. Provider URLs, signed-assertion

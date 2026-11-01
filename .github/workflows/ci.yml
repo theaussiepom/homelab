@@ -57,6 +57,13 @@ jobs:
           python-version: '3.12'
       - name: Install pinned blueprint fixture dependencies
         run: python3 -m pip install --require-hashes -r requirements.lock.txt
+      - name: Check SAML entry and local recovery
+        run: |
+          image="$(python3 -c 'import json; print(json.load(open("proxmox/applications/monitoring/versions.json"))["zabbix_web"])')"
+          docker run --rm --platform linux/amd64 --network none --entrypoint php \
+            -v "$PWD:/src:ro" "$image" \
+            /src/proxmox/applications/tests/saml_login_fixture.php \
+            /src/proxmox/applications/monitoring/saml-login.php
       - name: Build the existing pinned application test tools
         run: docker build --platform linux/amd64 -t homelab-app-test -f proxmox/bootstrap/docker/Dockerfile proxmox/bootstrap/docker
       - name: Install only verified upstream Zabbix API collections

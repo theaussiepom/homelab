@@ -32,9 +32,12 @@ def text(value):
 
 def saml_settings(value):
     """Supply only the public SAML trust and external HTTPS origin."""
-    require(isinstance(value, dict) and set(value) == {
+    require(isinstance(value, dict) and set(value) - {"default_login"} == {
         "public_url", "idp_signing_certificate"},
         "Select the public SAML URL and one IdP signing certificate")
+    require(isinstance(value.get("default_login", "zabbix"), str)
+            and value.get("default_login", "zabbix") in {"zabbix", "saml"},
+            "Choose the normal Zabbix or SAML login entry")
     url = urlsplit(text(value["public_url"]))
     require(url.scheme == "https" and url.hostname
             and url.netloc == url.hostname
@@ -189,6 +192,14 @@ def files(cfg):
                 "mode": "0400",
             }
         )
+    if m.get("saml", {}).get("default_login") == "saml":
+        result.append({
+            "path": "saml-login.php",
+            "content": (ROOT / "saml-login.php").read_text(),
+            "uid": 1997,
+            "gid": 1995,
+            "mode": "0400",
+        })
     return result
 
 
@@ -254,6 +265,14 @@ def compose(cfg):
     if "saml" in m:
         web["environment"]["ZBX_SSO_SETTINGS"] = json.dumps(
             saml_settings(m["saml"]), sort_keys=True, separators=(",", ":"))
+        if m["saml"].get("default_login") == "saml":
+            web["volumes"].append({
+                "type": "bind",
+                "source": "/opt/homelab-app/runtime/saml-login.php",
+                "target": "/usr/share/zabbix/local/app/views/general.login.php",
+                "read_only": True,
+                "bind": {"create_host_path": False},
+            })
     web["ports"] = [m["bind_address"] + ":8080:8080", "127.0.0.1:8081:8080"]
     web["depends_on"] = {"zabbix_server": {"condition": "service_started"}}
     return result
