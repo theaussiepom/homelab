@@ -68,11 +68,24 @@ def validation_workflow(site):
                      'Use a reusable local CI workflow with workflow_call')
     compiler.require(isinstance(value.get('jobs'), dict) and bool(value['jobs']),
                      'Use a reusable local CI workflow containing jobs')
+    compiler.require(set(value) <= {'name', 'on', True, 'permissions', 'jobs'}
+                     and value.get('permissions', {'contents': 'read'}) == {'contents': 'read'},
+                     'Preserve the source validation workflow context and read-only permissions')
+    compiler.require(set(value['jobs']) == {'source'}
+                     and isinstance(value['jobs']['source'], dict)
+                     and isinstance(value['jobs']['source'].get('steps'), list),
+                     'Use one native source validation job')
+    job = copy.deepcopy(value['jobs']['source'])
+    # A native job avoids GitHub's automatic caller/callee name separator.
+    # Preserve the original Ubuntu default shell instead of inheriting Deploy's.
+    job.update(name='Validate')
+    job.setdefault('defaults', {'run': {'shell': 'bash -e {0}'}})
+    return job
 
 
 def model(stack, site):
     env, labels = settings(site)
-    validation_workflow(site)
+    validation = validation_workflow(site)
     selected_source = compiler.workflow_selection(site / '.github/workflows/deploy.yml', 'deploy.yml')
     compiler.check_revision(stack, selected_source['revision'])
     compiler.require(not subprocess.check_output(
@@ -90,7 +103,7 @@ def model(stack, site):
               'permissions': {'contents': 'read'},
               'concurrency': {'group': 'homelab-private-deployment', 'cancel-in-progress': False, 'queue': 'max'},
               'defaults': {'run': {'shell': 'bash'}}, 'env': copy.deepcopy(env),
-              'jobs': {'validate': {'name': 'Validate', 'uses': './.github/workflows/ci.yml'}}}
+              'jobs': {'validate': validation}}
     selector = bind(copy.deepcopy(source['deploy.yml']['jobs']['selection']), disabled)
     selector.update(needs=['validate'], **{'if': condition})
     result['jobs']['selection'] = selector

@@ -92,8 +92,39 @@ class PrivateWorkflowTests(unittest.TestCase):
         for raw in ['on:\n  workflow_call:\n', "'on':\n  workflow_call: {}\n",
                     'on: workflow_call\n', 'on: [push, workflow_call]\n']:
             path.write_text(raw + CI_JOBS)
-            self.assertEqual(p.model(self.stack, self.site)['jobs']['validate']['uses'],
-                             './.github/workflows/ci.yml')
+            job = p.model(self.stack, self.site)['jobs']['validate']
+            self.assertEqual(job['name'], 'Validate')
+            self.assertNotIn('uses', job)
+            self.assertEqual(job['steps'], [{'run': 'echo synthetic'}])
+            self.assertEqual(job['defaults'], {'run': {'shell': 'bash -e {0}'}})
+
+    def test_native_validation_preserves_every_source_step_and_job_setting(self):
+        path = self.site / '.github/workflows/ci.yml'
+        value = yaml.safe_load(path.read_text())
+        value['permissions'] = {'contents': 'read'}
+        source = value['jobs']['source']
+        source.update(name='Long original title', **{'timeout-minutes': 9,
+                      'defaults': {'run': {'shell': 'bash'}}})
+        source['steps'].append({'name': 'Check source', 'run': 'python3 check.py',
+                                'env': {'SELECTED': '${{ github.sha }}'}})
+        path.write_text(yaml.safe_dump(value))
+        self.assertEqual(p.model(self.stack, self.site)['jobs']['validate'],
+                         {**source, 'name': 'Validate'})
+
+    def test_native_validation_refuses_to_drop_other_jobs_or_workflow_context(self):
+        path = self.site / '.github/workflows/ci.yml'
+        original = yaml.safe_load(path.read_text())
+        variants = []
+        for jobs in [{'other': {'steps': []}}, {'source': None}, {'source': {}},
+                     {'source': {'steps': 'not-steps'}},
+                     {'source': {'steps': []}, 'other': {'steps': []}}]:
+            value = copy.deepcopy(original); value['jobs'] = jobs; variants.append(value)
+        for key, setting in [('env', {'EXTRA': 'value'}), ('permissions', {'contents': 'write'})]:
+            value = copy.deepcopy(original); value[key] = setting; variants.append(value)
+        for value in variants:
+            path.write_text(yaml.safe_dump(value))
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                p.model(self.stack, self.site)
 
     def test_reusable_ci_requires_nonempty_job_mapping(self):
         path = self.site / '.github/workflows/ci.yml'
