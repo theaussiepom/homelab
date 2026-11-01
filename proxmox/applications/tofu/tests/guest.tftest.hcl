@@ -1,5 +1,32 @@
 mock_provider "proxmox" {}
 
+run "interface_scoped_firewall_reaches_the_provider" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "out", proto = "tcp", port = "443", destination = "198.19.107.23/32", interface = "net0", comment = "Inverter fixture" }]
+    })
+  }
+  assert {
+    condition     = proxmox_virtual_environment_firewall_rules.guest.rule[0].iface == "net0"
+    error_message = "A scoped interface must reach the actual provider rule."
+  }
+}
+
+run "undeclared_firewall_interface_is_rejected" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "out", proto = "tcp", port = "443", destination = "198.19.107.23/32", interface = "net2", comment = "Invalid interface fixture" }]
+    })
+  }
+  expect_failures = [var.guest]
+}
+
 run "active_radio_leaves_host_devices_to_its_capability" {
   command = plan
   module { source = "./guest" }

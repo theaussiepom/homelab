@@ -124,7 +124,7 @@ def connections(configurations, external_routes=None):
                     yield connection(name, target, address, protocol, 53)
 
 
-def permits(rules, direction, connection):
+def permits(rules, direction, connection, interface=None):
     def includes_network(value, address):
         if value is None:
             return True
@@ -155,6 +155,7 @@ def permits(rules, direction, connection):
     return any(
         rule["direction"] == direction
         and rule["proto"] == connection.protocol
+        and rule.get("interface") in (None, interface)
         and includes_network(rule.get("source"), connection.source_address)
         and includes_network(rule.get("destination"), connection.target_address)
         and includes_port(rule.get("port"))
@@ -176,6 +177,8 @@ def validate(configurations, external_routes=None):
             if guest is None:
                 continue
             require(
-                permits(configurations[guest]["guest"]["rules"], direction, connection),
+                permits(configurations[guest]["guest"]["rules"], direction, connection,
+                        network_endpoints.firewall_interface(configurations[guest]["guest"],
+                            connection.source_address if direction == "out" else connection.target_address)),
                 f"Permit {connection.source} -> {connection.target} {connection.protocol}/{connection.port} in the {guest} {direction} firewall",
             )

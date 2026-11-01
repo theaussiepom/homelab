@@ -28,7 +28,7 @@ try:
                                    "winet_pass": "fixture-only", "mqtt_url": "mqtt://fixture:1883", "ssl": True}))
         path.chmod(0o600)
         results = {}
-        for mode in ("online", "offline", "missing", "denied"):
+        for mode in ("online", "offline", "missing", "denied", "flap", "recover"):
             server = prefix + "-" + mode
             names.append(server)
             run("run", "-d", "--name", server, "--network", network, "--network-alias", "fixture",
@@ -41,10 +41,29 @@ try:
                 time.sleep(0.5)
             else:
                 raise AssertionError("Broker fixture startup failed")
+            started = time.monotonic()
             result = run("run", "--rm", "--network", network, "--memory", "256m", "--pids-limit", "128",
                          "--entrypoint", "node", "-v", str(path) + ":/data/options.json:ro", image, "-e", winet.HEALTH, check=False)
-            assert result.returncode == (0 if mode == "online" else 1), (mode, result.returncode)
-            results[mode] = result.returncode
+            assert result.returncode == (0 if mode in {"online", "recover"} else 1), (mode, result.returncode)
+            assert run("inspect", server, "--format", "{{.State.Running}}").stdout.strip() == "true"
+            events = [json.loads(line) for line in run("logs", server).stdout.splitlines() if line.startswith("{")]
+            connected = [e for e in events if e["event"] == "connect"]
+            subscribed = [e for e in events if e["event"] == "subscribe"]
+            sent = [e for e in events if e["event"] == "availability"]
+            assert connected and connected[0]["accepted"] == (mode != "denied"), (mode, events)
+            if mode == "denied":
+                assert not subscribed and not sent
+            else:
+                assert len(subscribed) == 1 and set(subscribed[0]["topics"]) == {
+                    "winet-extractor/198_19_107_23/status", "winet-extractor/198_19_107_23/availability"}
+                if mode == "missing":
+                    assert not sent and time.monotonic() - started >= 8
+                elif mode in {"flap", "recover"}:
+                    assert [e["value"] for e in sent] == ["online", "offline", "online"] + (["online"] if mode == "recover" else [])
+                else:
+                    assert len(sent) == 2
+                    assert [e["value"] for e in sent] == ["online", "offline" if mode == "offline" else "online"]
+            results[mode] = {"exit": result.returncode, "broker_state_proved": True}
             run("rm", "-f", server)
         print(json.dumps({"image": image, "results": results, "external_network": False,
                           "actual_upstream_health_runtime": True, "physical_inverter_tested": False}))

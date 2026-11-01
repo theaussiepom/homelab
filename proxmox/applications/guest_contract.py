@@ -78,6 +78,10 @@ def validate(cfg, stack=None):
     ordinary_failure.selection(cfg)
     app, guest = cfg["app"], cfg["guest"]
     addresses = network_endpoints.addresses(guest)
+    require(all(rule.get("interface") is None or rule["interface"] in
+                {f"net{index}" for index in range(len(guest["interfaces"]))}
+                for rule in guest.get("rules", [])),
+            "Bind firewall allowances only to declared PVE netN interfaces")
     require(
         guest.get("platform", "debian-lxc") == "debian-lxc",
         "Only Debian LXC is implemented",

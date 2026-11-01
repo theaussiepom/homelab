@@ -93,6 +93,7 @@ resource "proxmox_virtual_environment_firewall_rules" "guest" {
       type    = rule.value.direction
       action  = "ACCEPT"
       proto   = rule.value.proto
+      iface   = rule.value.interface
       dport   = rule.value.port
       source  = rule.value.source
       dest    = rule.value.destination

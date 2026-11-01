@@ -97,10 +97,11 @@ def configure(cfg, document):
 HEALTH = """const c=require('./build/src/config').loadConfig();
 const slug=require('./build/src/homeassistant').hostSlug(c.winets[0].host);
 const topics=new Set(['winet-extractor/'+slug+'/status','winet-extractor/'+slug+'/availability']);
+const latest=new Map([...topics].map(topic=>[topic,'unknown']));
 const client=require('mqtt').connect(c.mqttUrl,{reconnectPeriod:0,connectTimeout:5000});
 const done=code=>{client.end(true);process.exit(code)};
 setTimeout(()=>done(1),10000);
 client.on('error',()=>done(1));
 client.on('connect',()=>client.subscribe([...topics]));
-client.on('message',(topic,payload)=>{if(topics.has(topic)&&payload.toString()==='online')topics.delete(topic);if(!topics.size)done(0)});
+client.on('message',(topic,payload)=>{if(!latest.has(topic))return;latest.set(topic,payload.toString());if([...latest.values()].every(value=>value==='online'))done(0)});
 """

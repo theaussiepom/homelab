@@ -14,7 +14,7 @@ variable "guest" {
     volumes = map(object({ path = string, size_gib = number })),
     rules = list(object({
       direction = string, proto = string, port = optional(string),
-      source    = optional(string), destination = optional(string), comment = string
+      source    = optional(string), destination = optional(string), comment = string, interface = optional(string)
     }))
   })
   validation {
@@ -64,6 +64,7 @@ variable "guest" {
   validation {
     condition = alltrue([for rule in var.guest.rules :
       contains(["in", "out"], rule.direction) && contains(["tcp", "udp", "icmp", "icmpv6"], rule.proto) &&
+      (rule.interface == null ? true : contains([for index, nic in var.guest.interfaces : "net${index}"], rule.interface)) &&
       (rule.direction == "in" ? rule.source != null && rule.source != "0.0.0.0/0" && rule.source != "::/0" : rule.destination != null)
     ])
     error_message = "Declare each guest firewall allowance; inbound access must name a restricted source."

@@ -32,6 +32,22 @@ def guest(address, rules, routes=(), dns=()):
 
 
 class ConnectionContractTests(unittest.TestCase):
+    def test_interface_scoped_rule_never_proves_access_through_another_nic(self):
+        cfg = self.configurations()
+        cfg["ingress"]["guest"]["interfaces"].append({"ipv4": "manual", "bridge": "vmbr1",
+                                                          "mac": "02:00:00:00:11:22"})
+        cfg["ingress"]["guest"]["rules"][0]["interface"] = "net0"
+        c.validate(cfg)
+        flow = next(c.connections(cfg))
+        self.assertTrue(c.permits(cfg["ingress"]["guest"]["rules"], "out", flow, "net0"))
+        self.assertFalse(c.permits(cfg["ingress"]["guest"]["rules"], "out", flow, "net1"))
+        self.assertFalse(c.permits(cfg["ingress"]["guest"]["rules"], "out", flow))
+        cfg["ingress"]["guest"]["rules"][0]["interface"] = "net1"
+        with self.assertRaisesRegex(ValueError, "ingress out firewall"):
+            c.validate(cfg)
+        with self.assertRaisesRegex(ValueError, "one assigned interface"):
+            c.network_endpoints.firewall_interface(cfg["ingress"]["guest"], "198.18.9.9")
+
     def test_network_identity_conflicts_are_scoped_to_the_declared_link(self):
         cfg = self.configurations()
         for field in ("ipv4", "mac"):

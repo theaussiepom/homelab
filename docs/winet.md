@@ -17,6 +17,12 @@ host alias from the existing service publication. Credentials are in the externa
 controller-owned mode-0600 options JSON, whose digest joins the ordinary input
 binding. Rendering never puts credentials in Compose or a public source file.
 
+Firewall allowances can select a declared PVE `netN` interface. The compiler
+checks that binding, and the provider receives it as `iface`. This keeps the
+management download allowance off the newly added IoT link, including packets
+that select another local source address. Existing unscoped rules keep their
+current meaning.
+
 Only one inverter is supported here. The options must explicitly retain its
 credentials, encrypted transport, polling, analytics/site-total settings and MQTT
 identity. Unknown options, custom certificate fields, environment/entrypoint

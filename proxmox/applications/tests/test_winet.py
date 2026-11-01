@@ -142,6 +142,19 @@ class WinetTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises((ValueError, TypeError)):
                 winet.validate(cfg)
 
+    def test_firewall_rules_cannot_claim_an_undeclared_interface(self):
+        from fixtures import guest
+        cfg = guest(self.root)
+        cfg["guest"]["rules"] = [{"interface": None, "direction": "out", "proto": "tcp",
+                                  "port": "443", "destination": "203.0.113.10/32", "comment": "Fixture"}]
+        guest_contract.validate(cfg)
+        cfg["guest"]["rules"][0]["interface"] = "net0"
+        guest_contract.validate(cfg)
+        for interface in ("net1", "eth0", "net00", "any", 0):
+            cfg["guest"]["rules"][0]["interface"] = interface
+            with self.subTest(interface=interface), self.assertRaisesRegex(ValueError, "PVE netN"):
+                guest_contract.validate(cfg)
+
     def test_private_options_refuse_endpoint_or_identity_drift_and_custom_certificate_options(self):
         for change in (
             lambda v: v.update(custom_ca="old-custom-image-only"),
