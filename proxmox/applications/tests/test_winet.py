@@ -64,6 +64,7 @@ class WinetTests(unittest.TestCase):
         from fixtures import guest
         with patch.object(sys, "argv", ["deploy", "--phase", "winet", "--packet", str(self.path)]), \
              patch.object(deploy, "run", return_value={"status": "fixture"}) as run, \
+             patch.object(deploy.os, "umask"), \
              contextlib.redirect_stdout(io.StringIO()):
             deploy.main()
         run.assert_called_once_with("winet", self.path)
@@ -197,7 +198,7 @@ class WinetTests(unittest.TestCase):
         tasks = yaml.safe_load((Path(render.__file__).parent / "ansible/tasks/compose.yml").read_text())
         start = next(t for t in tasks if t["name"] == "Start exactly this guest stack")
         expression = start["ansible.builtin.command"]["argv"].strip()[2:-2].strip()
-        environment = Environment()
+        environment = Environment(autoescape=True)
         environment.filters["bool"] = bool
         for changed in (False, True):
             argv = environment.compile_expression(expression)(app={"kind": "zigbee2mqtt"},
