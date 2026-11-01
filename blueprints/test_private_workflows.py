@@ -129,10 +129,24 @@ class PrivateWorkflowTests(unittest.TestCase):
     def test_native_validation_refuses_an_unbound_reusable_input_condition(self):
         path = self.site / '.github/workflows/ci.yml'
         value = yaml.safe_load(path.read_text())
-        value['jobs']['source']['if'] = '${{ inputs.x }}'
-        path.write_text(yaml.safe_dump(value))
-        with self.assertRaisesRegex(ValueError, 'closed validation job inputs'):
-            p.model(self.stack, self.site)
+        for expression in ['${{ inputs.x }}', "${{ inputs['x'] }}",
+                           '${{ inputs["x"] }}', "${{ inputs \n ['x'] }}"]:
+            value['jobs']['source']['if'] = expression
+            path.write_text(yaml.safe_dump(value))
+            with self.subTest(expression=expression), self.assertRaisesRegex(ValueError, 'closed validation job inputs'):
+                p.model(self.stack, self.site)
+
+    def test_guest_run_refuses_bracket_input_references_after_materialisation(self):
+        original = workflows.models
+        for expression in ["${{ inputs['x'] }}", '${{ inputs["x"] }}',
+                           "${{ inputs \n ['x'] }}"]:
+            def changed(stack):
+                value = original(stack)
+                value['guest-web.yml']['jobs']['deploy']['steps'][-1]['run'] += '\n' + expression
+                return value
+            with self.subTest(expression=expression), patch.object(workflows, 'models', changed):
+                with self.assertRaisesRegex(ValueError, 'closed guest workflow inputs'):
+                    p.model(self.stack, self.site)
 
     def test_reusable_ci_requires_nonempty_job_mapping(self):
         path = self.site / '.github/workflows/ci.yml'
