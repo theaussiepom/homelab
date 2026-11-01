@@ -225,7 +225,7 @@ def backup(cfg, state, label):
         write_new(f"{stamp}.json", encoded(receipt), dir_fd=directory)
 
 
-def infrastructure(cfg, site, work, operation, expected, *, state_identity=None):
+def infrastructure(cfg, site, work, operation, expected, *, state_identity=None, reviewed_drift=None):
     """Plan the existing backend; apply only this reviewed guest's safe delta."""
     from deployment_inputs import binding
 
@@ -293,6 +293,7 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None)
         cfg["guest"]["vmid"],
         existing=existing,
         serial_device=cfg["guest"].get("serial_device"),
+        **({"reviewed_drift": reviewed_drift} if reviewed_drift is not None else {}),
     )
     if state_identity is not None:
         from coordinated_generation import plan_identity

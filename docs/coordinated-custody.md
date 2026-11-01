@@ -258,3 +258,34 @@ wrong empty types, nonempty values and all other fields retain exact comparison.
 This normalization applies only to refresh drift. Desired-plan disk/mount
 immutability, configured networking, identity and unknown-value checks are
 unchanged. Top-level computed address observation handling remains separate.
+
+## Reviewed infrastructure permission failures
+
+A failed bpg update can save planned RAM/network values in its backend even when
+Proxmox refuses the update with an SDN.Use permission error. The live guest and
+its backend can therefore disagree. Never restore an older state file, treat the
+failed infrastructure as completed, or clear its hold to make the next run pass.
+
+The existing `reviewed_ordinary_failures` selection can explicitly bind phase
+`infrastructure` to one separately reviewed pre-update SDN refusal. Its
+`infrastructure_sha256` pins `infrastructure/review.json`, a closed
+`homelab-reviewed-infrastructure-failure-v1` record with status `reviewed_failure`.
+It binds the original hold, saved plan, unfinished apply window, permission path,
+previous immutable success, both exact backend generations and their unchanged
+provider identities. The original log must contain the matching HTTP403/SDN.Use
+refusal and no completed resource modifications. Completed infrastructure or
+application records must remain absent for that failed operation.
+
+After an explicit operator decision, private copies of the failed backend and
+its verified pre-update backend belong at `infrastructure/terraform.tfstate` and
+`infrastructure/previous/terraform.tfstate` under that same failed operation.
+The operator preserves the exact own hold as `preserved-failed-hold.json`; CD
+never performs this action. All historical records and other holds remain.
+
+Only when the current backend matches this selected failure may a fresh ordinary
+plan refresh the exact pinned failed guest attributes to their pinned pre-update
+values. Any additional drift, changed identity/data, unknown value, move, import
+or replacement still refuses. The resulting desired plan retains every normal
+guard. This exception is not supplied after a later successful generation has
+advanced normally. The old operation is never replayed or labelled successful,
+and these files alone grant neither permission changes nor a new deployment.

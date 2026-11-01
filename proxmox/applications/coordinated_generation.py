@@ -167,6 +167,8 @@ def classify(attempt, member, lineage, baseline, *, binding_key="coordinated_cus
                         and isinstance(value["binding"], dict) and value["binding"].get("vmid") == member["vmid"]
                         and value["binding"].get(binding_key) == attempt.binding[binding_key],
                         "Preserve the latest exact ordinary success; no anchor fallback")
+                if value["state_sha256"] != state_hash and len(checkpoints) == 1:
+                    attempt.reviewed_infrastructure_drift = checkpoints[0].get("reviewed_drift")
         else:
             require(baseline is None and state_hash == member["initial_state_sha256"],
                     "Require the selected initial ordinary disposition and backend")
