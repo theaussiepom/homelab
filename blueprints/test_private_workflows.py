@@ -126,6 +126,14 @@ class PrivateWorkflowTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 p.model(self.stack, self.site)
 
+    def test_native_validation_refuses_an_unbound_reusable_input_condition(self):
+        path = self.site / '.github/workflows/ci.yml'
+        value = yaml.safe_load(path.read_text())
+        value['jobs']['source']['if'] = '${{ inputs.x }}'
+        path.write_text(yaml.safe_dump(value))
+        with self.assertRaisesRegex(ValueError, 'closed validation job inputs'):
+            p.model(self.stack, self.site)
+
     def test_reusable_ci_requires_nonempty_job_mapping(self):
         path = self.site / '.github/workflows/ci.yml'
         for jobs in ['', 'jobs: {}\n', 'jobs: []\n', 'jobs: null\n']:

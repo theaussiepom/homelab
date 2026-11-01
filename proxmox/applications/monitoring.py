@@ -54,7 +54,7 @@ def saml_settings(value):
     except ssl.SSLError:
         raise ValueError("Provide a valid X509 IdP signing certificate") from None
     return {"strict": True, "baseurl": value["public_url"].rstrip("/") + "/",
-            "use_proxy_headers": True,
+            "use_proxy_headers": False,
             "idp": {"x509certMulti": {"signing": [cert]}}}
 
 

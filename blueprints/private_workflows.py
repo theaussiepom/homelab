@@ -76,6 +76,8 @@ def validation_workflow(site):
                      and isinstance(value['jobs']['source'].get('steps'), list),
                      'Use one native source validation job')
     job = copy.deepcopy(value['jobs']['source'])
+    compiler.require('inputs.' not in json.dumps(job),
+                     'Materialize only closed validation job inputs')
     # A native job avoids GitHub's automatic caller/callee name separator.
     # Preserve the original Ubuntu default shell instead of inheriting Deploy's.
     job.update(name='Validate')

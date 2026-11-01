@@ -46,9 +46,9 @@ site's firewall controls. Other management routes keep their selected policies.
 
 An existing SAML identity provider can be connected without Traefik authentication
 middleware. The private monitoring stack may select `monitoring.saml` with only
-`public_url` (the external HTTPS origin) and `idp_signing_certificate` (one public
-PEM certificate). The frontend receives strict SAML validation, the fixed public
-base URL, proxy-header support and the pinned IdP signing certificate through the
+`public_url` (the fixed external HTTPS origin, without trusting forwarded headers)
+and `idp_signing_certificate` (one public PEM certificate). The frontend receives strict SAML validation, the fixed public
+base URL, disabled proxy-header trust and the pinned IdP signing certificate through the
 official image's `ZBX_SSO_SETTINGS`. No IdP private key is copied. Updating this
 container configuration requires normal CD. Provider URLs, signed-assertion
 requirements and user mappings are configured in Zabbix and the existing IdP;

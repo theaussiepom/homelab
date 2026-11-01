@@ -166,7 +166,7 @@ class SamlFrontendTests(unittest.TestCase):
             value = actual["services"]["zabbix_web"]["environment"].pop("ZBX_SSO_SETTINGS")
             settings = json.loads(value)
             self.assertIs(settings["strict"], True)
-            self.assertIs(settings["use_proxy_headers"], True)
+            self.assertIs(settings["use_proxy_headers"], False)
             self.assertEqual(settings["baseurl"], "https://zabbix.example.invalid/")
             self.assertEqual(settings["idp"]["x509certMulti"]["signing"], [self.certificate])
             self.assertEqual(actual, original)
