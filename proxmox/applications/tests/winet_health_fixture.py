@@ -33,6 +33,8 @@ try:
             names.append(server)
             run("run", "-d", "--name", server, "--network", network, "--network-alias", "fixture",
                 "--memory", "256m", "--pids-limit", "128", "--entrypoint", "node",
+                "--health-cmd", "exit 0" if mode in {"online", "recover"} else "exit 1",
+                "--health-interval", "1s", "--health-retries", "1",
                 "-v", str(Path(__file__).with_name("winet_health_broker.cjs")) + ":/tmp/broker.cjs:ro",
                 image, "/tmp/broker.cjs", mode)
             for _ in range(20):
@@ -63,7 +65,17 @@ try:
                 else:
                     assert len(sent) == 2
                     assert [e["value"] for e in sent] == ["online", "offline" if mode == "offline" else "online"]
-            results[mode] = {"exit": result.returncode, "broker_state_proved": True}
+            expected_status = "healthy" if mode in {"online", "recover"} else "unhealthy"
+            for _ in range(10):
+                status = run("inspect", server, "--format", "{{json .State.Health.Status}}").stdout.strip()
+                if status == json.dumps(expected_status):
+                    break
+                time.sleep(0.5)
+            else:
+                raise AssertionError((mode, status))
+            assert ('"healthy"' in status) == (expected_status == "healthy")
+            results[mode] = {"exit": result.returncode, "broker_state_proved": True,
+                             "docker_health_comparison_proved": True}
             run("rm", "-f", server)
         print(json.dumps({"image": image, "results": results, "external_network": False,
                           "actual_upstream_health_runtime": True, "physical_inverter_tested": False}))
