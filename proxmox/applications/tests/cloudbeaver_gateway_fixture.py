@@ -114,6 +114,34 @@ def issue_certificates():
           serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
 
 
+
+def clean_header(value):
+    if not isinstance(value, str) or '\r' in value or '\n' in value:
+        raise ValueError('Synthetic HTTP headers reject line breaks')
+    return value.replace('\r', '').replace('\n', '')
+
+
+def proxy_target(method, target):
+    """Only the three concrete fixture endpoints may reach the fixed gateway."""
+    if not isinstance(target, str) or len(target) > 8192 or any(c in target for c in '\r\n\\'):
+        raise ValueError('Synthetic proxy target refused')
+    if method == 'GET' and target == '/':
+        return 'GET', '/'
+    if method == 'POST' and target == '/api/gql':
+        return 'POST', '/api/gql'
+    parsed = urlsplit(target)
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    if (method != 'GET' or parsed.scheme or parsed.netloc or parsed.fragment
+            or parsed.path != '/oauth2/callback' or set(query) != {'code', 'state'}
+            or any(len(values) != 1 for values in query.values())):
+        raise ValueError('Synthetic proxy target refused')
+    code, state = query['code'][0], query['state'][0]
+    if (not code or len(code) > 128 or not all(c.isascii() and (c.isalnum() or c in '_-') for c in code)
+            or not state or len(state) > 4096 or any(ord(c) < 32 or ord(c) > 126 for c in state)):
+        raise ValueError('Synthetic callback parameters refused')
+    return 'GET', '/oauth2/callback?' + urlencode({'code': code, 'state': state})
+
+
 class Quiet(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -123,7 +151,7 @@ class Quiet(http.server.BaseHTTPRequestHandler):
             body = json.dumps(body).encode()
         self.send_response(status)
         for name, value in headers.items():
-            self.send_header(name.replace('_', '-'), value)
+            self.send_header(clean_header(name).replace('_', '-'), clean_header(value))
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -242,7 +270,11 @@ gateway_port = None
 
 class Frontdoor(Quiet):
     def do_GET(self):
-        headers = {name: value for name, value in self.headers.items()
+        try:
+            method, target = proxy_target(self.command, self.path)
+        except ValueError:
+            self.reply(400); return
+        headers = {clean_header(name): clean_header(value) for name, value in self.headers.items()
                    if name.lower() not in {'connection', 'host', 'x-forwarded-proto', 'x-forwarded-host', 'x-forwarded-port'}}
         origin = urlsplit(provider.public_url)
         headers.update({'Host': origin.netloc, 'X-Forwarded-Proto': 'https',
@@ -250,15 +282,15 @@ class Frontdoor(Quiet):
         conn = http.client.HTTPConnection('127.0.0.1', gateway_port, timeout=15)
         try:
             size = int(self.headers.get('Content-Length', '0'))
-            if size > 65536:
+            if not 0 <= size <= 65536:
                 self.reply(413); return
             body = self.rfile.read(size) if size else None
-            conn.request(self.command, self.path, body=body, headers=headers)
+            conn.request(method, target, body=body, headers=headers)
             response = conn.getresponse(); body = response.read()
             self.send_response(response.status)
             for name, value in response.getheaders():
                 if name.lower() not in {'connection', 'transfer-encoding', 'content-length'}:
-                    self.send_header(name, value)
+                    self.send_header(clean_header(name), clean_header(value))
             self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
         finally:
             conn.close()
@@ -272,6 +304,7 @@ def server(handler, tls=False):
     service = http.server.ThreadingHTTPServer((bind, 0), handler)
     if tls:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(ROOT/'server.pem', ROOT/'server.key')
         service.socket = context.wrap_socket(service.socket, server_side=True)
     threading.Thread(target=service.serve_forever, daemon=True).start()
