@@ -37,7 +37,8 @@ class RunnerLabelTests(unittest.TestCase):
                 executable.write_text('#!/bin/sh\nexec '+shlex.quote(str(interpreter))+' '
                     +shlex.quote(str(fixture))+' "$@"\n')
                 executable.chmod(0o700)
-                variables={'runner_directory':str(root),'runner_name':'homelab-deploy-test',
+                variables={'ansible_python_interpreter':sys.executable,
+                           'runner_directory':str(root),'runner_name':'homelab-deploy-test',
                            'runner_repository':'example/private-site','runner_archive_sha256':'a'*64}
                 if labels is not None:variables['runner_labels']=labels
                 play=root/'play.yml';play.write_text(yaml.safe_dump([{'hosts':'all','connection':'local','gather_facts':False,

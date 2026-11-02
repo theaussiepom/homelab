@@ -201,7 +201,7 @@
 
 - name: Start exactly this guest stack
   ansible.builtin.command:
-    argv: "{{ ['docker', 'compose', '-f', '/opt/homelab-app/compose.yml', 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--force-recreate'] if foundation_runtime_install.changed | default(false) else []) + (['--pull', 'never'] if app.kind == 'bitwarden' else []) + (['--no-deps', application_service] if app.kind in ['automation', 'dns', 'zigbee2mqtt'] else []) }}"
+    argv: "{{ ['docker', 'compose', '-f', '/opt/homelab-app/compose.yml', 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--force-recreate'] if app.kind != 'mqtt' and foundation_runtime_install.changed | default(false) else []) + (['--pull', 'never'] if app.kind == 'bitwarden' else []) + (['--no-deps', application_service] if app.kind in ['automation', 'dns', 'zigbee2mqtt'] else []) }}"
   register: compose_start
   changed_when: "'Started' in compose_start.stderr or 'Created' in compose_start.stderr or 'Recreated' in compose_start.stderr"
   no_log: true

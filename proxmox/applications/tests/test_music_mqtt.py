@@ -180,6 +180,23 @@ class BrokerTests(unittest.TestCase):
             account.write_text(json.dumps({'username':'retained','password':'different'}))
             self.assertNotEqual(deployment_inputs.input_hashes(cfg)[str(account)],before[str(account)])
 
+    def test_probe_file_changes_never_force_broker_recreation_but_mounted_runtime_changes_do(self):
+        import yaml
+        from jinja2 import Environment
+        tasks=yaml.safe_load((Path(render.__file__).parent/'ansible/tasks/compose.yml').read_text())
+        start=next(task for task in tasks if task['name']=='Start exactly this guest stack')
+        expression=start['ansible.builtin.command']['argv'].strip()[2:-2].strip()
+        environment=Environment(autoescape=True)
+        for changed in (False,True):
+            for kind in ('mqtt','identity','monitoring','zigbee2mqtt'):
+                with self.subTest(changed=changed,kind=kind):
+                    argv=environment.compile_expression(expression)(app={'kind':kind},
+                        foundation_runtime_install={'changed':changed},application_service='mqtt')
+                    self.assertIn('--wait',argv)
+                    self.assertEqual('--force-recreate' in argv,changed and kind!='mqtt')
+                    self.assertNotIn('--remove-orphans=true',argv)
+                    if kind=='mqtt':self.assertNotIn('--no-deps',argv)
+
     def test_private_probe_input_is_exact_bound_and_not_shared_ha_configuration(self):
         with tempfile.TemporaryDirectory()as directory:
             path=Path(directory)/'account';path.write_text(json.dumps({'username':'retained','password':'never-output'}));path.chmod(0o600)
