@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -27,9 +28,14 @@ class RunnerLabelTests(unittest.TestCase):
                 (['homelab-private-deploy','homelab-deploy-test'],False)]:
             with self.subTest(labels=labels), tempfile.TemporaryDirectory()as directory:
                 root=Path(directory); trace=root/'argv.json'; executable=root/'config.sh'
-                executable.write_text('#!'+sys.executable+'\nimport json,os,sys\nfrom pathlib import Path\n'
+                # A quoted wrapper preserves interpreter and fixture paths containing spaces.
+                interpreter=root/'python interpreter';interpreter.symlink_to(sys.executable)
+                fixture=root/'registration fixture.py'
+                fixture.write_text('import json,os,sys\nfrom pathlib import Path\n'
                     +'Path('+repr(str(trace))+').write_text(json.dumps(sys.argv[1:]))\n'
                     +"print(os.environ['ACTIONS_RUNNER_INPUT_TOKEN'])\n")
+                executable.write_text('#!/bin/sh\nexec '+shlex.quote(str(interpreter))+' '
+                    +shlex.quote(str(fixture))+' "$@"\n')
                 executable.chmod(0o700)
                 variables={'runner_directory':str(root),'runner_name':'homelab-deploy-test',
                            'runner_repository':'example/private-site','runner_archive_sha256':'a'*64}
