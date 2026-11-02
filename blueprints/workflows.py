@@ -178,7 +178,7 @@ def bind_phase(value, guest, phase):
     return value
 
 
-def models(stack):
+def models(stack, *, monitored=None):
     """Return complete workflow documents; no credentials, target access or writes."""
     spec = compiler.manifest(stack)
     recipe, defaults = phase_recipe()
@@ -257,6 +257,7 @@ PYCODE
                 if application in profile["config"]["app"]["service_health_checks"]:
                     apps.append(application)
                     names[application] = title
+        apps = compiler.guest_contract.application_order(blueprint, apps)
         compiler.require(
             isinstance(apps, list)
             and apps
@@ -281,6 +282,8 @@ PYCODE
                 "homeassistant": "Deploy Home Assistant", "node_red": "Deploy Node-RED",
             }.get(phase, "Deploy " + application_names[phase]) for phase in apps},
         }
+        if monitored is not False and "monitoring" in spec["guests"]:
+            phases[compiler.guest_contract.AGENT_PHASE] = "Zabbix agent"
         parent = {"name": guest_name}
         needs = spec["guests"][guest]["depends_on"]
         parent["needs"] = ["selection", *needs]

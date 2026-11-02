@@ -42,6 +42,14 @@ def fixture(root):
         "guests": {name: {"depends_on": needs, "prerequisites": []} for name, needs in DEPENDENCIES.items()}}))
     phase = root / ".github/workflows/phase.yml"; phase.parent.mkdir(parents=True)
     phase.write_text("jobs:\n  run:\n    uses: example/framework/.github/workflows/guest-phase.yml@" + "1" * 40 + "\n")
+    selected = root / 'guests/automation/profile.json'; selected.parent.mkdir(parents=True)
+    selected.write_text(json.dumps({'config': {'app': {'service_health_checks': {'mqtt': []}}}}))
+
+
+def legacy_models(root):
+    catalogue = {name: copy.deepcopy(workflows.compiler.CATALOGUE[name]) for name in DEPENDENCIES}
+    with patch.object(workflows.compiler, 'CATALOGUE', catalogue):
+        return workflows.models(root)
 
 
 def document(path):
@@ -54,6 +62,11 @@ class MaterializationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name); fixture(self.root)
+        # Keep this exact old11-service equivalence oracle while new catalogue
+        # members have their own current-graph tests. The old shared broker stays selected.
+        catalogue = {name: copy.deepcopy(workflows.compiler.CATALOGUE[name]) for name in DEPENDENCIES}
+        original = patch.object(workflows.compiler, 'CATALOGUE', catalogue)
+        original.start(); self.addCleanup(original.stop)
         self.original = document(workflows.PHASE_RECIPE)
         self.models = workflows.models(self.root)
 
@@ -83,6 +96,8 @@ class MaterializationTests(unittest.TestCase):
         # The requested guest label changes no frozen deployment operation.
         self.assertEqual(deploy["jobs"]["automation"]["name"], "Home Automation")
         deploy["jobs"]["automation"]["name"] = "Automation"
+        self.assertEqual(deploy['jobs']['zigbee2mqtt']['name'], 'Radios')
+        deploy['jobs']['zigbee2mqtt']['name'] = 'Zigbee2MQTT'
         # Only these human labels differ from the frozen pre-fallback parent.
         deploy["name"] = "HomeLab stack"
         deploy["jobs"]["selection"]["name"] = "Validate guest selection"

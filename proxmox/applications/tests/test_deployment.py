@@ -195,6 +195,8 @@ class LifecycleTests(unittest.TestCase):
             ("dns", ["unbound", "pihole"]),
         ]:
             self.cfg["app"]["kind"] = name
+            self.cfg["app"]["service_health_checks"] = {
+                phase: [{"name": phase, "argv": ["true"]}] for phase in phases}
             self.cfg["deployment"]["capabilities"] = ["linux", "docker"]
             # Reset only this test-owned completed attempt for an independent guest case.
             with tempfile.TemporaryDirectory() as td:
@@ -211,6 +213,28 @@ class LifecycleTests(unittest.TestCase):
                 for phase in phases:
                     deploy.run(phase, self.site)
                 self.assertFalse((self.work / "ORDINARY-HOLD.json").exists())
+
+    def test_monitoring_is_one_final_phase_and_cannot_be_skipped_or_replayed(self):
+        self.cfg['app']['monitoring'] = {'selected': 'synthetic; native validation mocked here'}
+        self.assertEqual(contract.phases(self.cfg), ['preparation', 'mariadb', 'zabbix-agent'])
+        deploy.run('infrastructure', self.site)
+        deploy.run('preparation', self.site)
+        with self.assertRaises((ValueError, FileNotFoundError)):
+            deploy.run('zabbix-agent', self.site)
+        deploy.run('mariadb', self.site)
+        self.assertTrue((self.work/'ORDINARY-HOLD.json').exists())
+        self.assertFalse((self.work/'ordinary-complete.json').exists())
+        deploy.run('zabbix-agent', self.site)
+        self.assertFalse((self.work/'ORDINARY-HOLD.json').exists())
+        self.assertEqual([call.args[-1] for call in self.app.call_args_list],
+                         ['preparation', 'mariadb', 'zabbix-agent'])
+        self.assertFalse(deploy.run('zabbix-agent', self.site)['target_contacted'])
+
+    def test_unmonitored_agent_is_explicitly_unselected_and_contacts_no_target(self):
+        result = deploy.run('zabbix-agent', self.site)
+        self.assertEqual(result, {'status':'not_selected', 'vmid':808, 'changed':False, 'target_contacted':False})
+        self.infra.assert_not_called(); self.app.assert_not_called()
+        self.assertFalse((self.work/'ORDINARY-HOLD.json').exists())
 
     def test_infrastructure_and_preparation_failures_hold_and_never_replay(self):
         self.infra.side_effect = ValueError("native failure")
@@ -667,6 +691,7 @@ class SecretMaterializationTests(unittest.TestCase):
                 },
                 required_paths=contract.BLUEPRINTS[kind]["required_paths"],
             )
+            cfg["app"]["required_paths"] = contract.required_paths(cfg)
             cfg["deployment"]["capabilities"] = ["linux", "docker"]
             destination = root / "inputs" / kind / ("a" * 64)
             cfg["app"]["stack_config"] = str(destination / "stack.json")

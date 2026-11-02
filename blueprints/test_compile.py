@@ -89,6 +89,10 @@ class CompilerTests(unittest.TestCase):
             ),
             {"image": "ghcr.io/bitwarden/lite:latest"},
         )
+        self.assertEqual(c.image({'repository':'ghcr.io/music-assistant/server', 'tag':'latest', 'digest':None}),
+                         {'image':'ghcr.io/music-assistant/server:latest'})
+        for repository in ('ghcr.io/music-assistant/other', 'example/music'):
+            with self.assertRaises(ValueError):c.image({'repository':repository,'tag':'latest','digest':None})
 
     def test_blueprints_have_one_preparation_per_guest_and_no_fake_vm_support(self):
         for name, row in c.CATALOGUE.items():

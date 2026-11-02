@@ -12,7 +12,7 @@ import guest_contract
 import proxmox_guest
 from private_io import require
 
-PHASES = {"infrastructure", "preparation"} | {
+PHASES = {"infrastructure", "preparation", guest_contract.AGENT_PHASE} | {
     p for b in guest_contract.BLUEPRINTS.values()
     for p in [*b["applications"], *b.get("optional_applications", {})]
 }
@@ -24,6 +24,9 @@ def run(
     require(phase in PHASES, "Select a current deployment phase")
     bootstrap_closed()
     cfg, site = deployment_inputs.prepare(packet, inputs, environment)
+    if phase == guest_contract.AGENT_PHASE and "monitoring" not in cfg["app"]:
+        return {"status": "not_selected", "vmid": cfg["guest"]["vmid"],
+                "changed": False, "target_contacted": False}
     phases = guest_contract.phases(cfg)
     require(
         phase == "infrastructure" or phase in phases,

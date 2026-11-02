@@ -30,6 +30,7 @@ class AutomationInitialTests(unittest.TestCase):
         self.cfg["app"].update(kind="automation", node_red_authentication="authentik-oidc",
             exclusive_writer_confirmed=True, required_paths=guest_contract.BLUEPRINTS["automation"]["required_paths"],
             service_health_checks={name: [{"name": name, "argv": ["true"]}] for name in ("mqtt", "homeassistant", "node_red")})
+        self.cfg["app"]["required_paths"] = guest_contract.required_paths(self.cfg)
         self.stack = stack_fixture("automation")
         self.stack["services"]["homeassistant"]["environment"].pop("HOMELAB_HA_IPV4", None)
         stack_path = case.root / "stack.json"; save(stack_path, self.stack)

@@ -22,13 +22,32 @@ require(
 BLUEPRINTS = _catalogue["guests"]
 DATABASE_KINDS = {"postgresql", "mariadb", "influxdb"}
 SCHEMA = "homelab-guest-deployment-v2"
+AGENT_PHASE = "zabbix-agent"
+
+
+def application_order(selected, chosen):
+    """Preserve the declared service order when an optional service is selected."""
+    possible = [*selected["applications"], *selected.get("optional_applications", {})]
+    order = selected.get("application_order", possible)
+    require(isinstance(order, list) and len(order) == len(set(order))
+            and set(order) == set(possible), "Order every blueprint application exactly once")
+    return [name for name in order if name in chosen]
 
 
 def applications(cfg):
-    """Optional telemetry is explicit; a Zigbee-only guest stays unchanged."""
+    """Optional applications are selected explicitly in the shared profile."""
     selected = BLUEPRINTS[cfg["app"]["kind"]]
     optional = selected.get("optional_applications", {})
-    return [*selected["applications"], *(name for name in optional if name in cfg["app"]["service_health_checks"])]
+    return application_order(selected, [*selected["applications"],
+        *(name for name in optional if name in cfg["app"]["service_health_checks"])])
+
+
+def required_paths(cfg):
+    """Optional applications retain their own data requirements only while selected."""
+    selected = BLUEPRINTS[cfg["app"]["kind"]]
+    optional = selected.get("optional_required_paths", {})
+    return [*selected["required_paths"],
+            *(path for application in applications(cfg) for path in optional.get(application, []))]
 
 
 def phases(cfg):
@@ -38,7 +57,8 @@ def phases(cfg):
         == {"contract": 2, "capabilities": selected["capabilities"]},
         "Use the current guest preparation contract",
     )
-    return ["preparation", *applications(cfg)]
+    selected_phases = ["preparation", *applications(cfg)]
+    return selected_phases + ([AGENT_PHASE] if "monitoring" in cfg["app"] else [])
 
 
 def runtime_images(stack):
@@ -117,7 +137,7 @@ def validate(cfg, stack=None):
         import monitoring_agent
         monitoring_agent.validate(cfg)
     require(
-        {(r["path"], r["type"]) for r in BLUEPRINTS[app["kind"]]["required_paths"]}
+        {(r["path"], r["type"]) for r in required_paths(cfg)}
         <= {(r["path"], r["type"]) for r in app.get("required_paths", [])},
         "Keep every blueprint data/configuration prerequisite",
     )
@@ -178,7 +198,7 @@ def validate(cfg, stack=None):
     )
     if "frontend_routing" in app:
         require(
-            app["kind"] in {"ingress", "automation"},
+            app["kind"] in {"ingress", "automation", "music", "mqtt"},
             "Select a multihomed frontend application",
         )
         _, _, _, mac = ingress_routing.validate(app["frontend_routing"])
@@ -306,6 +326,12 @@ def validate(cfg, stack=None):
                 not address or address in addresses,
                 "HA discovery must select an assigned address",
             )
+        if app["kind"] in {"automation", "mqtt", "music"}:
+            require(set(stack["services"]) == set(applications(cfg)),
+                    "Declare every selected service and its health contract")
+        if app["kind"] == "music":
+            require(stack["music_bind_address"] in addresses,
+                    "Bind Music Assistant to an assigned player-facing interface")
         if app["kind"] == "pegaprox":
             import pegaprox
 

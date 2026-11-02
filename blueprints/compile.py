@@ -167,12 +167,12 @@ def selection(spec, disabled=None):
 
 
 def image(value):
-    if value == {
-        "repository": "ghcr.io/bitwarden/lite",
+    if value in ({
+        "repository": repository,
         "tag": "latest",
         "digest": None,
-    }:
-        return {"image": "ghcr.io/bitwarden/lite:latest"}
+    } for repository in ("ghcr.io/bitwarden/lite", "ghcr.io/music-assistant/server")):
+        return {"image": value["repository"] + ":latest"}
     # A local image ID is a retained private archive selection, never an update.
     if set(value) == {"local_id", "archive", "archive_sha256"}:
         require(
@@ -190,6 +190,7 @@ def image(value):
         set(value) == {"repository", "tag", "digest"}
         and re.fullmatch(r"[a-z0-9./_-]+", value["repository"])
         and (value["tag"] is None or re.fullmatch(r"[A-Za-z0-9_.-]+", value["tag"]))
+        and isinstance(value["digest"], str)
         and re.fullmatch(r"sha256:[0-9a-f]{64}", value["digest"]),
         "Keep a repository, optional recorded tag and immutable digest",
     )
@@ -259,7 +260,7 @@ def _resolve_guest(root, overlay, name, spec):
         {
             row["path"]: row
             for row in [
-                *CATALOGUE[name]["required_paths"],
+                *guest_contract.required_paths(cfg),
                 *cfg["app"].get("required_paths", []),
             ]
         }.values()

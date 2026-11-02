@@ -42,13 +42,15 @@ class CompositionTests(unittest.TestCase):
             memory_mib=stack["guest_memory_mib"],
             address=address,
             exclusive_writer_confirmed=True,
-            required_paths=copy.deepcopy(contract.BLUEPRINTS[kind]["required_paths"]),
             service_health_checks={
                 p: [{"name": p, "argv": ["true"]}]
-                for p in contract.BLUEPRINTS[kind]["applications"]
+                for p in [*contract.BLUEPRINTS[kind]["applications"],
+                          *(p for p in contract.BLUEPRINTS[kind].get("optional_applications", {})
+                            if p in stack.get("services", {}))]
             },
             stack_config=str(self.root / "stack.json"),
         )
+        cfg["app"]["required_paths"] = copy.deepcopy(contract.required_paths(cfg))
         cfg["guest"]["memory_mib"] = stack["guest_memory_mib"]
         cfg["guest"]["interfaces"][0]["ipv4"] = address + "/24"
         return cfg

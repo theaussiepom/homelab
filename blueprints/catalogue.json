@@ -159,7 +159,6 @@
         "docker"
       ],
       "applications": [
-        "mqtt",
         "homeassistant",
         "node_red"
       ],
@@ -167,10 +166,6 @@
       "required_paths": [
         {
           "path": "/srv/homelab/data/homeassistant/config",
-          "type": "directory"
-        },
-        {
-          "path": "/srv/homelab/data/mqtt/config",
           "type": "directory"
         },
         {
@@ -198,14 +193,6 @@
           "type": "directory"
         },
         {
-          "path": "/srv/homelab/data/mqtt/data",
-          "type": "directory"
-        },
-        {
-          "path": "/srv/homelab/data/mqtt/log",
-          "type": "directory"
-        },
-        {
           "path": "/srv/homelab/data/node-red/config",
           "type": "directory"
         },
@@ -220,10 +207,33 @@
       ],
       "name": "Home Automation",
       "application_names": {
-        "mqtt": "MQTT",
         "homeassistant": "Home Assistant",
         "node_red": "Node-RED"
-      }
+      },
+      "optional_applications": {
+        "mqtt": "MQTT"
+      },
+      "optional_required_paths": {
+        "mqtt": [
+          {
+            "path": "/srv/homelab/data/mqtt/config",
+            "type": "directory"
+          },
+          {
+            "path": "/srv/homelab/data/mqtt/data",
+            "type": "directory"
+          },
+          {
+            "path": "/srv/homelab/data/mqtt/log",
+            "type": "directory"
+          }
+        ]
+      },
+      "application_order": [
+        "mqtt",
+        "homeassistant",
+        "node_red"
+      ]
     },
     "bitwarden": {
       "capabilities": [
@@ -304,7 +314,7 @@
           "type": "file"
         }
       ],
-      "name": "Zigbee2MQTT",
+      "name": "Radios",
       "application_names": {
         "zigbee2mqtt": "Zigbee2MQTT"
       },
@@ -327,6 +337,74 @@
         "zabbix": "Zabbix"
       },
       "feature": "zabbix"
+    },
+    "music": {
+      "capabilities": [
+        "linux",
+        "docker"
+      ],
+      "applications": [
+        "music_assistant"
+      ],
+      "platform": "debian-lxc",
+      "required_paths": [
+        {
+          "path": "/srv/homelab/data/music-assistant/data",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/music-assistant/data/settings.json",
+          "type": "file"
+        },
+        {
+          "path": "/srv/homelab/data/music-assistant/data/library.db",
+          "type": "file"
+        },
+        {
+          "path": "/srv/homelab/data/music-assistant/data/auth.db",
+          "type": "file"
+        },
+        {
+          "path": "/srv/homelab/data/music-assistant/data/playlists",
+          "type": "directory"
+        }
+      ],
+      "name": "Music Assistant",
+      "application_names": {
+        "music_assistant": "Music Assistant"
+      }
+    },
+    "mqtt": {
+      "capabilities": [
+        "linux",
+        "docker"
+      ],
+      "applications": [
+        "mqtt"
+      ],
+      "platform": "debian-lxc",
+      "required_paths": [
+        {
+          "path": "/srv/homelab/data/mqtt/config",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/mqtt/config/mosquitto.conf",
+          "type": "file"
+        },
+        {
+          "path": "/srv/homelab/data/mqtt/data",
+          "type": "directory"
+        },
+        {
+          "path": "/srv/homelab/data/mqtt/log",
+          "type": "directory"
+        }
+      ],
+      "name": "MQTT",
+      "application_names": {
+        "mqtt": "MQTT"
+      }
     }
   }
 }

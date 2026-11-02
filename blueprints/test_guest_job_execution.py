@@ -35,7 +35,7 @@ class GuestJobExecutionTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
         self.root = Path(temp.name); oracle.fixture(self.root)
-        self.models = workflows.models(self.root)
+        self.models = oracle.legacy_models(self.root)
         self.known = secrets.ALL_NAMES | set(secrets.ALIASES)
 
     def environment(self, fields, values):

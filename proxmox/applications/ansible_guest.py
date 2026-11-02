@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import re
 import shlex
-from guest_contract import SOURCE, phases, required_network_interfaces, archive_inputs
+from guest_contract import SOURCE, AGENT_PHASE, phases, required_network_interfaces, archive_inputs
 import proxmox_guest
 from commands import quiet
 from private_io import require, private_directory, write, read_json
@@ -36,13 +36,14 @@ def run_phase(cfg, site, work, operation, expected, phase):
     private_directory(phase_work, create=True)
     app = dict(cfg["app"], render_dir=str(phase_work / "rendered"), start_services=True)
     preparation = phase == "preparation"
-    if not preparation and "stack_config" in app:
+    agent = phase == AGENT_PHASE
+    if not preparation and not agent and "stack_config" in app:
         app["image_archives"] = archive_inputs(
             read_json(Path(app["stack_config"]), private=True)
         )
-    if not preparation:
+    if not preparation and not agent:
         app["health_checks"] = cfg["app"]["service_health_checks"][phase]
-    if preparation:
+    if preparation or agent:
         app["start_services"] = False
     monitoring = {}
     if "monitoring" in app:
@@ -50,13 +51,13 @@ def run_phase(cfg, site, work, operation, expected, phase):
         selected = monitoring_agent.validate(cfg)
         monitoring = {"monitoring_agent_package": monitoring_agent.AGENT_PACKAGE,
                       "monitoring_postgresql_package": monitoring_agent.POSTGRESQL_PACKAGE}
-        if phase != "preparation":
+        if agent:
             password = None
             if "database_password_file" in selected:
                 from private_io import regular
                 password = regular(Path(selected["database_password_file"]), private=True).decode()
             monitoring["monitoring_agent_configuration"] = monitoring_agent.configuration(cfg, password)
-        if app["kind"] == "monitoring" and phase != "preparation":
+        if app["kind"] == "monitoring" and phase == "zabbix":
             import monitoring_templates
             value = read_json(Path(selected["server_file"]), private=True)
             value["owner"] = {"node": cfg["site"]["node"], "vmid": cfg["guest"]["vmid"],
@@ -73,7 +74,7 @@ def run_phase(cfg, site, work, operation, expected, phase):
             "app": app,
             **monitoring,
             "network_ready_interfaces": required_network_interfaces(cfg),
-            **({"application_service": phase} if not preparation else {}),
+            **({"application_service": phase} if not preparation and not agent else {}),
             "preparation_capabilities": cfg["deployment"]["capabilities"],
         },
     )
@@ -98,7 +99,8 @@ def run_phase(cfg, site, work, operation, expected, phase):
         cfg["paths"]["private_key"],
         str(
             SOURCE
-            / ("ansible/preparation.yml" if preparation else "ansible/reconcile.yml")
+            / ("ansible/preparation.yml" if preparation else
+               "ansible/monitoring-agent.yml" if agent else "ansible/reconcile.yml")
         ),
         "--extra-vars",
         "@" + str(phase_work / "variables.json"),

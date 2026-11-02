@@ -103,7 +103,7 @@ class CredentialTests(unittest.TestCase):
         from deployment_state import bootstrap_closed
 
         stack = self.root / "stack"; stack.mkdir(); oracle.fixture(stack)
-        job = workflows.models(stack)["guest-automation.yml"]["jobs"]["deploy"]
+        job = oracle.legacy_models(stack)["guest-automation.yml"]["jobs"]["deploy"]
         for marker in ("CONFIGURING", "BOOTSTRAP-CD-HOLD.json"):
             for phase in oracle.PHASES["automation"][1:]:
                 with self.subTest(marker=marker, phase=phase):

@@ -8,6 +8,11 @@
       - runner_name is match('^[a-z][a-z0-9-]{1,62}$')
       - runner_repository is match('^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$')
       - runner_archive_sha256 is match('^[a-f0-9]{64}$')
+      - runner_labels | default('homelab-private-deploy,' + runner_name) is string
+      - runner_labels | default('homelab-private-deploy,' + runner_name) is match('^[A-Za-z0-9][A-Za-z0-9_.-]*(,[A-Za-z0-9][A-Za-z0-9_.-]*)*$')
+      - runner_labels | default('homelab-private-deploy,' + runner_name) | length <= 1024
+      - runner_name in (runner_labels | default('homelab-private-deploy,' + runner_name)).split(',')
+      - "'homelab-private-deploy' in (runner_labels | default('homelab-private-deploy,' + runner_name)).split(',')"
 
 - name: Require a short-lived registration token without logging its value
   ansible.builtin.assert:
@@ -71,7 +76,7 @@
       - --name
       - "{{ runner_name }}"
       - --labels
-      - "homelab-private-deploy,{{ runner_name }}"
+      - "{{ runner_labels | default('homelab-private-deploy,' + runner_name) }}"
       - --work
       - _work
     chdir: "{{ runner_directory }}"

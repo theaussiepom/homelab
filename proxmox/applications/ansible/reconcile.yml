@@ -28,7 +28,7 @@
 
     - name: Reconcile the preserved stack and its native login
       ansible.builtin.import_tasks: tasks/compose.yml
-      when: app.kind in ['identity', 'db-tools', 'automation', 'dns', 'ingress', 'bitwarden', 'pegaprox', 'zigbee2mqtt', 'monitoring']
+      when: app.kind in ['identity', 'db-tools', 'automation', 'dns', 'ingress', 'bitwarden', 'pegaprox', 'zigbee2mqtt', 'monitoring', 'music', 'mqtt']
 
     - name: Check this service after reconciliation
       ansible.builtin.command:
@@ -50,7 +50,3 @@
     - name: Configure the dedicated Zabbix database through its owning PostgreSQL guest
       ansible.builtin.include_tasks: tasks/monitoring-storage.yml
       when: app.monitoring is defined and app.kind == 'postgresql'
-
-    - name: Configure this guest's monitoring agent
-      ansible.builtin.include_tasks: tasks/monitoring-agent.yml
-      when: app.monitoring is defined

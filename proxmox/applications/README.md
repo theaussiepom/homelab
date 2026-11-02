@@ -2,8 +2,13 @@
 
 `deploy.py` is the permanent deployment entrypoint. It accepts the current guest
 packet and runs Infrastructure, Preparation, then the application's ordered phases.
+When the root Zabbix feature is selected, one final Zabbix agent step configures
+that guest's agent after its applications. The final ordinary receipt is written
+only after that step passes. Application steps retain their local database
+statistics and Zabbix database preparation responsibilities.
 There are no service-specific deployment controllers or historical packet adapters.
-The stack composes eleven supported guests; the private site selects and enables them.
+The stack selects supported guests from the catalogue; the private site binds
+their genuine prepared inputs and enables them.
 
 | Module | Responsibility |
 | --- | --- |
@@ -28,6 +33,23 @@ Zigbee2MQTT uses the same sequence, with its one stable serial device declared i
 the BPG container resource. There are no stopped, prepare/attached or first-start
 deployment modes. Prepared data/configuration remain prerequisites, and ordinary
 deployment never extracts captures or creates a new Zigbee network.
+Its guest display name is Radios; the Zigbee service, data and monitoring
+identities remain unchanged.
+
+Music Assistant runs the upstream `ghcr.io/music-assistant/server:latest` image by
+explicit operator policy. This and Bitwarden are the two closed floating-image
+exceptions. The dedicated Music guest requires its separately prepared original
+settings, library, accounts and playlists. Startup verifies the retained identity,
+providers and chosen UI/player listeners without rewriting them. A successful
+service health check does not claim actual playback acceptance.
+
+The dedicated MQTT guest retains the pinned Mosquitto image and existing broker
+configuration, accounts and persistence. Its private `mqtt.credential_file` binds
+one retained account for authenticated-CONNECT and anonymous-refusal checks;
+unrelated Home Assistant credentials are not copied. Old Automation profiles may
+still select their shared broker. A new profile omitting it refuses while its
+retained managed broker container exists, so source adoption cannot silently
+leave a second writer or delete the old broker/data.
 
 Before starting Zigbee, the application records the prepared network identity and
 coordinator in a private receipt. Subsequent runs require that identity unchanged;

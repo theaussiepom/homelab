@@ -140,8 +140,8 @@ class PrivateWorkflowTests(unittest.TestCase):
         original = workflows.models
         for expression in ["${{ inputs['x'] }}", '${{ inputs["x"] }}',
                            "${{ inputs \n ['x'] }}"]:
-            def changed(stack):
-                value = original(stack)
+            def changed(stack, **kwargs):
+                value = original(stack, **kwargs)
                 value['guest-web.yml']['jobs']['deploy']['steps'][-1]['run'] += '\n' + expression
                 return value
             with self.subTest(expression=expression), patch.object(workflows, 'models', changed):
@@ -194,8 +194,8 @@ class PrivateWorkflowTests(unittest.TestCase):
     def test_foreign_secret_and_unbound_input_cannot_enter_generated_jobs(self):
         original=workflows.models
         for expression in ['${{ secrets.FOREIGN }}','${{ inputs.extra }}']:
-            def changed(stack):
-                models=original(stack)
+            def changed(stack, **kwargs):
+                models=original(stack, **kwargs)
                 models['guest-web.yml']['jobs']['deploy']['env']['FORGED']=expression
                 return models
             with self.subTest(expression=expression),patch.object(workflows,'models',changed):

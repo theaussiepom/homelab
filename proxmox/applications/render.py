@@ -16,15 +16,19 @@ import foundation
 import dns_records
 import zigbee2mqtt
 import winet
+import music_assistant
+import mqtt_runtime
 
 KINDS = {
-    "automation": {"homeassistant", "node_red", "mqtt"},
+    "automation": {"homeassistant", "node_red"},
     "identity": {"server", "worker", "redis"},
     "dns": {"pihole", "unbound"},
     "ingress": {"traefik"},
     "db-tools": {"pgadmin"},
     "bitwarden": {"bitwarden"},
     "zigbee2mqtt": {"zigbee2mqtt"},
+    "music": {"music_assistant"},
+    "mqtt": {"mqtt"},
 }
 
 
@@ -74,6 +78,8 @@ def compose(cfg):
         )
     inputs = cfg.get("services", {})
     expected = KINDS[kind] | ({"winet"} if kind == "zigbee2mqtt" and "winet" in cfg else set())
+    if kind == "automation" and "mqtt" in inputs:
+        expected = expected | {"mqtt"}
     if set(inputs) != expected:
         raise ValueError("Supply exactly the services for this guest")
     if kind == "zigbee2mqtt":
@@ -101,6 +107,8 @@ def compose(cfg):
         )
     foundation.validate(cfg)
     winet.validate(cfg)
+    music_assistant.validate(cfg)
+    mqtt_runtime.validate(cfg)
     if kind == "bitwarden":
         bitwarden.validate(cfg)
     if kind in {"identity", "ingress", "db-tools"} and "foundation" not in cfg:
@@ -108,7 +116,8 @@ def compose(cfg):
     result = {"name": f"homelab-{kind}", "services": {}}
     for name, value in inputs.items():
         image = value.get("image", "")
-        if kind == "bitwarden" and image == "ghcr.io/bitwarden/lite:latest":
+        if (kind, image) in {("bitwarden", "ghcr.io/bitwarden/lite:latest"),
+                            ("music", "ghcr.io/music-assistant/server:latest")}:
             # Explicit service policy: the operator selected latest, without a version pin.
             policy = "always"
         elif re.fullmatch(r"sha256:[0-9a-f]{64}", image):
@@ -175,6 +184,7 @@ def compose(cfg):
             ],
             "zigbee2mqtt": [("zigbee2mqtt", "/app/data")],
             "winet": [],
+            "music_assistant": [("music-assistant/data", "/data")],
             "server": [
                 ("authentik/media", "/media"),
                 ("authentik/templates", "/templates"),
@@ -409,7 +419,7 @@ def compose(cfg):
         ]
     if kind == "bitwarden":
         return bitwarden.configure(cfg, result)
-    return winet.configure(cfg, foundation.configure_compose(cfg, result))
+    return music_assistant.configure(cfg, winet.configure(cfg, foundation.configure_compose(cfg, result)))
 
 
 def dns_name(host):
@@ -435,11 +445,12 @@ def main():
             json.dumps(dns_records.validate(cfg.get("dns_records", {})), sort_keys=True)
             + "\n"
         ).encode()
-    if "foundation" in cfg or cfg["kind"] == "monitoring" or "winet" in cfg:
+    if "foundation" in cfg or cfg["kind"] in {"monitoring", "mqtt"} or "winet" in cfg:
         manifest = []
         for artifact in (
             monitoring.files(cfg)
             if cfg["kind"] == "monitoring"
+            else mqtt_runtime.files(cfg) if cfg["kind"] == "mqtt"
             else winet.files(cfg) if "winet" in cfg else foundation.files(cfg)
         ):
             artifacts[artifact["path"]] = artifact["content"].encode()

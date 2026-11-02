@@ -32,7 +32,7 @@ class RemainingValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             render.required({"value": "invalid\n"}, "value")
         cfg = render_cases.fixture("automation")
-        cfg["services"].pop("mqtt")
+        cfg["services"].pop("homeassistant")
         with self.assertRaises(ValueError):
             render.compose(cfg)
         cfg = render_cases.fixture("identity")

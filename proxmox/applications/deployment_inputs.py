@@ -4,6 +4,7 @@ import json
 import hashlib
 import foundation
 import winet
+import mqtt_runtime
 from guest_contract import SOURCE
 import os
 from pathlib import Path
@@ -175,6 +176,7 @@ def input_hashes(cfg):
             stack = json.loads(Path(app["stack_config"]).read_text())
             paths.extend(foundation.source_files(stack))
             paths.extend(winet.source_files(stack))
+            paths.extend(mqtt_runtime.source_files(stack))
         if app.get("kind") == "bitwarden":
             paths.append(app["bitwarden"]["runtime_env_file"])
     if app.get("kind") == "pegaprox":

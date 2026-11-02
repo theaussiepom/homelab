@@ -47,13 +47,16 @@ class IntegrationTests(unittest.TestCase):
                 self.assertEqual(before,{p.name:p.read_bytes() for p in site.parent.iterdir()})
                 hashes=inputs.input_hashes(cfg)
                 self.assertTrue({str(provider),selected['credential_file'],selected['database_password_file']} <= set(hashes))
-                for phase in ('preparation','mariadb'):
+                for phase in ('preparation','mariadb',guest_contract.AGENT_PHASE):
                     def quiet(command,env,log):log.write_text('ok=1 changed=0 failed=0')
                     with patch.object(inputs,'binding',return_value=hashes),patch.object(ansible_guest.proxmox_guest,'guest_trust'),patch.object(ansible_guest,'quiet',side_effect=quiet):
                         ansible_guest.run_phase(cfg,site,root,root,hashes,phase)
                     variables=json.loads((root/phase/'variables.json').read_text())
-                    self.assertEqual('monitoring_agent_configuration' in variables,phase!='preparation')
-                    if phase!='preparation':self.assertIn('User=zbx_monitor',variables['monitoring_agent_configuration'])
+                    self.assertEqual('monitoring_agent_configuration' in variables,phase==guest_contract.AGENT_PHASE)
+                    if phase==guest_contract.AGENT_PHASE:
+                        self.assertIn('User=zbx_monitor',variables['monitoring_agent_configuration'])
+                        self.assertNotIn('application_service',variables)
+                        self.assertFalse(variables['app']['start_services'])
                 packet_value=json.loads(packet.read_text());packet_value['files']['monitoring-agent.json']='foreign';packet.write_text(json.dumps(packet_value))
                 with self.assertRaisesRegex(ValueError,'cannot replace'):inputs.prepare(packet,root/'inputs')
 
@@ -77,6 +80,11 @@ class IntegrationTests(unittest.TestCase):
             def quiet(command,env,log):log.write_text('changed=0')
             with patch.object(inputs,'binding',return_value={}),patch.object(ansible_guest.proxmox_guest,'guest_trust'),patch.object(ansible_guest.proxmox_guest,'dhcp_admission'),patch.object(ansible_guest,'required_network_interfaces',return_value=[]),patch.object(ansible_guest,'quiet',side_effect=quiet):
                 ansible_guest.run_phase(c,root/'site',root,root,{},'zabbix')
+                ansible_guest.run_phase(c,root/'site',root,root,{},guest_contract.AGENT_PHASE)
+            agent_variables=json.loads((root/guest_contract.AGENT_PHASE/'variables.json').read_text())
+            self.assertIn('Plugins.Docker.Endpoint=',agent_variables['monitoring_agent_configuration'])
+            self.assertNotIn('monitoring_server_configuration_file',agent_variables)
+            self.assertNotIn('application_service',agent_variables)
             variables=json.loads((root/'zabbix/variables.json').read_text())
             self.assertNotIn('monitoring_server_configuration',variables)
             payload=Path(variables['monitoring_server_configuration_file'])
@@ -86,7 +94,7 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(configuration['owner'],{'node':'fixture','vmid':208,'hostname':'monitoring'})
             self.assertEqual(variables['monitoring_server_owner'],configuration['owner'])
             self.assertEqual(len(configuration['templates']),6)
-            self.assertNotIn('Password=',variables['monitoring_agent_configuration'])
+            self.assertNotIn('monitoring_agent_configuration',variables)
             # Execute the actual copy action, not just a single Templar pass:
             # its task-argument finalization rejects raw Zabbix macro content.
             tasks=yaml.safe_load((ansible_guest.SOURCE/'ansible/tasks/monitoring-server.yml').read_text())

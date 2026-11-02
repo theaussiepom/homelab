@@ -73,6 +73,23 @@ class WorkflowGenerationTests(unittest.TestCase):
             if selected:
                 self.assertEqual(job["steps"][-1]["name"], "Deploy WiNet")
 
+    def test_agent_is_one_real_final_phase_only_for_monitored_composition(self):
+        self.catalogue['monitoring'] = {'name':'Zabbix', 'applications':['zabbix'],
+                                       'application_names':{'zabbix':'Zabbix'}}
+        self.manifest['guests']['monitoring'] = {'depends_on':['database'], 'prerequisites':[]}
+        self.write_manifest()
+        for monitored in (None, True, False):
+            models = workflows.models(self.root, monitored=monitored)
+            for guest in self.manifest['guests']:
+                job = models['guest-'+guest+'.yml']['jobs']['deploy']
+                phases = [step['env']['PHASE'] for step in job['steps'] if step['name']=='Check inputs']
+                self.assertEqual(phases.count('zabbix-agent'), 0 if monitored is False else 1)
+                if monitored is not False:
+                    self.assertEqual(phases[-1], 'zabbix-agent')
+                    self.assertEqual(job['steps'][-1]['name'], 'Zabbix agent')
+                    self.assertIn('--phase "$PHASE"', job['steps'][-1]['run'])
+                self.assertTrue(all('continue-on-error' not in step and 'if' not in step for step in job['steps']))
+
     def test_declarative_phase_and_dependency_edits_change_the_actual_job_graph(self):
         first = workflows.models(self.root)
         self.assertEqual(

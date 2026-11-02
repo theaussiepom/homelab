@@ -56,12 +56,18 @@ def connect(username=None, password=None):
         return reply[3]
 
 
-def mqtt(path=Path('/srv/homelab/data/homeassistant/config/.storage/core.config_entries')):
-    entries = json.loads(path.read_text())['data']['entries']
-    selected = [row['data'] for row in entries if row['domain'] == 'mqtt']
-    if len(selected) != 1:
-        raise ValueError('Restore the selected existing MQTT integration')
-    credentials = selected[0]
+def mqtt(path=Path('/srv/homelab/data/homeassistant/config/.storage/core.config_entries'), *, standalone=False):
+    value = json.loads(path.read_text())
+    if standalone:
+        if not isinstance(value, dict) or set(value) != {'username', 'password'}:
+            raise ValueError('Use only the retained broker probe account')
+        credentials = value
+    else:
+        entries = value['data']['entries']
+        selected = [row['data'] for row in entries if row['domain'] == 'mqtt']
+        if len(selected) != 1:
+            raise ValueError('Restore the selected existing MQTT integration')
+        credentials = selected[0]
     if connect(credentials.get('username'), credentials.get('password')) != 0:
         raise ValueError('The retained MQTT account cannot authenticate')
     if connect() not in (4, 5):
@@ -128,6 +134,8 @@ def homeassistant_auth_challenge():
 def probe(service):
     if service == 'mqtt':
         mqtt()
+    elif service == 'mqtt-broker':
+        mqtt(Path('/opt/homelab-app/runtime/mqtt-probe.json'), standalone=True)
     elif service == 'homeassistant':
         if http(8123, '/')[0] != 200:
             raise ValueError('HA web/API login boundary is not ready')
@@ -154,7 +162,7 @@ def run(service):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('service', choices=('mqtt', 'homeassistant', 'node_red'))
+    parser.add_argument('service', choices=('mqtt', 'mqtt-broker', 'homeassistant', 'node_red'))
     try:
         print(json.dumps(run(parser.parse_args().service)))
     except (OSError, ValueError, KeyError, TypeError):

@@ -24,6 +24,19 @@
     fail_msg: 'WiNet still exists in this radio stack. Preserve it and review retirement before selecting Zigbee alone.'
   when: app.kind == 'zigbee2mqtt' and stack.winet is not defined and application_service == 'zigbee2mqtt' and not ansible_check_mode
 
+- name: Check retained broker
+  ansible.builtin.command:
+    argv: [docker, ps, --all, --quiet, --filter, label=com.docker.compose.project=homelab-automation, --filter, label=com.docker.compose.service=mqtt]
+  register: retained_mqtt
+  changed_when: false
+  when: app.kind == 'automation' and stack.services.mqtt is not defined and application_service == 'homeassistant' and not ansible_check_mode
+
+- name: Preserve retained broker
+  ansible.builtin.assert:
+    that: retained_mqtt.stdout | trim == ''
+    fail_msg: 'The old managed MQTT container still exists. Preserve its data and complete the separately reviewed broker cutover first.'
+  when: app.kind == 'automation' and stack.services.mqtt is not defined and application_service == 'homeassistant' and not ansible_check_mode
+
 - name: Render private stack files on the controller
   ansible.builtin.command:
     argv: [python3, "{{ playbook_dir }}/../render.py", --config, "{{ app.stack_config }}", --output, "{{ app.render_dir }}"]
@@ -89,7 +102,7 @@
   ansible.builtin.set_fact:
     foundation_runtime_files: "{{ lookup('ansible.builtin.file', app.render_dir + '/runtime-files.json') | from_json }}"
   no_log: true
-  when: (stack.foundation is defined or stack.kind == 'monitoring' or (stack.winet is defined and application_service == 'winet')) and not ansible_check_mode
+  when: (stack.foundation is defined or stack.kind in ['monitoring', 'mqtt'] or (stack.winet is defined and application_service == 'winet')) and not ansible_check_mode
 
 - name: Prepare the private foundation runtime directory
   ansible.builtin.file:
@@ -98,7 +111,7 @@
     owner: root
     group: root
     mode: '0700'
-  when: (stack.foundation is defined or stack.kind == 'monitoring' or (stack.winet is defined and application_service == 'winet')) and not ansible_check_mode
+  when: (stack.foundation is defined or stack.kind in ['monitoring', 'mqtt'] or (stack.winet is defined and application_service == 'winet')) and not ansible_check_mode
 
 - name: Install only the selected service-readable foundation files
   ansible.builtin.copy:
@@ -110,7 +123,7 @@
   loop: "{{ foundation_runtime_files | default([]) }}"
   register: foundation_runtime_install
   no_log: true
-  when: (stack.foundation is defined or stack.kind == 'monitoring' or (stack.winet is defined and application_service == 'winet')) and not ansible_check_mode
+  when: (stack.foundation is defined or stack.kind in ['monitoring', 'mqtt'] or (stack.winet is defined and application_service == 'winet')) and not ansible_check_mode
 
 - name: Load preserved custom images by verified archive
   ansible.builtin.include_tasks: image.yml
@@ -153,6 +166,22 @@
   ansible.builtin.include_tasks: bitwarden.yml
   when: app.kind == 'bitwarden'
 
+- name: Install Music state check
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../music_assistant.py"
+    dest: /opt/homelab-app/music_assistant.py
+    owner: root
+    group: root
+    mode: '0700'
+  when: app.kind == 'music'
+
+- name: Verify retained Music state
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/music_assistant.py, --address, "{{ stack.music_bind_address }}"]
+  changed_when: false
+  no_log: true
+  when: app.kind == 'music'
+
 - name: Require the explicit start step and retired old writers
   ansible.builtin.assert:
     that:
@@ -168,7 +197,7 @@
     owner: root
     group: root
     mode: '0700'
-  when: app.kind == 'automation'
+  when: app.kind in ['automation', 'mqtt']
 
 - name: Start exactly this guest stack
   ansible.builtin.command:

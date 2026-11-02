@@ -99,7 +99,7 @@ def model(stack, site):
     spec = compiler.zabbix.selected(compiler.manifest(stack), overlay)
     selected = compiler.selection(spec, compiler.parse_disabled(disabled))
     compiler.zabbix.selection(overlay, selected)
-    source = workflows.models(stack)
+    source = workflows.models(stack, monitored=compiler.zabbix.enabled(overlay))
     repository = 'github.repository == ' + repr(env['HOMELAB_REPOSITORY'])
     condition = repository + ' && ' + workflows.PRIVATE_MAIN
     result = {'name': 'Deploy', 'on': {'push': {'branches': ['main']}},
