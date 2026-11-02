@@ -19,6 +19,8 @@ class RunnerLabelTests(unittest.TestCase):
                     ('Check runner installation inputs', 'Register with a short-lived token supplied through the environment')]
         token = 'synthetic-registration-token-never-print'
         for labels, accepted in [(None,True),('homelab-private-deploy,homelab-deploy-beast,homelab-deploy-test',True),
+                ('homelab-private-deploy,homelab-deploy-test,'+'a'*256,True),
+                ('homelab-private-deploy,homelab-deploy-test,'+'a'*257,False),
                 ('homelab-private-deploy,bad label,homelab-deploy-test',False),
                 ('homelab-private-deploy,other',False),('homelab-deploy-test',False),
                 (['homelab-private-deploy','homelab-deploy-test'],False)]:

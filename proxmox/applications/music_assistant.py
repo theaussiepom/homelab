@@ -74,7 +74,11 @@ def read_file(path, limit):
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > limit:
             raise ValueError('Use bounded regular retained Music Assistant files')
         raw = stream.read(limit + 1)
-        if os.fstat(stream.fileno()) != info or len(raw) != info.st_size:
+        after = os.fstat(stream.fileno())
+        fields = ('st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_gid', 'st_nlink',
+                  'st_size', 'st_mtime_ns', 'st_ctime_ns')
+        if (any(getattr(after, field) != getattr(info, field) for field in fields)
+                or len(raw) != info.st_size):
             raise ValueError('Retained Music Assistant state changed during verification')
     return raw
 

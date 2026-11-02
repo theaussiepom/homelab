@@ -134,8 +134,10 @@ class MusicTests(unittest.TestCase):
             link=path.with_name('hardlink');os.link(path,link)
             with self.assertRaisesRegex(ValueError,'bounded'):music.read_file(path,100)
             link.unlink()
-            first=SimpleNamespace(st_mode=stat.S_IFREG,st_nlink=1,st_size=7)
-            after=SimpleNamespace(st_mode=stat.S_IFREG,st_nlink=1,st_size=8)
+            attributes=dict(st_mode=stat.S_IFREG,st_nlink=1,st_size=7,st_dev=1,st_ino=2,
+                            st_uid=0,st_gid=0,st_mtime_ns=3,st_ctime_ns=4,st_atime_ns=5)
+            first=SimpleNamespace(**attributes)
+            after=SimpleNamespace(**dict(attributes,st_size=8))
             with patch.object(music.os,'fstat',side_effect=[first,after]),self.assertRaisesRegex(ValueError,'changed'):
                 music.read_file(path,100)
             with patch.object(music.os,'fstat',return_value=after),self.assertRaisesRegex(ValueError,'changed'):
@@ -143,6 +145,20 @@ class MusicTests(unittest.TestCase):
             not_regular=SimpleNamespace(st_mode=stat.S_IFIFO,st_nlink=1,st_size=7)
             with patch.object(music.os,'fstat',return_value=not_regular),self.assertRaisesRegex(ValueError,'bounded'):
                 music.read_file(path,100)
+
+    def test_atime_update_during_read_is_not_a_content_or_identity_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'settings';path.write_bytes(b'private')
+            fields=dict(st_mode=stat.S_IFREG|0o600,st_nlink=1,st_size=7,st_dev=1,st_ino=2,
+                        st_uid=0,st_gid=0,st_mtime_ns=3,st_ctime_ns=4,st_atime_ns=5)
+            before=SimpleNamespace(**fields)
+            after=SimpleNamespace(**dict(fields,st_atime_ns=6))
+            with patch.object(music.os,'fstat',side_effect=[before,after]):
+                self.assertEqual(music.read_file(path,100),b'private')
+            for field in ('st_dev','st_ino','st_mode','st_uid','st_gid','st_nlink','st_size','st_mtime_ns','st_ctime_ns'):
+                changed=SimpleNamespace(**dict(fields,**{field:fields[field]+1}))
+                with self.subTest(field=field),patch.object(music.os,'fstat',side_effect=[before,changed]),self.assertRaisesRegex(ValueError,'changed'):
+                    music.read_file(path,100)
 
 
 class BrokerTests(unittest.TestCase):
