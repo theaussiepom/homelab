@@ -30,6 +30,9 @@ def run_phase(cfg, site, work, operation, expected, phase):
 
     require(binding(cfg, site) == expected, "Approved inputs changed before Ansible")
     require(phase in phases(cfg), "Select a current preparation or application phase")
+    if cfg['app']['kind'] == 'ingress' and phase == 'traefik':
+        import discovery_scope
+        discovery_scope.verify(cfg, read_json(Path(cfg['app']['stack_config']), private=True))
     proxmox_guest.dhcp_admission(cfg)
     proxmox_guest.guest_trust(cfg, work)
     phase_work = operation / phase
@@ -73,6 +76,8 @@ def run_phase(cfg, site, work, operation, expected, phase):
         {
             "app": app,
             **monitoring,
+            **({'cloudbeaver_owner': {'node': cfg['site']['node'], 'vmid': cfg['guest']['vmid'],
+                  'hostname': cfg['guest']['hostname']}} if app.get('variant') == 'cloudbeaver' else {}),
             "network_ready_interfaces": required_network_interfaces(cfg),
             **({"application_service": phase} if not preparation and not agent else {}),
             "preparation_capabilities": cfg["deployment"]["capabilities"],

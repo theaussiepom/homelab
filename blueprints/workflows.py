@@ -236,6 +236,11 @@ PYCODE
             "    raise SystemExit('Keep Zabbix enabled while deploying its monitored guests')")
     for guest in spec["guests"]:
         blueprint = compiler.CATALOGUE[guest]
+        profile_path = stack / "guests" / guest / "profile.json"
+        if profile_path.is_file():
+            profile = compiler.read(profile_path)
+            if 'variant' in profile['config']['app']:
+                blueprint = compiler.guest_contract.blueprint(profile['config'])
         compiler.require(
             re.fullmatch(r"[a-z][a-z0-9-]*", guest) and guest != "selection",
             "Use a safe guest workflow identifier",

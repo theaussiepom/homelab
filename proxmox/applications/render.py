@@ -18,6 +18,7 @@ import zigbee2mqtt
 import winet
 import music_assistant
 import mqtt_runtime
+import cloudbeaver
 
 KINDS = {
     "automation": {"homeassistant", "node_red"},
@@ -77,7 +78,7 @@ def compose(cfg):
             "Choose dns, identity, ingress, automation, db-tools, bitwarden or zigbee2mqtt; databases are native"
         )
     inputs = cfg.get("services", {})
-    expected = KINDS[kind] | ({"winet"} if kind == "zigbee2mqtt" and "winet" in cfg else set())
+    expected = ({'cloudbeaver', 'auth_gateway'} if cloudbeaver.selected(cfg) else KINDS[kind]) | ({"winet"} if kind == "zigbee2mqtt" and "winet" in cfg else set())
     if kind == "automation" and "mqtt" in inputs:
         expected = expected | {"mqtt"}
     if set(inputs) != expected:
@@ -198,6 +199,8 @@ def compose(cfg):
             "pihole": [("pihole", "/etc/pihole")],
             "unbound": [("unbound", "/opt/unbound/etc/unbound")],
             "traefik": [("traefik", "/etc/traefik")],
+            "cloudbeaver": [],
+            "auth_gateway": [],
             "pgadmin": [("pgadmin", "/var/lib/pgadmin")],
             "bitwarden": [
                 ("bitwarden/data", "/etc/bitwarden"),
@@ -395,6 +398,8 @@ def compose(cfg):
         }
     if kind == "ingress":
         services["traefik"]["command"] = ["--configFile=/etc/traefik/traefik.yml"]
+    if cloudbeaver.selected(cfg):
+        return cloudbeaver.configure(cfg, result)
     if kind == "db-tools":
         address = ipaddress.IPv4Address(required(cfg, "pgadmin_bind_address"))
         if (

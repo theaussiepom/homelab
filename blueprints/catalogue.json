@@ -151,6 +151,23 @@
       "name": "pgAdmin",
       "application_names": {
         "pgadmin": "pgAdmin"
+      },
+      "variants": {
+        "cloudbeaver": {
+          "applications": [
+            "cloudbeaver"
+          ],
+          "application_names": {
+            "cloudbeaver": "CloudBeaver"
+          },
+          "required_paths": [
+            {
+              "path": "/srv/homelab/data/cloudbeaver",
+              "type": "directory"
+            }
+          ],
+          "name": "CloudBeaver"
+        }
       }
     },
     "automation": {

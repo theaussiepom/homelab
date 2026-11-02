@@ -160,6 +160,11 @@ jobs:
           persist-credentials: false
       - name: Build pinned source tools
         run: docker build --platform linux/amd64 -t homelab-app-test -f proxmox/bootstrap/docker/Dockerfile proxmox/bootstrap/docker
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install pinned fixture dependencies
+        run: python3 -m pip install --require-hashes -r requirements.lock.txt
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24.15.0'
@@ -172,6 +177,15 @@ jobs:
             -v "$PWD:/src:ro" -v "$RUNNER_TEMP/application-coverage:/coverage" \
             -e HOME=/tmp -e HOMELAB_COVERAGE_OUTPUT=/coverage/report -e GITHUB_SHA homelab-app-test \
             sh /src/proxmox/applications/tests/check.sh
+      - name: Community sign-in
+        run: |
+          community='dbeaver/cloudbeaver:26.2.3@sha256:a537c60a7ca98d8d791c11c01172c1354e8dedfe222d04a54795ceeb32f12bbc'
+          gateway='quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:0d989b27d90d5e527fb2b045d864c4001c3104bdd763b3211b7e9ba2110380ea'
+          docker pull "$community"
+          docker pull "$gateway"
+          docker run --rm --platform linux/amd64 --network none --entrypoint /bin/sh \
+            -v "$PWD:/src:ro" "$community" -c 'mkdir /tmp/health-classes && javac -d /tmp/health-classes /src/proxmox/applications/CloudBeaverHealth.java /src/proxmox/applications/tests/CloudBeaverHealthFixture.java && java -cp /tmp/health-classes CloudBeaverHealthFixture /tmp/health-classes'
+          python3 proxmox/applications/tests/cloudbeaver_gateway_fixture.py --real-ce
       - name: Show application coverage summary
         if: always()
         run: |

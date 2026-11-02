@@ -7,6 +7,8 @@ renderer reads those files; Compose contains references, never their contents.
 import ipaddress
 import json
 import discovery
+import cloudbeaver
+import discovery_scope
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
@@ -33,7 +35,7 @@ AUTH_ENV = {
 SCHEMAS = {
     "identity": (
         {"bind_address", "postgresql_host", "postgresql_user", "postgresql_database"},
-        set(),
+        {'allowed_callback_additions'},
     ),
     "db-tools": (
         {"identity_url", "oauth_client_id", "oauth_name"},
@@ -48,7 +50,7 @@ SCHEMAS = {
             "pve_ca_file",
             "acme_dns_resolvers",
         },
-        set(),
+        {'discovery_scope'},
     ),
 }
 
@@ -135,6 +137,13 @@ def validate(cfg):
         raise ValueError(
             "Foundation configuration belongs only to identity, db-tools or ingress"
         )
+    if cloudbeaver.selected(cfg):
+        cloudbeaver.validate(cfg)
+        cloudbeaver.foundation(cfg, selected)
+        validate_names(kind, selected.get('secret_files'))
+        for path in selected['secret_files'].values():
+            file_path(path)
+        return selected
     required, optional = SCHEMAS[kind]
     if (
         type(selected.get("version")) is not int
@@ -148,11 +157,14 @@ def validate(cfg):
     for path in secrets.values():
         file_path(path)
     for name in (required | (optional & selected.keys())) - {
-        "acme_dns_resolvers",
+        "acme_dns_resolvers", 'allowed_callback_additions', 'discovery_scope',
     }:
         text(selected[name], name)
     services = cfg.get("services", {})
     if kind == "identity":
+        if 'allowed_callback_additions' in selected:
+            import identity_callbacks
+            identity_callbacks.validate(selected['allowed_callback_additions'])
         address(selected["bind_address"])
         if any(name in cfg for name in ("authentik_secret_key", "postgresql_password")):
             raise ValueError(
@@ -187,6 +199,7 @@ def validate(cfg):
             raise ValueError("Foundation pgAdmin uses the selected UID/GID 5050")
     else:
         discovery.validate_ingress(cfg.get("routing", {}))
+        discovery_scope.selected(cfg)
         address(selected["bind_address"])
         dns_resolvers(selected["acme_dns_resolvers"])
         origin(selected["proxmox_url"], "proxmox_url")
@@ -213,6 +226,7 @@ def source_files(cfg):
     result = list(selected["secret_files"].values())
     if cfg["kind"] == "ingress":
         result.append(selected["pve_ca_file"])
+        result.extend(discovery_scope.source_files(cfg))
         result.extend(
             row["ca_file"]
             for row in cfg.get("routing", {}).get("transports", {}).values()
@@ -347,6 +361,8 @@ def files(cfg):
             cfg["kind"], selected["secret_files"]
         ).items():
             add(binding.filename, values[key], 1000)
+    elif cloudbeaver.selected(cfg):
+        return cloudbeaver.files(cfg, values['oauth_client_secret'].encode())
     elif cfg["kind"] == "db-tools":
         identity = origin(selected["identity_url"], "identity_url")
         slug = selected.get("provider_slug", "pgadmin4")

@@ -199,6 +199,29 @@
     mode: '0700'
   when: app.kind in ['automation', 'mqtt']
 
+- name: Install CloudBeaver health check
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../cloudbeaver-runtime.py"
+    dest: /opt/homelab-app/cloudbeaver-runtime.py
+    owner: root
+    group: root
+    mode: '0700'
+  when: app.kind == 'db-tools' and app.variant | default('pgadmin') == 'cloudbeaver'
+
+- name: Seed only the owned connection template permissions and preserve additional grants
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/cloudbeaver-runtime.py, templates, --config, /opt/homelab-app/runtime/cloudbeaver-public.json]
+  changed_when: false
+  no_log: true
+  when: app.kind == 'db-tools' and app.variant | default('pgadmin') == 'cloudbeaver' and not ansible_check_mode
+
+- name: Retire only the retained managed pgAdmin container
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/cloudbeaver-runtime.py, prepare, --config, /opt/homelab-app/runtime/cloudbeaver-public.json]
+  changed_when: false
+  no_log: true
+  when: app.kind == 'db-tools' and app.variant | default('pgadmin') == 'cloudbeaver' and not ansible_check_mode
+
 - name: Start exactly this guest stack
   ansible.builtin.command:
     argv: "{{ ['docker', 'compose', '-f', '/opt/homelab-app/compose.yml', 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--force-recreate'] if app.kind != 'mqtt' and foundation_runtime_install.changed | default(false) else []) + (['--pull', 'never'] if app.kind == 'bitwarden' else []) + (['--no-deps', application_service] if app.kind in ['automation', 'dns', 'zigbee2mqtt'] else []) }}"
@@ -217,6 +240,10 @@
 - name: Configure the dedicated Zabbix server before its browser listener is published
   ansible.builtin.include_tasks: monitoring-server.yml
   when: app.kind == 'monitoring' and not ansible_check_mode
+
+- name: Maintain only declared identity callbacks
+  ansible.builtin.include_tasks: identity-callbacks.yml
+  when: app.kind == 'identity' and stack.foundation.allowed_callback_additions is defined and not ansible_check_mode
 
 - name: Reload only Pi-hole after its owned DNS records change
   ansible.builtin.command:

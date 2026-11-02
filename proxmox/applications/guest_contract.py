@@ -25,6 +25,19 @@ SCHEMA = "homelab-guest-deployment-v2"
 AGENT_PHASE = "zabbix-agent"
 
 
+def blueprint(cfg):
+    """Keep legacy pgAdmin recipes while selecting the explicit Community variant."""
+    selected = BLUEPRINTS[cfg['app']['kind']]
+    variant = cfg['app'].get('variant', 'pgadmin')
+    require('variant' not in cfg['app'] or cfg['app']['kind'] == 'db-tools',
+            'Application variants belong only to database tools')
+    if cfg['app']['kind'] == 'db-tools':
+        require(isinstance(variant, str) and variant in {'pgadmin', 'cloudbeaver'}, 'Select a supported database-tools variant')
+        if variant == 'cloudbeaver':
+            return dict(selected, **selected['variants'][variant])
+    return selected
+
+
 def application_order(selected, chosen):
     """Preserve the declared service order when an optional service is selected."""
     possible = [*selected["applications"], *selected.get("optional_applications", {})]
@@ -36,7 +49,7 @@ def application_order(selected, chosen):
 
 def applications(cfg):
     """Optional applications are selected explicitly in the shared profile."""
-    selected = BLUEPRINTS[cfg["app"]["kind"]]
+    selected = blueprint(cfg)
     optional = selected.get("optional_applications", {})
     return application_order(selected, [*selected["applications"],
         *(name for name in optional if name in cfg["app"]["service_health_checks"])])
@@ -44,14 +57,14 @@ def applications(cfg):
 
 def required_paths(cfg):
     """Optional applications retain their own data requirements only while selected."""
-    selected = BLUEPRINTS[cfg["app"]["kind"]]
+    selected = blueprint(cfg)
     optional = selected.get("optional_required_paths", {})
     return [*selected["required_paths"],
             *(path for application in applications(cfg) for path in optional.get(application, []))]
 
 
 def phases(cfg):
-    selected = BLUEPRINTS[cfg["app"]["kind"]]
+    selected = blueprint(cfg)
     require(
         cfg.get("deployment")
         == {"contract": 2, "capabilities": selected["capabilities"]},
@@ -108,6 +121,7 @@ def validate(cfg, stack=None):
     )
     allowed = {
         "kind",
+        "variant",
         "vmid",
         "hostname",
         "memory_mib",
@@ -312,10 +326,12 @@ def validate(cfg, stack=None):
                 "Require the selected ingress reply-routing contract",
             )
         if app["kind"] == "db-tools":
-            require(
-                stack["pgadmin_bind_address"] in addresses,
-                "Bind pgAdmin to an assigned interface",
-            )
+            import cloudbeaver
+            require(app.get('variant', 'pgadmin') == stack.get('variant', 'pgadmin'),
+                    'Bind the selected database-tools variant')
+            cloud = cloudbeaver.validate(stack)
+            require((cloud['bind_address'] if cloud else stack['pgadmin_bind_address']) in addresses,
+                    'Bind database tools to an assigned interface')
         if app["kind"] == "automation":
             address = (
                 stack["services"]["homeassistant"]

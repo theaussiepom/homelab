@@ -14,7 +14,8 @@ from private_io import require
 
 PHASES = {"infrastructure", "preparation", guest_contract.AGENT_PHASE} | {
     p for b in guest_contract.BLUEPRINTS.values()
-    for p in [*b["applications"], *b.get("optional_applications", {})]
+    for variant in [b, *b.get("variants", {}).values()]
+    for p in [*variant["applications"], *variant.get("optional_applications", {})]
 }
 
 

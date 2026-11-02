@@ -3,6 +3,7 @@
 import connections
 import network_endpoints
 import dns_records
+import cloudbeaver
 
 
 def bind(resolved, route_records=None):
@@ -40,11 +41,14 @@ def bind(resolved, route_records=None):
             records[name] = address
     for guest, (cfg, stack, _) in resolved.items():
         required = cfg["app"].get("service_connections", {})
-        connections.require(
-            isinstance(required, dict)
-            and set(required) <= set(cfg["app"]["service_health_checks"]),
-            "Bind consumers to their declared application",
-        )
+        cloud = stack is not None and cloudbeaver.selected(stack)
+        allowed = ({'cloudbeaver.' + name for name in stack['cloudbeaver']['connections']}
+                   if cloud else set(cfg['app']['service_health_checks']))
+        connections.require(isinstance(required, dict) and set(required) <= allowed,
+                            "Bind consumers to their declared application")
+        if cloud:
+            connections.require(set(required) == allowed,
+                                'Bind every metadata-only CloudBeaver database connection')
         for application, binding in required.items():
             connections.require(
                 isinstance(binding, dict) and set(binding) == {"service", "address"},
@@ -61,6 +65,13 @@ def bind(resolved, route_records=None):
                 "Select a declared service address",
             )
             address = endpoint["addresses"][binding["address"]]
+            if cloud:
+                name = application.removeprefix('cloudbeaver.')
+                value = stack['cloudbeaver']['connections'][name]
+                connections.require(selected == value['driver'] + '.' + value['driver']
+                                    and endpoint['port'] == cloudbeaver.DRIVERS[value['driver']][2],
+                                    'Bind CloudBeaver metadata to its declared database engine')
+                value.update(host=address, port=endpoint['port'])
             if stack is not None and stack["kind"] == "zigbee2mqtt":
                 connections.require(
                     endpoint["port"] == 1883, "Select the preserved MQTT listener"

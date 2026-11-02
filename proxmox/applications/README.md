@@ -170,3 +170,51 @@ its own successful receipt.
 
 PostgreSQL monitoring commands use `runuser -u postgres --` from the existing root
 connection. They do not assume that minimal Debian guests have `sudo` installed.
+
+The explicit `db-tools` variant `cloudbeaver` selects CloudBeaver Community and a
+pinned OIDC gateway in one existing guest/application phase. The legacy omitted
+variant still means pgAdmin. The variant changes neither the database-tools guest
+identity nor its completed-custody membership. Database connection metadata binds
+to named published PostgreSQL/MariaDB services; it contains no shared database
+usernames, passwords or client keys. PostgreSQL SSL mode is explicit. Each signed-in
+user supplies their own database credentials.
+
+Only the gateway publishes a host port. CloudBeaver uses an unpublished Docker
+bridge that permits database egress; host firewall state is not the authentication
+boundary. The gateway verifies OIDC signatures, issuer, audience, nonce and PKCE,
+then removes incoming identity/role/profile headers and injects a namespaced
+verified identity plus the fixed `user` team. The recovery administrator name
+cannot use that namespace. Cookies are HTTPS-only, HttpOnly and host-scoped;
+CloudBeaver handles the trusted forwarded HTTPS scheme. The existing retained
+OAuth secret derives independent cookie/recovery material into private files,
+never Compose environment values or Git.
+
+Preparation owns only the new `/srv/homelab/data/cloudbeaver` workspace. First
+startup configures its own recovery account before the gateway becomes healthy;
+subsequent deployments verify ownership and never reset an unknown account. The
+pinned image’s existing JDK performs a bounded loopback check requiring closed
+setup, anonymous access disabled, the selected providers and forced HTTPS before
+the gateway starts. The
+finite connection-template permissions are seeded once, then verified while
+preserving additional application-owned connections/grants. A changed managed
+permission refuses rather than being overwritten. Health verifies the managed
+template endpoints and explicit SSL mode; changing source metadata for an already
+initialized workspace currently refuses stale values. A later managed endpoint
+update requires an explicit CD capability, not an outside-CD repair. The application phase retires
+only an exact managed pgAdmin container after verifying its pinned image, labels
+and data bind; it preserves the pgAdmin directory and retirement evidence. There
+is no orphan pruning, data import or shared-account migration.
+
+Identity foundation `allowed_callback_additions` is a typed, optional add-only
+maintenance contract. Exact retained provider/application/policy hashes and the
+ordered old strict redirects must match. One serializable transaction appends only
+the declared HTTPS `/oauth2/callback` URLs; repeat runs verify them. It does not
+change client secrets, identity flows, application access policy or other providers.
+
+Ingress foundation `discovery_scope` optionally verifies an existing finite
+mirrored bootstrap-owned discovery scope before the existing Traefik phase. It
+compares the configured runtime credential to retained custody, verifies effective
+read privileges and reads every declared guest configuration over verified TLS.
+It never creates a token, grants permissions or repairs a missing scope. Missing
+access fails with the existing privileged bootstrap CD dependency. HTTPS service
+checks remain separate proof of the actual endpoint and certificate.
