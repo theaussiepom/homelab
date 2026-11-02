@@ -152,7 +152,8 @@ runner name as labels. Use a unique name label when testing alongside a retained
 runner on another machine, so GitHub selects the intended local state.
 
 An explicitly approved pool on the same admitted deployment guest may set
-`runner_labels` to its shared CD routing label plus the individual runner name.
+`runner_labels` to `homelab-private-deploy`, its shared CD routing label and the
+individual runner name.
 For a five-worker pool, all five registrations share that guest's state, trust
 paths and existing per-guest locks, with distinct registration names, installation
 directories and systemd services. The existing selected routing label can remain
