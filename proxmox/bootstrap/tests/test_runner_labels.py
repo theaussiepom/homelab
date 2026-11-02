@@ -21,6 +21,7 @@ class RunnerLabelTests(unittest.TestCase):
         for labels, accepted in [(None,True),('homelab-private-deploy,homelab-deploy-beast,homelab-deploy-test',True),
                 ('homelab-private-deploy,homelab-deploy-test,'+'a'*256,True),
                 ('homelab-private-deploy,homelab-deploy-test,'+'a'*257,False),
+                ('homelab-private-deploy,homelab-deploy-test,pool\n',False),
                 ('homelab-private-deploy,bad label,homelab-deploy-test',False),
                 ('homelab-private-deploy,other',False),('homelab-deploy-test',False),
                 (['homelab-private-deploy','homelab-deploy-test'],False)]:

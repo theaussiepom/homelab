@@ -9,7 +9,7 @@
       - runner_repository is match('^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$')
       - runner_archive_sha256 is match('^[a-f0-9]{64}$')
       - runner_labels | default('homelab-private-deploy,' + runner_name) is string
-      - runner_labels | default('homelab-private-deploy,' + runner_name) is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}(,[A-Za-z0-9][A-Za-z0-9_.-]{0,255})*$')
+      - runner_labels | default('homelab-private-deploy,' + runner_name) is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}(,[A-Za-z0-9][A-Za-z0-9_.-]{0,255})*\Z')
       - runner_labels | default('homelab-private-deploy,' + runner_name) | length <= 1024
       - runner_name in (runner_labels | default('homelab-private-deploy,' + runner_name)).split(',')
       - "'homelab-private-deploy' in (runner_labels | default('homelab-private-deploy,' + runner_name)).split(',')"

@@ -38,7 +38,8 @@ identities remain unchanged.
 
 Music Assistant runs the upstream `ghcr.io/music-assistant/server:latest` image by
 explicit operator policy. This and Bitwarden are the two closed floating-image
-exceptions. The dedicated Music guest requires its separately prepared original
+exceptions. Ordinary Music deployments pull that tag and may upgrade the upstream
+version. The dedicated Music guest requires its separately prepared original
 settings, library, accounts and playlists. Startup verifies the retained identity,
 providers and chosen UI/player listeners without rewriting them. A successful
 service health check does not claim actual playback acceptance.

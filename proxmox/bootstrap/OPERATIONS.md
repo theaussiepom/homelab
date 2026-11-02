@@ -147,9 +147,18 @@ not the guest's identity; it does not reserve or follow a changing DHCP lease.
 
 ## Runner trust and one-way handover
 
-Runner registration includes both `homelab-private-deploy` and your configured
-runner name as labels. Target the unique name label when testing alongside
-another retained runner, so GitHub cannot choose the older machine.
+Runner registration defaults to `homelab-private-deploy` and your configured
+runner name as labels. Use a unique name label when testing alongside a retained
+runner on another machine, so GitHub selects the intended local state.
+
+An explicitly approved pool on the same admitted deployment guest may set
+`runner_labels` to its shared CD routing label plus the individual runner name.
+For a five-worker pool, all five registrations share that guest's state, trust
+paths and existing per-guest locks, with distinct registration names, installation
+directories and systemd services. The existing selected routing label can remain
+unchanged. Add it only to these reviewed same-guest workers; a runner on another
+machine must retain its separate routing identity. The shared role still defaults
+to its original labels and introduces no runner-pool controller or state handover.
 
 The workstation checks that your GitHub repository is private and your account
 has administration access. It obtains a fresh one-hour registration token
