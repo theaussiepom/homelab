@@ -172,7 +172,7 @@ def health(config):
          and any(m['Source'] == str(WORKSPACE) and m['Destination'] == '/opt/cloudbeaver/workspace'
                  and m['Type'] == 'bind' and m['RW'] is True for m in server['Mounts'])
          and server['NetworkSettings']['Networks'].keys() == gateway['NetworkSettings']['Networks'].keys())
-    raw = docker(['compose', '-f', COMPOSE, 'exec', '-T', 'cloudbeaver', 'java', '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m', '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC',
+    raw = docker(['compose', '-f', COMPOSE, 'exec', '-T', 'cloudbeaver', '/opt/java/openjdk/bin/java', '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m', '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC',
                   '/opt/cloudbeaver/conf/CloudBeaverHealth.java', '--configuration'], timeout=15)
     current = json.loads(raw)['data']['serverConfig']
     need(current['forceHttps'] is True and current['configurationMode'] is False and current['anonymousAccessEnabled'] is False

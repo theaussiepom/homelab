@@ -143,11 +143,14 @@ def verify(cfg, stack, api=None):
     # non-propagating grant, NOT an absent privilege. Reuse the exact owner check.
     try:
         access.verify_secret(api, selected_config, configured)
-    except ValueError:
+    except (OSError, ValueError):
         raise ValueError('Discovery read access is not verified; complete reviewed privileged bootstrap CD') from None
     reader = api.discovery(configured)
     for vmid in value['guests']:
-        config = reader.call('/nodes/' + quote(owner['node'], safe='') + '/lxc/' + str(vmid) + '/config')['data']
+        try:
+            config = reader.call('/nodes/' + quote(owner['node'], safe='') + '/lxc/' + str(vmid) + '/config')['data']
+        except (OSError, ValueError):
+            raise ValueError('A declared guest is not visible; complete reviewed privileged bootstrap CD') from None
         require(isinstance(config, dict) and isinstance(config.get('hostname'), str) and config['hostname'],
                 'A declared guest is not visible; complete reviewed privileged bootstrap CD')
     return {'status': 'verified', 'owned_scope': True, 'effective_permissions': True,

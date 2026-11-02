@@ -218,7 +218,7 @@ def configure(cfg, result):
         mount('cloudbeaver.auto.conf', '/opt/cloudbeaver/conf/.cloudbeaver.auto.conf'),
         mount('cloudbeaver-connections.json', '/opt/cloudbeaver/conf/initial-data-sources.conf')]
     server['volumes'].append(mount('CloudBeaverHealth.java', '/opt/cloudbeaver/conf/CloudBeaverHealth.java'))
-    server['healthcheck'] = {'test': ['CMD', 'java', '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m', '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC',
+    server['healthcheck'] = {'test': ['CMD', '/opt/java/openjdk/bin/java', '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m', '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC',
         '/opt/cloudbeaver/conf/CloudBeaverHealth.java'],
         'start_period': '60s', 'interval': '10s', 'timeout': '8s', 'retries': 18}
     proxy = services['auth_gateway']

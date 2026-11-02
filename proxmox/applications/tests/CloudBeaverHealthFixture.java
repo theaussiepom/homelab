@@ -52,7 +52,7 @@ class CloudBeaverHealthFixture {
         try {
             for (String mode : new String[] {"valid", "setup", "anonymous", "error", "oversized", "provider", "redirect", "timeout", "invalid-argument"}) {
                 scenario = mode;
-                var process = new ProcessBuilder("java", "-Xms8m", "-Xmx64m", "-cp", args[0], "CloudBeaverHealth",
+                var process = new ProcessBuilder("/opt/java/openjdk/bin/java", "-Xms8m", "-Xmx64m", "-cp", args[0], "CloudBeaverHealth",
                     mode.equals("invalid-argument") ? "invalid" : "--configuration").start();
                 if (!process.waitFor(10, TimeUnit.SECONDS)) {
                     process.destroyForcibly();

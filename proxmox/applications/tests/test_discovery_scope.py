@@ -8,6 +8,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock,patch
+from urllib.error import HTTPError,URLError
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import discovery_scope as d
@@ -68,6 +69,9 @@ class ScopeTests(unittest.TestCase):
             access.verify_secret.assert_called_once()
             access.verify_secret.side_effect=ValueError('effective permission drift')
             with self.assertRaisesRegex(ValueError,'privileged bootstrap CD'):d.verify(self.cfg,self.stack,api)
+            for error in (HTTPError('https://pve.example.invalid',403,'private response',{},None),URLError('transport'),TimeoutError('timeout')):
+                access.verify_secret.side_effect=error
+                with self.assertRaisesRegex(ValueError,'privileged bootstrap CD'):d.verify(self.cfg,self.stack,api)
             access.verify_secret.side_effect=None
             (self.root/'secret').write_text('foreign-token')
             with self.assertRaisesRegex(ValueError,'Configured discovery'):d.verify(self.cfg,self.stack,api)
@@ -82,6 +86,10 @@ class ScopeTests(unittest.TestCase):
             access.retained.return_value='root@pam!discovery=synthetic-token';api.discovery.return_value.call.return_value={'data':{}}
             with self.assertRaises(ValueError):d.verify(self.cfg,self.stack,api)
             api.discovery.return_value.call.return_value={'data':{'hostname':'fixture'}}
+            for error in (HTTPError('https://pve.example.invalid',403,'private response',{},None),URLError('transport'),TimeoutError('timeout'),ValueError('bad native envelope')):
+                api.discovery.return_value.call.side_effect=error
+                with self.assertRaisesRegex(ValueError,'declared guest is not visible'):d.verify(self.cfg,self.stack,api)
+            api.discovery.return_value.call.side_effect=None
             with patch.object(d,'Reader',return_value=api):d.verify(self.cfg,self.stack)
         with patch.object(d.importlib,'import_module',return_value=SimpleNamespace(__file__='/foreign/provider_access.py')):
             with self.assertRaises(ValueError):d.provider()
