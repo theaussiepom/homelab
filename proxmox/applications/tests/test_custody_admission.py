@@ -141,6 +141,60 @@ class AdmissionTests(unittest.TestCase):
             if change == 'digest': selected[0]['hold_sha256'] = 'unknown'
             with self.subTest(change=change), self.assertRaises(ValueError): ordinary_failure.selection(cfg)
 
+    def test_exact_final_agent_phase_can_be_selected_without_admitting_other_hyphenated_paths(self):
+        import guest_contract
+        row = {'operation': 'ordinary-100-1', 'phase': guest_contract.AGENT_PHASE,
+               **{k: 'a' * 64 for k in ('hold_sha256', 'infrastructure_sha256', 'log_sha256',
+                                       'previous_ordinary_sha256', 'state_sha256')}}
+        cfg = {'coordinated_custody': {}, 'reviewed_ordinary_failures': [row]}
+        self.assertEqual(ordinary_failure.selection(cfg), [row])
+        for phase in ('foreign-phase', 'zabbix-agent/..', '../zabbix-agent', 'zabbix-agent\n'):
+            changed = copy.deepcopy(cfg); changed['reviewed_ordinary_failures'][0]['phase'] = phase
+            with self.subTest(phase=phase), self.assertRaises(ValueError): ordinary_failure.selection(changed)
+
+    def test_exact_reviewed_agent_failure_keeps_old_hold_and_requires_a_new_successful_run(self):
+        import guest_contract
+        import monitoring_inputs
+        import test_monitoring_agent
+        value = self.fixture(); real = subprocess.run
+        def output(argv, **kwargs):
+            if argv[0] == 'findmnt': return 'nfs4 nas.example.invalid:/backups\n'
+            return real(argv, check=True, stdout=subprocess.PIPE, **kwargs).stdout
+        with patch.object(subprocess, 'check_output', side_effect=output), patch.object(monitoring_inputs, 'source_files', return_value=[]):
+            runtime = self.runtime(value)
+            selected = copy.deepcopy(test_monitoring_agent.cfg('mariadb')['app']['monitoring'])
+            selected.update(hostname=runtime.cfg['site']['node']+'-'+str(runtime.cfg['guest']['vmid']))
+            selected['psk_identity'] = selected['hostname']
+            selected['credential_file'] = str(value.root/'agent.json')
+            selected['database_password_file'] = str(value.root/'agent-database-password')
+            save(Path(selected['credential_file']), {'psk':'b'*64})
+            save(Path(selected['database_password_file']), b'c'*64)
+            runtime.cfg['app']['monitoring'] = selected
+            self.all_phases(runtime)
+            previous = (runtime.work/'ordinary-complete.json').read_bytes()
+            phase = guest_contract.AGENT_PHASE
+            with patch.dict(os.environ, {'GITHUB_RUN_ID':'778','GITHUB_RUN_NUMBER':'778','GITHUB_SHA':runtime.revisions[1]}):
+                for name in ('infrastructure','preparation','mariadb'): deploy.run(name,runtime.site)
+                runtime.app.side_effect = RuntimeError('synthetic final agent refusal')
+                with self.assertRaises(RuntimeError):deploy.run(phase,runtime.site)
+                runtime.app.side_effect = None
+            operation=runtime.work/'ordinary-778-1'; hold=(runtime.work/'ORDINARY-HOLD.json').read_bytes()
+            log=operation/phase/'application.log';save(log,b'original agent failure remains\n')
+            row={'operation':operation.name,'phase':phase,'hold_sha256':io.digest(hold),
+                 'infrastructure_sha256':io.sha(operation/'infrastructure-complete.json'),'log_sha256':io.sha(log),
+                 'previous_ordinary_sha256':io.digest(previous),'state_sha256':io.sha(runtime.work/'terraform.tfstate')}
+            runtime.cfg['reviewed_ordinary_failures']=[row]
+            with patch.dict(os.environ, {'GITHUB_RUN_ID':'779','GITHUB_RUN_NUMBER':'779','GITHUB_SHA':runtime.revisions[1]}):
+                with self.assertRaises((ValueError,OSError)):deploy.run('infrastructure',runtime.site)
+                self.assertEqual((runtime.work/'ordinary-complete.json').read_bytes(),previous)
+                # Only the explicit fixture operator preserves the old active hold.
+                (runtime.work/'ORDINARY-HOLD.json').rename(operation/'preserved-failed-hold.json')
+                self.all_phases(runtime)
+            self.assertEqual((operation/'preserved-failed-hold.json').read_bytes(),hold)
+            self.assertEqual(log.read_bytes(),b'original agent failure remains\n')
+            self.assertFalse((operation/'complete.json').exists())
+            self.assertEqual(records.decode((runtime.work/'ordinary-complete.json').read_bytes())['run_number'],779)
+
     def test_complete_local_and_nas_provenance_includes_disabled_members(self):
         value = self.fixture(postgres=True)
         contract.configured_closure(value.resolved())

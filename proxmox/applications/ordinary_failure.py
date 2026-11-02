@@ -99,7 +99,9 @@ def selection(cfg):
         require(isinstance(name, str) and re.fullmatch(r"ordinary-[1-9][0-9]*-[1-9][0-9]*", name)
                 and name not in seen, "Select each exact failed ordinary operation once")
         seen.add(name)
-        require(isinstance(row["phase"], str) and re.fullmatch(r"[a-z][a-z0-9_]{0,31}", row["phase"]),
+        require(isinstance(row["phase"], str)
+                and (re.fullmatch(r"[a-z][a-z0-9_]{0,31}", row["phase"])
+                     or row["phase"] == "zabbix-agent"),
                 "Select a fixed failed application phase")
         for key in row.keys() - {"operation", "phase"}:
             fingerprint(row[key])
