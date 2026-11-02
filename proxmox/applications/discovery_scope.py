@@ -6,6 +6,7 @@ Proxmox configuration, and never turns a missing grant into an automatic repair.
 import importlib
 import hmac
 import json
+from http.client import HTTPException
 from pathlib import Path
 import re
 import ssl
@@ -143,13 +144,13 @@ def verify(cfg, stack, api=None):
     # non-propagating grant, NOT an absent privilege. Reuse the exact owner check.
     try:
         access.verify_secret(api, selected_config, configured)
-    except (OSError, ValueError):
+    except (OSError, ValueError, TypeError, AttributeError, HTTPException):
         raise ValueError('Discovery read access is not verified; complete reviewed privileged bootstrap CD') from None
     reader = api.discovery(configured)
     for vmid in value['guests']:
         try:
             config = reader.call('/nodes/' + quote(owner['node'], safe='') + '/lxc/' + str(vmid) + '/config')['data']
-        except (OSError, ValueError):
+        except (OSError, ValueError, HTTPException):
             raise ValueError('A declared guest is not visible; complete reviewed privileged bootstrap CD') from None
         require(isinstance(config, dict) and isinstance(config.get('hostname'), str) and config['hostname'],
                 'A declared guest is not visible; complete reviewed privileged bootstrap CD')

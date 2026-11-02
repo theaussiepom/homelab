@@ -2,6 +2,7 @@
 import copy
 import io
 import json
+from http.client import HTTPException
 from pathlib import Path
 import sys
 import tempfile
@@ -69,7 +70,7 @@ class ScopeTests(unittest.TestCase):
             access.verify_secret.assert_called_once()
             access.verify_secret.side_effect=ValueError('effective permission drift')
             with self.assertRaisesRegex(ValueError,'privileged bootstrap CD'):d.verify(self.cfg,self.stack,api)
-            for error in (HTTPError('https://pve.example.invalid',403,'private response',{},None),URLError('transport'),TimeoutError('timeout')):
+            for error in (HTTPError('https://pve.example.invalid',403,'private response',{},None),URLError('transport'),TimeoutError('timeout'),HTTPException('private protocol error')):
                 access.verify_secret.side_effect=error
                 with self.assertRaisesRegex(ValueError,'privileged bootstrap CD'):d.verify(self.cfg,self.stack,api)
             access.verify_secret.side_effect=None
@@ -86,7 +87,7 @@ class ScopeTests(unittest.TestCase):
             access.retained.return_value='root@pam!discovery=synthetic-token';api.discovery.return_value.call.return_value={'data':{}}
             with self.assertRaises(ValueError):d.verify(self.cfg,self.stack,api)
             api.discovery.return_value.call.return_value={'data':{'hostname':'fixture'}}
-            for error in (HTTPError('https://pve.example.invalid',403,'private response',{},None),URLError('transport'),TimeoutError('timeout'),ValueError('bad native envelope')):
+            for error in (HTTPError('https://pve.example.invalid',403,'private response',{},None),URLError('transport'),TimeoutError('timeout'),HTTPException('private protocol error'),ValueError('bad native envelope')):
                 api.discovery.return_value.call.side_effect=error
                 with self.assertRaisesRegex(ValueError,'declared guest is not visible'):d.verify(self.cfg,self.stack,api)
             api.discovery.return_value.call.side_effect=None
@@ -94,6 +95,26 @@ class ScopeTests(unittest.TestCase):
         with patch.object(d.importlib,'import_module',return_value=SimpleNamespace(__file__='/foreign/provider_access.py')):
             with self.assertRaises(ValueError):d.provider()
         self.assertEqual(Path(d.provider().__file__).resolve(),d.BOOTSTRAP/'provider_access.py')
+
+    def test_real_permission_verifier_malformed_data_has_safe_recovery_error(self):
+        actual=d.provider();access=Mock();access.scope_owner.return_value=self.owner
+        access.owner_sha256.return_value='a'*64
+        access.retained.return_value='root@pam!discovery=synthetic-token'
+        access.identity.return_value=('user','root@pam!discovery')
+        access.verify_secret.side_effect=actual.verify_secret
+        api=Mock()
+        permissions={path:{'VM.Audit':0,'Sys.Audit':0}
+                     for path in ('/nodes/fixture-pve','/vms/808','/vms/809')}
+        malformed=[None,[]]
+        for value in (1,['VM.Audit','Sys.Audit'],'private malformed value',
+                      {'VM.Audit':0,'Sys.Audit':[]}):
+            data=copy.deepcopy(permissions);data['/vms/808']=value;malformed.append(data)
+        with patch.object(d,'provider',return_value=access):
+            for data in malformed:
+                with self.subTest(data_type=type(data).__name__):
+                    api.discovery.return_value.call.return_value={'data':data}
+                    with self.assertRaises(ValueError) as caught:d.verify(self.cfg,self.stack,api)
+                    self.assertEqual(str(caught.exception),'Discovery read access is not verified; complete reviewed privileged bootstrap CD')
 
     def test_reader_is_get_only_verified_tls_no_redirects_and_bounded(self):
         reader=d.Reader('https://pve.example.invalid:8006/','/public/ca.pem').discovery('synthetic')
