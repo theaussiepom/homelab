@@ -6,6 +6,10 @@ object. The compiler, guest runner and generated workflow use the same explicit
 application selection. A Zigbee-only composition remains supported. A private
 overlay cannot silently add an application missing from the shared workflow.
 
+When the selected profile omits WiNet but this Compose project still contains its
+container, deployment refuses before rendering. Keep the container and review
+retirement separately; ordinary CD never removes an orphan to make a selection pass.
+
 WiNet runs after Zigbee2MQTT in the same guest job, with common preparation once.
 Each application starts with `compose up --no-deps` targeting only its service.
 Only the WiNet phase installs its private runtime options, so that file's changes

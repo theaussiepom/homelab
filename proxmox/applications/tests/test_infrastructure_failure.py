@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import unittest
@@ -137,9 +138,15 @@ class InfrastructureFailureTests(unittest.TestCase):
             current = copy.deepcopy(self.review)
             mutate(current)
             self.row['infrastructure_sha256'] = save(self.review_path, current)
+            save(self.case.site, self.cfg)
+            message = ('Require the exact reviewed pre-update SDN refusal' if index < 9 else
+                       'Keep the prior immutable success before this failed attempt' if index < 11 else
+                       'Preserve the exact prior success and its original backend' if index == 11 else
+                       'Bind the frozen failed backend identity' if index < 14 else
+                       'Preserve the exact unfinished saved-plan attempt')
             with self.subTest(index=index), self.next_run():
                 before = self.infra.call_count
-                with self.assertRaises((ValueError, OSError)):
+                with self.assertRaisesRegex(ValueError, re.escape(message)):
                     deploy.run('infrastructure', self.case.site)
                 self.assertEqual(self.infra.call_count, before)
                 self.assertFalse((self.work / 'ordinary-779-1').exists())
@@ -204,10 +211,29 @@ class InfrastructureFailureTests(unittest.TestCase):
                 v = b'other failure\n' if name == 'log-other' else v + b'Modifications complete\n'
                 row['log_sha256'] = save(p, v)
             row['infrastructure_sha256'] = save(self.review_path, review)
+            save(self.case.site, self.cfg)
+            messages = {
+                'unselected': "'complete.json'",
+                'complete': 'A failed checkpoint cannot replace a completed operation',
+                'infra-complete': 'A failed checkpoint cannot replace a completed operation',
+                'nested-hold': 'Preserve unresolved or pending custody',
+                'previous-snapshot': 'Keep the exact prior backend and all resource identities',
+                'previous-array': 'Preserve the exact prior success and its original backend',
+                'previous-status': 'Preserve the exact prior success and its original backend',
+                'snapshot-vmid': 'Preserve backend VMID, node and resource ID',
+                'window-finished': 'Use closed coordinated custody fields',
+                'log-other': 'A different or partially completed apply needs separate review',
+                'log-partial-success': 'A different or partially completed apply needs separate review',
+                'same-run': 'A reviewed failure cannot replay as the current operation',
+            }
             with self.subTest(change=name), self.next_run(778 if name == 'same-run' else 779):
                 before = self.infra.call_count
-                with self.assertRaises((ValueError, OSError)):
-                    deploy.run('infrastructure', self.case.site)
+                with patch.object(generation, 'read_existing', wraps=generation.read_existing) as history:
+                    with self.assertRaisesRegex((ValueError, OSError), re.escape(messages.get(
+                            name, 'Preserve the exact unfinished saved-plan attempt'))):
+                        deploy.run('infrastructure', self.case.site)
+                    if name == 'unselected':
+                        history.assert_called_with(self.operation / 'complete.json')
                 self.assertEqual(self.infra.call_count, before)
             for path in (self.operation / 'complete.json',
                          self.operation / 'infrastructure-complete.json',

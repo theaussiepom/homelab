@@ -11,6 +11,19 @@
       - stack.guest_memory_mib | int == app.memory_mib | int
       - stack.guest_memory_mib | int <= ansible_facts.memtotal_mb | int + 64
 
+- name: Check WiNet
+  ansible.builtin.command:
+    argv: [docker, ps, --all, --quiet, --filter, label=com.docker.compose.project=homelab-zigbee2mqtt, --filter, label=com.docker.compose.service=winet]
+  register: retained_winet
+  changed_when: false
+  when: app.kind == 'zigbee2mqtt' and stack.winet is not defined and application_service == 'zigbee2mqtt' and not ansible_check_mode
+
+- name: Preserve WiNet
+  ansible.builtin.assert:
+    that: retained_winet.stdout | trim == ''
+    fail_msg: 'WiNet still exists in this radio stack. Preserve it and review retirement before selecting Zigbee alone.'
+  when: app.kind == 'zigbee2mqtt' and stack.winet is not defined and application_service == 'zigbee2mqtt' and not ansible_check_mode
+
 - name: Render private stack files on the controller
   ansible.builtin.command:
     argv: [python3, "{{ playbook_dir }}/../render.py", --config, "{{ app.stack_config }}", --output, "{{ app.render_dir }}"]
