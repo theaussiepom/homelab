@@ -273,8 +273,10 @@ The existing `reviewed_ordinary_failures` selection can explicitly bind phase
 It binds the original hold, saved plan, unfinished apply window, permission path,
 previous immutable success, both exact backend generations and their unchanged
 provider identities. The original log must contain the matching HTTP403/SDN.Use
-refusal and no completed resource modifications. Completed infrastructure or
-application records must remain absent for that failed operation.
+refusal and no completed resource modifications. The reader requires both
+`complete.json` and `infrastructure-complete.json` to remain absent for that
+failed operation. The separate operator review also verifies that no later
+application steps ran; this is not an additional absence check in the reader.
 
 After an explicit operator decision, private copies of the failed backend and
 its verified pre-update backend belong at `infrastructure/terraform.tfstate` and
