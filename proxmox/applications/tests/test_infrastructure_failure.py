@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import deploy
 import initial_ordinary
 import coordinated_generation as generation
+import ordinary_failure
 import private_io as io
 from custody_fixtures import save
 import test_initial_ordinary as original_fixture
@@ -38,6 +39,9 @@ class InfrastructureFailureTests(unittest.TestCase):
         def denied(cfg, site, work, operation, expected, **kwargs):
             state = json.loads((work / 'terraform.tfstate').read_bytes())
             state['serial'] += 1  # Native refresh was saved despite the denied PUT.
+            state['resources'][0]['instances'][0]['attributes']['network_interface'] = [
+                {'bridge': n['bridge'], 'vlan_id': n.get('vlan')}
+                for n in self.cfg['guest']['interfaces']]
             save(work / 'terraform.tfstate', state)
             plan_sha = save(operation / 'guest.tfplan', b'fixture saved provider plan')
             save(operation / 'plan.json',
@@ -151,6 +155,32 @@ class InfrastructureFailureTests(unittest.TestCase):
                 self.assertEqual(self.infra.call_count, before)
                 self.assertFalse((self.work / 'ordinary-779-1').exists())
         self.assertEqual(self.case.canonical.read_bytes(), self.previous)
+
+    def test_later_bridge_correction_preserves_the_exact_historical_denial(self):
+        self.preserve_hold()
+        original = {p: p.read_bytes() for p in self.operation.rglob('*') if p.is_file()}
+        self.cfg['guest']['interfaces'][0]['bridge'] = 'vmbr1'
+        save(self.case.site, self.cfg)
+        with self.next_run():
+            self.case.all_phases()
+        with self.next_run(780):
+            self.case.all_phases()
+            self.assertNotIn('reviewed_drift', self.infra.call_args.kwargs)
+        for p, raw in original.items():
+            self.assertEqual(p.read_bytes(), raw)
+        self.assertEqual(json.loads(self.review_path.read_bytes())['permission_path'],
+                         '/sdn/zones/localnetwork/vmbr0/25')
+
+    def test_historical_network_provenance_refuses_malformed_or_foreign_paths(self):
+        self.assertEqual(ordinary_failure.historical_network_paths({'network_interface': [
+            {'bridge': 'vmbr0', 'vlan_id': 25}, {'bridge': 'vmbr30', 'vlan_id': None},
+            {'bridge': 'vmbr1', 'vlan_id': 0}]}), {'/sdn/zones/localnetwork/vmbr0/25'})
+        for nics in (None, {}, [], [{}] * 17, [None], [{'bridge': None, 'vlan_id': 25}],
+                [{'bridge': '../vmbr0', 'vlan_id': 25}], [{'bridge': 'vmbr0', 'vlan_id': True}],
+                [{'bridge': 'vmbr0', 'vlan_id': '25'}], [{'bridge': 'vmbr0', 'vlan_id': -1}],
+                [{'bridge': 'vmbr0', 'vlan_id': 4095}]):
+            with self.subTest(nics=nics), self.assertRaisesRegex(ValueError, 'frozen failed backend network'):
+                ordinary_failure.historical_network_paths({'network_interface': nics})
 
     def test_rejects_finished_partial_foreign_or_unselected_attempts(self):
         self.preserve_hold()

@@ -278,6 +278,12 @@ refusal and no completed resource modifications. The reader requires both
 failed operation. The separate operator review also verifies that no later
 application steps ran; this is not an additional absence check in the reader.
 
+The denied bridge/VLAN path belongs to the pinned failed backend's network
+interfaces. A later successful deployment may legitimately change its desired
+bridge while preserving that historical proof. Current interface selections do
+not rewrite or invalidate the original refusal; unrelated historical paths or
+malformed frozen interface records still refuse.
+
 After an explicit operator decision, private copies of the failed backend and
 its verified pre-update backend belong at `infrastructure/terraform.tfstate` and
 `infrastructure/previous/terraform.tfstate` under that same failed operation.

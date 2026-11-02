@@ -11,6 +11,24 @@ from custody_records import decode, no_markers, read_existing
 from private_io import digest, private_directory, require
 
 
+def historical_network_paths(attributes):
+    """Bind the denied path to its pinned past backend, not future profiles."""
+    interfaces = attributes.get("network_interface")
+    require(isinstance(interfaces, list) and 0 < len(interfaces) <= 16,
+            "Bind the frozen failed backend network interfaces")
+    paths = set()
+    for nic in interfaces:
+        require(isinstance(nic, dict) and isinstance(nic.get("bridge"), str)
+                and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,14}", nic["bridge"]),
+                "Bind the frozen failed backend network interfaces")
+        vlan = nic.get("vlan_id")
+        require(vlan is None or type(vlan) is int and 0 <= vlan <= 4094,
+                "Bind the frozen failed backend network interfaces")
+        if vlan:
+            paths.add(f"/sdn/zones/localnetwork/{nic['bridge']}/{vlan}")
+    return paths
+
+
 def infrastructure_review(attempt, member, path, held, ready, row):
     """Read an exact operator-reviewed SDN refusal; never complete or retry it."""
     from coordinated_generation import backend
@@ -19,13 +37,11 @@ def infrastructure_review(attempt, member, path, held, ready, row):
                   "previous_state_sha256", "state_sha256", "state_identity", "plan_sha256",
                   "failure_kind", "permission_path", "configuration_unchanged", "guest_healthy"})
     permission = ready["permission_path"]
-    allowed = {f"/sdn/zones/localnetwork/{nic['bridge']}/{nic['vlan']}"
-               for nic in attempt.cfg["guest"]["interfaces"] if nic.get("vlan") is not None}
     require(ready["schema"] == "homelab-reviewed-infrastructure-failure-v1"
             and ready["status"] == "reviewed_failure"
             and ready["failure_kind"] == "pve_sdn_use_denied_before_update"
             and ready["configuration_unchanged"] is True and ready["guest_healthy"] is True
-            and isinstance(permission, str) and permission in allowed
+            and isinstance(permission, str)
             and ready["binding"] == held["binding"] and ready["operation"] == str(path),
             "Require the exact reviewed pre-update SDN refusal, not a successful checkpoint")
     previous = ready["previous_operation"]
@@ -42,6 +58,13 @@ def infrastructure_review(attempt, member, path, held, ready, row):
     require(state_hash == row["state_sha256"] == ready["state_sha256"]
             and identity == ready["state_identity"],
             "Bind the frozen failed backend identity; never restore or adopt it")
+    def guest_attributes(folder):
+        value = decode(read_existing(folder / "terraform.tfstate"))
+        return next(r["instances"][0]["attributes"] for r in value["resources"]
+                    if r["type"] == "proxmox_virtual_environment_container")
+    failed_guest = guest_attributes(path / "infrastructure")
+    require(permission in historical_network_paths(failed_guest),
+            "Require the exact reviewed pre-update SDN refusal, not a successful checkpoint")
     plan = decode(read_existing(path / "plan.json"))
     window = decode(read_existing(path / "apply-window.json"))
     shape(window, {"plan_sha256", "started_at_ns"})
@@ -59,11 +82,7 @@ def infrastructure_review(attempt, member, path, held, ready, row):
     previous_hash, previous_identity = backend(previous_folder, member)
     require(previous_hash == ready["previous_state_sha256"] and previous_identity == identity,
             "Keep the exact prior backend and all resource identities across the failed apply")
-    def guest_attributes(folder):
-        value = decode(read_existing(folder / "terraform.tfstate"))
-        return next(r["instances"][0]["attributes"] for r in value["resources"]
-                    if r["type"] == "proxmox_virtual_environment_container")
-    return identity, {"before": guest_attributes(path / "infrastructure"),
+    return identity, {"before": failed_guest,
                       "after": guest_attributes(previous_folder)}
 
 
