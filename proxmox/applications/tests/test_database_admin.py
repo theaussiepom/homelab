@@ -16,6 +16,9 @@ from test_cloudbeaver import fixture
 
 def composition():
     cloud = fixture()
+    # Synthetic artifact fingerprint; these unit fixtures never download a JAR.
+    cloud['cloudbeaver']['mariadb_jdbc']={'version':'3.5.11','sha256':'b'*64,
+        'image_filename':'mariadb-java-client-3.5.10.jar'}
     cloud['cloudbeaver']['managed_connections'] = {engine+'-admin': {'name': engine+' administrator',
         'driver': engine, 'database': 'postgres' if engine == 'postgresql' else '', 'account_id': 'server-admin'}
         for engine in m.KINDS}
@@ -38,6 +41,29 @@ def composition():
 
 
 class DatabaseAdministratorTests(unittest.TestCase):
+    def test_managed_maria_driver_is_one_closed_official_artifact_with_exact_readonly_mount(self):
+        resolved=composition();service_bindings.bind(resolved);stack=resolved['db-tools'][1]
+        value=stack['cloudbeaver'];artifact=cloudbeaver.jdbc(value)
+        self.assertEqual(artifact['url'],'https://repo.maven.apache.org/maven2/org/mariadb/jdbc/mariadb-java-client/3.5.11/mariadb-java-client-3.5.11.jar')
+        self.assertEqual(artifact['source'],'/opt/homelab-app/runtime/mariadb-java-client-3.5.11.jar')
+        import render
+        mounts=render.compose(stack)['services']['cloudbeaver']['volumes']
+        driver=[row for row in mounts if row['target'].startswith('/opt/cloudbeaver/drivers/mariadb/')]
+        self.assertEqual(driver,[{'type':'bind','source':artifact['source'],'target':artifact['target'],
+            'read_only':True,'bind':{'create_host_path':False}}])
+        for key,bad in [('version','3.5.10'),('version','latest'),('version',True),('sha256','short'),
+            ('sha256',None),('image_filename','../foreign.jar'),('image_filename','other.jar')]:
+            changed=copy.deepcopy(stack);changed['cloudbeaver']['mariadb_jdbc'][key]=bad
+            with self.subTest(key=key,bad=bad),self.assertRaises(ValueError):cloudbeaver.validate(changed)
+        changed=copy.deepcopy(stack);changed['cloudbeaver']['mariadb_jdbc']['url']='https://foreign.example.invalid/driver.jar'
+        with self.assertRaises(ValueError):cloudbeaver.validate(changed)
+        changed=copy.deepcopy(stack);changed['cloudbeaver'].pop('mariadb_jdbc')
+        with self.assertRaises(ValueError):cloudbeaver.validate(changed)
+        changed=copy.deepcopy(stack);changed['cloudbeaver']['managed_connections'].pop('mariadb-admin')
+        with self.assertRaises(ValueError):cloudbeaver.validate(changed)
+        changed['cloudbeaver'].pop('mariadb_jdbc');self.assertIsNone(cloudbeaver.jdbc(changed['cloudbeaver']))
+        self.assertIsNone(cloudbeaver.jdbc(fixture()['cloudbeaver']))
+
     def test_resolved_topology_links_only_new_ids_and_preserves_metadata_policies(self):
         resolved = composition(); original = copy.deepcopy(resolved['db-tools'][1]['cloudbeaver']['connections'])
         endpoints = service_bindings.bind(resolved)
@@ -113,6 +139,12 @@ class DatabaseAdministratorTests(unittest.TestCase):
             service = render.compose(cloud)['services']['cloudbeaver']
             self.assertTrue(any(row['target'].endswith('/CloudBeaverDatabaseHealth.java') and row['read_only']
                                 for row in service['volumes']))
+            pg_only=copy.deepcopy(cloud)
+            pg_only['cloudbeaver']['managed_connections'].pop('mariadb-admin')
+            pg_only['cloudbeaver'].pop('mariadb_jdbc')
+            pg_public=json.loads(next(row['content'] for row in cloudbeaver.files(pg_only,b'synthetic-client-secret-'*2)
+                if row['path']=='cloudbeaver-public.json'))
+            self.assertNotIn('mariadb_jdbc',pg_public)
             cfg['paths']['state_root'] = str(root)
             cloud['cloudbeaver']['managed_connections']['postgresql-admin']['credential_file'] = '/foreign/managed-fixture-postgresql.json'
             with self.assertRaises(ValueError):m.prepare(cfg, cloud, root/'cloud')

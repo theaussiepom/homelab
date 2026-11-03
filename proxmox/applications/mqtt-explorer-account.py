@@ -22,6 +22,11 @@ def need(ok):
         raise ValueError('Dedicated Explorer account refused')
 
 
+def fingerprint(secret, owner, purpose):
+    context = ('homelab-mqtt-custody-v1\0'+purpose+'\0'+json.dumps(owner, sort_keys=True, separators=(',', ':'))).encode()
+    return hashlib.pbkdf2_hmac('sha256', secret.encode(), context, 600000).hex()
+
+
 def identity(info):
     return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns,
             info.st_uid, info.st_gid, info.st_mode, info.st_nlink)
@@ -136,7 +141,7 @@ def account(value):
     receipt = CUSTODY/(selected['credential_id']+'-account.json')
     hold = CUSTODY/(selected['credential_id']+'-ACCOUNT-HOLD.json')
     need(not hold.exists() and not hold.is_symlink())
-    expected = {'owner': credential['owner'], 'password_sha256': hashlib.sha256(credential['password'].encode()).hexdigest(),
+    expected = {'owner': credential['owner'], 'credential_fingerprint': fingerprint(credential['password'], credential['owner'], 'account'),
                 'password_file': selected['password_file'], 'config_sha256': config_sha}
     if receipt.exists() or receipt.is_symlink():
         old = json.loads(read(receipt, True)[0])
@@ -198,8 +203,8 @@ def profile(value):
     receipt = CUSTODY/(selected['credential_id']+'-profile.json')
     hold = CUSTODY/(selected['credential_id']+'-PROFILE-HOLD.json')
     need(not hold.exists() and not hold.is_symlink())
-    digest = hashlib.sha256(json.dumps(expected, sort_keys=True).encode()).hexdigest()
-    proof = {'owner': credential['owner'], 'profile_sha256': digest}
+    digest = fingerprint(json.dumps(expected, sort_keys=True), credential['owner'], 'profile')
+    proof = {'owner': credential['owner'], 'profile_fingerprint': digest}
     if receipt.exists() or receipt.is_symlink():
         need(json.loads(read(receipt, True)[0]) == proof and connections.get(name) == expected)
     else:

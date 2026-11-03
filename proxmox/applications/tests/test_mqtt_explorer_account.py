@@ -40,9 +40,11 @@ class AccountTests(unittest.TestCase):
         self.owners = {}
         self.real_lstat, self.real_fstat, self.real_open = Path.lstat, os.fstat, os.open
         self.own(self.m.DATA, 1001, 1001); self.own(self.path, 1883, 1883)
-        def opened(path, flags, mode=0o777, **kwargs):
+        def opened(path, flags, mode=0o600, **kwargs):
             fd = self.real_open(path, flags, mode, **kwargs)
-            self.owners.setdefault(self.key(self.real_fstat(fd)), (0, 0))
+            if flags & os.O_CREAT and flags & os.O_EXCL:
+                # A newly root-created inode may reuse a former app-owned ID.
+                self.owners[self.key(self.real_fstat(fd))] = (0, 0)
             return fd
         self.add_patch(Path, 'lstat', lambda path, *a, **kw: self.overlay(self.real_lstat(path, *a, **kw)))
         self.add_patch(os, 'fstat', lambda fd: self.overlay(self.real_fstat(fd)))
@@ -171,6 +173,18 @@ class AccountTests(unittest.TestCase):
         return {'Id': 'd'*64, 'State': {'Running': running}, 'Config': {'User': '1001:1001', 'Labels': {
             'com.docker.compose.project': 'homelab-mqtt', 'com.docker.compose.service': 'mqtt_explorer'}},
             'Mounts': [{'Type': 'bind', 'Source': str(self.m.DATA), 'Destination': '/app/data', 'RW': True}]}
+
+    def test_custody_fingerprint_is_slow_deterministic_and_bound_to_owner_and_purpose(self):
+        owner=self.value['credential']['owner']
+        value=self.m.fingerprint(self.password,owner,'account')
+        self.assertEqual(value,self.m.fingerprint(self.password,dict(reversed(list(owner.items()))),'account'))
+        self.assertNotEqual(value,self.m.fingerprint(self.password,dict(owner,vmid=12017),'account'))
+        self.assertNotEqual(value,self.m.fingerprint(self.password,owner,'profile'))
+        self.assertEqual(len(value),64)
+        self.m.account(self.value)
+        receipt=json.loads((self.m.CUSTODY/'fixture-account-account.json').read_bytes())
+        self.assertEqual(receipt['credential_fingerprint'],value)
+        self.assertNotIn('password_sha256',receipt)
 
     def test_profile_first_empty_workspace_and_stopped_GUI_do_not_touch_broker(self):
         row=self.gui(False)

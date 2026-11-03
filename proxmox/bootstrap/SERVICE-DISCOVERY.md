@@ -163,13 +163,16 @@ node, guest type and hostname. CD reads only those added guest configurations
 before its saved plan and again before granting access. A missing or different
 identity refuses the change.
 
-The mode requires existing mirrored ownership, token and scope receipts, an exact
-mounted NAS, and no bootstrap hold or maintenance marker. It can add only the
+The mode requires matching `owner.json`, `token.json` and `READY.json` in both
+`service-discovery` directories, an exact mounted NAS, and no bootstrap hold or
+maintenance marker. The mirrored `scope-extensions` chain is required only when
+previous extensions exist; it is absent for the first extension. The mode can add only the
 declared non-propagating discovery ACL rows and their mirrored scope receipt. It
 cannot mint credentials or change bridges, application grants, monitoring or
 firewall rules. Plans and results use the existing private evidence boundary.
 The exact unique API allowance may follow only input rules whose single literal
 IPv4 source/CIDR excludes the discovery guest. Unknown, inverted, compound or
 overlapping sources refuse; CD never moves or edits those rules.
-Failure retains its hold and does not retry; an unchanged successful repeat
+Preflight refusals create no hold. Failures after plan and hold creation retain
+that hold and do not retry; an unchanged successful repeat
 verifies the exact completed extension without another grant or receipt.

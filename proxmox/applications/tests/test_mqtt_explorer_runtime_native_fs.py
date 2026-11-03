@@ -43,7 +43,7 @@ def fixture(tmp_path, monkeypatch):
     def lstat(path, *args, **kwargs):
         return overlay(original_lstat(path, *args, **kwargs), local(path))
 
-    def opened(path, flags, mode=0o777, **kwargs):
+    def opened(path, flags, mode=0o600, **kwargs):
         fd = original_open(path, flags, mode, **kwargs)
         if local(path):
             owners.setdefault(key(original_fstat(fd)), (0, 0))

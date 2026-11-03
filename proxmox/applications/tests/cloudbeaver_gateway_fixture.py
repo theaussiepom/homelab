@@ -452,7 +452,13 @@ def start_community(module, selected, value):
                 and any(isinstance(item, ast.Constant) and item.value == 'exec' for item in node.args[0].elts))
     elements = call.args[0].elts
     index = next(i for i, item in enumerate(elements) if isinstance(item, ast.Constant) and item.value == 'cloudbeaver')
-    argv = [ast.literal_eval(item) for item in elements[index+1:]]
+    argv = []
+    for item in elements[index+1:]:
+        if isinstance(item, ast.Starred) and isinstance(item.value, ast.Name) and item.value.id == 'extra':
+            artifact = module.jdbc(cfg['cloudbeaver'])
+            argv.extend([artifact['version'], artifact['sha256'], artifact['image_filename']] if artifact else [])
+        else:
+            argv.append(ast.literal_eval(item))
     query = next((node.value.args[0] for node in health.body if isinstance(node, ast.Assign)
                  and any(isinstance(target, ast.Name) and target.id == 'query' for target in node.targets)), None)
     reply = subprocess.run([*DOCKER, 'exec', '-i', ce_id, *argv],

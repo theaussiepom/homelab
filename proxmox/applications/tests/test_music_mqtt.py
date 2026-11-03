@@ -216,6 +216,12 @@ class BrokerTests(unittest.TestCase):
                     self.assertEqual('--force-recreate' in argv,changed and kind!='mqtt')
                     self.assertNotIn('--remove-orphans=true',argv)
                     if kind=='mqtt':self.assertEqual(argv[-2:],['--no-deps','mqtt'])
+        for kind in ('mqtt','identity','db-tools'):
+            for changed in (False,True):
+                with self.subTest(driver_changed=changed,kind=kind):
+                    argv=environment.compile_expression(expression)(app={'kind':kind},
+                        foundation_runtime_install={'changed':False},cloudbeaver_driver_install={'changed':changed},application_service='mqtt')
+                    self.assertEqual('--force-recreate' in argv,changed and kind=='db-tools')
 
     def test_private_probe_input_is_exact_bound_and_not_shared_ha_configuration(self):
         with tempfile.TemporaryDirectory()as directory:

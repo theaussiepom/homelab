@@ -21,6 +21,11 @@ def need(ok):
         raise ValueError('Native database administration held')
 
 
+def fingerprint(password, owner):
+    context = ('homelab-database-custody-v1\0'+json.dumps(owner, sort_keys=True, separators=(',', ':'))).encode()
+    return hashlib.pbkdf2_hmac('sha256', password.encode(), context, 600000).hex()
+
+
 def run(args, text):
     return subprocess.run(args, input=text, text=True, capture_output=True, check=True, timeout=30).stdout.strip()
 
@@ -104,18 +109,41 @@ def mysql_state(user):
     return [json.loads(row) for row in raw.splitlines()]
 
 
-def mysql_verifier(password):
-    # Match the server's existing native-password protocol without transmitting
-    # the raw password in SQL (including servers with the general log enabled).
-    return '*'+hashlib.sha1(hashlib.sha1(password.encode()).digest()).hexdigest().upper()
+def parsec_plugin(required=False):
+    raw = maria("SELECT JSON_OBJECT('name',PLUGIN_NAME,'status',PLUGIN_STATUS,'type',PLUGIN_TYPE,'library',PLUGIN_LIBRARY) "
+                "FROM information_schema.PLUGINS WHERE PLUGIN_NAME='parsec';")
+    rows = [json.loads(row) for row in raw.splitlines()]
+    need(rows == [] or rows == [{'name':'parsec', 'status':'ACTIVE', 'type':'AUTHENTICATION', 'library':'auth_parsec.so'}])
+    need(not required or bool(rows))
+    return bool(rows)
+
+
+def parsec_verifier(password, stored=None):
+    # MariaDB 12.3.3 accepts P0..P3 only. Use its strongest supported P3
+    # (8192 rounds), a fresh salt, and the generated 256-bit machine secret.
+    # The separate custody fingerprint uses 600000 rounds.
+    if stored is None:
+        salt = os.urandom(18)
+    else:
+        need(isinstance(stored, str) and re.fullmatch(r'P3:[A-Za-z0-9+/]{24}:[A-Za-z0-9+/]{43}', stored))
+        salt = base64.b64decode(stored.split(':')[1], validate=True)
+        need(len(salt) == 18)
+    seed = hashlib.pbkdf2_hmac('sha512', password.encode(), salt, 8192, dklen=32)
+    private_der = bytes.fromhex('302e020100300506032b657004220420')+seed
+    result = subprocess.run(['openssl', 'pkey', '-inform', 'DER', '-pubout', '-outform', 'DER'],
+                            input=private_der, capture_output=True, check=True, timeout=10).stdout
+    prefix = bytes.fromhex('302a300506032b6570032100')
+    need(len(result) == len(prefix)+32 and result.startswith(prefix))
+    return 'P3:'+base64.b64encode(salt).decode()+':'+base64.b64encode(result[len(prefix):]).decode().rstrip('=')
 
 
 def mysql_verify(item, password):
+    parsec_plugin(required=True)
     need(maria("SHOW GLOBAL VARIABLES LIKE 'have_ssl';").split() == ['have_ssl', 'YES'])
     user, source = item['username'], item['owner']['source_address']
     rows = mysql_state(user); need(len(rows) == 1)
-    expected = mysql_verifier(password)
-    need(rows[0] == {'name': user, 'host': source, 'plugin': 'mysql_native_password', 'password': expected, 'ssl': 'ANY'})
+    expected = parsec_verifier(password, rows[0]['password'])
+    need(rows[0] == {'name': user, 'host': source, 'plugin': 'parsec', 'password': expected, 'ssl': 'ANY'})
     grants = maria("SHOW GRANTS FOR '"+user+"'@'"+source+"';").splitlines()
     need(len(grants) == 1 and grants[0].startswith("GRANT ALL PRIVILEGES ON *.* TO `"+user+"`@`"+source+"`")
          and ' REQUIRE SSL' in grants[0] and grants[0].endswith(' WITH GRANT OPTION'))
@@ -151,9 +179,10 @@ def apply(value):
     info = ROOT.lstat(); need(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and stat.S_IMODE(info.st_mode) == 0o700)
     receipt, hold = ROOT/(item['credential_id']+'.json'), ROOT/(item['credential_id']+'-HOLD.json')
     need(not hold.exists() and not hold.is_symlink())
-    proof = {'owner': item['owner'], 'password_sha256': hashlib.sha256(credential['password'].encode()).hexdigest(),
+    proof = {'owner': item['owner'], 'credential_fingerprint': fingerprint(credential['password'], item['owner']),
              'access': 'server-administration', 'transport': 'tls'}
     rows = postgres_state(item['username']) if engine == 'postgresql' else mysql_state(item['username'])
+    plugin_exists = parsec_plugin() if engine == 'mariadb' else False
     existing = receipt.exists() or receipt.is_symlink()
     need(len(rows) == (1 if existing else 0))
     if existing:
@@ -169,7 +198,10 @@ def apply(value):
                 '-p', '5432', '-v', 'ON_ERROR_STOP=1', '-d', 'postgres', '-c', "SET password_encryption='scram-sha-256'",
                 '-c', '\\password "'+user+'"'], credential['password']+'\n'+credential['password']+'\n')
         else:
-            maria("CREATE USER '"+user+"'@'"+source+"' IDENTIFIED BY PASSWORD '"+mysql_verifier(credential['password'])+"' REQUIRE SSL;\n"
+            if not plugin_exists:
+                maria("INSTALL SONAME 'auth_parsec';")
+                parsec_plugin(required=True)
+            maria("CREATE USER '"+user+"'@'"+source+"' IDENTIFIED VIA parsec USING '"+parsec_verifier(credential['password'])+"' REQUIRE SSL;\n"
                   "GRANT ALL PRIVILEGES ON *.* TO '"+user+"'@'"+source+"' WITH GRANT OPTION;")
     (postgres_verify if engine == 'postgresql' else mysql_verify)(item, credential['password'])
     if not existing:
@@ -187,9 +219,11 @@ def preflight(value):
     need(not hold.exists() and not hold.is_symlink())
     existing = receipt.exists() or receipt.is_symlink()
     rows = postgres_state(item['username']) if engine == 'postgresql' else mysql_state(item['username'])
+    if engine == 'mariadb':
+        parsec_plugin()
     need(len(rows) == (1 if existing else 0))
     if existing:
-        need(private(receipt) == {'owner': item['owner'], 'password_sha256': hashlib.sha256(credential['password'].encode()).hexdigest(),
+        need(private(receipt) == {'owner': item['owner'], 'credential_fingerprint': fingerprint(credential['password'], item['owner']),
              'access': 'server-administration', 'transport': 'tls'})
         (postgres_verify if engine == 'postgresql' else mysql_verify)(item, credential['password'])
     need((pg('SHOW ssl;') == 'on') if engine == 'postgresql'

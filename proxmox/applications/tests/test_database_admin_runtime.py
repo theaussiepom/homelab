@@ -8,6 +8,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import types
 import unittest
@@ -40,6 +41,7 @@ class FakeSQL:
         self.ssl = True
         self.fail_password = False
         self.fail_grant = False
+        self.plugin = None
         source = value['account']['owner']['source_address']
         self.hba = [{'type': kind, 'database': ['all', 'replication'], 'user_name': [value['account']['username']], 'address': address, 'netmask': mask, 'method': method, 'options': None, 'error': None} for kind, address, mask, method in [('hostssl', source, '255.255.255.255', 'scram-sha-256'), ('local', None, None, 'reject'), ('host', '0.0.0.0', '0.0.0.0', 'reject'), ('host', '::', '::', 'reject')]]
     def __call__(self, argv, text):
@@ -57,15 +59,19 @@ class FakeSQL:
         if text.startswith('CREATE ROLE'):
             self.row = {'name': user, 'login': True, 'super': True, 'createdb': True, 'createrole': True, 'replication': True, 'bypassrls': True, 'password': '', 'connection_limit': -1, 'expires': None, 'memberships': 0}; return ''
         if text.startswith('SHOW GLOBAL VARIABLES'): return 'have_ssl\tYES' if self.ssl else 'have_ssl\tDISABLED'
+        if 'FROM information_schema.PLUGINS' in text: return json.dumps(self.plugin) if self.plugin else ''
+        if text == "INSTALL SONAME 'auth_parsec';":
+            self.plugin={'name':'parsec','status':'ACTIVE','type':'AUTHENTICATION','library':'auth_parsec.so'};return ''
         if text.startswith('SELECT JSON_OBJECT'): return json.dumps(self.row) if self.row else ''
         if text.startswith('CREATE USER'):
             if self.fail_grant: raise RuntimeError('synthetic grant failure')
-            self.row = {'name': user, 'host': source, 'plugin': 'mysql_native_password', 'password': self.m.mysql_verifier(self.value['credential']['password']), 'ssl': 'ANY'}; return ''
+            stored=re.search(r"IDENTIFIED VIA parsec USING '([^']+)' REQUIRE SSL",text).group(1)
+            self.row = {'name': user, 'host': source, 'plugin': 'parsec', 'password': stored, 'ssl': 'ANY'}; return ''
         if text.startswith('SHOW GRANTS'):
             return "GRANT ALL PRIVILEGES ON *.* TO `" + user + "`@`" + source + "` IDENTIFIED BY PASSWORD '<synthetic-verifier>' REQUIRE SSL WITH GRANT OPTION"
         raise AssertionError('Unexpected synthetic SQL boundary: ' + text[:100])
     def writes(self):
-        return [(a, t) for a, t in self.calls if 'setsid' in a or t.startswith(('CREATE ROLE', 'CREATE USER'))]
+        return [(a, t) for a, t in self.calls if 'setsid' in a or t.startswith(('CREATE ROLE', 'CREATE USER', 'INSTALL SONAME'))]
 
 
 class DatabaseAdminRuntimeTests(unittest.TestCase):
@@ -80,6 +86,15 @@ class DatabaseAdminRuntimeTests(unittest.TestCase):
         self.enterContext(patch.object(self.m.os, 'geteuid', return_value=0))
         self.enterContext(patch.object(self.m.os, 'fstat', side_effect=lambda fd: RootStat(real_fstat(fd))))
         self.enterContext(patch.object(Path, 'lstat', lambda value: RootStat(real_lstat(value))))
+        def openssl(argv, **kwargs):
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+            from cryptography.hazmat.primitives import serialization
+            assert argv==['openssl','pkey','-inform','DER','-pubout','-outform','DER']
+            data=kwargs['input'];prefix=bytes.fromhex('302e020100300506032b657004220420')
+            assert data.startswith(prefix) and len(data)==len(prefix)+32
+            key=Ed25519PrivateKey.from_private_bytes(data[len(prefix):]).public_key()
+            return types.SimpleNamespace(stdout=key.public_bytes(serialization.Encoding.DER,serialization.PublicFormat.SubjectPublicKeyInfo))
+        self.enterContext(patch.object(self.m.subprocess,'run',side_effect=openssl))
     def value(self, engine='postgresql'):
         own = {'node': 'fixture-node', 'engine': engine, 'database_vmid': 501, 'source_vmid': 502, 'server_address': '198.18.31.23' if engine == 'postgresql' else '198.18.32.24', 'source_address': '198.18.31.32' if engine == 'postgresql' else '198.18.32.32', 'username': 'fixture_admin', 'purpose': 'database-administration'}
         return {'engine': engine, 'account': {'username': own['username'], 'source_guest': 'db-tools', 'credential_id': 'fixture-' + engine, 'credential_file': '/synthetic/managed-fixture-' + engine + '.json', 'access': 'server-administration', 'transport': 'tls', 'owner': own}, 'credential': {'schema': 'homelab-application-account-v1', 'owner': copy.deepcopy(own), 'password': 'ab' * 32}}
@@ -118,8 +133,12 @@ class DatabaseAdminRuntimeTests(unittest.TestCase):
         create = next(text for _, text in sql.calls if text.startswith('CREATE USER'))
         self.assertIn("'fixture_admin'@'198.18.32.32'", create)
         self.assertIn('REQUIRE SSL', create)
+        self.assertIn('IDENTIFIED VIA parsec USING',create)
+        self.assertEqual(sql.row['plugin'],'parsec')
+        self.assertTrue(sql.row['password'].startswith('P3:'))
+        self.assertEqual(sum(text=="INSTALL SONAME 'auth_parsec';" for _,text in sql.calls),1)
         self.assertIn('WITH GRANT OPTION', create)
-        self.assertIn(self.m.mysql_verifier(value['credential']['password']), create)
+        self.assertIn(self.m.parsec_verifier(value['credential']['password'], sql.row['password']), create)
         for argv, text in sql.calls:
             self.assertNotIn(value['credential']['password'], ' '.join(argv) + text)
     def test_shape_owner_sql_injection_and_nonprivate_sources_refuse_before_sql(self):
@@ -214,6 +233,47 @@ class DatabaseAdminRuntimeTests(unittest.TestCase):
         import runpy
         with patch('sys.stdin',types.SimpleNamespace(buffer=io.BytesIO(b'{}'))),patch('sys.argv',['helper']),self.assertRaises(SystemExit):
             runpy.run_path(str(SOURCE),run_name='__main__')
+
+    def test_custody_fingerprint_uses_owner_bound_PBKDF2_not_native_authentication(self):
+        value=self.value();owner=value['account']['owner'];password=value['credential']['password']
+        first=self.m.fingerprint(password,owner)
+        self.assertEqual(first,self.m.fingerprint(password,dict(reversed(list(owner.items())))))
+        self.assertNotEqual(first,self.m.fingerprint(password,dict(owner,source_vmid=12002)))
+        self.assertEqual(len(first),64)
+        self.fake(value);self.m.apply(value)
+        receipt=self.m.private(self.m.ROOT/(value['account']['credential_id']+'.json'))
+        self.assertEqual(receipt['credential_fingerprint'],first)
+        self.assertNotIn('password_sha256',receipt)
+
+    def test_parsec_reuses_only_exact_active_vendor_plugin_without_reinstall_or_legacy_fallback(self):
+        value=self.value('mariadb');sql=self.fake(value)
+        sql.plugin={'name':'parsec','status':'ACTIVE','type':'AUTHENTICATION','library':'auth_parsec.so'}
+        self.m.preflight(value);self.m.apply(value)
+        self.assertFalse(any(text.startswith('INSTALL')for _,text in sql.calls))
+        self.assertTrue(all('mysql_native_password'not in text for _,text in sql.calls))
+        before=len(sql.writes())
+        for key,bad in [('status','DISABLED'),('type','DAEMON'),('library','foreign.so'),('name','other')]:
+            original=sql.plugin[key];sql.plugin[key]=bad
+            with self.subTest(key=key),self.assertRaises(ValueError):self.m.preflight(value)
+            sql.plugin[key]=original
+        self.assertEqual(len(sql.writes()),before)
+
+    def test_parsec_format_uses_fresh_salt_exact_native_P3_and_stock_key_stdin(self):
+        password='cd'*32;salt=b'fixtureparsecsalt1'
+        self.assertEqual(len(salt),18)
+        real=self.m.hashlib.pbkdf2_hmac
+        with patch.object(self.m.os,'urandom',return_value=salt),patch.object(self.m.hashlib,'pbkdf2_hmac',wraps=real) as kdf:
+            stored=self.m.parsec_verifier(password)
+        self.assertTrue(stored.startswith('P3:'+base64.b64encode(salt).decode()+':'))
+        self.assertEqual(len(stored),71)
+        kdf.assert_called_once_with('sha512',password.encode(),salt,8192,dklen=32)
+        self.assertEqual(self.m.parsec_verifier(password,stored),stored)
+        self.assertNotEqual(self.m.parsec_verifier('ef'*32,stored),stored)
+        self.assertNotEqual(self.m.parsec_verifier(password),stored)
+        for bad in ('P0'+stored[2:],'P4'+stored[2:],'native-sha1',stored+'=',[],stored[:-1]):
+            with self.subTest(stored=bad),self.assertRaises(ValueError):self.m.parsec_verifier(password,bad)
+        with patch.object(self.m.subprocess,'run',return_value=types.SimpleNamespace(stdout=b'foreign DER')):
+            with self.assertRaises(ValueError):self.m.parsec_verifier(password)
 
 
 if __name__ == '__main__':

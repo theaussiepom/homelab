@@ -1,9 +1,14 @@
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.Properties;
+import java.util.HexFormat;
 
 /** Fixed maintenance reads using the already installed, pinned JDBC drivers. */
 class CloudBeaverDatabaseHealth {
@@ -18,13 +23,27 @@ class CloudBeaverDatabaseHealth {
 
     public static void main(String[] args) {
         try {
-            need(args.length == 4 && (args[0].equals("postgresql") || args[0].equals("mariadb")));
+            need(args.length >= 4 && (args[0].equals("postgresql") || args[0].equals("mariadb")));
+            boolean pg = args[0].equals("postgresql");
+            need(args.length == (pg ? 4 : 7));
             ipv4(args[1]); ipv4(args[2]);
             need(args[3].matches("[a-z][a-z0-9_-]{0,62}"));
             byte[] input = System.in.readNBytes(128);
             String secret = new String(input, StandardCharsets.US_ASCII);
             need(secret.matches("[0-9a-f]{64}\\n"));
-            boolean pg = args[0].equals("postgresql");
+            if (!pg) {
+                need(args[4].matches("3\\.5\\.[0-9]{1,3}") && args[5].matches("[0-9a-f]{64}")
+                    && args[6].matches("mariadb-java-client-[0-9]+\\.[0-9]+\\.[0-9]+\\.jar"));
+                need(Integer.parseInt(args[4].split("\\.")[2]) >= 11);
+                Path directory = Path.of("/opt/cloudbeaver/drivers/mariadb");
+                try (var files = Files.list(directory)) {
+                    var jars = files.filter(path -> path.getFileName().toString().endsWith(".jar")).toList();
+                    need(jars.size() == 1 && jars.get(0).getFileName().toString().equals(args[6]));
+                    Path jar = jars.get(0);
+                    need(Files.isRegularFile(jar, LinkOption.NOFOLLOW_LINKS) && Files.size(jar) <= 16*1024*1024);
+                    need(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(jar))).equals(args[5]));
+                }
+            }
             Class.forName(pg ? "org.postgresql.Driver" : "org.mariadb.jdbc.Driver");
             String url = pg ? "jdbc:postgresql://"+args[1]+":5432/postgres?sslmode=require&connectTimeout=5&socketTimeout=5"
                             : "jdbc:mariadb://"+args[1]+":3306/?sslMode=trust&connectTimeout=5000&socketTimeout=5000";
@@ -33,6 +52,8 @@ class CloudBeaverDatabaseHealth {
             DriverManager.setLoginTimeout(5);
             try (Connection connection = DriverManager.getConnection(url, properties);
                  Statement statement = connection.createStatement()) {
+                need(!connection.getMetaData().getURL().contains(secret.substring(0, 64)));
+                if (!pg) need(connection.getMetaData().getDriverVersion().equals(args[4]));
                 statement.setQueryTimeout(5);
                 if (pg) {
                     try (ResultSet row = statement.executeQuery("SELECT current_user,host(inet_client_addr()),r.rolsuper,r.rolcreatedb,"

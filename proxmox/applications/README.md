@@ -211,6 +211,10 @@ binding. Compilation derives the actual database/client identities and addresses
 requires independent credential IDs and a shared controller credential store,
 and refuses metadata-ID overwrites or a mismatched account owner. Ordinary CD
 creates a credential once, with no existing-password reuse or rotation.
+The database must already be commissioned, running and TLS-enabled. The read-only
+account preflight checks collisions, custody and TLS before ordinary configuration
+or service reconciliation; a stopped or TLS-disabled preimage refuses. This
+optional capability does not commission or recover a database server.
 
 These are full server administrators: PostgreSQL SUPERUSER includes server-file
 and program powers; MariaDB receives `ALL ON *.* WITH GRANT OPTION`. Native
@@ -219,6 +223,32 @@ address and requires TLS. The generated drivers require encryption but do not
 claim certificate identity validation (`sslmode=require` / `sslMode=trust`). No
 backend certificate lifecycle is introduced. A bounded JDBC read verifies the
 account, source, TLS and privileges without creating application data.
+The new MariaDB account uses the bundled PARSEC plugin, reusing an exact active
+vendor plugin or installing only `auth_parsec` under the account's existing hold.
+Existing users and the default authentication plugin remain unchanged. PARSEC
+uses a fresh 18-byte salt, the selected server's supported P3/8192-round
+PBKDF2-SHA512 protocol and stock OpenSSL Ed25519 with the generated 256-bit machine
+credential. The private key seed stays on stdin; SQL receives only its public
+verifier. There is no native-password/SHA1 fallback. This requires MariaDB 11.6+
+with the bundled plugin, an Ed25519-capable OpenSSL and a PARSEC-capable client.
+Separate owner-bound custody fingerprints use PBKDF2-HMAC-SHA256/600000 rounds;
+their work factor is distinct from the vendor authentication protocol.
+
+Managed MariaDB connections also require `cloudbeaver.mariadb_jdbc` containing
+`version`, `sha256` and `image_filename`. CD downloads the official Maven artifact
+over verified HTTPS with the declared checksum, installs it mode 0400 and mounts
+that single file read-only. The selected image's driver-directory contract must
+be qualified: an explicit older compatibility filename can contain the declared
+fixed bytes; its name does not assert their version. The current fixed selection
+is 3.5.11. Local readiness requires one MariaDB jar, its exact hash and manifest
+version; the JDBC read also checks the loaded version and that metadata URLs omit
+the password. Omission preserves metadata-only and PostgreSQL-only behavior.
+In this mode the existing Java health check also refuses a selected MariaDB
+driver override, conflicting MariaDB cache bytes, persisted driver-home settings
+or runtime flags outside the generated configuration. It reads only the vendor's
+default cache/configuration locations, with size, entry and depth limits and no
+symlink traversal. Unrelated records are preserved; caches and overrides are
+never removed or rewritten to make a deployment pass.
 
 Community consumes an owned native datasource file, plaintext at rest, mode 0600
 under its UID-8978 mode-0700 workspace. Only this optional mode enables native

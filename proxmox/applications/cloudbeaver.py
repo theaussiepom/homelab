@@ -20,6 +20,26 @@ SIGNING_ALGORITHMS = {'RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512',
                       'ES256', 'ES384', 'ES512', 'EdDSA'}
 
 
+def jdbc(value):
+    """One official pinned driver, with an explicit image compatibility path."""
+    needed = any(item['driver'] == 'mariadb' for item in value.get('managed_connections', {}).values())
+    require(('mariadb_jdbc' in value) == needed, 'Bind the fixed MariaDB JDBC artifact only for managed MariaDB connections')
+    if not needed:
+        return None
+    artifact = value['mariadb_jdbc']
+    require(isinstance(artifact, dict) and set(artifact) == {'version', 'sha256', 'image_filename'}
+            and isinstance(artifact['version'], str) and re.fullmatch(r'3\.5\.[0-9]{1,3}', artifact['version'])
+            and int(artifact['version'].split('.')[2]) >= 11
+            and isinstance(artifact['sha256'], str) and re.fullmatch('[0-9a-f]{64}', artifact['sha256'])
+            and isinstance(artifact['image_filename'], str) and artifact['image_filename'] in {
+                'mariadb-java-client-'+artifact['version']+'.jar', 'mariadb-java-client-3.5.10.jar'},
+            'Use the closed fixed vendor JDBC artifact and a declared image filename')
+    filename = 'mariadb-java-client-'+artifact['version']+'.jar'
+    return dict(artifact, url='https://repo.maven.apache.org/maven2/org/mariadb/jdbc/mariadb-java-client/'
+                +artifact['version']+'/'+filename, source='/opt/homelab-app/runtime/'+filename,
+                target='/opt/cloudbeaver/drivers/mariadb/'+artifact['image_filename'])
+
+
 def selected(cfg):
     """Legacy database-tools inputs retain their existing pgAdmin implementation."""
     variant = cfg.get('variant', 'pgadmin')
@@ -52,7 +72,7 @@ def validate(cfg):
         require('cloudbeaver' not in cfg, 'CloudBeaver settings require its explicit variant')
         return None
     value = cfg.get('cloudbeaver')
-    require(isinstance(value, dict) and set(value) - {'managed_connections'} == {'bind_address', 'public_url', 'server_name',
+    require(isinstance(value, dict) and set(value) - {'managed_connections', 'mariadb_jdbc'} == {'bind_address', 'public_url', 'server_name',
             'recovery_admin', 'heap_mib', 'auth_headers', 'connections', 'retained_pgadmin_image'},
             'Use the closed CloudBeaver Community configuration')
     try:
@@ -95,6 +115,7 @@ def validate(cfg):
     managed = value.get('managed_connections', {})
     database_admin.connections(value, compiled=isinstance(managed, dict) and bool(managed)
         and all(isinstance(v, dict) and 'owner' in v for v in managed.values()))
+    jdbc(value)
     services = cfg.get('services')
     require(isinstance(services, dict) and set(services) == {'cloudbeaver', 'auth_gateway'}, 'Use only CloudBeaver and its OIDC gateway')
     for service in services.values():
@@ -224,6 +245,8 @@ def files(cfg, secret):
             ('cloudbeaver-public.json', json.dumps(public), 0)]
     if value.get('managed_connections'):
         public['cloudbeaver_image'] = cfg['services']['cloudbeaver']['image']
+        if jdbc(value) is not None:
+            public['mariadb_jdbc'] = jdbc(value)
         managed = json.loads(database_admin.document(value))
         public['managed_sha256'] = hashlib.sha256((json.dumps(managed, sort_keys=True)+'\n').encode()).hexdigest()
         rows[-1] = ('cloudbeaver-public.json', json.dumps(public), 0)
@@ -257,8 +280,13 @@ def configure(cfg, result):
     server['volumes'].append(mount('CloudBeaverHealth.java', '/opt/cloudbeaver/conf/CloudBeaverHealth.java'))
     if value.get('managed_connections'):
         server['volumes'].append(mount('CloudBeaverDatabaseHealth.java', '/opt/cloudbeaver/conf/CloudBeaverDatabaseHealth.java'))
+    if jdbc(value) is not None:
+        artifact = jdbc(value)
+        server['volumes'].append({'type':'bind', 'source':artifact['source'], 'target':artifact['target'],
+            'read_only':True, 'bind':{'create_host_path':False}})
     server['healthcheck'] = {'test': ['CMD', '/opt/java/openjdk/bin/java', '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m', '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC',
-        '/opt/cloudbeaver/conf/CloudBeaverHealth.java'],
+        '/opt/cloudbeaver/conf/CloudBeaverHealth.java'] + ([artifact['version'], artifact['sha256'], artifact['image_filename']]
+            if jdbc(value) is not None else []),
         'start_period': '60s', 'interval': '10s', 'timeout': '8s', 'retries': 18}
     proxy = services['auth_gateway']
     proxy['user'] = '65532:65532'

@@ -41,6 +41,7 @@ class ManagedFixture(unittest.TestCase):
         self.addCleanup(self.stack.close)
         for key, value in [('WORKSPACE', self.workspace), ('CUSTODY', self.custody), ('MANAGED', self.runtime)]:
             self.stack.enter_context(patch.object(m, key, value))
+        self.stack.enter_context(patch.object(m,'RUNTIME',self.root))
         self.stack.enter_context(patch.object(Path, 'lstat', lambda path: self.metadata(self.real_lstat(path))))
         self.stack.enter_context(patch.object(m.os, 'fstat', lambda fd: self.metadata(self.real_fstat(fd))))
         self.stack.enter_context(patch.object(m.os, 'chown', lambda path, uid, gid: self.set_owner(path, uid, gid)))
@@ -71,6 +72,12 @@ class ManagedFixture(unittest.TestCase):
             ('postgresql-admin', 'postgresql', '198.18.31.32', '198.18.31.23'),
             ('mariadb-admin', 'mariadb', '198.18.32.32', '198.18.32.24'),
         ]}}
+        self.jar=self.root/'mariadb-java-client-3.5.11.jar'
+        self.jar.write_bytes(b'bounded synthetic driver fixture');self.jar.chmod(0o400);self.set_owner(self.jar,8978,8978)
+        self.config['mariadb_jdbc']={'version':'3.5.11','sha256':hashlib.sha256(self.jar.read_bytes()).hexdigest(),
+            'image_filename':'mariadb-java-client-3.5.10.jar','source':str(self.jar),
+            'target':'/opt/cloudbeaver/drivers/mariadb/mariadb-java-client-3.5.10.jar',
+            'url':'https://repo.maven.apache.org/maven2/org/mariadb/jdbc/mariadb-java-client/3.5.11/mariadb-java-client-3.5.11.jar'}
         self.document = {'folders': {}, 'connections': {name: {
             'configuration': {'auth-properties': {'userName': 'fixture_admin', 'userPassword': self.passwords[name]}},
             'save-password': True,
@@ -307,6 +314,24 @@ class ManagedFixture(unittest.TestCase):
             self.assertEqual(m.database_health({}), 'individual_credentials_required')
         self.docker.assert_not_called()
 
+    def test_driver_health_requires_exact_readonly_hash_and_no_folder_or_nested_shadow(self):
+        artifact=self.config['mariadb_jdbc']
+        server={'Mounts':[{'Type':'bind','Source':artifact['source'],'Destination':artifact['target'],'RW':False}]}
+        m.driver_health(self.config,server)
+        m.driver_health({}, {'Mounts':[]})
+        for mutate in (lambda c,s:c['mariadb_jdbc'].update(sha256='0'*64),
+            lambda c,s:c['mariadb_jdbc'].update(version='3.5.10'),
+            lambda c,s:c['mariadb_jdbc'].update(source='/foreign.jar'),
+            lambda c,s:c['mariadb_jdbc'].update(url='https://foreign.example.invalid/driver.jar'),
+            lambda c,s:s['Mounts'][0].update(RW=True),
+            lambda c,s:s['Mounts'].append(dict(s['Mounts'][0],Destination='/opt/cloudbeaver/drivers/mariadb'))):
+            config,container=copy.deepcopy(self.config),copy.deepcopy(server);mutate(config,container)
+            with self.subTest(mutate=mutate),self.assertRaises(ValueError):m.driver_health(config,container)
+        config=copy.deepcopy(self.config);config.pop('mariadb_jdbc')
+        with self.assertRaises(ValueError):m.driver_health(config,server)
+        self.jar.chmod(0o600)
+        with self.assertRaises(ValueError):m.driver_health(self.config,server)
+
     def test_database_health_sends_each_password_only_on_stdin_with_exact_tls_proof(self):
         calls = []
         def docker(args, *, input, timeout):
@@ -321,7 +346,11 @@ class ManagedFixture(unittest.TestCase):
             value = self.config['managed_connections'][key]
             self.assertEqual(stdin, self.passwords[key] + '\n')
             self.assertEqual(timeout, 20)
-            self.assertEqual(args[-4:], [value['driver'], value['host'], value['owner']['source_address'], value['username']])
+            selected=[value['driver'], value['host'], value['owner']['source_address'], value['username']]
+            if value['driver']=='mariadb':
+                self.assertEqual(args[-7:-3],selected)
+                self.assertEqual(args[-3:],[self.config['mariadb_jdbc'][key] for key in ('version','sha256','image_filename')])
+            else:self.assertEqual(args[-4:],selected)
             self.assertTrue(all(password not in repr(args) for password in self.passwords.values()))
 
     def test_database_health_refuses_failed_tls_source_or_extra_output_without_password_leak(self):

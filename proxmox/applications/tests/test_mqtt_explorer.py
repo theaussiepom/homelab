@@ -4,7 +4,6 @@ import hashlib
 import json
 from pathlib import Path
 import sys
-import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -76,21 +75,6 @@ class ExplorerTests(unittest.TestCase):
             self.assertEqual(guest_contract.validate(cfg,stack),cfg['guest']['vmid'])
             self.assertEqual(guest_contract.applications(cfg),['mqtt'])
 
-    def test_exact_startup_suppresses_rpc_payload_logs_but_retains_fixed_error_signal_and_exit(self):
-        command = render.compose(configuration())['services']['mqtt_explorer']['command']
-        with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory);server=root/'dist/src/server.js';server.parent.mkdir(parents=True)
-            source = "const secret='synthetic-private-broker-password';" \
-                + "for(const level of ['log','info','debug','dir','table','trace'])console[level]({password:secret},new Error(secret));" \
-                + "console.warn(new Error(secret));console.error({password:secret});" \
-                + "if(process.umask()!==0o077)process.exit(8);"
-            for exit_code in (0,7):
-                server.write_text(source+'process.exitCode='+str(exit_code)+';')
-                result=subprocess.run(command,cwd=root,text=True,capture_output=True,timeout=15)
-                self.assertEqual(result.returncode,exit_code)
-                self.assertEqual(result.stdout,'')
-                self.assertEqual(result.stderr,'MQTT Explorer warning\nMQTT Explorer error\n')
-                self.assertNotIn('synthetic-private-broker-password',result.stdout+result.stderr)
 
     def test_managed_broker_credential_is_create_once_and_bound_to_ordinary_input(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 
@@ -14,6 +15,7 @@ PGADMIN = Path('/srv/homelab/data/pgadmin')
 COMPOSE = '/opt/homelab-app/compose.yml'
 PERMISSIONS = Path('/opt/homelab-app/runtime/cloudbeaver-permissions.json')
 MANAGED = Path('/opt/homelab-app/runtime/cloudbeaver-admin-connections.json')
+RUNTIME = Path('/opt/homelab-app/runtime')
 
 
 def need(value):
@@ -251,6 +253,30 @@ def metadata(config):
     return {'connections': 'verified'}
 
 
+def driver_health(config, server):
+    artifact = config.get('mariadb_jdbc')
+    needed = any(item.get('driver') == 'mariadb' for item in config.get('managed_connections', {}).values())
+    need(bool(artifact) == needed)
+    if not needed:
+        return
+    need(isinstance(artifact, dict) and set(artifact) == {'version','sha256','image_filename','source','target','url'})
+    need(isinstance(artifact['version'], str) and re.fullmatch(r'3\.5\.[0-9]{1,3}', artifact['version'])
+         and int(artifact['version'].split('.')[2]) >= 11
+         and isinstance(artifact['sha256'], str) and re.fullmatch('[0-9a-f]{64}', artifact['sha256'])
+         and isinstance(artifact['image_filename'], str)
+         and artifact['image_filename'] in {'mariadb-java-client-'+artifact['version']+'.jar', 'mariadb-java-client-3.5.10.jar'})
+    source = RUNTIME/('mariadb-java-client-'+artifact['version']+'.jar')
+    target = '/opt/cloudbeaver/drivers/mariadb/'+artifact['image_filename']
+    need(artifact['source'] == str(source) and artifact['target'] == target
+         and artifact['url'] == 'https://repo.maven.apache.org/maven2/org/mariadb/jdbc/mariadb-java-client/'
+             +artifact['version']+'/'+source.name
+         and hashlib.sha256(managed_bytes(source, 8978, (0o400,))).hexdigest() == artifact['sha256'])
+    mounts = [row for row in server['Mounts'] if row['Destination'] == '/opt/cloudbeaver/drivers/mariadb'
+              or row['Destination'].startswith('/opt/cloudbeaver/drivers/mariadb/')]
+    need(len(mounts) == 1 and mounts[0]['Type'] == 'bind' and mounts[0]['Source'] == str(source)
+         and mounts[0]['Destination'] == target and mounts[0]['RW'] is False)
+
+
 def database_health(config):
     selected = config.get('managed_connections')
     if not selected:
@@ -258,12 +284,14 @@ def database_health(config):
     document = json.loads(managed_bytes(MANAGED, 0, (0o400, 0o600)))
     for key, item in selected.items():
         password = document['connections'][key]['configuration']['auth-properties']['userPassword']
+        artifact = config['mariadb_jdbc'] if item['driver'] == 'mariadb' else None
+        extra = [artifact['version'], artifact['sha256'], artifact['image_filename']] if artifact else []
         raw = docker(['compose', '-f', COMPOSE, 'exec', '-T', 'cloudbeaver', '/opt/java/openjdk/bin/java',
             '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m',
             '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC', '--class-path',
             '/opt/cloudbeaver/drivers/postgresql/*:/opt/cloudbeaver/drivers/mariadb/*',
             '/opt/cloudbeaver/conf/CloudBeaverDatabaseHealth.java', item['driver'], item['host'],
-            item['owner']['source_address'], item['username']], input=password+'\n', timeout=20)
+            item['owner']['source_address'], item['username'], *extra], input=password+'\n', timeout=20)
         need(json.loads(raw) == {'database_administrator': 'verified', 'encrypted': True, 'source_match': True})
     return 'managed_tls_administrator_verified'
 
@@ -281,6 +309,7 @@ def health(config):
     need(isinstance(containers, list) and {r['Service'] for r in containers} == {'cloudbeaver', 'auth_gateway'})
     rows = {r['Service']: json.loads(docker(['inspect', r['ID']]))[0] for r in containers}
     server, gateway = rows['cloudbeaver'], rows['auth_gateway']
+    driver_health(config, server)
     if config.get('managed_connections'):
         mounts = [m for m in server['Mounts'] if m['Destination'] == '/opt/cloudbeaver/workspace'
                   or m['Destination'].startswith('/opt/cloudbeaver/workspace/')]
@@ -297,8 +326,10 @@ def health(config):
          and any(m['Source'] == str(WORKSPACE) and m['Destination'] == '/opt/cloudbeaver/workspace'
                  and m['Type'] == 'bind' and m['RW'] is True for m in server['Mounts'])
          and server['NetworkSettings']['Networks'].keys() == gateway['NetworkSettings']['Networks'].keys())
+    artifact = config.get('mariadb_jdbc')
+    extra = [artifact['version'], artifact['sha256'], artifact['image_filename']] if artifact else []
     raw = docker(['compose', '-f', COMPOSE, 'exec', '-T', 'cloudbeaver', '/opt/java/openjdk/bin/java', '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m', '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC',
-                  '/opt/cloudbeaver/conf/CloudBeaverHealth.java', '--configuration'], timeout=15)
+                  '/opt/cloudbeaver/conf/CloudBeaverHealth.java', '--configuration', *extra], timeout=15)
     current = json.loads(raw)['data']['serverConfig']
     need(current['forceHttps'] is True and current['configurationMode'] is False and current['anonymousAccessEnabled'] is False
          and set(current['enabledAuthProviders']) == {'local', 'reverseProxy'})

@@ -223,6 +223,26 @@
     mode: '0700'
   when: app.kind == 'db-tools' and app.variant | default('pgadmin') == 'cloudbeaver'
 
+- name: Read the selected managed database driver
+  ansible.builtin.set_fact:
+    cloudbeaver_jdbc: "{{ (lookup('ansible.builtin.file', app.render_dir + '/cloudbeaver-public.json') | from_json).mariadb_jdbc | default({}) }}"
+  no_log: true
+  when: app.kind == 'db-tools' and app.variant | default('pgadmin') == 'cloudbeaver' and not ansible_check_mode
+
+- name: Install the verified managed database driver
+  ansible.builtin.get_url:
+    url: "{{ cloudbeaver_jdbc.url }}"
+    dest: "{{ cloudbeaver_jdbc.source }}"
+    checksum: "{{ 'sha256:' + cloudbeaver_jdbc.sha256 }}"
+    owner: '8978'
+    group: '8978'
+    mode: '0400'
+    validate_certs: true
+    timeout: 30
+  register: cloudbeaver_driver_install
+  no_log: true
+  when: app.kind == 'db-tools' and app.variant | default('pgadmin') == 'cloudbeaver' and cloudbeaver_jdbc.version is defined and not ansible_check_mode
+
 - name: Seed only the owned connection template permissions and preserve additional grants
   ansible.builtin.command:
     argv: [python3, /opt/homelab-app/cloudbeaver-runtime.py, templates, --config, /opt/homelab-app/runtime/cloudbeaver-public.json]
@@ -274,7 +294,7 @@
 
 - name: Start exactly this guest stack
   ansible.builtin.command:
-    argv: "{{ ['docker', 'compose', '-f', '/opt/homelab-app/compose.yml', 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--force-recreate'] if (app.kind != 'mqtt' or application_service == 'mqtt_explorer') and foundation_runtime_install.changed | default(false) else []) + (['--pull', 'never'] if app.kind == 'bitwarden' else []) + (['--no-deps', 'mqtt_explorer', 'explorer_gateway'] if app.kind == 'mqtt' and application_service == 'mqtt_explorer' else (['--no-deps', application_service] if app.kind in ['automation', 'dns', 'zigbee2mqtt', 'mqtt'] else [])) }}"
+    argv: "{{ ['docker', 'compose', '-f', '/opt/homelab-app/compose.yml', 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--force-recreate'] if (app.kind != 'mqtt' or application_service == 'mqtt_explorer') and ((foundation_runtime_install.changed | default(false)) or (app.kind == 'db-tools' and (cloudbeaver_driver_install | default({})).changed | default(false))) else []) + (['--pull', 'never'] if app.kind == 'bitwarden' else []) + (['--no-deps', 'mqtt_explorer', 'explorer_gateway'] if app.kind == 'mqtt' and application_service == 'mqtt_explorer' else (['--no-deps', application_service] if app.kind in ['automation', 'dns', 'zigbee2mqtt', 'mqtt'] else [])) }}"
   register: compose_start
   changed_when: "'Started' in compose_start.stderr or 'Created' in compose_start.stderr or 'Recreated' in compose_start.stderr"
   no_log: true

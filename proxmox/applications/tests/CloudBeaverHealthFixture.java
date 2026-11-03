@@ -1,14 +1,131 @@
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.Comparator;
+import java.util.HexFormat;
+import java.util.Map;
+import java.util.jar.Attributes;
+import java.util.jar.JarOutputStream;
+import java.util.jar.Manifest;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /** Real loopback HTTP and pure negative cases, inside the pinned networkless image. */
 class CloudBeaverHealthFixture {
     static volatile String scenario = "valid";
+    static int stateControls = 0;
     static final String BODY = "{\"data\":{\"serverConfig\":{\"configurationMode\":false,\"anonymousAccessEnabled\":false,\"enabledAuthProviders\":[\"local\",\"reverseProxy\"],\"forceHttps\":true}}}";
+    static void driverChecks() throws Exception {
+        Path directory = Files.createTempDirectory("fixed-driver-");
+        Path jar = directory.resolve("mariadb-java-client-3.5.10.jar");
+        var manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().putValue("Bundle-Version", "3.5.11");
+        try (var archive = new JarOutputStream(Files.newOutputStream(jar), manifest)) { }
+        String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(jar)));
+        CloudBeaverHealth.driver(directory, new String[]{"3.5.11", digest, jar.getFileName().toString()}, 0);
+        CloudBeaverHealth.driver(directory, new String[]{"--configuration", "3.5.11", digest, jar.getFileName().toString()}, 1);
+        for (String[] invalid : new String[][] {{"3.5.10",digest,jar.getFileName().toString()}, {"3.5.12",digest,jar.getFileName().toString()},
+                {"3.5.11","0".repeat(64),jar.getFileName().toString()}, {"3.5.11",digest,"../driver.jar"}, {"3.5.11",digest}, {"invalid"}}) {
+            refusesDriver(directory, invalid);
+        }
+        Files.copy(jar, directory.resolve("other.jar"));
+        refusesDriver(directory, new String[]{"3.5.11",digest,jar.getFileName().toString()});
+        Files.delete(directory.resolve("other.jar"));
+        Path held = Files.move(jar, directory.resolve("saved.fixture"));
+        Files.createSymbolicLink(jar, held);
+        refusesDriver(directory, new String[]{"3.5.11",digest,jar.getFileName().toString()});
+        Files.delete(jar); Files.delete(held); Files.delete(directory);
+    }
+    static void refusesDriver(Path directory, String[] fields) throws Exception {
+        try { CloudBeaverHealth.driver(directory, fields, 0); }
+        catch (Exception expected) { return; }
+        throw new AssertionError("unsafe driver accepted");
+    }
+    static void stateChecks() throws Exception {
+        Path root = Files.createTempDirectory("fixed-driver-state-");
+        Path workspace = root.resolve("workspace"), temporary = root.resolve("temporary");
+        Files.createDirectories(workspace); Files.createDirectories(temporary);
+        Map<String,String> environment = Map.of("JAVA_OPTS", "-Xms128m -Xmx1024m -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=64m");
+        String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest("selected bytes".getBytes(StandardCharsets.UTF_8)));
+        acceptsState(workspace, temporary, hash, environment);
+        for (String name : new String[]{".data/.cloudbeaver.runtime.conf", ".data/.product.runtime.conf"}) {
+            Path file = workspace.resolve(name); Files.createDirectories(file.getParent());
+            String harmless = "{\"server\":{\"productSettings\":{\"other\":\"quoted \\\"ui.drivers.home\\\": value\"}}}";
+            Files.writeString(file, harmless); acceptsState(workspace, temporary, hash, environment);
+            for (String text : new String[]{"{\"server\":{\"productSettings\":{\"ui.drivers.home\":\"drivers\"}}}",
+                    "{\"ui.drivers.h\\u006fme\":\"custom\"}", "{\"unclosed}", "{\"invalid\\q\":0}"}) {
+                Files.writeString(file, text); refusesState(workspace, temporary, hash, environment);
+                if (!Files.readString(file).equals(text)) throw new AssertionError("runtime configuration changed");
+            }
+            Files.writeString(file, harmless);
+        }
+        Path preferences = workspace.resolve(".metadata/.plugins/org.eclipse.core.runtime/.settings/io.cloudbeaver.server.ce.prefs");
+        Files.createDirectories(preferences.getParent()); Files.writeString(preferences, "other=value\n");
+        acceptsState(workspace, temporary, hash, environment);
+        for (String text : new String[]{"ui.drivers.home=drivers\n", "ui.drivers.h\\u006fme=custom\n"}) {
+            Files.writeString(preferences, text); refusesState(workspace, temporary, hash, environment);
+        }
+        Files.writeString(preferences, "other=value\n");
+        Path primary = workspace.resolve(".metadata/.config/drivers.xml"); Files.createDirectories(primary.getParent());
+        Path legacy = workspace.resolve(".metadata/.plugins/io.cloudbeaver.server.ce/drivers.xml"); Files.createDirectories(legacy.getParent());
+        String foreign = "<drivers><provider id=\"mysql\"><driver id=\"mariaDB\"/></provider></drivers>";
+        String unrelated = "<drivers><provider id=\"postgresql\"><driver id=\"mariaDB\" provider=\"mysql\"/></provider><driver provider=\"mysql\" id=\"other\"/></drivers>";
+        Files.writeString(legacy, foreign);
+        refusesState(workspace, temporary, hash, environment);
+        Files.writeString(primary, unrelated);
+        acceptsState(workspace, temporary, hash, environment); // Effective primary wins over legacy.
+        byte[] retained = Files.readAllBytes(primary);
+        for (String xml : new String[]{foreign, "<drivers><driver provider=\"mysql\" id=\"mariaDB\"/></drivers>",
+                "<drivers><driver", "<!DOCTYPE drivers [<!ENTITY private SYSTEM 'file:///SYNTHETIC_DONT_ECHO'>]><drivers>&private;</drivers>",
+                " ".repeat(262145)}) {
+            Files.writeString(primary, xml);
+            refusesState(workspace, temporary, hash, environment);
+            if (!Files.readString(primary).equals(xml)) throw new AssertionError("driver override was changed");
+        }
+        Files.write(primary, retained); acceptsState(workspace, temporary, hash, environment);
+        Path real = root.resolve("actual.xml"); Files.move(primary, real); Files.createSymbolicLink(primary, real);
+        refusesState(workspace, temporary, hash, environment); Files.delete(primary); Files.move(real, primary);
+        for (Path cache : new Path[]{workspace.resolve(".metadata/drivers"), workspace.resolve("data/libraries"), temporary.resolve("dbeaver/.work-data/data/libraries")}) {
+            Files.createDirectories(cache);
+            Files.writeString(cache.resolve("postgresql.jar"), "unrelated custom bytes");
+            Path jar = cache.resolve("mariadb-java-client-3.5.10.jar"); Files.writeString(jar, "selected bytes");
+            acceptsState(workspace, temporary, hash, environment);
+            Files.writeString(jar, "conflicting bytes"); refusesState(workspace, temporary, hash, environment);
+            if (!Files.readString(jar).equals("conflicting bytes")) throw new AssertionError("cache was changed");
+            Files.delete(jar); Files.createSymbolicLink(jar, cache.resolve("postgresql.jar"));
+            refusesState(workspace, temporary, hash, environment); Files.delete(jar);
+        }
+        Path cache = workspace.resolve(".metadata/drivers");
+        Path deep = cache;
+        for (int n=0; n<9; n++) { deep = deep.resolve("deep"); Files.createDirectory(deep); }
+        refusesState(workspace, temporary, hash, environment);
+        try (var paths=Files.walk(cache)) { for (Path path:paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path); }
+        Files.createDirectory(cache);
+        for (int n=0; n<512; n++) Files.writeString(cache.resolve("other-"+n), "");
+        refusesState(workspace, temporary, hash, environment);
+        for (String key : new String[]{"JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "JAVA_OPTS", "CLOUDBEAVER_DRIVERS_LOCATION"}) {
+            var changed = new java.util.HashMap<>(environment); changed.put(key, "SYNTHETIC_OVERRIDE");
+            // Use an empty workspace to isolate each runtime override refusal.
+            refusesState(root.resolve("absent"), root.resolve("absent-tmp"), hash, changed);
+        }
+        refusesState(root.resolve("absent"), root.resolve("absent-tmp"), hash, Map.of());
+        try (var paths=Files.walk(root)) { for (Path path:paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path); }
+    }
+    static void acceptsState(Path workspace, Path temporary, String hash, Map<String,String> environment) throws Exception {
+        CloudBeaverHealth.driverState(workspace, temporary, hash, environment); stateControls++;
+    }
+    static void refusesState(Path workspace, Path temporary, String hash, Map<String,String> environment) throws Exception {
+        try { CloudBeaverHealth.driverState(workspace, temporary, hash, environment); }
+        catch (Exception expected) { stateControls++; return; }
+        throw new AssertionError("conflicting retained driver state accepted");
+    }
     public static void main(String[] args) throws Exception {
+        driverChecks();
+        stateChecks();
         if (!CloudBeaverHealth.valid(BODY) || !CloudBeaverHealth.valid(BODY.replace(",", ",\n "))
             || !CloudBeaverHealth.valid(BODY.replace("[\"local\",\"reverseProxy\"]", "[\"reverseProxy\",\"local\"]"))) {
             throw new AssertionError("valid configured response refused");
@@ -70,6 +187,6 @@ class CloudBeaverHealthFixture {
             server.stop(0);
             executor.shutdownNow();
         }
-        System.out.println("CloudBeaver setup health: 24 controls passed");
+        System.out.println("CloudBeaver setup health: "+(34+stateControls)+" controls passed");
     }
 }
