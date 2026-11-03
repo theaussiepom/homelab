@@ -6,16 +6,25 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import Mock
-import yaml
 
 from ci_changes import needs_iso
 
 
 class ChangeSelectionTests(unittest.TestCase):
     def test_coverage_failure_stdout_is_bounded_selective_and_keeps_exit_status(self):
-        workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / 'workflows/ci.yml').read_text())
-        step = next(row for row in workflow['jobs']['python']['steps']
-                    if row.get('name') == 'Measure all current framework Python code')
+        workflow = (Path(__file__).resolve().parents[1] / 'workflows/ci.yml').read_text()
+        marker = '      - name: Measure all current framework Python code\n'
+        self.assertEqual(workflow.count(marker), 1)
+        # Read this fixed literal shell block without adding a YAML dependency
+        # to the deliberately standard-library-only source-safety job.
+        block = workflow.split(marker, 1)[1].split('        run: |\n', 1)[1]
+        lines = []
+        for line in block.splitlines():
+            if not line.startswith('          '):
+                break
+            lines.append(line[10:])
+        script = '\n'.join(lines) + '\n'
+        self.assertIn('exit "$coverage_status"', script)
         for status, summary in [(0, True), (7, True), (9, False)]:
             with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory); (root / 'tools').mkdir()
@@ -29,9 +38,11 @@ if SUMMARY:
 raise SystemExit(STATUS)
 '''.replace('SUMMARY', repr(summary)).replace('STATUS', repr(status))
                 (root / 'tools/measure_coverage.py').write_text(fixture)
+                (root / 'bin').mkdir()
+                (root / 'bin/python').symlink_to(sys.executable)
                 environment = dict(os.environ, RUNNER_TEMP=str(root / 'runner'),
-                                   PATH=str(Path(sys.executable).parent) + os.pathsep + os.environ['PATH'])
-                result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', step['run']], cwd=root,
+                                   PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'])
+                result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script], cwd=root,
                                         env=environment, capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, status, result.stdout + result.stderr)
                 self.assertNotIn('PASSED_SUITE_MUST_NOT_BE_PRINTED', result.stdout)

@@ -139,6 +139,7 @@ def document(value):
             'name': item['name'], 'save-password': True, 'show-system-objects': True,
             'configuration': {'host': item['host'], 'port': str(item['port']), 'database': item['database'],
                 'configurationType': 'MANUAL', 'type': 'dev', 'auth-model': 'native',
-                'properties': {'sslmode': 'require'} if postgres else {'sslMode': 'trust'},
+                'properties': {'sslmode': 'require', 'channelBinding': 'require',
+                    'requireAuth': 'scram-sha-256'} if postgres else {'sslMode': 'verify-full'},
                 'auth-properties': {'userName': item['username'], 'userPassword': record['password']}}}
     return encoded({'folders': {}, 'connections': result})

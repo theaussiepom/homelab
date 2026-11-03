@@ -44,16 +44,19 @@ class CloudBeaverDatabaseHealth {
                     need(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(jar))).equals(args[5]));
                 }
             }
-            Class.forName(pg ? "org.postgresql.Driver" : "org.mariadb.jdbc.Driver");
-            String url = pg ? "jdbc:postgresql://"+args[1]+":5432/postgres?sslmode=require&connectTimeout=5&socketTimeout=5"
-                            : "jdbc:mariadb://"+args[1]+":3306/?sslMode=trust&connectTimeout=5000&socketTimeout=5000";
+            Class<?> driver = Class.forName(pg ? "org.postgresql.Driver" : "org.mariadb.jdbc.Driver");
+            String version = driver.getPackage().getImplementationVersion();
+            if (pg) need(version != null && version.matches("42\\.7\\.[0-9]{1,3}")
+                         && Integer.parseInt(version.split("\\.")[2]) >= 13);
+            String url = pg ? "jdbc:postgresql://"+args[1]+":5432/postgres?sslmode=require&channelBinding=require&requireAuth=scram-sha-256&connectTimeout=5&socketTimeout=5"
+                            : "jdbc:mariadb://"+args[1]+":3306/?sslMode=verify-full&connectTimeout=5000&socketTimeout=5000";
             Properties properties = new Properties();
             properties.setProperty("user", args[3]); properties.setProperty("password", secret.substring(0, 64));
             DriverManager.setLoginTimeout(5);
             try (Connection connection = DriverManager.getConnection(url, properties);
                  Statement statement = connection.createStatement()) {
                 need(!connection.getMetaData().getURL().contains(secret.substring(0, 64)));
-                if (!pg) need(connection.getMetaData().getDriverVersion().equals(args[4]));
+                need(connection.getMetaData().getDriverVersion().equals(pg ? version : args[4]));
                 statement.setQueryTimeout(5);
                 if (pg) {
                     try (ResultSet row = statement.executeQuery("SELECT current_user,host(inet_client_addr()),r.rolsuper,r.rolcreatedb,"

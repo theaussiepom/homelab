@@ -45,6 +45,64 @@ class CloudBeaverHealthFixture {
         catch (Exception expected) { return; }
         throw new AssertionError("unsafe driver accepted");
     }
+    static void pgJar(Path path, String version) throws Exception {
+        var manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        if (version != null) manifest.getMainAttributes().putValue("Implementation-Version", version);
+        try (var archive = new JarOutputStream(Files.newOutputStream(path), manifest)) { }
+    }
+    static void refusesPg(Path directory) throws Exception {
+        try { CloudBeaverHealth.postgresqlDriver(directory); }
+        catch (Exception expected) { stateControls++; return; }
+        throw new AssertionError("unsupported PostgreSQL driver accepted");
+    }
+    static void postgresChecks() throws Exception {
+        Path root = Files.createTempDirectory("pg-driver-state-");
+        Path directory = root.resolve("packaged"), workspace = root.resolve("workspace"), temporary = root.resolve("temporary");
+        Files.createDirectories(directory); Files.createDirectories(workspace); Files.createDirectories(temporary);
+        refusesPg(directory);
+        Path jar = directory.resolve("postgresql-42.7.13.jar"); pgJar(jar, "42.7.13");
+        Files.writeString(directory.resolve("postgis-jdbc.jar"), "unrelated support jar");
+        String digest = CloudBeaverHealth.postgresqlDriver(directory); stateControls++;
+        if (!digest.equals(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(jar)))))
+            throw new AssertionError("packaged PostgreSQL digest differs");
+        Map<String,String> environment = Map.of("JAVA_OPTS", "-Xms128m -Xmx1024m -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=64m");
+        Map<String,String> hashes = Map.of("postgresql", digest);
+        CloudBeaverHealth.driverState(workspace, temporary, hashes, environment); stateControls++;
+        Path xml = workspace.resolve(".metadata/.config/drivers.xml"); Files.createDirectories(xml.getParent());
+        Files.writeString(xml, "<drivers><provider id=\"mysql\"><driver id=\"mariaDB\"/></provider></drivers>");
+        CloudBeaverHealth.driverState(workspace, temporary, hashes, environment); stateControls++;
+        for (String text : new String[]{"<drivers><provider id=\"postgresql\"><driver id=\"postgres-jdbc\"/></provider></drivers>",
+                "<drivers><driver provider=\"postgresql\" id=\"postgres-jdbc\"/></drivers>"}) {
+            Files.writeString(xml, text);
+            try { CloudBeaverHealth.driverState(workspace, temporary, hashes, environment); throw new AssertionError("PG override accepted"); }
+            catch (IllegalStateException expected) { stateControls++; }
+            if (!Files.readString(xml).equals(text)) throw new AssertionError("PG override modified");
+        }
+        Files.writeString(xml, "<drivers><provider id=\"postgresql\"><driver id=\"other\"/></provider></drivers>");
+        CloudBeaverHealth.driverState(workspace, temporary, hashes, environment); stateControls++;
+        for (Path cache : new Path[]{workspace.resolve(".metadata/drivers"), workspace.resolve("data/libraries"), temporary.resolve("dbeaver/.work-data/data/libraries")}) {
+            Files.createDirectories(cache); Files.writeString(cache.resolve("mariadb.jar"), "unselected custom MariaDB jar");
+            Path cached = cache.resolve("postgresql-42.7.13.jar"); Files.copy(jar, cached);
+            CloudBeaverHealth.driverState(workspace, temporary, hashes, environment); stateControls++;
+            Files.writeString(cached, "conflicting PostgreSQL jar");
+            try { CloudBeaverHealth.driverState(workspace, temporary, hashes, environment); throw new AssertionError("PG cache accepted"); }
+            catch (IllegalStateException expected) { stateControls++; }
+            if (!Files.readString(cached).equals("conflicting PostgreSQL jar")) throw new AssertionError("PG cache modified");
+            Files.delete(cached);
+        }
+        Files.copy(jar, directory.resolve("postgresql-42.7.14.jar")); refusesPg(directory); Files.delete(directory.resolve("postgresql-42.7.14.jar"));
+        for (String version : new String[]{"42.7.12", "42.6.13", "43.7.13"}) {
+            Files.delete(jar); Path other = directory.resolve("postgresql-"+version+".jar"); pgJar(other,version); refusesPg(directory); Files.delete(other);
+            pgJar(jar,"42.7.13");
+        }
+        for (String version : new String[]{null,"42.7.12"}) { pgJar(jar,version); refusesPg(directory); }
+        pgJar(jar,"42.7.13"); Path real = Files.move(jar, root.resolve("saved.jar")); Files.createSymbolicLink(jar,real); refusesPg(directory);
+        Files.delete(jar); Files.move(real,jar);
+        Files.delete(jar); jar=directory.resolve("postgresql-42.7.14.jar"); pgJar(jar,"42.7.14");
+        CloudBeaverHealth.postgresqlDriver(directory); stateControls++;
+        try (var paths=Files.walk(root)) { for (Path path:paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path); }
+    }
     static void stateChecks() throws Exception {
         Path root = Files.createTempDirectory("fixed-driver-state-");
         Path workspace = root.resolve("workspace"), temporary = root.resolve("temporary");
@@ -125,6 +183,7 @@ class CloudBeaverHealthFixture {
     }
     public static void main(String[] args) throws Exception {
         driverChecks();
+        postgresChecks();
         stateChecks();
         if (!CloudBeaverHealth.valid(BODY) || !CloudBeaverHealth.valid(BODY.replace(",", ",\n "))
             || !CloudBeaverHealth.valid(BODY.replace("[\"local\",\"reverseProxy\"]", "[\"reverseProxy\",\"local\"]"))) {

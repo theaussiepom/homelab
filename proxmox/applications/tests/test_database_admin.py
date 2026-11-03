@@ -51,6 +51,8 @@ class DatabaseAdministratorTests(unittest.TestCase):
         driver=[row for row in mounts if row['target'].startswith('/opt/cloudbeaver/drivers/mariadb/')]
         self.assertEqual(driver,[{'type':'bind','source':artifact['source'],'target':artifact['target'],
             'read_only':True,'bind':{'create_host_path':False}}])
+        self.assertEqual(render.compose(stack)['services']['cloudbeaver']['healthcheck']['test'][-4:],
+                         ['--postgresql', artifact['version'], artifact['sha256'], artifact['image_filename']])
         for key,bad in [('version','3.5.10'),('version','latest'),('version',True),('sha256','short'),
             ('sha256',None),('image_filename','../foreign.jar'),('image_filename','other.jar')]:
             changed=copy.deepcopy(stack);changed['cloudbeaver']['mariadb_jdbc'][key]=bad
@@ -62,7 +64,9 @@ class DatabaseAdministratorTests(unittest.TestCase):
         changed=copy.deepcopy(stack);changed['cloudbeaver']['managed_connections'].pop('mariadb-admin')
         with self.assertRaises(ValueError):cloudbeaver.validate(changed)
         changed['cloudbeaver'].pop('mariadb_jdbc');self.assertIsNone(cloudbeaver.jdbc(changed['cloudbeaver']))
+        self.assertEqual(render.compose(changed)['services']['cloudbeaver']['healthcheck']['test'][-1], '--postgresql')
         self.assertIsNone(cloudbeaver.jdbc(fixture()['cloudbeaver']))
+        self.assertNotIn('--postgresql', render.compose(fixture())['services']['cloudbeaver']['healthcheck']['test'])
 
     def test_resolved_topology_links_only_new_ids_and_preserves_metadata_policies(self):
         resolved = composition(); original = copy.deepcopy(resolved['db-tools'][1]['cloudbeaver']['connections'])
@@ -121,8 +125,9 @@ class DatabaseAdministratorTests(unittest.TestCase):
                                 json.loads(next(iter(packets['mariadb'].values())))['password'])
             document = json.loads(m.document(cloud['cloudbeaver']))
             self.assertEqual(set(document['connections']), {'postgresql-admin', 'mariadb-admin'})
-            self.assertEqual(document['connections']['postgresql-admin']['configuration']['properties'], {'sslmode': 'require'})
-            self.assertEqual(document['connections']['mariadb-admin']['configuration']['properties'], {'sslMode': 'trust'})
+            self.assertEqual(document['connections']['postgresql-admin']['configuration']['properties'],
+                             {'sslmode': 'require', 'channelBinding': 'require', 'requireAuth': 'scram-sha-256'})
+            self.assertEqual(document['connections']['mariadb-admin']['configuration']['properties'], {'sslMode': 'verify-full'})
             before = cloudbeaver.configuration(fixture()['cloudbeaver'])
             after = cloudbeaver.configuration(cloud['cloudbeaver'])
             self.assertFalse(before['app']['adminCredentialsSaveEnabled'])

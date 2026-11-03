@@ -36,7 +36,7 @@ class ManagedFixture(unittest.TestCase):
         self.hold = self.custody / 'MANAGED-CONNECTIONS-HOLD.json'
         self.permissions = self.directory / 'data-sources-permissions.json'
         self.owners = {}
-        self.real_lstat, self.real_fstat = Path.lstat, os.fstat
+        self.real_lstat, self.real_fstat, self.real_open = Path.lstat, os.fstat, os.open
         self.stack = contextlib.ExitStack()
         self.addCleanup(self.stack.close)
         for key, value in [('WORKSPACE', self.workspace), ('CUSTODY', self.custody), ('MANAGED', self.runtime)]:
@@ -44,6 +44,7 @@ class ManagedFixture(unittest.TestCase):
         self.stack.enter_context(patch.object(m,'RUNTIME',self.root))
         self.stack.enter_context(patch.object(Path, 'lstat', lambda path: self.metadata(self.real_lstat(path))))
         self.stack.enter_context(patch.object(m.os, 'fstat', lambda fd: self.metadata(self.real_fstat(fd))))
+        self.stack.enter_context(patch.object(m.os, 'open', self.open_file))
         self.stack.enter_context(patch.object(m.os, 'chown', lambda path, uid, gid: self.set_owner(path, uid, gid)))
         self.stack.enter_context(patch.object(m.os, 'fchown', lambda fd, uid, gid: self.set_owner_fd(fd, uid, gid)))
         self.stack.enter_context(patch.object(m.os, 'geteuid', lambda: 0))
@@ -99,6 +100,14 @@ class ManagedFixture(unittest.TestCase):
         row = self.real_fstat(fd)
         self.owners[(row.st_dev, row.st_ino)] = (uid, gid)
 
+    def open_file(self, path, flags, *args, **kwargs):
+        fd = self.real_open(path, flags, *args, **kwargs)
+        if flags & os.O_CREAT and flags & os.O_EXCL:
+            # A newly created inode belongs to the simulated root process,
+            # even if Linux recycled an inode previously owned by the app.
+            self.set_owner_fd(fd, 0, 0)
+        return fd
+
     def write(self, path, value, uid, mode=0o600):
         path.write_text(json.dumps(value, sort_keys=True) + '\n')
         path.chmod(mode)
@@ -122,6 +131,19 @@ class ManagedFixture(unittest.TestCase):
         self.unchanged_other_data()
         self.assertEqual(len(self.docker.call_args_list), 1)
         self.assertEqual(self.docker.call_args.args[0][0], 'ps')
+
+    def test_new_private_receipt_does_not_inherit_recycled_inode_ownership(self):
+        real_open = self.real_open
+        def recycled(path, flags, *args, **kwargs):
+            fd = real_open(path, flags, *args, **kwargs)
+            if flags & os.O_CREAT and flags & os.O_EXCL:
+                self.set_owner_fd(fd, 8978, 8978)
+            return fd
+        self.real_open = recycled
+        path = self.custody / 'new-receipt.json'
+        m.create(path, {'owned': True})
+        self.assertEqual(m.private(path), {'owned': True})
+        self.assertEqual(path.lstat().st_uid, 0)
 
     def server(self):
         return {'Id': 'a'*64, 'Config': {'Image': self.config['cloudbeaver_image'], 'Labels': {

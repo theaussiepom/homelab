@@ -12,6 +12,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 
 ROOT = Path('/var/lib/homelab-database-administrators')
 
@@ -91,6 +92,12 @@ def postgres_verify(item, password):
     need(row['name'] == user and all(row[key] is True for key in ('login', 'super', 'createdb', 'createrole', 'replication', 'bypassrls'))
          and row['connection_limit'] == -1 and row['expires'] is None and row['memberships'] == 0)
     scram(password, row['password'])
+    postgres_hba(item)
+
+
+def postgres_hba(item):
+    user, source = item['username'], item['owner']['source_address']
+    need(pg('SELECT count(*) = 0 FROM pg_hba_file_rules WHERE error IS NOT NULL;') == 't')
     rows = json.loads(pg("SELECT json_agg(json_build_object('type',type,'database',database,'user_name',user_name,"
         "'address',address,'netmask',netmask,'method',auth_method,'options',options,'error',error) ORDER BY rule_number) "
         "FROM pg_hba_file_rules WHERE '"+user+"'=ANY(user_name);") or 'null')
@@ -101,6 +108,19 @@ def postgres_verify(item, password):
         need(row['type'] == kind and row['database'] == ['all', 'replication'] and row['user_name'] == [user]
              and row['address'] == address and row['netmask'] == mask and row['method'] == method
              and row['options'] is None and row['error'] is None)
+
+
+def postgres_reload():
+    before = pg('SELECT pg_conf_load_time()::text;')
+    need(bool(before) and len(before) <= 128 and pg('SELECT pg_reload_conf();') == 't')
+    for attempt in range(20):
+        current = pg('SELECT pg_conf_load_time()::text;')
+        need(bool(current) and len(current) <= 128)
+        if current != before:
+            return
+        if attempt < 19:
+            time.sleep(0.1)
+    need(False)
 
 
 def mysql_state(user):
@@ -187,10 +207,21 @@ def apply(value):
     need(len(rows) == (1 if existing else 0))
     if existing:
         need(private(receipt) == proof)
+        if engine == 'postgresql':
+            postgres_verify(item, credential['password'])
     else:
         need((pg('SHOW ssl;') == 'on') if engine == 'postgresql'
              else maria("SHOW GLOBAL VARIABLES LIKE 'have_ssl';").split() == ['have_ssl', 'YES'])
+    if engine == 'postgresql':
+        postgres_hba(item)
         write_new(hold, proof)
+        # Preparation may already have written the file. Load it before any
+        # new LOGIN role, including when service startup itself was a no-op.
+        postgres_reload()
+        postgres_hba(item)
+    elif not existing:
+        write_new(hold, proof)
+    if not existing:
         user, source = item['username'], item['owner']['source_address']
         if engine == 'postgresql':
             pg('CREATE ROLE "'+user+'" LOGIN SUPERUSER CREATEDB CREATEROLE REPLICATION BYPASSRLS;')
@@ -206,6 +237,7 @@ def apply(value):
     (postgres_verify if engine == 'postgresql' else mysql_verify)(item, credential['password'])
     if not existing:
         write_new(receipt, proof)
+    if engine == 'postgresql' or not existing:
         hold.unlink(); sync(ROOT)
     return {'administrator': 'verified', 'transport': 'tls', 'source_restricted': True}
 

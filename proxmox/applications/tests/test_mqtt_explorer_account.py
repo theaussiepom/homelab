@@ -112,6 +112,18 @@ class AccountTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), before)
         self.assertTrue(all(args[0] not in ('run', 'kill', 'stop', 'restart') for args, _ in self.docker_calls[calls:]))
 
+    def test_verified_local_image_id_is_preserved_and_mutable_or_invalid_references_refuse(self):
+        for image in ('mosquitto:latest', 'sha256:short', 'sha256:'+'A'*64, None):
+            selected=copy.deepcopy(self.value);selected['image']=image
+            with self.subTest(image=image),self.assertRaises(ValueError):self.m.account(selected)
+        self.assertEqual(self.docker_calls, [])
+        self.value['image']='sha256:'+'a'*64
+        self.row['Config']['Image']=self.value['image']
+        self.assertEqual(self.m.account(self.value)['account'],'verified')
+        created=next(args for args,_ in self.docker_calls if args[0]=='run')
+        self.assertIn(self.value['image'],created)
+        self.assertTrue(self.path.read_bytes().startswith(self.before))
+
     def test_same_bytes_metadata_or_directory_drift_refuses_before_replacement(self):
         for drift in ('mode', 'inode', 'xattr', 'directory'):
             with self.subTest(drift=drift):

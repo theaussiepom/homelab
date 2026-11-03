@@ -285,7 +285,8 @@ def configure(cfg, result):
         server['volumes'].append({'type':'bind', 'source':artifact['source'], 'target':artifact['target'],
             'read_only':True, 'bind':{'create_host_path':False}})
     server['healthcheck'] = {'test': ['CMD', '/opt/java/openjdk/bin/java', '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m', '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC',
-        '/opt/cloudbeaver/conf/CloudBeaverHealth.java'] + ([artifact['version'], artifact['sha256'], artifact['image_filename']]
+        '/opt/cloudbeaver/conf/CloudBeaverHealth.java'] + (['--postgresql'] if any(item['driver'] == 'postgresql'
+            for item in value.get('managed_connections', {}).values()) else []) + ([artifact['version'], artifact['sha256'], artifact['image_filename']]
             if jdbc(value) is not None else []),
         'start_period': '60s', 'interval': '10s', 'timeout': '8s', 'retries': 18}
     proxy = services['auth_gateway']

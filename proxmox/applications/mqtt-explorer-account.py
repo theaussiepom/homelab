@@ -123,7 +123,7 @@ def account(value):
          and isinstance(selected['credential_id'], str) and re.fullmatch('[a-z][a-z0-9-]{2,63}', selected['credential_id'])
          and isinstance(selected['password_file'], str) and re.fullmatch('/mosquitto/config/[A-Za-z0-9_.-]{1,100}', selected['password_file'])
          and Path(selected['password_file']).name not in {'.', '..'}
-         and isinstance(value['image'], str) and re.fullmatch('[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}', value['image']))
+         and isinstance(value['image'], str) and re.fullmatch('(?:[A-Za-z0-9._:/-]+@)?sha256:[0-9a-f]{64}', value['image']))
     need(isinstance(credential, dict) and set(credential) == {'schema', 'owner', 'password'}
          and credential['schema'] == 'homelab-application-account-v1'
          and isinstance(credential['password'], str) and re.fullmatch('[0-9a-f]{64}', credential['password']))

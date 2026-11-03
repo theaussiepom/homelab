@@ -328,6 +328,8 @@ def health(config):
          and server['NetworkSettings']['Networks'].keys() == gateway['NetworkSettings']['Networks'].keys())
     artifact = config.get('mariadb_jdbc')
     extra = [artifact['version'], artifact['sha256'], artifact['image_filename']] if artifact else []
+    if any(item['driver'] == 'postgresql' for item in config.get('managed_connections', {}).values()):
+        extra.insert(0, '--postgresql')
     raw = docker(['compose', '-f', COMPOSE, 'exec', '-T', 'cloudbeaver', '/opt/java/openjdk/bin/java', '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m', '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC',
                   '/opt/cloudbeaver/conf/CloudBeaverHealth.java', '--configuration', *extra], timeout=15)
     current = json.loads(raw)['data']['serverConfig']

@@ -42,6 +42,10 @@ class FakeSQL:
         self.fail_password = False
         self.fail_grant = False
         self.plugin = None
+        self.reload_count = 0
+        self.reload_allowed = True
+        self.reload_observed = True
+        self.hba_errors = False
         source = value['account']['owner']['source_address']
         self.hba = [{'type': kind, 'database': ['all', 'replication'], 'user_name': [value['account']['username']], 'address': address, 'netmask': mask, 'method': method, 'options': None, 'error': None} for kind, address, mask, method in [('hostssl', source, '255.255.255.255', 'scram-sha-256'), ('local', None, None, 'reject'), ('host', '0.0.0.0', '0.0.0.0', 'reject'), ('host', '::', '::', 'reject')]]
     def __call__(self, argv, text):
@@ -54,9 +58,16 @@ class FakeSQL:
             assert len(password) == 2 and password[0] == password[1]
             self.row['password'] = verifier(password[0]); return ''
         if text == 'SHOW ssl;': return 'on' if self.ssl else 'off'
+        if text == 'SELECT count(*) = 0 FROM pg_hba_file_rules WHERE error IS NOT NULL;':return 'f' if self.hba_errors else 't'
+        if text == 'SELECT pg_conf_load_time()::text;':return 'loaded-'+str(self.reload_count if self.reload_observed else 0)
+        if text == 'SELECT pg_reload_conf();':
+            assert (self.m.ROOT/(self.value['account']['credential_id']+'-HOLD.json')).is_file()
+            self.reload_count+=1
+            return 't' if self.reload_allowed else 'f'
         if text.startswith('SELECT json_agg') and 'FROM pg_authid' in text: return json.dumps([self.row] if self.row else [])
         if text.startswith('SELECT json_agg') and 'pg_hba_file_rules' in text: return json.dumps(self.hba)
         if text.startswith('CREATE ROLE'):
+            assert self.reload_count and self.reload_observed
             self.row = {'name': user, 'login': True, 'super': True, 'createdb': True, 'createrole': True, 'replication': True, 'bypassrls': True, 'password': '', 'connection_limit': -1, 'expires': None, 'memberships': 0}; return ''
         if text.startswith('SHOW GLOBAL VARIABLES'): return 'have_ssl\tYES' if self.ssl else 'have_ssl\tDISABLED'
         if 'FROM information_schema.PLUGINS' in text: return json.dumps(self.plugin) if self.plugin else ''
@@ -117,6 +128,7 @@ class DatabaseAdminRuntimeTests(unittest.TestCase):
         self.m.preflight(value); self.m.apply(value)
         self.assertEqual(before, self.receipt(value).read_bytes())
         self.assertEqual(len(sql.writes()), writes)
+        self.assertEqual(sql.reload_count, 2)
         password_calls = [(a, t) for a, t in sql.calls if 'setsid' in a]
         self.assertEqual(len(password_calls), 1)
         self.assertIn('\\password "fixture_admin"', password_calls[0][0])
@@ -180,6 +192,31 @@ class DatabaseAdminRuntimeTests(unittest.TestCase):
                 with self.assertRaises(ValueError): self.m.preflight(value)
                 with self.assertRaises(ValueError): self.m.apply(value)
                 self.assertEqual(len(sql.calls), before)
+    def test_pg_reload_refusal_or_missing_ack_keeps_hold_before_login_creation(self):
+        for allowed,observed in ((False,True),(True,False)):
+            value=self.value();sql=self.fake(value);sql.reload_allowed=allowed;sql.reload_observed=observed
+            with patch.object(self.m.time,'sleep') as sleep:
+                with self.subTest(allowed=allowed,observed=observed),self.assertRaises(ValueError):self.m.apply(value)
+            self.assertIsNone(sql.row);self.assertTrue(self.hold(value).exists());self.assertFalse(self.receipt(value).exists())
+            self.assertLessEqual(sleep.call_count,19)
+            before=len(sql.calls)
+            with self.assertRaises(ValueError):self.m.apply(value)
+            self.assertEqual(len(sql.calls),before)
+            self.hold(value).unlink()
+    def test_any_hba_parse_error_refuses_before_hold_reload_or_new_role(self):
+        value=self.value();sql=self.fake(value);sql.hba_errors=True
+        with self.assertRaises(ValueError):self.m.apply(value)
+        self.assertIsNone(sql.row);self.assertEqual(sql.reload_count,0)
+        self.assertFalse(self.hold(value).exists());self.assertFalse(self.receipt(value).exists())
+    def test_unusable_reload_time_keeps_hold_without_creating_login(self):
+        for invalid in ('','x'*129):
+            value=self.value();sql=self.fake(value)
+            pg=self.m.pg
+            with patch.object(self.m,'pg',side_effect=lambda text:invalid if text=='SELECT pg_conf_load_time()::text;'else pg(text)):
+                with self.subTest(invalid_length=len(invalid)),self.assertRaises(ValueError):self.m.apply(value)
+            self.assertIsNone(sql.row);self.assertEqual(sql.reload_count,0)
+            self.assertTrue(self.hold(value).exists());self.assertFalse(self.receipt(value).exists())
+            self.hold(value).unlink()
     def test_receipt_drift_mode_symlink_and_hardlink_refuse(self):
         value = self.value(); self.fake(value); self.m.apply(value); receipt = self.receipt(value); original = receipt.read_bytes()
         receipt.chmod(0o644)

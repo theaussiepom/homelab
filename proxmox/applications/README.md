@@ -219,10 +219,23 @@ optional capability does not commission or recover a database server.
 These are full server administrators: PostgreSQL SUPERUSER includes server-file
 and program powers; MariaDB receives `ALL ON *.* WITH GRANT OPTION`. Native
 authentication restricts each account to the exact selected CloudBeaver source
-address and requires TLS. The generated drivers require encryption but do not
-claim certificate identity validation (`sslmode=require` / `sslMode=trust`). No
-backend certificate lifecycle is introduced. A bounded JDBC read verifies the
+address and requires TLS. PostgreSQL uses `sslmode=require`,
+`channelBinding=require` and the positive `requireAuth=scram-sha-256` setting.
+Readiness accepts the packaged PgJDBC 42.7 family from 42.7.13 onward, checks its
+actual loaded version and refuses conflicting selected driver overrides/cache.
+SCRAM channel binding authenticates the TLS endpoint using the password exchange;
+this does not claim CA-chain or hostname validation. MariaDB uses `sslMode=verify-full`
+with PARSEC's supported zero-configuration certificate fingerprint authentication.
+No backend certificate lifecycle is introduced. A bounded JDBC read verifies the
 account, source, TLS and privileges without creating application data.
+Before creating a PostgreSQL LOGIN role, CD validates the whole HBA file, reloads
+the running server under the account hold, observes the postmaster reload and
+rechecks the selected rules. Updates also reload without restarting the service;
+read-only preflight never reloads it.
+Every user admitted by the configured OIDC application receives the managed
+connections through CloudBeaver's existing `user` team. These shared administrators
+therefore require an explicitly restricted upstream sign-in policy; they do not
+provide a separate per-user database privilege boundary.
 The new MariaDB account uses the bundled PARSEC plugin, reusing an exact active
 vendor plugin or installing only `auth_parsec` under the account's existing hold.
 Existing users and the default authentication plugin remain unchanged. PARSEC

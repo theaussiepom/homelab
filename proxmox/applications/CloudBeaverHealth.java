@@ -55,6 +55,10 @@ class CloudBeaverHealth {
     }
 
     static void driverConfiguration(Path workspace) throws Exception {
+        driverConfiguration(workspace, false, true);
+    }
+
+    static void driverConfiguration(Path workspace, boolean postgresql, boolean mariadb) throws Exception {
         Path selected = workspace.resolve(".metadata/.config/drivers.xml");
         if (!safePath(selected)) selected = workspace.resolve(".metadata/.plugins/io.cloudbeaver.server.ce/drivers.xml");
         if (!safePath(selected)) return;
@@ -84,11 +88,17 @@ class CloudBeaverHealth {
                     break;
                 }
             }
-            if (provider.equals("mysql") && driver.getAttribute("id").equals("mariaDB")) throw new IllegalStateException();
+            if ((mariadb && provider.equals("mysql") && driver.getAttribute("id").equals("mariaDB"))
+                || (postgresql && provider.equals("postgresql") && driver.getAttribute("id").equals("postgres-jdbc")))
+                throw new IllegalStateException();
         }
     }
 
     static void cache(Path root, String digest) throws Exception {
+        cache(root, Map.of("mariadb", digest));
+    }
+
+    static void cache(Path root, Map<String,String> digests) throws Exception {
         if (!safePath(root)) return;
         var pending = new ArrayDeque<Path>(); pending.add(root);
         int entries = 0; long bytes = 0;
@@ -103,11 +113,14 @@ class CloudBeaverHealth {
                         pending.add(child);
                     }
                 }
-            } else if (path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).contains("mariadb")
-                       && path.getFileName().toString().endsWith(".jar")) {
-                bytes += attributes.size();
-                if (bytes > 64*1024*1024 || !HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(bounded(path, 16*1024*1024))).equals(digest)) throw new IllegalStateException();
+            } else if (path.getFileName().toString().endsWith(".jar")) {
+                String name = path.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+                for (var selected : digests.entrySet()) {
+                    if (!name.contains(selected.getKey())) continue;
+                    bytes += attributes.size();
+                    if (bytes > 64*1024*1024 || !HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                        .digest(bounded(path, 16*1024*1024))).equals(selected.getValue())) throw new IllegalStateException();
+                }
             }
         }
     }
@@ -154,6 +167,10 @@ class CloudBeaverHealth {
     }
 
     static void driverState(Path workspace, Path temporary, String digest, Map<String,String> environment) throws Exception {
+        driverState(workspace, temporary, Map.of("mariadb", digest), environment);
+    }
+
+    static void driverState(Path workspace, Path temporary, Map<String,String> digests, Map<String,String> environment) throws Exception {
         // The generated server flags/configuration select the vendor default paths.
         if (!environment.getOrDefault("JAVA_OPTS", "").matches("-Xms128m -Xmx[0-9]{3,5}m -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=64m")
             || !environment.getOrDefault("CLOUDBEAVER_DRIVERS_LOCATION", "drivers").equals("drivers")) throw new IllegalStateException();
@@ -163,10 +180,27 @@ class CloudBeaverHealth {
         driverHome(workspace.resolve(".data/.cloudbeaver.runtime.conf"), false);
         driverHome(workspace.resolve(".data/.product.runtime.conf"), false);
         driverHome(workspace.resolve(".metadata/.plugins/org.eclipse.core.runtime/.settings/io.cloudbeaver.server.ce.prefs"), true);
-        driverConfiguration(workspace);
-        cache(workspace.resolve(".metadata/drivers"), digest);
-        cache(workspace.resolve("data/libraries"), digest);
-        cache(temporary.resolve("dbeaver/.work-data/data/libraries"), digest);
+        driverConfiguration(workspace, digests.containsKey("postgresql"), digests.containsKey("mariadb"));
+        cache(workspace.resolve(".metadata/drivers"), digests);
+        cache(workspace.resolve("data/libraries"), digests);
+        cache(temporary.resolve("dbeaver/.work-data/data/libraries"), digests);
+    }
+
+    static String postgresqlDriver(Path directory) throws Exception {
+        try (var entries = Files.list(directory)) {
+            var jars = entries.filter(path -> path.getFileName().toString().matches("postgresql-.*\\.jar")).toList();
+            if (jars.size() != 1) throw new IllegalStateException();
+            Path jar = jars.get(0);
+            var version = java.util.regex.Pattern.compile("postgresql-(42\\.7\\.([0-9]{1,3}))\\.jar")
+                .matcher(jar.getFileName().toString());
+            if (!version.matches() || Integer.parseInt(version.group(2)) < 13) throw new IllegalStateException();
+            byte[] bytes = bounded(jar, 16*1024*1024);
+            try (var archive = new JarFile(jar.toFile())) {
+                if (archive.getManifest() == null || !version.group(1).equals(archive.getManifest().getMainAttributes()
+                    .getValue("Implementation-Version"))) throw new IllegalStateException();
+            }
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        }
     }
 
     static void driver(Path directory, String[] args, int offset) throws Exception {
@@ -203,9 +237,14 @@ class CloudBeaverHealth {
         try {
             boolean configuration = args.length > 0 && args[0].equals("--configuration");
             int offset = configuration ? 1 : 0;
+            boolean postgresql = args.length > offset && args[offset].equals("--postgresql");
+            if (postgresql) offset++;
             driver(Path.of("/opt/cloudbeaver/drivers/mariadb"), args, offset);
-            if (args.length != offset) driverState(Path.of("/opt/cloudbeaver/workspace"),
-                Path.of(System.getProperty("java.io.tmpdir")), args[offset+1], System.getenv());
+            var digests = new java.util.HashMap<String,String>();
+            if (postgresql) digests.put("postgresql", postgresqlDriver(Path.of("/opt/cloudbeaver/drivers/postgresql")));
+            if (args.length != offset) digests.put("mariadb", args[offset+1]);
+            if (!digests.isEmpty()) driverState(Path.of("/opt/cloudbeaver/workspace"),
+                Path.of(System.getProperty("java.io.tmpdir")), digests, System.getenv());
             var connection = (HttpURLConnection) URI.create("http://127.0.0.1:8978/api/gql")
                 .toURL().openConnection(Proxy.NO_PROXY);
             connection.setConnectTimeout(2000);

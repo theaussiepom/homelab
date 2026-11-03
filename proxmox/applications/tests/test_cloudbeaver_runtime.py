@@ -151,11 +151,12 @@ class RuntimeTests(unittest.TestCase):
 
     def test_managed_health_refuses_nested_workspace_shadow(self):
         self.own();r.templates(self.config);self.seed_metadata()
-        config=dict(self.config,managed_connections={'owned-administrator':{}})
+        config=dict(self.config,managed_connections={'owned-administrator':{'driver':'postgresql'}})
         with patch.object(r,'managed',return_value={'managed_connections':'verified'}), \
                 patch.object(r,'database_health',return_value='managed_tls_administrator_verified'):
-            with patch.object(r,'docker',side_effect=self.health_boundary()):
+            with patch.object(r,'docker',side_effect=self.health_boundary()) as boundary:
                 self.assertEqual(r.health(config)['cloudbeaver'],'passed')
+                self.assertIn('--postgresql', boundary.call_args.args[0])
             def shadow(docs,current):
                 docs['cloudbeaver']['Mounts'].append({'Destination':'/opt/cloudbeaver/workspace/GlobalConfiguration'})
             with patch.object(r,'docker',side_effect=self.health_boundary(change=shadow)),self.assertRaises(ValueError):
