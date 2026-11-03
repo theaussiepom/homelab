@@ -272,7 +272,41 @@ jobs:
       - name: Measure all current framework Python code
         env:
           GITLEAKS_BIN: ${{ runner.temp }}/coverage-tools/gitleaks
-        run: python tools/measure_coverage.py --all --fail-under 100 --output "$RUNNER_TEMP/framework-coverage"
+        run: |
+          coverage_status=0
+          python tools/measure_coverage.py --all --fail-under 100 --output "$RUNNER_TEMP/framework-coverage" || coverage_status=$?
+          if [ "$coverage_status" -ne 0 ]; then
+            python - "$RUNNER_TEMP/framework-coverage" <<'PY' || true
+          import json
+          from pathlib import Path
+          import sys
+          import uuid
+          root = Path(sys.argv[1])
+          try:
+              summary = json.loads((root / 'summary.json').read_text())
+          except (OSError, ValueError):
+              print('Per-suite failure diagnostics unavailable; see the measurement error above.')
+              raise SystemExit(0)
+          failed = {row.get('suite') for row in summary.get('suites', [])
+                    if isinstance(row, dict) and row.get('exit_code') not in (0, None)}
+          for suite in ('framework', 'blueprints', 'applications', 'bootstrap', 'installer', 'network-recovery', 'source-tooling'):
+              if suite not in failed:
+                  continue
+              token = uuid.uuid4().hex
+              print(f'::group::{suite} failure details')
+              print(f'::stop-commands::{token}')
+              try:
+                  with (root / (suite + '.txt')).open('rb') as stream:
+                      stream.seek(0, 2)
+                      stream.seek(max(0, stream.tell() - 16384))
+                      print(stream.read(16384).decode('utf-8', errors='replace'))
+              except OSError:
+                  print('Suite log unavailable.')
+              print(f'::{token}::')
+              print('::endgroup::')
+          PY
+          fi
+          exit "$coverage_status"
   source-safety:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     name: Source safety
