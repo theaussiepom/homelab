@@ -10,14 +10,14 @@ Review it with the application profiles before merging. The merge lets bootstrap
 CD create the token and one host firewall allowance; no workstation command or
 root SSH key is needed on the runner.
 
-Add `service_discovery` to the private host settings. These are example addresses
-and guest IDs; replace them together with the rest of the host configuration:
+Add `service_discovery` to the private host settings. The following uses explicitly synthetic RFC2544
+addresses and lab guest IDs; replace them together with the rest of the host configuration:
 
 ```json
 "service_discovery": {
-  "vmid": 212,
-  "address": "10.77.25.33",
-  "guests": [202, 211, 212]
+  "vmid": 12012,
+  "address": "198.19.125.43",
+  "guests": [12002, 12011, 12012]
 }
 ```
 
@@ -32,10 +32,10 @@ For the example, bootstrap creates:
 
 | Item | Result |
 | --- | --- |
-| API token | `root@pam!homelab-traefik-212`, privilege separation enabled, no expiry |
-| Custom role | `HomelabTraefikRead212`, containing only `Sys.Audit` and `VM.Audit` |
-| Grants | That role on the exact node and `/vms/202`, `/vms/211`, `/vms/212`; propagation disabled |
-| Host firewall | One incoming TCP 8006 allowance from `10.77.25.33/32` to the selected host address `/32` |
+| API token | `root@pam!homelab-traefik-12012`, privilege separation enabled, no expiry |
+| Custom role | `HomelabTraefikRead12012`, containing only `Sys.Audit` and `VM.Audit` |
+| Grants | That role on the exact node and `/vms/12002`, `/vms/12011`, `/vms/12012`; propagation disabled |
+| Host firewall | One incoming TCP 8006 allowance from `198.19.125.43/32` to the selected host address `/32` |
 
 The role permits reading metadata and Notes at those paths. It cannot create,
 configure, start, stop or delete guests. It receives no storage, guest-agent,
@@ -79,7 +79,7 @@ reviewed host-settings change:
 ```json
 "service_discovery_extension": {
   "owner_sha256": "<SHA256 of the current non-secret discovery owner>",
-  "guests": [215]
+  "guests": [12015]
 }
 ```
 
