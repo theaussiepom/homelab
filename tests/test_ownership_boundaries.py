@@ -150,7 +150,7 @@ def test_cli_malformed_shape_and_nonrepository_return_only_fixed_error(tmp_path,
 def test_git_quoted_unicode_and_newline_names_are_scanned_intact(tmp_path):
     root=repo(tmp_path)
     subprocess.run(['git','-C',str(root),'config','core.quotePath','true'],check=True)
-    for name in ('é.md','line\nbreak.md'):
+    for name in ('é.md','line\nbreak.md','report\r.md','report\r\n.md'):
         path=write(root,name,b.CONSUMER_PREFIX)
         subprocess.run(['git','-C',str(root),'add','--',name],check=True)
         assert b.check(root,'framework')['findings']==[{'path':name,'line':1,'code':'private-repository-reference'}]
@@ -164,5 +164,9 @@ def test_consumer_yaml_target_steps_include_list_marker_without_matching_plain_i
         for prefix in ('  - run: ','    run: ','    '):
             path.write_text('steps:\n'+prefix+command+'\n')
             assert b.check(root,'consumer')['findings']==[{'path':'.github/workflows/operations.yml','line':2,'code':'consumer-target-workflow'}]
-    for line in ('  - docker','  - ssh','  - run: python3 tools/check.py'):
+    for line in ('  - run: ssh','  - run: docker|cat','  - run: tofu>plan.txt','  - run: ssh;true'):
+        path.write_text('steps:\n'+line+'\n')
+        assert b.check(root,'consumer')['findings']==[{'path':'.github/workflows/operations.yml','line':2,'code':'consumer-target-workflow'}]
+    for line in ('  - docker','  - ssh','  - run: python3 tools/check.py',
+                 '  - run: ssh-keygen -lf key.pub','    run: ssh-keygen -lf key.pub','    ssh-keygen -lf key.pub'):
         path.write_text('steps:\n'+line+'\n');assert b.check(root,'consumer')['status']=='passed'
