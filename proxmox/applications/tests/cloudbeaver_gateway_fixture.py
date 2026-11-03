@@ -42,6 +42,7 @@ DOCKER = ['docker'] + (['--context', os.environ['CLOUDBEAVER_DOCKER_CONTEXT']]
                       if os.environ.get('CLOUDBEAVER_DOCKER_CONTEXT') else [])
 LINUX = sys.platform.startswith('linux')
 REAL_CE = '--real-ce' in sys.argv
+EXPLICIT_OIDC = '--explicit-oidc' in sys.argv
 os.umask(0o077)
 run_id = uuid.uuid4().hex
 OUTPUT = Path(os.environ['CLOUDBEAVER_FIXTURE_OUTPUT']).resolve() if os.environ.get('CLOUDBEAVER_FIXTURE_OUTPUT') else Path(tempfile.mkdtemp(prefix='cloudbeaver-signed-oidc-'))
@@ -52,6 +53,7 @@ container_name = 'cloudbeaver-oidc-fixture-' + run_id[:12]
 result = {'schema': 'cloudbeaver-synthetic-gateway-fixture-v1', 'run_id': run_id,
           'image': IMAGE, 'native_or_private_targets': False, 'tests': [],
           'mode': 'combined-ce-and-gateway' if REAL_CE else 'gateway-header-echo',
+          'oidc_endpoint_mode': 'explicit' if EXPLICIT_OIDC else 'discovery',
           'fixture_source_sha256_at_start': hashlib.sha256(Path(__file__).resolve().read_bytes()).hexdigest()}
 container_id = None
 ce_id = network_id = None
@@ -170,6 +172,10 @@ class Provider:
         self.client_secret = 'synthetic-retained-client-secret-with-high-entropy-for-local-tests-only'
         self.issuer = ''
         self.public_url = ''
+        self.available = True
+        self.jwks_available = True
+        self.wrong_jwks = False
+        self.requests = self.jwks_requests = 0
 
     def claims(self, nonce, mode, username):
         now = int(time.time())
@@ -195,6 +201,9 @@ HEADERS = ()
 
 class OIDC(Quiet):
     def do_GET(self):
+        provider.requests += 1
+        if not provider.available:
+            self.reply(503); return
         path = urlsplit(self.path).path.rstrip('/')
         base = provider.issuer.rstrip('/')
         if path.endswith('/.well-known/openid-configuration'):
@@ -205,7 +214,10 @@ class OIDC(Quiet):
                 'token_endpoint_auth_methods_supported': ['client_secret_basic', 'client_secret_post'],
                 'code_challenge_methods_supported': ['S256']}, Content_Type='application/json')
         elif path.endswith('/jwks'):
-            public = provider.key.public_key().public_numbers()
+            provider.jwks_requests += 1
+            if not provider.jwks_available:
+                self.reply(503); return
+            public = (provider.wrong_key if provider.wrong_jwks else provider.key).public_key().public_numbers()
             integer = lambda x: b64(x.to_bytes((x.bit_length()+7)//8, 'big'))
             self.reply(200, {'keys': [{'kty': 'RSA', 'kid': 'synthetic-fixture-key', 'use': 'sig',
                 'alg': 'RS256', 'n': integer(public.n), 'e': integer(public.e)}]}, Content_Type='application/json')
@@ -230,6 +242,9 @@ class OIDC(Quiet):
             self.reply(404)
 
     def do_POST(self):
+        provider.requests += 1
+        if not provider.available:
+            self.reply(503); return
         if not urlsplit(self.path).path.rstrip('/').endswith('/token'):
             self.reply(404); return
         query = parse_qs(self.rfile.read(int(self.headers['Content-Length'])).decode())
@@ -562,6 +577,36 @@ def echo_checks():
     result['echo_authentication_controls_passed'] = 33
 
 
+def offline_start_checks(common, stage):
+    """Actual gateway startup and HTTPS redirect need no available IdP."""
+    provider.available = False
+    status, _, _ = get(provider.issuer+'.well-known/openid-configuration', ROOT/(stage+'-offline-idp.txt'))
+    record(stage+'_idp_is_unavailable', status == 503)
+    before = provider.requests
+    start_gateway(common, stage)
+    status, headers, _ = get(provider.public_url+'/', ROOT/(stage+'-offline-redirect.txt'),
+                             {'X-User': 'forged', 'X-Team': 'admin'})
+    location = headers.get('location', [''])[0]
+    record(stage+'_local_gateway_and_https_redirect_ready_without_idp',
+           status == 302 and location.startswith(provider.issuer.rstrip('/')+'/authorize?')
+           and provider.requests == before, status=status, startup_idp_requests=provider.requests-before)
+    provider.available = True
+
+
+def unavailable_jwks_checks():
+    """An available token endpoint never substitutes for verified signing keys."""
+    for mode in ('unavailable', 'wrong_key'):
+        provider.jwks_available = mode != 'unavailable'
+        provider.wrong_jwks = mode == 'wrong_key'
+        before = len(seen_upstream); before_keys = provider.jwks_requests
+        _, status, _, statuses = login()
+        record(mode+'_jwks_refuses_authenticated_upstream', status != 200
+               and len(seen_upstream) == before and provider.jwks_requests > before_keys,
+               terminal_status=status, statuses=statuses)
+    provider.jwks_available = True
+    provider.wrong_jwks = False
+
+
 def main():
     global HEADERS, gateway_port, container_id
     runner = Path(__file__).resolve().read_bytes()
@@ -593,6 +638,11 @@ def main():
     value = {'public_url': provider.public_url, 'auth_headers': {'user': 'X-User', 'team': 'X-Team'}}
     selected = {'oauth_name': 'Synthetic issuer', 'oauth_client_id': provider.client_id,
                 'oidc_issuer': provider.issuer, 'user_claim': 'preferred_username'}
+    if EXPLICIT_OIDC:
+        base = provider.issuer.rstrip('/')
+        selected['oidc_endpoints'] = {'authorization_url': base+'/authorize', 'token_url': base+'/token',
+            'userinfo_url': base+'/userinfo', 'jwks_url': base+'/jwks', 'signing_algorithms': ['RS256']}
+        provider.available = False
     cfg = start_community(module, selected, value) if REAL_CE else None
     alpha, options = module.gateway(value, selected, provider.client_secret.encode())
     material = module.derive(provider.client_secret.encode(), 'session-cookie')
@@ -624,7 +674,11 @@ def main():
         common += ['--add-host=host.docker.internal:host-gateway']
     if REAL_CE:
         common += ['--network', network_name]
-    start_gateway(common, 'echo')
+    if EXPLICIT_OIDC:
+        offline_start_checks(common, 'echo')
+        unavailable_jwks_checks()
+    else:
+        start_gateway(common, 'echo')
     echo_checks()
     if REAL_CE:
         prior = json.loads(docker('inspect', container_id).stdout)[0]
@@ -641,7 +695,10 @@ def main():
         write(ROOT/'fixture-alpha.json', original, 0o444, replace_existing=True)
         write(ROOT/'community-alpha.json', original, 0o444)
         record('community_uses_exact_generated_alpha_configuration', alpha == generated_alpha)
-        start_gateway(common, 'community')
+        if EXPLICIT_OIDC:
+            offline_start_checks(common, 'community')
+        else:
+            start_gateway(common, 'community')
         combined_checks(cfg)
         details = json.loads(docker('inspect', container_id).stdout)[0]
         record('gateway_stays_capped_nonroot_readonly_without_oom', details['State']['Running']

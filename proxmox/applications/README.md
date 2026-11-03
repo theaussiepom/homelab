@@ -194,6 +194,18 @@ email address. Missing or false verification is refused by the gateway's secure
 default. Complete address verification through the identity provider; the
 configuration does not enable the insecure unverified-email mode.
 
+CloudBeaver's optional `foundation.oidc_endpoints` object declares
+`authorization_url`, `token_url`, `userinfo_url`, `jwks_url` and a nonempty unique
+`signing_algorithms` list of supported asymmetric algorithms. These URLs require
+HTTPS without credentials, queries or fragments. This mode supplies the endpoint
+metadata directly, so the gateway can start while the identity provider is
+unavailable. Omission retains startup discovery. Both modes require the declared
+client ID and protected client secret, and retain issuer, audience, signature,
+nonce, PKCE and verified-email checks. The remote JWKS remains authoritative;
+new sign-in requires the identity provider and its registered callback. Service
+readiness and an HTTPS sign-in redirect do not prove successful authentication.
+Callback maintenance remains in the identity guest's deployment.
+
 Preparation owns only the new `/srv/homelab/data/cloudbeaver` workspace. First
 startup configures its own recovery account before the gateway becomes healthy;
 subsequent deployments verify ownership and never reset an unknown account. The

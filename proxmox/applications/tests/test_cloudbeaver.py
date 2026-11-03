@@ -29,6 +29,12 @@ def fixture():
                     for k, m in [('cloudbeaver',1536),('auth_gateway',128)]}}
 
 
+def endpoints():
+    return {**{name: 'https://sso.example.invalid/oidc/' + path for name, path in (
+        ('authorization_url', 'authorize'), ('token_url', 'token'),
+        ('userinfo_url', 'userinfo'), ('jwks_url', 'jwks'))}, 'signing_algorithms': ['RS256']}
+
+
 class CloudBeaverTests(unittest.TestCase):
     def test_legacy_variant_and_other_kinds_remain_explicit(self):
         self.assertFalse(c.selected({'kind':'db-tools'}))
@@ -97,6 +103,47 @@ class CloudBeaverTests(unittest.TestCase):
         self.assertEqual(rows['X-Role-TE']['values'],[])
         self.assertIn('cookie_secure = true',toml);self.assertIn('cookie_samesite = "lax"',toml)
         self.assertNotIn('cookie_domains',toml);self.assertNotIn('insecure',toml)
+
+    def test_explicit_endpoints_preserve_security_and_legacy_discovery_bytes(self):
+        cfg = fixture(); secret = b'a'*64
+        old_alpha, old_options = c.gateway(cfg['cloudbeaver'], cfg['foundation'], secret)
+        self.assertEqual(old_alpha['providers'][0]['oidcConfig'],
+                         {'issuerURL': cfg['foundation']['oidc_issuer'], 'insecureSkipNonce': False})
+        before = copy.deepcopy(cfg)
+        cfg['foundation']['oidc_endpoints'] = endpoints()
+        self.assertIs(foundation.validate(cfg), cfg['foundation'])
+        self.assertEqual(foundation.source_files(cfg), ['/private/oauth-secret'])
+        alpha, options = c.gateway(cfg['cloudbeaver'], cfg['foundation'], secret)
+        provider = alpha['providers'][0]
+        self.assertEqual(provider['oidcConfig'], {
+            **old_alpha['providers'][0]['oidcConfig'], 'skipDiscovery': True,
+            'jwksURL': endpoints()['jwks_url'], 'enabledSigningAlgs': ['RS256']})
+        self.assertEqual({key: provider[key] for key in ('loginURL', 'redeemURL', 'profileURL')},
+                         {'loginURL': endpoints()['authorization_url'], 'redeemURL': endpoints()['token_url'],
+                          'profileURL': endpoints()['userinfo_url']})
+        self.assertEqual(options, old_options)
+        self.assertEqual(alpha['injectRequestHeaders'], old_alpha['injectRequestHeaders'])
+        self.assertEqual(provider['code_challenge_method'], 'S256')
+        self.assertNotIn('insecureSkipIssuerVerification', provider['oidcConfig'])
+        self.assertNotIn('insecureAllowUnverifiedEmail', provider['oidcConfig'])
+        cfg['foundation'].pop('oidc_endpoints')
+        self.assertEqual(cfg, before)
+        self.assertEqual(c.gateway(cfg['cloudbeaver'], cfg['foundation'], secret), (old_alpha, old_options))
+
+    def test_explicit_endpoint_shape_https_and_signing_algorithm_refusals(self):
+        bad = [None, [], {}, {**endpoints(), 'extra': True}]
+        for field in ('authorization_url', 'token_url', 'userinfo_url', 'jwks_url', 'signing_algorithms'):
+            row = endpoints(); row.pop(field); bad.append(row)
+        for url in (None, 'http://sso.example.invalid/token', 'https://user:pass@sso.example.invalid/token',
+                    'https://sso.example.invalid/token?', 'https://sso.example.invalid/token#',
+                    'https://sso.example.invalid/token?query=1', 'https://sso.example.invalid/token#fragment'):
+            bad.append({**endpoints(), 'token_url': url})
+        for algorithms in (None, 'RS256', [], [True], [[]], ['none'], ['HS256'], ['RS256', 'RS256'], ['RS256']*11):
+            bad.append({**endpoints(), 'signing_algorithms': algorithms})
+        for value in bad:
+            cfg = fixture(); cfg['foundation']['oidc_endpoints'] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                foundation.validate(cfg)
 
     def test_compose_only_gateway_publishes_and_database_bridge_can_egress(self):
         cfg=fixture();before=copy.deepcopy(cfg);doc=render.compose(cfg)

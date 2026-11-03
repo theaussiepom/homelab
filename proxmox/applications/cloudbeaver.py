@@ -15,6 +15,8 @@ HEADERS = ('X-User', 'X-Team', 'X-Role', 'X-Role-TE', 'X-First-name', 'X-Last-na
            'X-Full-name', 'X-Forwarded-User', 'X-Forwarded-Email', 'X-Forwarded-Groups')
 DRIVERS = {'postgresql': ('postgresql', 'postgres-jdbc', 5432),
            'mariadb': ('mysql', 'mariaDB', 3306)}
+SIGNING_ALGORITHMS = {'RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512',
+                      'ES256', 'ES384', 'ES512', 'EdDSA'}
 
 
 def selected(cfg):
@@ -103,12 +105,26 @@ def validate(cfg):
 
 def foundation(cfg, selected):
     """Validate explicit OIDC inputs without provider-specific URL construction."""
-    require(set(selected) == {'version', 'oidc_issuer', 'oauth_client_id', 'oauth_name', 'user_claim', 'secret_files'}
+    require(set(selected) - {'oidc_endpoints'} == {'version', 'oidc_issuer', 'oauth_client_id', 'oauth_name', 'user_claim', 'secret_files'}
             and selected['version'] == 1, 'Use the closed CloudBeaver OIDC foundation configuration')
     https(selected['oidc_issuer'], issuer=True)
     require(all(isinstance(selected[k], str) and 1 <= len(selected[k]) <= 256 and
             not any(c in selected[k] for c in '\r\n\x00') for k in ('oauth_client_id', 'oauth_name'))
             and isinstance(selected['user_claim'], str) and selected['user_claim'] in {'sub', 'preferred_username', 'email'}, 'Select a verified OIDC identity claim')
+    if 'oidc_endpoints' in selected:
+        endpoints = selected['oidc_endpoints']
+        urls = ('authorization_url', 'token_url', 'userinfo_url', 'jwks_url')
+        require(isinstance(endpoints, dict) and set(endpoints) == {*urls, 'signing_algorithms'},
+                'Declare complete explicit OIDC endpoints and signing algorithms')
+        for key in urls:
+            https(endpoints[key], issuer=True)
+            require('?' not in endpoints[key] and '#' not in endpoints[key],
+                    'Use OIDC endpoint URLs without query or fragment delimiters')
+        algorithms = endpoints['signing_algorithms']
+        require(isinstance(algorithms, list) and 1 <= len(algorithms) <= len(SIGNING_ALGORITHMS)
+                and all(isinstance(item, str) and item in SIGNING_ALGORITHMS for item in algorithms)
+                and len(set(algorithms)) == len(algorithms),
+                'Select unique supported asymmetric OIDC signing algorithms')
     return selected
 
 
@@ -166,6 +182,13 @@ def gateway(value, selected, secret):
             'clientID': selected['oauth_client_id'], 'clientSecret': secret.decode(),
             'scope': 'openid email profile', 'code_challenge_method': 'S256',
             'oidcConfig': {'issuerURL': selected['oidc_issuer'], 'insecureSkipNonce': False}}]}
+    if 'oidc_endpoints' in selected:
+        endpoints = selected['oidc_endpoints']
+        provider = alpha['providers'][0]
+        provider.update(loginURL=endpoints['authorization_url'], redeemURL=endpoints['token_url'],
+                        profileURL=endpoints['userinfo_url'])
+        provider['oidcConfig'].update(skipDiscovery=True, jwksURL=endpoints['jwks_url'],
+                                     enabledSigningAlgs=list(endpoints['signing_algorithms']))
     options = {'redirect_url': value['public_url'].rstrip('/') + '/oauth2/callback',
         'cookie_secret': base64.urlsafe_b64encode(derive(secret, 'session-cookie')).decode(),
         'cookie_name': '__Host-cloudbeaver', 'cookie_secure': True, 'cookie_httponly': True,
