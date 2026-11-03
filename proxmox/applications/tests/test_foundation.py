@@ -229,6 +229,45 @@ class FoundationTests(unittest.TestCase):
                 | {cfg["foundation"]["pve_ca_file"]},
             )
 
+    def test_optional_acme_timeout_preserves_default_and_changes_only_canonical_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cfg = fixture(directory, "ingress")
+            baseline = render.compose(cfg)
+            artifacts = render.foundation.files(cfg)
+            sources = render.foundation.source_files(cfg)
+            environment = baseline['services']['traefik']['environment']
+            self.assertEqual(json.dumps(environment, sort_keys=True, separators=(',', ':')).encode(),
+                b'{"CF_DNS_API_TOKEN_FILE":"/run/secrets/cloudflare-dns-token","SSL_CERT_FILE":"/etc/ssl/certs/homelab-pve.pem","TZ":"Etc/UTC"}')
+            for seconds in (120, 2100):
+                cfg['foundation']['acme_dns_propagation_timeout_seconds'] = seconds
+                original = copy.deepcopy(cfg)
+                selected = render.compose(cfg)
+                self.assertEqual(cfg, original)
+                self.assertEqual(selected['services']['traefik']['environment'].pop(
+                    'CLOUDFLARE_PROPAGATION_TIMEOUT'), str(seconds))
+                self.assertEqual(selected, baseline)
+                self.assertEqual(render.foundation.files(cfg), artifacts)
+                self.assertEqual(render.foundation.source_files(cfg), sources)
+
+    def test_acme_timeout_is_exact_bounded_integer_ingress_only_without_environment_passthrough(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for value in (None, True, False, 120.0, '2100', '35m', [], {}, -1, 0, 119, 2101):
+                cfg = fixture(directory, 'ingress')
+                cfg['foundation']['acme_dns_propagation_timeout_seconds'] = value
+                with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'integer ACME propagation timeout'):
+                    render.compose(cfg)
+            for kind in ('identity', 'db-tools'):
+                cfg = fixture(directory, kind)
+                cfg['foundation']['acme_dns_propagation_timeout_seconds'] = 2100
+                with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, 'closed foundation'):
+                    render.compose(cfg)
+            for name in ('CLOUDFLARE_PROPAGATION_TIMEOUT', 'CF_PROPAGATION_TIMEOUT'):
+                cfg = fixture(directory, 'ingress')
+                cfg['foundation']['acme_dns_propagation_timeout_seconds'] = 2100
+                cfg['services']['traefik']['environment'][name] = '2100'
+                with self.subTest(environment=name), self.assertRaisesRegex(ValueError, 'generated provider and TLS'):
+                    render.compose(cfg)
+
     def test_acme_requires_explicit_unique_recursive_dns_addresses_on_port_53(self):
         with tempfile.TemporaryDirectory() as directory:
             for value in (

@@ -218,3 +218,10 @@ read privileges and reads every declared guest configuration over verified TLS.
 It never creates a token, grants permissions or repairs a missing scope. Missing
 access fails with the existing privileged bootstrap CD dependency. HTTPS service
 checks remain separate proof of the actual endpoint and certificate.
+
+Ingress foundation optionally accepts `acme_dns_propagation_timeout_seconds`, an
+integer from 120 through 2100. It renders only the Cloudflare provider's
+`CLOUDFLARE_PROPAGATION_TIMEOUT` in decimal seconds; omission leaves the existing
+environment unchanged. DNS propagation checks, resolver selection, TLS validation
+and file-based credentials remain enforced. This bounds the wait for the expected
+DNS record; it does not guarantee certificate issuance or permit arbitrary environment settings.

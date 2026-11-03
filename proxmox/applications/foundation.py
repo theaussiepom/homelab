@@ -50,7 +50,7 @@ SCHEMAS = {
             "pve_ca_file",
             "acme_dns_resolvers",
         },
-        {'discovery_scope'},
+        {'discovery_scope', 'acme_dns_propagation_timeout_seconds'},
     ),
 }
 
@@ -158,6 +158,7 @@ def validate(cfg):
         file_path(path)
     for name in (required | (optional & selected.keys())) - {
         "acme_dns_resolvers", 'allowed_callback_additions', 'discovery_scope',
+        'acme_dns_propagation_timeout_seconds',
     }:
         text(selected[name], name)
     services = cfg.get("services", {})
@@ -202,6 +203,10 @@ def validate(cfg):
         discovery_scope.selected(cfg)
         address(selected["bind_address"])
         dns_resolvers(selected["acme_dns_resolvers"])
+        if 'acme_dns_propagation_timeout_seconds' in selected:
+            timeout = selected['acme_dns_propagation_timeout_seconds']
+            if type(timeout) is not int or not 120 <= timeout <= 2100:
+                raise ValueError('Use an integer ACME propagation timeout from 120 to 2100 seconds')
         origin(selected["proxmox_url"], "proxmox_url")
         file_path(selected["pve_ca_file"])
         if not re.fullmatch(
@@ -314,6 +319,10 @@ def configure_compose(cfg, result):
                 "SSL_CERT_FILE": "/etc/ssl/certs/homelab-pve.pem",
             }
         )
+        if 'acme_dns_propagation_timeout_seconds' in selected:
+            service['environment']['CLOUDFLARE_PROPAGATION_TIMEOUT'] = str(
+                selected['acme_dns_propagation_timeout_seconds']
+            )
         service["volumes"] = [
             mount("traefik.yml", "/etc/traefik/traefik.yml"),
             mount("shared.yml", "/etc/traefik/shared.yml"),
