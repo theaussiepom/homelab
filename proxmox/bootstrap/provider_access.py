@@ -82,6 +82,22 @@ def allowance(c):
             'comment': 'Homelab service discovery API for traefik ' + str(c['service_discovery']['vmid'])}
 
 
+def preceding_rules_irrelevant(rows, source):
+    """A literal, nonoverlapping source proves an earlier input rule irrelevant."""
+    for row in rows:
+        if not (isinstance(row, dict) and row.get('type') == 'in'
+                and isinstance(row.get('action'), str) and row['action'] in {'ACCEPT', 'DROP', 'REJECT'}
+                and isinstance(row.get('source'), str)):
+            return False
+        try:
+            network = ipaddress.IPv4Network(row['source'], strict=False)
+        except ValueError:
+            return False
+        if ipaddress.IPv4Address(source) in network:
+            return False
+    return True
+
+
 def owner(c):
     return {'schema': SCHEMA, 'node': c['node'], 'endpoint': c['endpoint'],
             'configuration': c['service_discovery'], 'identity': identity(c)[1], 'role': identity(c)[2]}
@@ -244,8 +260,9 @@ def inspect(api, c, root, backup):
         require(len(tokens) == 1 and tokens[0].get('privsep') == 1 and tokens[0].get('expire') == 0
                 and tokens[0].get('comment') == rule['comment'], 'Discovery token metadata differs')
         require(actual == acl_rows(baseline), 'Discovery token scope differs; no automatic rewrite')
-        require(len(owned) == 1 and rules[0] == owned[0] and same_allowance(owned[0], rule),
-                'Discovery firewall rule differs or moved; no automatic rewrite')
+        require(len(owned) == 1 and same_allowance(owned[0], rule)
+                and preceding_rules_irrelevant(rules[:rules.index(owned[0])], c['service_discovery']['address']),
+                'Discovery firewall rule differs or earlier rule overlap is unproved; no automatic rewrite')
         verify_secret(api, baseline, secret)
     result = {'exists': secret is not None, 'role': roles, 'metadata': tokens,
             'acl': [list(r) for r in sorted(actual)], 'rules': normalized(rules), 'options': options}

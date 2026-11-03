@@ -149,6 +149,18 @@ class RuntimeTests(unittest.TestCase):
             with patch.object(r,'docker',side_effect=self.health_boundary(change=mutation)),self.assertRaises(ValueError):r.health(self.config)
         with patch.object(r,'docker',return_value='old'),self.assertRaises(ValueError):r.health(self.config)
 
+    def test_managed_health_refuses_nested_workspace_shadow(self):
+        self.own();r.templates(self.config);self.seed_metadata()
+        config=dict(self.config,managed_connections={'owned-administrator':{}})
+        with patch.object(r,'managed',return_value={'managed_connections':'verified'}), \
+                patch.object(r,'database_health',return_value='managed_tls_administrator_verified'):
+            with patch.object(r,'docker',side_effect=self.health_boundary()):
+                self.assertEqual(r.health(config)['cloudbeaver'],'passed')
+            def shadow(docs,current):
+                docs['cloudbeaver']['Mounts'].append({'Destination':'/opt/cloudbeaver/workspace/GlobalConfiguration'})
+            with patch.object(r,'docker',side_effect=self.health_boundary(change=shadow)),self.assertRaises(ValueError):
+                r.health(config)
+
     def test_managed_metadata_refuses_stale_endpoints_or_saved_shared_credentials_without_writes(self):
         self.own();path,document=self.seed_metadata()
         document['connections']['custom']={'application-owned':'preserved'}

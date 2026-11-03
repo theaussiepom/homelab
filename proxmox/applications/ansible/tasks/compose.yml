@@ -37,6 +37,21 @@
     fail_msg: 'The old managed MQTT container still exists. Preserve its data and complete the separately reviewed broker cutover first.'
   when: app.kind == 'automation' and stack.services.mqtt is not defined and application_service == 'homeassistant' and not ansible_check_mode
 
+- name: Check retained Explorer
+  ansible.builtin.command:
+    argv: [docker, ps, --all, --quiet, --filter, label=com.docker.compose.project=homelab-mqtt, --filter, "label=com.docker.compose.service={{ item }}"]
+  loop: [mqtt_explorer, explorer_gateway]
+  register: retained_explorer
+  changed_when: false
+  when: app.kind == 'mqtt' and stack.mqtt_explorer is not defined and application_service == 'mqtt' and not ansible_check_mode
+
+- name: Preserve retained Explorer
+  ansible.builtin.assert:
+    that: item.stdout | trim == ''
+    fail_msg: 'Retained Explorer services need explicit retirement; preserve them and their data.'
+  loop: "{{ retained_explorer.results | default([]) }}"
+  when: app.kind == 'mqtt' and stack.mqtt_explorer is not defined and application_service == 'mqtt' and not ansible_check_mode
+
 - name: Render private stack files on the controller
   ansible.builtin.command:
     argv: [python3, "{{ playbook_dir }}/../render.py", --config, "{{ app.stack_config }}", --output, "{{ app.render_dir }}"]
@@ -120,7 +135,7 @@
     owner: "{{ item.uid }}"
     group: "{{ item.gid }}"
     mode: "{{ item.mode }}"
-  loop: "{{ foundation_runtime_files | default([]) }}"
+  loop: "{{ (foundation_runtime_files | default([]) | selectattr('path', 'equalto', 'mqtt-probe.json') | list) if app.kind == 'mqtt' and application_service == 'mqtt' else ((foundation_runtime_files | default([]) | rejectattr('path', 'equalto', 'mqtt-probe.json') | list) if app.kind == 'mqtt' else foundation_runtime_files | default([])) }}"
   register: foundation_runtime_install
   no_log: true
   when: (stack.foundation is defined or stack.kind in ['monitoring', 'mqtt'] or (stack.winet is defined and application_service == 'winet')) and not ansible_check_mode
@@ -222,13 +237,56 @@
   no_log: true
   when: app.kind == 'db-tools' and app.variant | default('pgadmin') == 'cloudbeaver' and not ansible_check_mode
 
+- name: Seed only declared private administrator datasources
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/cloudbeaver-runtime.py, managed, --config, /opt/homelab-app/runtime/cloudbeaver-public.json]
+  changed_when: false
+  no_log: true
+  when: app.kind == 'db-tools' and app.variant | default('pgadmin') == 'cloudbeaver' and not ansible_check_mode
+
+- name: Record the running broker before Explorer deployment
+  ansible.builtin.command:
+    argv: [docker, ps, --quiet, --no-trunc, --filter, label=com.docker.compose.project=homelab-mqtt, --filter, label=com.docker.compose.service=mqtt]
+  register: explorer_broker_before
+  changed_when: false
+  when: app.kind == 'mqtt' and application_service == 'mqtt_explorer' and not ansible_check_mode
+
+- name: Require the existing running broker
+  ansible.builtin.assert:
+    that: explorer_broker_before.stdout | trim is match('^[0-9a-f]{64}$')
+  when: app.kind == 'mqtt' and application_service == 'mqtt_explorer' and not ansible_check_mode
+
+- name: Install dedicated Explorer account lifecycle
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../mqtt-explorer-account.py"
+    dest: /opt/homelab-app/mqtt-explorer-account.py
+    owner: root
+    group: root
+    mode: '0700'
+  when: app.kind == 'mqtt' and application_service == 'mqtt_explorer' and stack.mqtt_explorer.broker_connection is defined
+
+- name: Verify the dedicated broker account and saved Explorer connection
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/mqtt-explorer-account.py, --config, /opt/homelab-app/runtime/mqtt-explorer-account.json]
+  changed_when: false
+  no_log: true
+  when: app.kind == 'mqtt' and application_service == 'mqtt_explorer' and stack.mqtt_explorer.broker_connection is defined and not ansible_check_mode
+
 - name: Start exactly this guest stack
   ansible.builtin.command:
-    argv: "{{ ['docker', 'compose', '-f', '/opt/homelab-app/compose.yml', 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--force-recreate'] if app.kind != 'mqtt' and foundation_runtime_install.changed | default(false) else []) + (['--pull', 'never'] if app.kind == 'bitwarden' else []) + (['--no-deps', application_service] if app.kind in ['automation', 'dns', 'zigbee2mqtt'] else []) }}"
+    argv: "{{ ['docker', 'compose', '-f', '/opt/homelab-app/compose.yml', 'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false'] + (['--force-recreate'] if (app.kind != 'mqtt' or application_service == 'mqtt_explorer') and foundation_runtime_install.changed | default(false) else []) + (['--pull', 'never'] if app.kind == 'bitwarden' else []) + (['--no-deps', 'mqtt_explorer', 'explorer_gateway'] if app.kind == 'mqtt' and application_service == 'mqtt_explorer' else (['--no-deps', application_service] if app.kind in ['automation', 'dns', 'zigbee2mqtt', 'mqtt'] else [])) }}"
   register: compose_start
   changed_when: "'Started' in compose_start.stderr or 'Created' in compose_start.stderr or 'Recreated' in compose_start.stderr"
   no_log: true
   when: app.start_services | default(false) | bool and not ansible_check_mode
+
+- name: Verify Explorer preserved the running broker
+  ansible.builtin.command:
+    argv: [docker, ps, --quiet, --no-trunc, --filter, label=com.docker.compose.project=homelab-mqtt, --filter, label=com.docker.compose.service=mqtt]
+  register: explorer_broker_after
+  changed_when: false
+  failed_when: explorer_broker_after.stdout | trim != explorer_broker_before.stdout | trim
+  when: app.kind == 'mqtt' and application_service == 'mqtt_explorer' and not ansible_check_mode
 
 - name: Reconcile owned Pi-hole records while retaining unrelated names
   ansible.builtin.command:

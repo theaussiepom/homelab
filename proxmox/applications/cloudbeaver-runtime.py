@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Own only the CloudBeaver workspace and exact managed pgAdmin retirement."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ CUSTODY = Path('/var/lib/homelab-db-tools')
 PGADMIN = Path('/srv/homelab/data/pgadmin')
 COMPOSE = '/opt/homelab-app/compose.yml'
 PERMISSIONS = Path('/opt/homelab-app/runtime/cloudbeaver-permissions.json')
+MANAGED = Path('/opt/homelab-app/runtime/cloudbeaver-admin-connections.json')
 
 
 def need(value):
@@ -123,6 +125,107 @@ def templates(config, seed=True):
     return {'templates': 'verified', 'additional_permissions': 'preserved'}
 
 
+def managed_bytes(path, uid, modes):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        need(stat.S_ISREG(info.st_mode) and info.st_uid == info.st_gid == uid and info.st_nlink == 1
+             and stat.S_IMODE(info.st_mode) in modes and info.st_size <= 1024*1024)
+        raw = stream.read(1024*1024+1)
+        key = lambda row: (row.st_dev, row.st_ino, row.st_uid, row.st_gid, row.st_mode, row.st_nlink,
+                           row.st_size, row.st_mtime_ns, row.st_ctime_ns)
+        need(len(raw) == info.st_size and key(info) == key(os.fstat(stream.fileno())) == key(path.lstat()))
+    return raw
+
+
+def managed_writer(config):
+    """Flush only our existing server before its first owned datasource seed."""
+    ids = docker(['ps', '--all', '--quiet', '--filter', 'label=com.docker.compose.project=homelab-db-tools',
+                  '--filter', 'label=com.docker.compose.service=cloudbeaver']).split()
+    need(len(ids) <= 1)
+    if not ids:
+        return
+    row = json.loads(docker(['inspect', ids[0]]))[0]
+    mounts = [item for item in row['Mounts'] if item['Destination'] == '/opt/cloudbeaver/workspace'
+              or item['Destination'].startswith('/opt/cloudbeaver/workspace/')]
+    need(row['Id'].startswith(ids[0]) and row['Config']['Image'] == config['cloudbeaver_image']
+         and row['Config']['Labels'].get('com.docker.compose.project') == 'homelab-db-tools'
+         and row['Config']['Labels'].get('com.docker.compose.service') == 'cloudbeaver'
+         and len(mounts) == 1 and mounts[0]['Type'] == 'bind' and mounts[0]['Source'] == str(WORKSPACE)
+         and mounts[0]['RW'] is True)
+    if row['State']['Running']:
+        docker(['stop', '--time', '30', row['Id']], timeout=45)
+        after = json.loads(docker(['inspect', row['Id']]))[0]
+        need(after['Id'] == row['Id'] and after['State']['Running'] is False)
+
+
+def managed(config, seed=True):
+    """Own one native credential file, keeping every other datasource and grant."""
+    directory = WORKSPACE/'GlobalConfiguration/.dbeaver'
+    path = directory/'data-sources-homelab-administrators.json'
+    receipt, hold = CUSTODY/'managed-connections.json', CUSTODY/'MANAGED-CONNECTIONS-HOLD.json'
+    selected = config.get('managed_connections')
+    if not selected:
+        need(not any(p.exists() or p.is_symlink() for p in (path, receipt, hold)))
+        return {'managed_connections': 'absent'}
+    need(isinstance(selected, dict) and 1 <= len(selected) <= 8 and os.geteuid() == 0)
+    workspace(private(CUSTODY/'workspace.json'))
+    for parent in (directory.parent, directory):
+        info = parent.lstat(); need(stat.S_ISDIR(info.st_mode) and info.st_uid == info.st_gid == 8978)
+    raw = managed_bytes(MANAGED, 0, (0o400, 0o600))
+    need(hashlib.sha256(raw).hexdigest() == config['managed_sha256'])
+    desired = json.loads(raw)
+    need(isinstance(desired, dict) and set(desired) == {'folders', 'connections'} and desired['folders'] == {}
+         and set(desired['connections']) == set(selected))
+    proof = {'owners': {key: value['owner'] for key, value in selected.items()}, 'sha256': config['managed_sha256']}
+    need(not hold.exists() and not hold.is_symlink())
+    permissions = directory/'data-sources-permissions.json'
+    old_permissions = managed_bytes(permissions, 8978, (0o400, 0o600, 0o640, 0o644))
+    grants = json.loads(old_permissions); need(isinstance(grants, dict))
+    own_grants = {key: ['user'] for key in selected}
+    if receipt.exists() or receipt.is_symlink():
+        need(private(receipt) == proof and managed_bytes(path, 8978, (0o600,)) == raw
+             and all(grants.get(key) == value for key, value in own_grants.items()))
+    else:
+        need(seed and not path.exists() and not path.is_symlink() and not set(selected) & grants.keys())
+        sources = list(directory.glob('data-sources*.json')); need(len(sources) <= 128)
+        for source in sources:
+            document = json.loads(managed_bytes(source, 8978, (0o400, 0o600, 0o640, 0o644)))
+            need(isinstance(document, dict) and not set(selected) & document.get('connections', {}).keys())
+        create(hold, proof)
+        managed_writer(config)
+        # A graceful stop can flush application-owned changes. Re-read them
+        # before adding our IDs; no running server may race this first seed.
+        need(not path.exists() and not path.is_symlink())
+        old_permissions = managed_bytes(permissions, 8978, (0o400, 0o600, 0o640, 0o644))
+        grants = json.loads(old_permissions); need(isinstance(grants, dict) and not set(selected) & grants.keys())
+        sources = list(directory.glob('data-sources*.json')); need(len(sources) <= 128)
+        for source in sources:
+            document = json.loads(managed_bytes(source, 8978, (0o400, 0o600, 0o640, 0o644)))
+            need(isinstance(document, dict) and not set(selected) & document.get('connections', {}).keys())
+        create(path, desired, uid=8978, mode=0o600)
+        # The exact native file format is private plaintext at rest. Community
+        # consumes it; we never synthesize or claim an encrypted credential store.
+        grants.update(own_grants)
+        temporary = directory/'permissions.homelab-managed.pending'
+        create(temporary, grants, uid=8978, mode=stat.S_IMODE(permissions.lstat().st_mode))
+        need(managed_bytes(permissions, 8978, (0o400, 0o600, 0o640, 0o644)) == old_permissions)
+        os.replace(temporary, permissions)
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        create(receipt, proof)
+        hold.unlink()
+        fd = os.open(CUSTODY, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    return {'managed_connections': 'verified', 'private_native_file': True}
+
+
 def prepare(config):
     need(config['workspace'] == str(WORKSPACE) and config['project'] == 'homelab-db-tools')
     workspace(private(CUSTODY / 'workspace.json'))
@@ -148,8 +251,26 @@ def metadata(config):
     return {'connections': 'verified'}
 
 
+def database_health(config):
+    selected = config.get('managed_connections')
+    if not selected:
+        return 'individual_credentials_required'
+    document = json.loads(managed_bytes(MANAGED, 0, (0o400, 0o600)))
+    for key, item in selected.items():
+        password = document['connections'][key]['configuration']['auth-properties']['userPassword']
+        raw = docker(['compose', '-f', COMPOSE, 'exec', '-T', 'cloudbeaver', '/opt/java/openjdk/bin/java',
+            '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m',
+            '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC', '--class-path',
+            '/opt/cloudbeaver/drivers/postgresql/*:/opt/cloudbeaver/drivers/mariadb/*',
+            '/opt/cloudbeaver/conf/CloudBeaverDatabaseHealth.java', item['driver'], item['host'],
+            item['owner']['source_address'], item['username']], input=password+'\n', timeout=20)
+        need(json.loads(raw) == {'database_administrator': 'verified', 'encrypted': True, 'source_match': True})
+    return 'managed_tls_administrator_verified'
+
+
 def health(config):
     templates(config, seed=False)
+    managed(config, seed=False)
     metadata(config)
     prepare_owner = private(CUSTODY / 'workspace.json')
     workspace(prepare_owner)
@@ -160,6 +281,10 @@ def health(config):
     need(isinstance(containers, list) and {r['Service'] for r in containers} == {'cloudbeaver', 'auth_gateway'})
     rows = {r['Service']: json.loads(docker(['inspect', r['ID']]))[0] for r in containers}
     server, gateway = rows['cloudbeaver'], rows['auth_gateway']
+    if config.get('managed_connections'):
+        mounts = [m for m in server['Mounts'] if m['Destination'] == '/opt/cloudbeaver/workspace'
+                  or m['Destination'].startswith('/opt/cloudbeaver/workspace/')]
+        need(len(mounts) == 1)
     need(all(obj['State']['Running'] is True
              and ('Health' not in obj['State'] or obj['State']['Health']['Status'] == 'healthy')
              for obj in rows.values())
@@ -178,12 +303,12 @@ def health(config):
     need(current['forceHttps'] is True and current['configurationMode'] is False and current['anonymousAccessEnabled'] is False
          and set(current['enabledAuthProviders']) == {'local', 'reverseProxy'})
     return {'cloudbeaver': 'passed', 'setup': 'closed', 'gateway_only_listener': True,
-            'database_login': 'individual_credentials_required'}
+            'database_login': database_health(config)}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('workspace', 'templates', 'prepare', 'health'))
+    parser.add_argument('action', choices=('workspace', 'templates', 'managed', 'prepare', 'health'))
     parser.add_argument('--config', type=Path)
     parser.add_argument('--owner')
     args = parser.parse_args()
@@ -191,7 +316,7 @@ def main():
         result = workspace(json.loads(args.owner))
     else:
         value = private(args.config)
-        result = {'prepare': prepare, 'health': health, 'templates': templates}[args.action](value)
+        result = {'prepare': prepare, 'health': health, 'templates': templates, 'managed': managed}[args.action](value)
     print(json.dumps(result, sort_keys=True))
 
 

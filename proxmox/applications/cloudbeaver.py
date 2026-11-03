@@ -9,6 +9,7 @@ import re
 from urllib.parse import urlsplit
 
 from private_io import require
+import database_admin
 
 WORKSPACE = '/srv/homelab/data/cloudbeaver'
 HEADERS = ('X-User', 'X-Team', 'X-Role', 'X-Role-TE', 'X-First-name', 'X-Last-name',
@@ -51,7 +52,7 @@ def validate(cfg):
         require('cloudbeaver' not in cfg, 'CloudBeaver settings require its explicit variant')
         return None
     value = cfg.get('cloudbeaver')
-    require(isinstance(value, dict) and set(value) == {'bind_address', 'public_url', 'server_name',
+    require(isinstance(value, dict) and set(value) - {'managed_connections'} == {'bind_address', 'public_url', 'server_name',
             'recovery_admin', 'heap_mib', 'auth_headers', 'connections', 'retained_pgadmin_image'},
             'Use the closed CloudBeaver Community configuration')
     try:
@@ -91,6 +92,9 @@ def validate(cfg):
         if 'host' in connection:
             ipaddress.IPv4Address(connection['host'])
             require(connection['port'] == DRIVERS[connection['driver']][2], 'Bind the selected database engine listener')
+    managed = value.get('managed_connections', {})
+    database_admin.connections(value, compiled=isinstance(managed, dict) and bool(managed)
+        and all(isinstance(v, dict) and 'owner' in v for v in managed.values()))
     services = cfg.get('services')
     require(isinstance(services, dict) and set(services) == {'cloudbeaver', 'auth_gateway'}, 'Use only CloudBeaver and its OIDC gateway')
     for service in services.values():
@@ -150,7 +154,7 @@ def connection_document(value):
 
 def configuration(value):
     """The Community server trusts headers only on its unpublished Compose bridge."""
-    return {'server': {'serverPort': 8978, 'forceHttps': True, 'serverName': value['server_name'], 'contentRoot': 'web',
+    result = {'server': {'serverPort': 8978, 'forceHttps': True, 'serverName': value['server_name'], 'contentRoot': 'web',
             'driversLocation': 'drivers', 'rootURI': '/', 'serviceURI': '/api/',
             'database': {'driver': 'h2_embedded_v2', 'url': 'jdbc:h2:${workspace}/.data/cb.h2v2.dat',
                          'initialDataConfiguration': 'conf/initial-data.conf'}},
@@ -162,6 +166,9 @@ def configuration(value):
                 'displayName': 'Verified sign-in', 'disabled': False, 'parameters': {
                     'user-header': value['auth_headers']['user'], 'team-header': value['auth_headers']['team'],
                     'team-delimiter': ',', 'auto-user-provisioning': True}}]}}
+    if value.get('managed_connections'):
+        result['app'].update(adminCredentialsSaveEnabled=True, secretManagerEnabled=True)
+    return result
 
 
 def gateway(value, selected, secret):
@@ -215,6 +222,13 @@ def files(cfg, secret):
             ('cloudbeaver-permissions.json', json.dumps({name: ['user'] for name in value['connections']}), 8978),
             ('oauth2-alpha.json', json.dumps(alpha), 65532), ('oauth2.cfg', options, 65532),
             ('cloudbeaver-public.json', json.dumps(public), 0)]
+    if value.get('managed_connections'):
+        public['cloudbeaver_image'] = cfg['services']['cloudbeaver']['image']
+        managed = json.loads(database_admin.document(value))
+        public['managed_sha256'] = hashlib.sha256((json.dumps(managed, sort_keys=True)+'\n').encode()).hexdigest()
+        rows[-1] = ('cloudbeaver-public.json', json.dumps(public), 0)
+        rows.append(('cloudbeaver-admin-connections.json', json.dumps(managed, sort_keys=True), 0))
+        rows.append(('CloudBeaverDatabaseHealth.java', Path(__file__).with_name('CloudBeaverDatabaseHealth.java').read_text(), 8978))
     return [{'path': name, 'content': content + '\n', 'uid': uid, 'gid': uid, 'mode': '0400'}
             for name, content, uid in rows]
 
@@ -241,6 +255,8 @@ def configure(cfg, result):
         mount('cloudbeaver.auto.conf', '/opt/cloudbeaver/conf/.cloudbeaver.auto.conf'),
         mount('cloudbeaver-connections.json', '/opt/cloudbeaver/conf/initial-data-sources.conf')]
     server['volumes'].append(mount('CloudBeaverHealth.java', '/opt/cloudbeaver/conf/CloudBeaverHealth.java'))
+    if value.get('managed_connections'):
+        server['volumes'].append(mount('CloudBeaverDatabaseHealth.java', '/opt/cloudbeaver/conf/CloudBeaverDatabaseHealth.java'))
     server['healthcheck'] = {'test': ['CMD', '/opt/java/openjdk/bin/java', '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m', '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC',
         '/opt/cloudbeaver/conf/CloudBeaverHealth.java'],
         'start_period': '60s', 'interval': '10s', 'timeout': '8s', 'retries': 18}

@@ -421,6 +421,17 @@
       "name": "MQTT",
       "application_names": {
         "mqtt": "MQTT"
+      },
+      "optional_applications": {
+        "mqtt_explorer": "MQTT Explorer"
+      },
+      "optional_required_paths": {
+        "mqtt_explorer": [
+          {
+            "path": "/srv/homelab/data/mqtt-explorer",
+            "type": "directory"
+          }
+        ]
       }
     }
   }

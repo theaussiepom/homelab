@@ -30,6 +30,21 @@
   changed_when: false
   when: app.kind == 'db-tools' and app.variant | default('pgadmin') == 'cloudbeaver' and not ansible_check_mode
 
+- name: Install MQTT Explorer lifecycle
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../mqtt-explorer-runtime.py"
+    dest: /usr/local/bin/homelab-mqtt-explorer.py
+    owner: root
+    group: root
+    mode: '0700'
+  when: app.kind == 'mqtt' and 'mqtt_explorer' in app.service_health_checks
+
+- name: Prepare the new Explorer workspace
+  ansible.builtin.command:
+    argv: [python3, /usr/local/bin/homelab-mqtt-explorer.py, workspace, --owner, "{{ mqtt_explorer_owner | to_json }}"]
+  changed_when: false
+  when: app.kind == 'mqtt' and 'mqtt_explorer' in app.service_health_checks and not ansible_check_mode
+
 - name: Inspect separately prepared application paths
   ansible.builtin.stat:
     path: "{{ item.path }}"

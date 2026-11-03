@@ -134,6 +134,7 @@ def validate(cfg, stack=None):
         "service_health_checks",
         "repositories",
         "database",
+        "database_administrators",
         "frontend_routing",
         "endpoints",
         "node_red_authentication",
@@ -147,6 +148,8 @@ def validate(cfg, stack=None):
     require(not app.keys() - allowed, "Use only current application contract fields")
     require(app["kind"] in BLUEPRINTS, "Select a supported application blueprint")
     phases(cfg)
+    import database_admin
+    database_admin.accounts(cfg, compiled=True)
     if "monitoring" in app:
         import monitoring_agent
         monitoring_agent.validate(cfg)
@@ -343,7 +346,16 @@ def validate(cfg, stack=None):
                 "HA discovery must select an assigned address",
             )
         if app["kind"] in {"automation", "mqtt", "music"}:
-            require(set(stack["services"]) == set(applications(cfg)),
+            helper_services = set()
+            if app['kind'] == 'mqtt':
+                import mqtt_explorer
+                explorer = mqtt_explorer.validate(stack)
+                require((explorer is not None) == ('mqtt_explorer' in applications(cfg)),
+                        'Bind the optional Explorer application to its explicit stack configuration')
+                if explorer is not None:
+                    require(explorer['bind_address'] in addresses, 'Bind Explorer to an assigned backend interface')
+                    helper_services = {'explorer_gateway'}
+            require(set(stack["services"]) == set(applications(cfg)) | helper_services,
                     "Declare every selected service and its health contract")
         if app["kind"] == "music":
             require(stack["music_bind_address"] in addresses,

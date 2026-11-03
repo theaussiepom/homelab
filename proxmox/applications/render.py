@@ -19,6 +19,7 @@ import winet
 import music_assistant
 import mqtt_runtime
 import cloudbeaver
+import mqtt_explorer
 
 KINDS = {
     "automation": {"homeassistant", "node_red"},
@@ -81,6 +82,8 @@ def compose(cfg):
     expected = ({'cloudbeaver', 'auth_gateway'} if cloudbeaver.selected(cfg) else KINDS[kind]) | ({"winet"} if kind == "zigbee2mqtt" and "winet" in cfg else set())
     if kind == "automation" and "mqtt" in inputs:
         expected = expected | {"mqtt"}
+    if kind == 'mqtt' and 'mqtt_explorer' in cfg:
+        expected |= mqtt_explorer.SERVICES
     if set(inputs) != expected:
         raise ValueError("Supply exactly the services for this guest")
     if kind == "zigbee2mqtt":
@@ -110,6 +113,7 @@ def compose(cfg):
     winet.validate(cfg)
     music_assistant.validate(cfg)
     mqtt_runtime.validate(cfg)
+    mqtt_explorer.validate(cfg)
     if kind == "bitwarden":
         bitwarden.validate(cfg)
     if kind in {"identity", "ingress", "db-tools"} and "foundation" not in cfg:
@@ -201,6 +205,8 @@ def compose(cfg):
             "traefik": [("traefik", "/etc/traefik")],
             "cloudbeaver": [],
             "auth_gateway": [],
+            "mqtt_explorer": [],
+            "explorer_gateway": [],
             "pgadmin": [("pgadmin", "/var/lib/pgadmin")],
             "bitwarden": [
                 ("bitwarden/data", "/etc/bitwarden"),
@@ -424,7 +430,7 @@ def compose(cfg):
         ]
     if kind == "bitwarden":
         return bitwarden.configure(cfg, result)
-    return music_assistant.configure(cfg, winet.configure(cfg, foundation.configure_compose(cfg, result)))
+    return mqtt_explorer.configure(cfg, music_assistant.configure(cfg, winet.configure(cfg, foundation.configure_compose(cfg, result))))
 
 
 def dns_name(host):
@@ -455,7 +461,7 @@ def main():
         for artifact in (
             monitoring.files(cfg)
             if cfg["kind"] == "monitoring"
-            else mqtt_runtime.files(cfg) if cfg["kind"] == "mqtt"
+            else [*mqtt_runtime.files(cfg), *mqtt_explorer.files(cfg)] if cfg["kind"] == "mqtt"
             else winet.files(cfg) if "winet" in cfg else foundation.files(cfg)
         ):
             artifacts[artifact["path"]] = artifact["content"].encode()

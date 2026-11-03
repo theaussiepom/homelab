@@ -127,3 +127,49 @@ extension request may be removed, retaining the full desired guest list.
 
 Omit `service_discovery` when this provider is not part of your deployment. The
 original host prerequisite workflow keeps its existing behaviour.
+
+## Extend only an already owned scope
+
+When the complete historical host plan is not being changed, the same protected
+bootstrap workflow can invoke `bootstrap_cd.py --owned-discovery-extension
+--config <private-json> --ca <pinned-ca>`. Ordinary application CD does not receive
+the bootstrap credential. This mode accepts exactly these fields:
+
+```json
+{
+  "schema": "homelab-owned-discovery-extension-v1",
+  "endpoint": "https://198.19.125.11:8006/",
+  "node": "fixture-node",
+  "backup_source": "198.19.120.2:/backups/fixture",
+  "application_vmids": [12002, 12011, 12012, 12015],
+  "service_discovery": {
+    "vmid": 12012,
+    "address": "198.19.125.43",
+    "guests": [12002, 12011, 12012, 12015]
+  },
+  "service_discovery_extension": {
+    "owner_sha256": "<canonical current owner SHA256>",
+    "guests": [12015]
+  },
+  "added_guests": [
+    {"node": "fixture-node", "vmid": 12015, "hostname": "fixture-mqtt", "type": "lxc"}
+  ]
+}
+```
+
+These values are synthetic; the owner hash must come from genuine current
+custody. `added_guests` binds every appended ID, in order, to its exact native
+node, guest type and hostname. CD reads only those added guest configurations
+before its saved plan and again before granting access. A missing or different
+identity refuses the change.
+
+The mode requires existing mirrored ownership, token and scope receipts, an exact
+mounted NAS, and no bootstrap hold or maintenance marker. It can add only the
+declared non-propagating discovery ACL rows and their mirrored scope receipt. It
+cannot mint credentials or change bridges, application grants, monitoring or
+firewall rules. Plans and results use the existing private evidence boundary.
+The exact unique API allowance may follow only input rules whose single literal
+IPv4 source/CIDR excludes the discovery guest. Unknown, inverted, compound or
+overlapping sources refuse; CD never moves or edits those rules.
+Failure retains its hold and does not retry; an unchanged successful repeat
+verifies the exact completed extension without another grant or receipt.

@@ -5,6 +5,8 @@ import hashlib
 import foundation
 import winet
 import mqtt_runtime
+import mqtt_explorer
+import database_admin
 from guest_contract import SOURCE
 import os
 from pathlib import Path
@@ -76,6 +78,13 @@ def prepare(
     extra_monitoring = monitoring_inputs.prepare(cfg, stack, destination)
     require(not extra_monitoring.keys() & payload.keys(), "Monitoring secrets cannot replace source files")
     payload.update(extra_monitoring)
+    extra_database = database_admin.prepare(cfg, stack, destination)
+    require(not extra_database.keys() & payload.keys(), 'Administrator account inputs cannot replace source files')
+    payload.update(extra_database)
+    if stack is not None:
+        extra_accounts = mqtt_explorer.prepare(cfg, stack, destination)
+        require(not extra_accounts.keys() & payload.keys(), 'Managed account inputs cannot replace source files')
+        payload.update(extra_accounts)
     if "stack.json" in payload:
         require(
             cfg["app"]["stack_config"] == str(destination / "stack.json"),
@@ -163,6 +172,7 @@ def input_hashes(cfg):
             cfg["paths"][name] for name in ("host_device_key", "host_known_hosts")
         )
     app = cfg["app"]
+    paths.extend(row['credential_file'] for row in database_admin.accounts(cfg, compiled=True).values())
     if "monitoring" in app:
         paths.extend(monitoring_inputs.source_files())
         paths.append(app["monitoring"]["credential_file"])
@@ -177,6 +187,7 @@ def input_hashes(cfg):
             paths.extend(foundation.source_files(stack))
             paths.extend(winet.source_files(stack))
             paths.extend(mqtt_runtime.source_files(stack))
+            paths.extend(mqtt_explorer.source_files(stack))
         if app.get("kind") == "bitwarden":
             paths.append(app["bitwarden"]["runtime_env_file"])
     if app.get("kind") == "pegaprox":

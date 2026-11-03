@@ -78,6 +78,9 @@ def run_phase(cfg, site, work, operation, expected, phase):
             **monitoring,
             **({'cloudbeaver_owner': {'node': cfg['site']['node'], 'vmid': cfg['guest']['vmid'],
                   'hostname': cfg['guest']['hostname']}} if app.get('variant') == 'cloudbeaver' else {}),
+            **({'mqtt_explorer_owner': {'node': cfg['site']['node'], 'vmid': cfg['guest']['vmid'],
+                  'hostname': cfg['guest']['hostname']}} if app['kind'] == 'mqtt'
+                and 'mqtt_explorer' in app['service_health_checks'] else {}),
             "network_ready_interfaces": required_network_interfaces(cfg),
             **({"application_service": phase} if not preparation and not agent else {}),
             "preparation_capabilities": cfg["deployment"]["capabilities"],

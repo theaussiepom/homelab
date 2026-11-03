@@ -215,7 +215,7 @@ class BrokerTests(unittest.TestCase):
                     self.assertIn('--wait',argv)
                     self.assertEqual('--force-recreate' in argv,changed and kind!='mqtt')
                     self.assertNotIn('--remove-orphans=true',argv)
-                    if kind=='mqtt':self.assertNotIn('--no-deps',argv)
+                    if kind=='mqtt':self.assertEqual(argv[-2:],['--no-deps','mqtt'])
 
     def test_private_probe_input_is_exact_bound_and_not_shared_ha_configuration(self):
         with tempfile.TemporaryDirectory()as directory:

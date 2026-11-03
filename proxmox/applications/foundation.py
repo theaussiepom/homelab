@@ -234,6 +234,8 @@ def source_files(cfg):
     if selected is None:
         return []
     result = list(selected["secret_files"].values())
+    if cloudbeaver.selected(cfg):
+        result.extend(row['credential_file'] for row in cfg['cloudbeaver'].get('managed_connections', {}).values())
     if cfg["kind"] == "ingress":
         result.append(selected["pve_ca_file"])
         result.extend(discovery_scope.source_files(cfg))

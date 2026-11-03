@@ -25,6 +25,7 @@ import guest_contract
 import service_bindings
 import routes
 import zabbix
+import database_admin
 
 CATALOGUE = guest_contract.BLUEPRINTS
 PIN = re.compile(
@@ -381,6 +382,7 @@ def _resolve_guest(root, overlay, name, spec):
 
 
 def _compile_guest(name, cfg, stack, files, enabled):
+    database_admin.hba(cfg, files)
     if stack is not None:
         files["stack.json"] = encoded(stack).decode()
     # The identity hashes the abstract input slot before binding absolute paths.

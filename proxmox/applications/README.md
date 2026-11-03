@@ -52,6 +52,29 @@ still select their shared broker. A new profile omitting it refuses while its
 retained managed broker container exists, so source adoption cannot silently
 leave a second writer or delete the old broker/data.
 
+Optional `mqtt_explorer` adds a separately named application phase in that same
+guest. Its pinned browser service is unpublished on a private Docker bridge;
+only a file-provider Traefik sidecar publishes the configured backend address and
+checks every application/Socket.IO request with the declared Authentik outpost.
+Local startup and health do not require the identity provider. The selected
+browser hostname must already be registered with the outpost. No AI keys,
+automatic broker connection or real-topic test publication is configured.
+
+An optional `mqtt_explorer.broker_connection` declares `name`, `hostname`, `port`,
+`username`, `credential_id`, `credential_file`, `password_file`, and the closed
+`access: read-write-all` choice. Its named `service_connections` binding must
+resolve to this guest's existing MQTT publication on port 1883. CD creates one
+independent credential and appends only its absent account to the selected
+parent-mounted password file, preserving old bytes, ownership, modes and xattrs.
+Unexpected ACL/include/per-listener authentication refuses this finite path.
+An atomic replacement and HUP reload preserve the existing broker container;
+GUI-only reconciliation targets only the two GUI services. Interrupted account
+or profile work retains a hold. The owned native saved connection is plaintext
+inside the protected UID-1001 mode-0700 workspace, with mode-0600 settings; other
+settings and connections are preserved. Authentik-admitted GUI users share that
+account's read/write topic access. Neither the probe nor application credentials
+are reused or rotated.
+
 Before starting Zigbee, the application records the prepared network identity and
 coordinator in a private receipt. Subsequent runs require that identity unchanged;
 normal device database and counter updates are allowed. The container defaults to
@@ -178,6 +201,35 @@ identity nor its completed-custody membership. Database connection metadata bind
 to named published PostgreSQL/MariaDB services; it contains no shared database
 usernames, passwords or client keys. PostgreSQL SSL mode is explicit. Each signed-in
 user supplies their own database credentials.
+
+Optional `app.database_administrators` on PostgreSQL/MariaDB declares a map of
+owned accounts with `username`, `source_guest`, `credential_id`, `credential_file`,
+`access: server-administration`, and `transport: tls`. Optional
+`cloudbeaver.managed_connections` declares separate new IDs containing `name`,
+`driver`, `database`, and `account_id`; each must have a named database-service
+binding. Compilation derives the actual database/client identities and addresses,
+requires independent credential IDs and a shared controller credential store,
+and refuses metadata-ID overwrites or a mismatched account owner. Ordinary CD
+creates a credential once, with no existing-password reuse or rotation.
+
+These are full server administrators: PostgreSQL SUPERUSER includes server-file
+and program powers; MariaDB receives `ALL ON *.* WITH GRANT OPTION`. Native
+authentication restricts each account to the exact selected CloudBeaver source
+address and requires TLS. The generated drivers require encryption but do not
+claim certificate identity validation (`sslmode=require` / `sslMode=trust`). No
+backend certificate lifecycle is introduced. A bounded JDBC read verifies the
+account, source, TLS and privileges without creating application data.
+
+Community consumes an owned native datasource file, plaintext at rest, mode 0600
+under its UID-8978 mode-0700 workspace. Only this optional mode enables native
+administrator credential saving. The runtime owns only its declared new IDs and
+permissions; existing metadata, custom user connections, resource functionality
+and unrelated grants remain application-owned. Foreign account/file collisions,
+changed custody or incomplete operations refuse rather than reset or adopt.
+Every Authentik-admitted user can use these shared dedicated administrators;
+ordinary connection metadata does not expose their passwords. This capability
+does not change identity-provider policy or grant CloudBeaver application-admin
+roles to browser users.
 
 Only the gateway publishes a host port. CloudBeaver uses an unpublished Docker
 bridge that permits database egress; host firewall state is not the authentication
