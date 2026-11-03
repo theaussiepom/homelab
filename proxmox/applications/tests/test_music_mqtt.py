@@ -45,6 +45,26 @@ def settings():
 
 
 class MusicTests(unittest.TestCase):
+    def test_retained_official_2_10_9_providers_remain_readonly_and_closed(self):
+        observed=('wikipedia','loudness_analysis','playlist_metadata','itunes_artwork',
+                  'radio_playlist','recommendations','sendspin_source',
+                  'lastfm_recommendations','ambient_sounds')
+        value=settings()
+        value['providers'].update({f'retained-{name}':{'domain':name,'enabled':True,
+            'values':{'retained_credential':'never-output'}} for name in observed})
+        original=copy.deepcopy(value)
+        music.validate_settings(value,'198.18.100.241')
+        self.assertEqual(value,original)
+        for domain in ('unreviewed_custom_provider','filesystem'):
+            changed=copy.deepcopy(value)
+            changed['providers']['unreviewed']={'domain':domain,'enabled':True}
+            with self.subTest(domain=domain),self.assertRaisesRegex(ValueError,'reviewed existing'):
+                music.validate_settings(changed,'198.18.100.241')
+        changed=copy.deepcopy(value)
+        changed['core']['streams']['values']['bind_ip']='198.18.25.31'
+        with self.assertRaisesRegex(ValueError,'UI and player listeners'):
+            music.validate_settings(changed,'198.18.100.241')
+
     def test_cli_entry_refuses_unprepared_state_without_printing_values(self):
         with patch('pathlib.Path.is_symlink',return_value=True),patch('sys.argv',['music_assistant.py','--address','198.18.100.241']),patch('sys.stdout',new_callable=io.StringIO) as output:
             with self.assertRaises(SystemExit) as result:runpy.run_path(music.__file__,run_name='__main__')

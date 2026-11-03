@@ -9,7 +9,9 @@ import stat
 PROVIDERS = {'fanarttv', 'builtin', 'musicbrainz', 'theaudiodb', 'player_group',
              'hass', 'apple_music', 'spotify', 'airplay', 'builtin_player',
              'chromecast', 'lrclib', 'universal_player', 'sync_group', 'sendspin',
-             'coverartarchive', 'dlna', 'party'}
+             'coverartarchive', 'dlna', 'party', 'wikipedia', 'loudness_analysis',
+             'playlist_metadata', 'itunes_artwork', 'radio_playlist', 'recommendations',
+             'sendspin_source', 'lastfm_recommendations', 'ambient_sounds'}
 DATA = Path('/srv/homelab/data/music-assistant/data')
 
 
