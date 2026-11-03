@@ -41,6 +41,34 @@ def composition():
 
 
 class DatabaseAdministratorTests(unittest.TestCase):
+    def test_postgresql_hba_wildcard_and_reserved_roles_refuse_before_configuration(self):
+        for compiled in (False, True):
+            for username in ('all', 'public', 'none', 'pg_', 'pg_fixture'):
+                resolved=composition()
+                if compiled:service_bindings.bind(resolved)
+                cfg=resolved['postgresql'][0]
+                item=cfg['app']['database_administrators']['server-admin'];item['username']=username
+                if compiled:item['owner']['username']=username
+                with self.subTest(compiled=compiled,username=username),self.assertRaisesRegex(ValueError,'literal non-reserved'):
+                    m.accounts(cfg,compiled=compiled)
+                if compiled:
+                    files={'pg_hba.conf':'local all postgres peer\n'};before=copy.deepcopy(files)
+                    with self.assertRaisesRegex(ValueError,'literal non-reserved'):m.hba(cfg,files)
+                    self.assertEqual(files,before)
+
+    def test_role_refusal_preserves_literal_postgresql_names_and_other_engine_accounts(self):
+        for compiled in (False, True):
+            for engine,names in [('postgresql',('fixture_admin','pgadmin','all_admin','current_user','current_role','session_user')),
+                                 ('mariadb',('all','public','none','pg_fixture'))]:
+                for username in names:
+                    resolved=composition()
+                    if compiled:service_bindings.bind(resolved)
+                    cfg=resolved[engine][0]
+                    item=cfg['app']['database_administrators']['server-admin'];item['username']=username
+                    if compiled:item['owner']['username']=username
+                    with self.subTest(engine=engine,compiled=compiled,username=username):
+                        self.assertEqual(m.accounts(cfg,compiled=compiled)['server-admin']['username'],username)
+
     def test_managed_maria_driver_is_one_closed_official_artifact_with_exact_readonly_mount(self):
         resolved=composition();service_bindings.bind(resolved);stack=resolved['db-tools'][1]
         value=stack['cloudbeaver'];artifact=cloudbeaver.jdbc(value)

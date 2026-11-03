@@ -59,6 +59,9 @@ def accounts(cfg, *, compiled=False):
                 and value['access'] == 'server-administration' and value['transport'] == 'tls',
                 'Use the closed TLS server-administration account configuration')
         name(value['username']); name(value['source_guest']); credential_path(value)
+        require(app['kind'] != 'postgresql' or (value['username'] not in {'all', 'public', 'none'}
+                and not value['username'].startswith('pg_')),
+                'Use a literal non-reserved PostgreSQL administrator role name')
         if compiled:
             actual = owner(value['owner'])
             require(actual['engine'] == app['kind'] and actual['database_vmid'] == cfg['guest']['vmid']

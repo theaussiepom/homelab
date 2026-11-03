@@ -75,6 +75,12 @@ settings and connections are preserved. Authentik-admitted GUI users share that
 account's read/write topic access. Neither the probe nor application credentials
 are reused or rotated.
 
+The `managed-<credential_id>` connection is CD-owned. Editing that entry, or an
+application rewrite that changes its declared fields, is drift and makes later
+CD refuse while preserving the settings and proof. Create a separate connection
+for personal settings; CD never automatically adopts or overwrites a changed
+managed entry.
+
 Before starting Zigbee, the application records the prepared network identity and
 coordinator in a private receipt. Subsequent runs require that identity unchanged;
 normal device database and counter updates are allowed. The container defaults to
