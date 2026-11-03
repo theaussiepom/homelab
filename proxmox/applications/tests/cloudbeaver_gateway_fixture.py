@@ -177,7 +177,7 @@ class Provider:
                 'aud': self.client_id if mode != 'wrong_audience' else 'wrong-client',
                 'exp': now+300, 'iat': now-1, 'sub': 'synthetic-subject-123',
                 'nonce': nonce if mode != 'bad_nonce' else 'wrong-nonce',
-                'email': 'fixture-user@example.invalid', 'email_verified': True,
+                'email': 'fixture-user@example.invalid', 'email_verified': mode != 'unverified_email',
                 'preferred_username': username, 'groups': ['user', 'admin']}
 
     def jwt(self, claims, mode):
@@ -548,7 +548,7 @@ def echo_checks():
     jar, status, body, statuses = login(username='local-recovery')
     record('upstream_recovery_name_is_oidc_namespaced_and_static_user_team', status == 200 and
         json.loads(body)['identity_headers'] == {'x-user': ['oidc.local-recovery'], 'x-team': ['user']}, statuses=statuses)
-    for mode in ['bad_signature', 'bad_nonce', 'wrong_audience', 'wrong_issuer']:
+    for mode in ['bad_signature', 'bad_nonce', 'wrong_audience', 'wrong_issuer', 'unverified_email']:
         before = len(seen_upstream)
         _, status, _, statuses = login(mode=mode)
         record(mode+'_token_refuses_authenticated_upstream', status != 200 and len(seen_upstream) == before,
@@ -559,7 +559,7 @@ def echo_checks():
         and details['Config']['User'] == '65532:65532' and details['HostConfig']['ReadonlyRootfs'],
         running=details['State']['Running'], oom_killed=details['State']['OOMKilled'], restarts=details['RestartCount'])
     result['echo_gateway_image_id'] = details['Image']
-    result['echo_authentication_controls_passed'] = 32
+    result['echo_authentication_controls_passed'] = 33
 
 
 def main():

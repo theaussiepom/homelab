@@ -189,6 +189,11 @@ CloudBeaver handles the trusted forwarded HTTPS scheme. The existing retained
 OAuth secret derives independent cookie/recovery material into private files,
 never Compose environment values or Git.
 
+The OIDC provider must assert `email_verified: true` only for an actually verified
+email address. Missing or false verification is refused by the gateway's secure
+default. Complete address verification through the identity provider; the
+configuration does not enable the insecure unverified-email mode.
+
 Preparation owns only the new `/srv/homelab/data/cloudbeaver` workspace. First
 startup configures its own recovery account before the gateway becomes healthy;
 subsequent deployments verify ownership and never reset an unknown account. The

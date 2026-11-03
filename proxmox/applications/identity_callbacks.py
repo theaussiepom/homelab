@@ -20,7 +20,7 @@ def canonical(value):
 
 
 def uri(value, callback=False):
-    need(isinstance(value, str) and len(value) <= 2048 and '\\' not in value
+    need(isinstance(value, str) and len(value) <= 2048 and '\\' not in value and '?' not in value and '#' not in value
          and not any(c.isspace() for c in value))
     url = urlsplit(value)
     need(url.scheme == 'https' and url.hostname and not url.username and not url.password

@@ -36,6 +36,7 @@ Post-import checks use `ON_ERROR_STOP=1`.
   owned isolated target; production container/data identity must remain unchanged.
 
 Private deployment inputs may reconstruct an existing helper's protected
-credential JSON only inside mode 0600 private scratch. Values and source metadata
+credential JSON only in a mode 0700 private scratch directory, with the credential
+file itself mode 0600. Values and source metadata
 remain outside public source and logs. A manifest or test result alone does not
 establish source freshness, application authentication or current recoverability.

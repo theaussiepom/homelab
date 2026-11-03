@@ -126,6 +126,8 @@ class IdentityCallbackContract(unittest.TestCase):
         for uri in ('http://db.example.invalid/oauth2/callback',
              'https://user@db.example.invalid/oauth2/callback',
              'https://db.example.invalid/not-callback',
+             'https://db.example.invalid/oauth2/callback?',
+             'https://db.example.invalid/oauth2/callback#',
              'https://db.example.invalid/oauth2/callback?redirect=other',
              'https://db.example.invalid/oauth2/callback#fragment'):
             item = copy.deepcopy(record); item['additions'] = [uri]

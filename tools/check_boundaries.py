@@ -22,7 +22,7 @@ ROLE_HOSTS = {'deploy'}  # Existing bootstrap role identity, not a site hostname
 
 
 def source_files(root):
-    names = subprocess.check_output(['git','-C',str(root),'ls-files','--cached','--others','--exclude-standard'],text=True,stderr=subprocess.PIPE).splitlines()
+    names = [name for name in subprocess.check_output(['git','-C',str(root),'ls-files','-z','--cached','--others','--exclude-standard'],text=True,stderr=subprocess.PIPE).split('\0') if name]
     result=[]
     for name in sorted(set(names)):
         path=Path(name)
@@ -134,7 +134,7 @@ def check(root, mode):
             findings.extend({'path':name,'line':line,'code':code} for line,code in python_rules(text,consumer=mode=='consumer',fixture=test_source(name)))
         if mode=='consumer' and name.endswith(('.yml','.yaml','.sh')):
             for line,value in enumerate(text.splitlines(),1):
-                if re.match(r'^\s*(?:run:\s*)?(?:sudo\s+)?(?:ssh|scp|rsync|docker|pct|pvesh|tofu|terraform|ansible-playbook)\b',value):
+                if re.match(r'^\s*(?:-\s+run:\s*|run:\s*)?(?:sudo\s+)?(?:ssh|scp|rsync|docker|pct|pvesh|tofu|terraform|ansible-playbook)\b',value):
                     findings.append({'path':name,'line':line,'code':'consumer-target-workflow'})
     if mode=='stack':findings.extend({'path':path,'line':line,'code':code} for path,line,code in stack_allocations(root))
     return {'status':'failed' if findings else 'passed','mode':mode,'source_files':len(files),
