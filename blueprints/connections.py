@@ -90,6 +90,10 @@ def connections(configurations, external_routes=None):
         )
 
     for route in (external_routes or {}).values():
+        if 'service' in route:
+            require(route['service'] == 'api@internal' and 'url' not in route,
+                    'Only the validated internal dashboard has no backend socket')
+            continue
         origin = urlsplit(route["url"])
         yield connection(
             "ingress",

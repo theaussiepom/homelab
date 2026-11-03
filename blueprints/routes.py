@@ -52,10 +52,21 @@ def bind(resolved, routes):
         target = selected.pop("target")
         discovery.require(
             isinstance(target, dict)
-            and (set(target) == {"endpoint"} or set(target) == {"url"}),
-            "Select exactly one app endpoint or external URL",
+            and set(target) in ({"endpoint"}, {"url"}, {"internal"}),
+            "Select exactly one app endpoint, external URL or dashboard",
         )
-        if "endpoint" in target:
+        if 'internal' in target:
+            discovery.require(target['internal'] == 'dashboard'
+                and stack['foundation'].get('dashboard') is True
+                and 'authentik_forward_auth' in selected,
+                'Explicitly enable and authenticate the internal dashboard')
+            discovery.require('url' not in selected and 'service' not in selected,
+                              'Keep backend selection in the route target')
+            selected['service'] = 'api@internal'
+            external[key] = selected
+            all_routes[key] = selected
+            continue
+        elif "endpoint" in target:
             discovery.require(
                 isinstance(target["endpoint"], str) and target["endpoint"] in endpoints,
                 "Select a declared application endpoint",

@@ -92,36 +92,32 @@ class NamedSecretWorkflowTests(unittest.TestCase):
                     self.assertEqual(set(guest_values), required_scope)
                     self.assertEqual(set(guest_model['jobs']), {'deploy'})
                     job = guest_model['jobs']['deploy']
-                    for index, phase in enumerate(['infrastructure', 'preparation', *blueprint['applications']]):
-                        steps = [step for step in job['steps'] if step.get('env', {}).get('PHASE') == phase]
-                        self.assertNotIn('secrets', job)
-                        self.assertEqual(set(job['env']), {'HOMELAB_DEPLOYMENT_WORKFLOW'})
-                        credential = steps[1]['env']
-                        self.assertEqual({key for key in credential if key not in {'GUEST', 'PHASE'}}, COMMON)
-                        final_values = {key: guest_values.get(key, '') for key in COMMON}
-                        for key, expression in steps[2]['env'].items():
-                            if key in {'GUEST', 'PHASE'}: continue
-                            match = re.fullmatch(r"\$\{\{ '([a-z0-9-]+)' == '([a-z-]+)' && (?:secrets\.([A-Z_]+)|'') \|\| '' \}\}", expression)
+                    import test_workflow_materialization as oracle
+                    self.assertEqual(set(job['env']),{'HOMELAB_DEPLOYMENT_WORKFLOW'})
+                    self.assertEqual(job['steps'][0]['name'],'Setup')
+                    self.assertNotIn('with',job['steps'][0])
+                    for call_step in job['steps'][1:]:
+                        self.assertNotIn('env',call_step)
+                        parameters=call_step['with'];phase=parameters['phase']
+                        self.assertEqual(set(parameters)-{'guest','phase','disabled'},required_scope)
+                        self.assertEqual({k:v for k,v in parameters.items() if k in required_scope},
+                                         {k:'${{ secrets.'+k+' }}' for k in required_scope})
+                        steps=oracle.phase_steps(guest,phase)
+                        self.assertNotIn('env',steps[0])
+                        self.assertEqual(set(steps[1]['env']),{'GUEST','PHASE','DISABLED'})
+                        self.assertEqual(set(steps[2]['env'])-{'GUEST','PHASE'},COMMON)
+                        final_values={key:guest_values.get(key,'') for key in COMMON}
+                        for key,expression in steps[3]['env'].items():
+                            if key in {'GUEST','PHASE'}:continue
+                            match=re.fullmatch(r"\$\{\{ '([a-z0-9-]+)' == '([a-z-]+)' && secrets\.([A-Z_]+) \|\| '' \}\}",expression)
                             self.assertIsNotNone(match)
-                            actual_guest, owner, selected_name = match.groups()
-                            name = ALIASES[key]
-                            self.assertEqual(actual_guest, guest)
-                            self.assertIn(name, OWNED[owner])
-                            if selected_name is None:
-                                self.assertNotEqual(actual_guest, owner)
-                                self.assertNotIn(name, required_scope)
-                            else:
-                                self.assertEqual(selected_name, name)
-                                self.assertIn(name, required_scope)
-                            final_values[name] = guest_values.get(name, '') if actual_guest == owner else ''
-                        self.assertEqual(set(final_values), ALL_NAMES)
-                        expected_present = required_scope & names
-                        self.assertEqual({name for name, value in final_values.items() if value}, expected_present)
-                        self.assertEqual({name: final_values[name] for name in expected_present},
-                                         {name: available[name] for name in expected_present})
-                        self.assertEqual(steps[0]['env']['PHASE'], phase)
-                        self.assertEqual(steps[0]['env']['GUEST'], guest)
-                        self.assertEqual(final_values[SMTP], available[SMTP] if smtp_present and guest == 'identity' else '')
+                            actual,owner,name=match.groups()
+                            self.assertEqual(actual,guest);self.assertEqual(name,ALIASES[key]);self.assertIn(name,OWNED[owner])
+                            final_values[name]=guest_values.get(name,'') if actual==owner else ''
+                        expected_present=required_scope & names
+                        self.assertEqual({name for name,value in final_values.items() if value},expected_present)
+                        self.assertEqual({name:final_values[name] for name in expected_present},{name:available[name] for name in expected_present})
+                        self.assertEqual(final_values[SMTP],available[SMTP] if smtp_present and guest=='identity' else '')
 
     def test_missing_name_is_refused_but_empty_values_remain_runtime_admission(self):
         guest = self.models['guest-automation.yml']

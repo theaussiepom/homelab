@@ -52,7 +52,7 @@ class CloudBeaverBlueprintTests(unittest.TestCase):
                 result=workflows.models(root)
             self.assertEqual(result['deploy.yml']['jobs']['db-tools']['name'],'CloudBeaver')
             job=result['guest-db-tools.yml']['jobs']['deploy']
-            self.assertEqual([s['env']['PHASE']for s in job['steps']if s['name']=='Check inputs'],['infrastructure','preparation','cloudbeaver'])
+            self.assertEqual([s['with']['phase'] for s in job['steps'][1:]],['infrastructure','preparation','cloudbeaver'])
             self.assertNotIn('pgadmin',json.dumps(result))
 
 

@@ -7,6 +7,7 @@ runs deployers. Runtime admission is deliberately separate from offline previews
 import argparse
 import copy
 import hashlib
+import ipaddress
 import json
 from pathlib import Path
 import re
@@ -84,13 +85,77 @@ def merge(base, override):
     return copy.deepcopy(override)
 
 
-def substitute(value, values):
+def binding_declarations(spec):
+    declared = spec.get('required_site_bindings', {})
+    require(isinstance(declared, dict) and len(declared) <= 512,
+            'Declare bounded required site bindings')
+    for key, kind in declared.items():
+        require(isinstance(key, str) and key != 'inputs' and len(key) <= 160 and TOKEN.fullmatch('${' + key + '}'),
+                'Use literal central binding names')
+        require(kind in ('string', 'integer', 'string-list') if isinstance(kind, str)
+                else kind == ['integer', 'null'], 'Use declared scalar or flat string-list binding types')
+    return declared
+
+
+def binding_value(value, kind):
+    if kind == 'string':
+        return isinstance(value, str) and bool(value)
+    if kind == 'integer':
+        return type(value) is int
+    if kind == 'string-list':
+        return isinstance(value, list) and bool(value) and all(isinstance(v, str) and v for v in value)
+    return kind == ['integer', 'null'] and (value is None or type(value) is int)
+
+
+def synthetic_binding(key, value):
+    """Reject known examples only in declared address/network/domain inputs."""
+    network = key.startswith(('addresses.', 'gateways.', 'networks.')) or re.fullmatch(r'interfaces\..+\.ipv4(?:_endpoint)?', key)
+    domain = key.startswith(('domains.', 'hostnames.'))
+    if not network and not domain:
+        return False
+    for item in value if isinstance(value, list) else [value]:
+        if not isinstance(item, str) or item in {'manual', 'dhcp'}:
+            continue
+        if domain:
+            name = item.lower().rstrip('.')
+            if any(name == suffix or name.endswith('.' + suffix)
+                   for suffix in ('example.com', 'example.net', 'example.org', 'example', 'invalid', 'test', 'localhost')):
+                return True
+        else:
+            try:
+                candidate = ipaddress.ip_network(item, strict=False)
+            except ValueError:
+                continue  # The existing receiver validates its complete semantic contract.
+            examples = ('192.0.2.0/24', '198.51.100.0/24', '203.0.113.0/24', '198.18.0.0/15', '2001:db8::/32')
+            if any(candidate.version == example.version and candidate.subnet_of(example)
+                   for example in map(ipaddress.ip_network, examples)):
+                return True
+    return False
+
+
+def validate_site_bindings(spec, overlay, *, admit):
+    declared = binding_declarations(spec)
+    values = merge(spec['values'], overlay['values'])
+    for key, kind in declared.items():
+        require(key in values and binding_value(values[key], kind), 'Supply the declared site binding type: ' + key)
+        if admit:
+            require(key in overlay['values'], 'Supply an explicit consumer binding: ' + key)
+            require(not synthetic_binding(key, values[key]), 'Replace the known synthetic site binding: ' + key)
+    return declared
+
+
+def substitute(value, values, bindings=None):
     if isinstance(value, dict):
-        return {k: substitute(v, values) for k, v in value.items()}
+        return {k: substitute(v, values, bindings) for k, v in value.items()}
     if isinstance(value, list):
-        return [substitute(v, values) for v in value]
+        return [substitute(v, values, bindings) for v in value]
     if not isinstance(value, str):
         return value
+    whole = TOKEN.fullmatch(value)
+    if whole and bindings and whole[1] in bindings:
+        require(whole[1] in values and binding_value(values[whole[1]], bindings[whole[1]]),
+                'Supply the declared whole-value binding')
+        return copy.deepcopy(values[whole[1]])
 
     def replacement(match):
         key = match[1]
@@ -108,10 +173,12 @@ def substitute(value, values):
 def manifest(root):
     spec = read(root / "stack.json")
     require(
-        set(spec) == {"schema", "values", "guests", "routes"}
+        {"schema", "values", "guests", "routes"} <= set(spec)
+        <= {"schema", "values", "guests", "routes", "required_site_bindings"}
         and spec["schema"] == "homelab-stack-v2",
         "Use the stack contract",
     )
+    binding_declarations(spec)
     guests = spec["guests"]
     require(
         set(guests) in (set(CATALOGUE), {k for k, v in CATALOGUE.items() if "feature" not in v}), "Keep a permanent path for every prepared guest"
@@ -222,6 +289,7 @@ def custody_text(raw, expected, values):
 
 def _resolve_guest(root, overlay, name, spec):
     values = merge(spec["values"], overlay["values"])
+    bindings = binding_declarations(spec)
     profile = read(root / "guests" / name / "profile.json")
     require(
         set(profile) == {"config", "files", "stack"}, "Use the guest profile fields"
@@ -236,7 +304,7 @@ def _resolve_guest(root, overlay, name, spec):
             merge(read(root / "common.json"), profile["config"]),
             merge(overlay["common"], overrides.get("config", {})),
         ),
-        values,
+        values, bindings,
     )
     require(
         "deployment" not in cfg
@@ -303,7 +371,7 @@ def _resolve_guest(root, overlay, name, spec):
             if profile["stack"] is not None
             else None
         ),
-        values,
+        values, bindings,
     )
     if stack is not None:
         images = merge(read(root / "images.json"), overlay["images"])
@@ -353,6 +421,7 @@ def compile_stack(root, overlay, disabled=None, *, admit=False):
         and set(overlay["accepted"]) <= set(CATALOGUE),
         "Record explicit prerequisite acceptance",
     )
+    validate_site_bindings(spec, overlay, admit=admit)
     resolved = {name: _resolve_guest(root, overlay, name, spec) for name in spec["guests"]}
     if zabbix.enabled(overlay):
         zabbix.bind(resolved, enabled, merge(spec["values"], overlay["values"]))
@@ -364,7 +433,7 @@ def compile_stack(root, overlay, disabled=None, *, admit=False):
                                      "host": "${domains.monitoring}",
                                       "middlewares": ["security-headers"]}
     route_records = routes.bind(
-        resolved, substitute(declared_routes, merge(spec["values"], overlay["values"])),
+        resolved, substitute(declared_routes, merge(spec["values"], overlay["values"]), binding_declarations(spec)),
     )
     service_bindings.bind(resolved, route_records)
     compiled = {

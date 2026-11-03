@@ -67,11 +67,11 @@ class WorkflowGenerationTests(unittest.TestCase):
             models = workflows.models(self.root)
             self.assertEqual(set(models["deploy.yml"]["jobs"]), {"selection", "database", "web"})
             job = models["guest-web.yml"]["jobs"]["deploy"]
-            self.assertEqual([s["env"]["PHASE"] for s in job["steps"][8::4]],
+            self.assertEqual([s["with"]["phase"] for s in job["steps"][1:]],
                              ["infrastructure", "preparation", "web", *(["winet"] if selected else [])])
-            self.assertEqual(sum(s["name"] == "Prepare service" for s in job["steps"]), 1)
+            self.assertEqual(sum(s["name"] == "Prepare" for s in job["steps"]), 1)
             if selected:
-                self.assertEqual(job["steps"][-1]["name"], "Deploy WiNet")
+                self.assertEqual(job["steps"][-1]["name"], "WiNet")
 
     def test_agent_is_one_real_final_phase_only_for_monitored_composition(self):
         self.catalogue['monitoring'] = {'name':'Zabbix', 'applications':['zabbix'],
@@ -82,12 +82,12 @@ class WorkflowGenerationTests(unittest.TestCase):
             models = workflows.models(self.root, monitored=monitored)
             for guest in self.manifest['guests']:
                 job = models['guest-'+guest+'.yml']['jobs']['deploy']
-                phases = [step['env']['PHASE'] for step in job['steps'] if step['name']=='Check inputs']
+                phases = [step['with']['phase'] for step in job['steps'][1:]]
                 self.assertEqual(phases.count('zabbix-agent'), 0 if monitored is False else 1)
                 if monitored is not False:
                     self.assertEqual(phases[-1], 'zabbix-agent')
                     self.assertEqual(job['steps'][-1]['name'], 'Zabbix agent')
-                    self.assertIn('--phase "$PHASE"', job['steps'][-1]['run'])
+                    self.assertTrue(job['steps'][-1]['uses'].split('@')[0].endswith('/.github/actions/guest-phase'))
                 self.assertTrue(all('continue-on-error' not in step and 'if' not in step for step in job['steps']))
 
     def test_declarative_phase_and_dependency_edits_change_the_actual_job_graph(self):
@@ -110,12 +110,12 @@ class WorkflowGenerationTests(unittest.TestCase):
         jobs = current["guest-web.yml"]["jobs"]
         self.assertEqual(list(jobs), ["deploy"])
         steps = jobs["deploy"]["steps"]
-        self.assertEqual([step["env"]["PHASE"] for step in steps if step["name"] == "Check inputs"], ["infrastructure", "preparation", "web", "verify"])
-        self.assertEqual(steps[-3]["env"]["PHASE"], "verify")
-        self.assertEqual(steps[-3]["env"]["GUEST"], "web")
+        self.assertEqual([step["with"]["phase"] for step in steps[1:]], ["infrastructure", "preparation", "web", "verify"])
+        self.assertEqual(steps[-1]["with"]["phase"], "verify")
+        self.assertEqual(steps[-1]["with"]["guest"], "web")
         self.assertNotIn("uses", jobs["deploy"])
         self.assertNotIn("needs", jobs["deploy"])
-        self.assertEqual(steps[-1]["name"], "Deploy Verify")
+        self.assertEqual(steps[-1]["name"], "Verify")
 
     def test_aggregate_budget_preserves_phase_allowances_and_refuses_above_portable_limit(self):
         for apps, expected in ((1, 135), (2, 180), (3, 225), (6, 360)):

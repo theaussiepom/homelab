@@ -10,12 +10,12 @@ Three repositories have different jobs:
 | --- | --- |
 | **homelab** (this one) | Reusable infrastructure, preparation and app blueprints, phase runner and tests |
 | **homelab-stack** | Copyable composition: guests, applications, dependencies, images and example topology |
-| **homelab-site** (private) | Reviewed stack selection, actual private overrides, Secrets references and deployment controls |
+| **Private consumer** | Reviewed stack selection, actual private overrides, Secrets references and deployment controls |
 
 ```mermaid
 flowchart LR
   framework[homelab: reusable blueprints] --> stack[homelab-stack: composition]
-  stack --> site[homelab-site: deliberate adoption]
+  stack --> site[Private consumer: deliberate adoption]
   site --> infra[Infrastructure]
   infra --> prep[Preparation]
   prep --> apps[Applications]
@@ -52,7 +52,7 @@ helpers. Measure and enforce the complete Python inventory locally:
 
 ```sh
 export GITLEAKS_BIN=/path/to/verified/gitleaks
-python3 tools/measure_coverage.py --all --stack ../homelab-stack --site ../homelab-site --fail-under 100 --output .work/coverage
+python3 tools/measure_coverage.py --all --stack ../homelab-stack --site ../consumer --fail-under 100 --output .work/coverage
 ```
 
 Omit `--fail-under` for an exploratory measurement. CI always supplies the gate.

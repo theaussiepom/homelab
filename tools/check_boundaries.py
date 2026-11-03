@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Finite, offline ownership checks for framework, composition and consumers.
+
+These rules catch known boundary regressions. They do not prove absence of
+secrets, arbitrary target execution, or every form of site-specific policy.
+"""
+import argparse
+import ast
+import ipaddress
+import json
+from pathlib import Path
+import re
+import subprocess
+from urllib.parse import urlsplit
+
+CONSUMER_SCHEMA = 'homelab-site-v3'
+CONSUMER_PREFIX = CONSUMER_SCHEMA.rsplit('-v', 1)[0]
+SOURCE_SUFFIXES = {'.py','.md','.json','.yml','.yaml','.sh','.service','.timer','.txt'}
+TARGET_IMPORTS = {'fcntl','socket','paramiko','fabric','requests','http.client','urllib.request','subprocess'}
+TARGET_COMMANDS = {'ssh','scp','rsync','docker','pct','pvesh','tofu','terraform','ansible-playbook'}
+ROLE_HOSTS = {'deploy'}  # Existing bootstrap role identity, not a site hostname.
+
+
+def source_files(root):
+    names = subprocess.check_output(['git','-C',str(root),'ls-files','--cached','--others','--exclude-standard'],text=True,stderr=subprocess.PIPE).splitlines()
+    result=[]
+    for name in sorted(set(names)):
+        path=Path(name)
+        if path.parts[0] in {'.git','.work','framework-source','stack-source'} or path.suffix not in SOURCE_SUFFIXES:
+            continue
+        target=root/path
+        if target.is_symlink() or any(parent.is_symlink() for parent in target.parents if parent != root):
+            raise ValueError('Source files cannot be symlinks')
+        if target.is_file():
+            if target.stat().st_size>4*1024**2:raise ValueError('Bound source text files')
+            result.append((name,target.read_text()))
+    return result
+
+
+def test_source(name):
+    path=Path(name)
+    return 'tests' in path.parts or path.name.startswith('test_') or path.name.endswith('_fixture.py')
+
+
+def public_text(text):
+    findings=[]
+    token=re.compile(re.escape(CONSUMER_PREFIX)+r'[A-Za-z0-9_.-]*',re.IGNORECASE)
+    for number,line in enumerate(text.splitlines(),1):
+        if any(match.group(0).rstrip('.')!=CONSUMER_SCHEMA for match in token.finditer(line)):
+            findings.append((number,'private-repository-reference'))
+        if re.search(r'/Users/[A-Za-z0-9_.-]+/',line):
+            findings.append((number,'personal-checkout-path'))
+    return findings
+
+
+def python_rules(text, *, consumer, fixture):
+    if fixture:return []
+    tree=ast.parse(text);findings=[]
+    for node in ast.walk(tree):
+        if consumer and isinstance(node,(ast.Import,ast.ImportFrom)):
+            modules=[a.name for a in node.names] if isinstance(node,ast.Import) else [node.module or '']
+            if any(module in TARGET_IMPORTS for module in modules):findings.append((node.lineno,'consumer-target-library'))
+        if isinstance(node,ast.Compare) and not consumer:
+            values=[node.left,*node.comparators]
+            host=any(isinstance(v,ast.Call) and (isinstance(v.func,ast.Attribute) and
+                     (v.func.attr=='gethostname' or v.func.attr=='get' and v.args and isinstance(v.args[0],ast.Constant) and v.args[0].value=='hostname')) for v in values)
+            if host and any(isinstance(v,ast.Constant) and isinstance(v.value,str) and v.value not in ROLE_HOSTS for v in values):
+                findings.append((node.lineno,'literal-host-identity-policy'))
+        if consumer and isinstance(node,ast.Call):
+            strings=[v.value for arg in [*node.args,*[k.value for k in node.keywords]] for v in ast.walk(arg)
+                     if isinstance(v,ast.Constant) and isinstance(v.value,str)]
+            if any(Path(v).name in TARGET_COMMANDS for v in strings):findings.append((node.lineno,'consumer-target-command'))
+    return findings
+
+
+def stack_allocations(root):
+    findings=[]
+    spec=json.loads((root/'stack.json').read_text())
+    bindings=spec.get('required_site_bindings')
+    if not isinstance(bindings,dict) or not bindings:return [('stack.json',1,'declare-site-bindings')]
+    if set(spec.get('values',{})) & set(bindings):findings.append(('stack.json',1,'public-site-binding-default'))
+    def reference(value):
+        token=re.fullmatch(r'\$\{([a-z][a-z0-9_.-]*)\}',value) if isinstance(value,str) else None
+        return token and token[1] in bindings
+    def template(value):
+        tokens=re.findall(r'\$\{([a-z][a-z0-9_.-]*)\}',value) if isinstance(value,str) else []
+        return bool(tokens) and all(key in bindings for key in tokens)
+    def concrete_network(value):
+        if template(value) or not isinstance(value,str):return False
+        if re.fullmatch(r'(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}',value):return True
+        try:network=ipaddress.ip_network(value,strict=False)
+        except ValueError:return False
+        address=network.network_address
+        examples=map(ipaddress.ip_network,('192.0.2.0/24','198.51.100.0/24','203.0.113.0/24','198.18.0.0/15','2001:db8::/32'))
+        if any(network.version==example.version and network.subnet_of(example) for example in examples):return False
+        return network.prefixlen>0 and address.is_private and not (address.is_multicast or address.is_loopback or address.is_unspecified)
+    def route_allocations(routes,path):
+        for route in routes.values():
+            hosts=[route['host'],*route.get('aliases',[])]
+            if not all(isinstance(host,str) for host in hosts):raise ValueError('Use literal route host strings or bindings')
+            if any(not template(host) and not any(host==suffix or host.endswith('.'+suffix) for suffix in ('invalid','example','test','localhost','example.com','example.net','example.org')) for host in hosts):
+                findings.append((path,1,'concrete-route-host'))
+            url=route.get('target',{}).get('url')
+            if isinstance(url,str) and concrete_network(urlsplit(url).hostname):findings.append((path,1,'concrete-route-backend'))
+    route_allocations(spec.get('routes',{}),'stack.json')
+    def interface_reference(key,value):
+        if reference(value):return True
+        combined=re.fullmatch(r'\$\{(addresses\.[a-z0-9_.-]+)\}/\$\{(prefixes\.[a-z0-9_.-]+)\}',value) if isinstance(value,str) else None
+        return key in {'ipv4','ipv4_endpoint'} and combined and bindings.get(combined[1])=='string' and bindings.get(combined[2])=='integer'
+    for guest in spec['guests']:
+        path=root/'guests'/guest/'profile.json'
+        profile=json.loads(path.read_text());cfg=profile['config']
+        values=[cfg['guest'].get(k) for k in ('vmid','hostname','storage_id','template_file_id')]
+        invalid=any(not reference(v) for v in values)
+        for nic in cfg['guest'].get('interfaces',[]):
+            invalid|=any(not interface_reference(k,v) for k,v in nic.items() if k in {'bridge','vlan','ipv4','ipv4_endpoint','mac'} and v not in ('manual','dhcp'))
+        if invalid:findings.append((str(path.relative_to(root)),1,'concrete-site-allocation'))
+        network_values=[rule.get(key) for rule in cfg['guest'].get('rules',[]) for key in ('source','destination')]
+        network_values.extend(cfg.get('app',{}).get('frontend_routing',{}).get(key) for key in ('address','gateway','mac'))
+        for definition in (profile.get('stack') or {}).get('routing',{}).get('middlewares',{}).values():
+            ranges=definition.get('ipAllowList',{}).get('sourceRange',[])
+            network_values.extend(ranges if isinstance(ranges,list) else [ranges])
+        if any(concrete_network(value) for value in network_values):findings.append((str(path.relative_to(root)),1,'concrete-network-policy'))
+    return findings
+
+
+def check(root, mode):
+    if mode not in {'framework','stack','consumer'}:raise ValueError('Use a declared ownership mode')
+    root=root.resolve();findings=[];files=source_files(root)
+    for name,text in files:
+        if mode!='consumer':
+            findings.extend({'path':name,'line':line,'code':code} for line,code in public_text(text))
+        if name.endswith('.py'):
+            findings.extend({'path':name,'line':line,'code':code} for line,code in python_rules(text,consumer=mode=='consumer',fixture=test_source(name)))
+        if mode=='consumer' and name.endswith(('.yml','.yaml','.sh')):
+            for line,value in enumerate(text.splitlines(),1):
+                if re.match(r'^\s*(?:run:\s*)?(?:sudo\s+)?(?:ssh|scp|rsync|docker|pct|pvesh|tofu|terraform|ansible-playbook)\b',value):
+                    findings.append({'path':name,'line':line,'code':'consumer-target-workflow'})
+    if mode=='stack':findings.extend({'path':path,'line':line,'code':code} for path,line,code in stack_allocations(root))
+    return {'status':'failed' if findings else 'passed','mode':mode,'source_files':len(files),
+            'findings':findings,'targets_contacted':False,'runtime_state_read':False}
+
+
+def main(argv=None):
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--mode',required=True,choices=('framework','stack','consumer'));parser.add_argument('--root',required=True,type=Path)
+    args=parser.parse_args(argv)
+    try:result=check(args.root,args.mode)
+    except (OSError,ValueError,SyntaxError,KeyError,TypeError,AttributeError,subprocess.CalledProcessError):result={'status':'failed','code':'invalid-source-boundary-input','targets_contacted':False,'runtime_state_read':False}
+    print(json.dumps(result,sort_keys=True));return 0 if result['status']=='passed' else 1
+
+if __name__=='__main__':raise SystemExit(main())

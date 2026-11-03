@@ -1,25 +1,25 @@
-# Local network recovery on BenBeast
+# Local network recovery
 
 [Back to the main README](../../README.md)
 
 This service watches for two specific Docker network faults after an adapter
 interruption and can repair them within strict limits. It runs locally on the
-existing BenBeast Linux host, even when NAS monitoring is unavailable.
+explicitly configured Linux host, even when NAS monitoring is unavailable.
 
 **This is not a generic network fixer or a Proxmox setup step.** Its installer
-is restricted to the host named `ben-beast`. It needs reviewed private settings
-for that host. Publishing these files does not install or enable the service.
+requires the live hostname to match a validated `hostname` in the staged private
+configuration. It needs reviewed settings for that host. Publishing these files does not install or enable the service.
 
 ## What can it repair?
 
 | Fault | What it can do | What it will not do |
 | --- | --- | --- |
-| Missing overlay forwarding entry | Add one verified missing destination for the configured `underground` overlay. | Replace/delete/flush forwarding entries or guess peer identities. |
+| Missing overlay forwarding entry | Add one verified missing destination for the configured overlay. | Replace/delete/flush forwarding entries or guess peer identities. |
 | Missing macvlan address | Restart the same enrolled container when its configured static LAN address is absent from its actual network namespace. | Restart stopped containers, pull images, recreate containers or restart for ordinary application errors. |
 
 An **overlay** connects containers across Docker hosts. **Macvlan** gives a
-container its own address on your LAN. Only the existing enrolled containers
-`hass`, `mass`, `nodered`, `pgadmin` and `traefik` can be restarted by this code.
+container its own address on your LAN. Only explicitly enrolled containers in the private configuration can be
+restarted by this code; names are not inferred from running workloads.
 
 The service runs as root because these repairs inspect network namespaces and
 kernel forwarding entries. It exposes no inbound listener/API or remote shell,
@@ -42,7 +42,7 @@ repair a real Docker network.
 
 ## 2. Prepare the intended Linux host
 
-Installation is for an administrator making a reviewed change on `ben-beast`.
+Installation is for an administrator making a reviewed change on the configured host.
 Use the [installation reference](INSTALLATION.md) to stage the fixed payload,
 both systemd unit files and the private `network-recovery.json`.
 

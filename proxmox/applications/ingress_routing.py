@@ -13,6 +13,8 @@ import stat
 import subprocess
 
 TABLE = 10040
+PRIVATE_NETWORKS = tuple(ipaddress.IPv4Network(value) for value in
+                         ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16','198.18.0.0/15'))
 
 
 def require(ok, message):
@@ -27,7 +29,8 @@ def validate(value):
     gateway = ipaddress.IPv4Address(value['gateway'])
     network = interface.network
     require(interface.ip.is_private and not interface.ip.is_loopback and not interface.ip.is_link_local
-            and network.prefixlen == 24 and gateway in network
+            and 8 <= network.prefixlen <= 30
+            and any(network.subnet_of(allowed) for allowed in PRIVATE_NETWORKS) and gateway in network
             and gateway not in (network.network_address, network.broadcast_address, interface.ip)
             and interface.ip not in (network.network_address, network.broadcast_address), 'Use the selected frontend subnet and gateway')
     require(re.fullmatch(r'(?:[0-9a-f]{2}:){5}[0-9a-f]{2}', value['mac']) is not None
@@ -54,7 +57,8 @@ def state(settings):
     # through the link query instead of guessing or weakening the identity check.
     hardware = [row for row in json.loads(command(['-j', 'link', 'show'])) if row.get('ifname') == device]
     require(len(hardware) == 1 and hardware[0].get('address', '').lower() == mac
-            and 'UP' in hardware[0].get('flags', []) and assigned.get('prefixlen') == 24,
+            and 'UP' in hardware[0].get('flags', [])
+            and assigned.get('prefixlen') == ipaddress.IPv4Network(network).prefixlen,
             'Frontend interface identity, prefix or link state differs')
     rules = json.loads(command(['-j', 'rule', 'show']))
     require(all(row.get('priority') in (0, TABLE, 32766, 32767) for row in rules),

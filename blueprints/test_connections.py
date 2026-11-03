@@ -32,6 +32,17 @@ def guest(address, rules, routes=(), dns=()):
 
 
 class ConnectionContractTests(unittest.TestCase):
+    def test_exact_internal_dashboard_has_no_backend_socket_and_keeps_other_flows(self):
+        cfg=self.configurations()
+        baseline=list(c.connections(cfg))
+        route={'host':'proxy.example.invalid','service':'api@internal',
+               'authentik_forward_auth':'login','middlewares':['security-headers','login']}
+        self.assertEqual(list(c.connections(cfg,{'proxy':route})),baseline)
+        c.validate(cfg,{'proxy':route})
+        for change in ({'service':'other@internal'},{'url':'http://198.18.2.3:8123'}):
+            with self.subTest(change=change),self.assertRaisesRegex(ValueError,'validated internal dashboard'):
+                list(c.connections(cfg,{'proxy':dict(route,**change)}))
+
     def test_interface_scoped_rule_never_proves_access_through_another_nic(self):
         cfg = self.configurations()
         cfg["ingress"]["guest"]["interfaces"].append({"ipv4": "manual", "bridge": "vmbr1",

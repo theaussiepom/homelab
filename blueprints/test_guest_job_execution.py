@@ -61,10 +61,11 @@ class GuestJobExecutionTests(unittest.TestCase):
         runner_temp = work / 'temp'; runner_temp.mkdir(mode=0o700)
         trace = work / 'trace.jsonl'
         bootstrap = work / 'bootstrap'; bootstrap.mkdir()
+        if fail == 'guard': (bootstrap/'CONFIGURING').touch()
         workflow = self.models['guest-' + guest + '.yml']
         values = {key: 'invented-' + key for key in workflow['on']['workflow_call']['secrets']}
         job = workflow['jobs']['deploy']; returncode = 0
-        for step in job['steps'][6:]:
+        for step in [inner for call in job['steps'][1:] for inner in oracle.phase_steps(guest,call['with']['phase'])]:
             self.assertNotIn('if', step); self.assertNotIn('continue-on-error', step)
             environment = self.environment(step.get('env', {}), values)
             script = step['run'].replace('/var/lib/homelab-bootstrap', str(bootstrap)) if step['name'] == 'Check readiness' else step['run']
@@ -75,7 +76,7 @@ class GuestJobExecutionTests(unittest.TestCase):
             if result.returncode:
                 returncode = result.returncode
                 break  # GitHub's documented default success() step condition.
-        records = [json.loads(line) for line in trace.read_text().splitlines()]
+        records = [json.loads(line) for line in trace.read_text().splitlines()] if trace.exists() else []
         return returncode, records, runner_temp, values
 
     def test_all36_phase_command_chains_use_unique_private_packets_and_step_only_credentials(self):
@@ -109,3 +110,9 @@ class GuestJobExecutionTests(unittest.TestCase):
                     expected = [(name, item) for name in phases[:phase_index] for item in stages]
                     expected.extend((phase, item) for item in stages[:stage_index + 1])
                     self.assertEqual([(r['phase'], r['stage']) for r in records], expected)
+
+    def test_guard_failure_prevents_compile_binding_and_deploy(self):
+        status,records,folder,_=self.exercise('automation','guard')
+        self.assertNotEqual(status,0)
+        self.assertEqual(records,[])
+        self.assertEqual(list(folder.iterdir()),[])

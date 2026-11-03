@@ -51,70 +51,110 @@ retained local image ID. Ordinary deployment does not pull or retag mutable
 before start. Missing or mismatched local content fails closed. Explicit immutable
 registry digests and verified archive selections keep their existing behavior.
 
-GitHub requires literal reusable workflow references. The stack keeps one
-independently callable workflow per guest and explicit cross-guest `needs`. Each
-guest workflow contains one real deployment job named Deploy. Infrastructure,
-preparation and application phases run as ordered steps in that job. There is
-one additional selection-validation job before the eleven guest deployment jobs.
+The stack keeps one independently callable workflow per guest and explicit
+cross-guest `needs`. The private consumer materializes the same native guest jobs
+with guest-only names. Each guest has Setup, Infrastructure, Prepare, one step
+named for each application, and a final Zabbix agent step when monitored.
+GitHub-owned checkout/cleanup details can still appear within those actions.
 
-The generator reads the selected framework checkout's authoritative phase recipe.
-Five checkout and selection steps run once per guest, using the pinned
-private/stack/framework sources. The original readiness command runs before
-every phase. An exact digest guard permits sharing only the reviewed
-common setup; changed commands, action pins, output IDs or policies require review.
-The existing stack/framework output IDs occur once. The compiler, credential binding
-and deployment commands then run separately for every phase with unchanged command
-bodies and phase-specific packet paths. Each compiler creates a new packet
-exclusively; phases do not reuse another phase's packet or environment secrets.
-The original readiness command checks bootstrap custody before each phase's
-compilation and credential binding; only checkout and selection work is shared.
-A hold present at that phase readiness check stops the phase before its packet
-or missing retained credentials can be written. This restores the original
-boundary check; it does not make an entire phase atomic. The deployment entry point also
-rechecks bootstrap custody before target access on every phase.
+The pinned framework Setup composite selects the private, stack and framework
+sources. It accepts exactly one immutable stack selection, either the reusable
+workflow reference or the flattened `HOMELAB_STACK_SOURCE` declaration. Ambiguous
+or unpinned selections refuse. Checkouts disable persisted credentials.
 
-The selected runner, protected Environment, contents-read permission and workflow
-identity apply to the guest job. Its budget is the original 45-minute phase
-allowance multiplied by the phase count: 135 minutes for three-phase guests,
-180 for DNS and 225 for Automation. Every setup, compile, credential and deployment
-step also has an explicit 45-minute cap. The standalone phase recipe retains its
-45-minute job budget, and command-internal deadlines remain unchanged. Generation
-refuses an aggregate above 360 minutes, keeping the budget within the portable
-GitHub-hosted job limit. Self-hosted runners have a higher platform limit; this
-framework deliberately retains the portable bound. One job replaces the former
-per-phase runner and Environment boundaries. A failed step stops subsequent
-phase steps under GitHub's default success condition. Rerunning the guest starts
-at infrastructure and remains subject to existing holds and no-replay checks.
+A pinned phase composite retains four separate inner steps from the authoritative
+`.github/workflows/guest-phase.yml` recipe: bootstrap readiness, compile/admit,
+credential binding, and deployment. The readiness and compiler steps receive no
+credential environment. The binding step receives only its two existing common
+credentials; deployment receives only the existing application aliases. The
+caller passes only that guest's declared input subset, rather than putting all
+credentials in a parent shell environment. Source checks reject action/recipe
+drift. Original command bytes, phase-specific exclusive packet paths, locks,
+receipts, holds, runtime input checks and command-internal deadlines remain.
 
-Guest-only secret declarations and the original credential/deployment step scopes
-remain intact. Provably false unrelated secret operands bind to the explicit empty
-value; selected credentials cannot be folded away. All checkouts disable persisted
-credentials. The pinned checkout action removes authentication before its main step
-returns; its final cleanup remains at job end. Phase credential-key temporary files
-retain the existing cleanup within credential binding. Short labels include Update
-container, Prepare service, Deploy service, Deploy DNS, Deploy MQTT, Deploy Home
-Assistant and Deploy Node-RED.
+A hold at phase readiness stops before creating the next packet or binding
+missing credentials. The deployment entry point checks bootstrap custody again
+before target access. These are boundary checks, not a claim that an entire phase
+is atomic. Default Actions failure behavior stops all later phases. A rerun starts
+with infrastructure and is still subject to existing no-replay and hold checks.
 
-References: [workflow reuse](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows),
-[step status conditions](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions),
-[runner execution limits](https://docs.github.com/en/actions/reference/limits),
-[step timeout limits](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idstepstimeout-minutes),
-[pinned checkout authentication cleanup](https://github.com/actions/checkout/blob/3d3c42e5aac5ba805825da76410c181273ba90b1/src/git-source-provider.ts#L291).
+Each visible action has the original 45-minute phase cap. The guest job budget is
+45 minutes multiplied by its phase count; generation refuses an aggregate above
+360 minutes. The standalone leaf keeps its own 45-minute job budget. Runner,
+protected Environment, contents-read permissions and workflow identity stay on
+the guest job. There is no runtime DAG executor, secret broker or consumer phase
+runner. `phase.yml` remains the immutable framework selection anchor.
 
-`blueprints/workflows.py` generates the checked-in stack entry workflow and one
-permanent workflow per guest. Application phase order comes from the blueprint
-catalogue. The generator supplies short step labels and uses catalogue names for
-additional application phases; cross-guest dependencies come from `stack.json`. Source CI
-runs the same selected generator with `--check` and rejects missing, changed or
-obsolete generated paths without rewriting them. GitHub executes the explicit
-checked-in jobs and steps; there is no runtime DAG executor or phase dispatcher.
-The framework selection in `phase.yml` remains an uncalled immutable selection
-anchor for existing source/CI/runtime parsers. Guest jobs do not call that wrapper.
-The source equivalence checks establish eleven deployment jobs, all 36 ordered
-logical phases, command bytes and effective secret values. Actual Actions job names,
-step display and private workflow/receipt continuity require separate verification
-on the next authorized native CD. Static source tests do not establish native UI
-acceptance.
+`blueprints/workflows.py` generates stack workflows and validates the checked-in
+shared actions against the selected authoritative leaf. `--check` rejects drift
+without rewriting source. Tests exercise exact command bodies, phase order,
+effective step-only secret values, late holds and failure stops. Source tests do
+not establish actual Actions rendering, target continuity or application health;
+those require the authorized CD and its observations.
+
+## Explicit site bindings
+
+A stack may declare a closed `required_site_bindings` map in `stack.json`:
+
+```json
+{
+  "required_site_bindings": {
+    "vmids.web": "integer",
+    "domains.web": "string",
+    "vlans.backend": ["integer", "null"],
+    "ssh.public_keys": "string-list"
+  }
+}
+```
+
+A declared whole `${key}` preserves its integer, nullable integer or nonempty
+flat string-list type. Embedded substitution remains text-only; lists cannot be
+embedded or stringified. Existing field validators still enforce SSH-key, CIDR,
+port and other semantics. Booleans are not integers. Stacks omitting this optional
+map retain the previous text substitution behavior. Literal custody catalogue and
+acceptance proofs keep their exact bytes, independent of these typed references;
+`${inputs}` remains bound at the existing final input-slot stage.
+
+Admission requires every declared key to be supplied explicitly by the consumer,
+even when a public source default exists. Declared address/network/domain inputs
+reject known documentation/test ranges and reserved example domains. That finite
+check does not classify arbitrary text, every reserved range, integer allocation
+or MAC as synthetic. Runnable examples remain separate synthetic site overlays.
+
+The single offline checker is invoked as:
+
+```sh
+python3 tools/check_boundaries.py --mode framework --root .
+python3 /path/to/selected/framework/tools/check_boundaries.py --mode stack --root /path/to/stack
+python3 /path/to/selected/framework/tools/check_boundaries.py --mode consumer --root /path/to/consumer
+```
+
+It checks source-controlled/unignored source text, ignoring protected local work
+and external source checkouts. Public modes reject private-consumer references,
+personal checkout paths and literal host identity policy. Stack mode checks known
+allocation/network-policy fields and required bindings. Consumer mode rejects
+known target libraries/commands outside tests while allowing offline validation
+and generated ordinary CD. The exact public schema identifier `homelab-site-v3`
+is permitted without exempting other text on that line. These are finite ownership
+regression checks, not a complete secret scanner or arbitrary-execution proof;
+existing security scanners and source review remain required.
+
+## Optional authenticated ingress dashboard
+
+Ingress `foundation.dashboard` is an optional exact boolean. Omitted or false
+preserves the existing disabled dashboard. An enabled route uses
+`target: {"internal": "dashboard"}` and must select an existing declared
+`authentik_forward_auth` middleware in its ordered middleware list. Compilation
+refuses an unenabled dashboard, foreign internal services, raw backend overrides,
+unprotected exposure and TLS transports on the internal service.
+
+The file provider routes normal `websecure` HTTPS to `api@internal`; no insecure
+API listener or host API port is added. The same authentication protects root,
+dashboard and API paths. Root redirects to `/dashboard/` after authentication;
+the existing outpost callback is derived separately without an authentication
+loop. Hostnames, optional client policies, provider coverage and actual endpoint
+acceptance belong to the consumer. This capability adds no default IP restriction
+and does not manage firewall policy.
 
 ## Custody and phase behavior
 
@@ -297,7 +337,7 @@ trusted workstation, create a fresh private policy from the compiled packet:
 
 ```sh
 umask 077
-python3 blueprints/compile.py --stack ../homelab-stack --site ../homelab-site/site.json --guest zigbee2mqtt --output /private/reviewed-packet.json
+python3 blueprints/compile.py --stack ../homelab-stack --site ../consumer/site.json --guest zigbee2mqtt --output /private/reviewed-packet.json
 python3 proxmox/applications/host_devices.py --packet /private/reviewed-packet.json --output /private/209.json
 ansible-playbook -i /private/operator-inventory.yml proxmox/bootstrap/ansible/host-device.yml -e host_device_policy_file=/private/209.json
 ```

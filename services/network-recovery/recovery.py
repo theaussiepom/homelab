@@ -62,7 +62,10 @@ def run_json(argv):
 
 
 def validate_config(config):
-    if config.get("schema") != 1 or config.get("hostname") != "ben-beast":
+    hostname = config.get('hostname') if isinstance(config, dict) else None
+    if (not isinstance(config, dict) or config.get("schema") != 1
+            or not isinstance(hostname, str) or len(hostname) > 253 or not re.fullmatch(
+                r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*', hostname)):
         raise ValueError("Unsupported configuration/host")
     policy = config["policy"]
     bounds = {"stable_seconds": (60, 600), "fault_seconds": (60, 600),

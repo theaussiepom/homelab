@@ -1,0 +1,75 @@
+# Generated from .github/workflows/guest-phase.yml by blueprints/workflows.py.
+name: Guest phase
+description: Run one guarded admitted deployment phase
+inputs:
+  guest:
+    description: Selected guest
+    required: true
+  phase:
+    description: Selected phase
+    required: true
+  disabled:
+    description: Selected disabled
+    required: false
+    default: '[]'
+  APPLICATION_SSH_KEY:
+    description: Existing scoped credential
+    required: true
+  PROXMOX_APP_TOKEN:
+    description: Existing scoped credential
+    required: true
+  AUTOMATION_NODE_RED_API_TOKEN:
+    description: Existing scoped credential
+    required: false
+  FOUNDATION_AUTHENTIK_POSTGRES_PASSWORD:
+    description: Existing scoped credential
+    required: false
+  FOUNDATION_AUTHENTIK_SECRET_KEY:
+    description: Existing scoped credential
+    required: false
+  FOUNDATION_AUTHENTIK_SMTP_PASSWORD:
+    description: Existing scoped credential
+    required: false
+  FOUNDATION_PGADMIN_OAUTH_SECRET:
+    description: Existing scoped credential
+    required: false
+  FOUNDATION_CLOUDFLARE_DNS_TOKEN:
+    description: Existing scoped credential
+    required: false
+runs:
+  using: composite
+  steps:
+  - name: Check readiness
+    run: 'test ! -e /var/lib/homelab-bootstrap/CONFIGURING
+
+      test ! -e /var/lib/homelab-bootstrap/BOOTSTRAP-CD-HOLD.json
+
+      '
+    shell: bash
+  - name: Check inputs
+    env:
+      GUEST: ${{ inputs.guest }}
+      PHASE: ${{ inputs.phase }}
+      DISABLED: ${{ inputs.disabled }}
+    run: "umask 077\npython3 framework-source/blueprints/compile.py --stack stack-source --site site.json \\\n  --guest \"$GUEST\" --disabled \"$DISABLED\" --admit \\\n  --output \"$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json\"\n"
+    shell: bash
+  - name: Load credentials
+    env:
+      GUEST: ${{ inputs.guest }}
+      PHASE: ${{ inputs.phase }}
+      PROXMOX_APP_TOKEN: ${{ inputs.PROXMOX_APP_TOKEN }}
+      APPLICATION_SSH_KEY: ${{ inputs.APPLICATION_SSH_KEY }}
+    run: python3 framework-source/blueprints/credentials.py --packet "$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json"
+    shell: bash
+  - name: Deploy
+    env:
+      GUEST: ${{ inputs.guest }}
+      PHASE: ${{ inputs.phase }}
+      NODE_RED_API_TOKEN: ${{ inputs.guest == 'automation' && inputs.AUTOMATION_NODE_RED_API_TOKEN || '' }}
+      AUTHENTIK_SECRET_KEY: ${{ inputs.guest == 'identity' && inputs.FOUNDATION_AUTHENTIK_SECRET_KEY || '' }}
+      AUTHENTIK_POSTGRES_PASSWORD: ${{ inputs.guest == 'identity' && inputs.FOUNDATION_AUTHENTIK_POSTGRES_PASSWORD || '' }}
+      AUTHENTIK_SMTP_PASSWORD: ${{ inputs.guest == 'identity' && inputs.FOUNDATION_AUTHENTIK_SMTP_PASSWORD || '' }}
+      PGADMIN_OAUTH_SECRET: ${{ inputs.guest == 'db-tools' && inputs.FOUNDATION_PGADMIN_OAUTH_SECRET || '' }}
+      CLOUDFLARE_DNS_TOKEN: ${{ inputs.guest == 'ingress' && inputs.FOUNDATION_CLOUDFLARE_DNS_TOKEN || '' }}
+    run: python3 framework-source/proxmox/applications/deploy.py --phase "$PHASE" --packet "$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json"
+    shell: bash

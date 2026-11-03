@@ -50,7 +50,7 @@ SCHEMAS = {
             "pve_ca_file",
             "acme_dns_resolvers",
         },
-        {'discovery_scope', 'acme_dns_propagation_timeout_seconds'},
+        {'discovery_scope', 'acme_dns_propagation_timeout_seconds', 'dashboard'},
     ),
 }
 
@@ -159,6 +159,7 @@ def validate(cfg):
     for name in (required | (optional & selected.keys())) - {
         "acme_dns_resolvers", 'allowed_callback_additions', 'discovery_scope',
         'acme_dns_propagation_timeout_seconds',
+        'dashboard',
     }:
         text(selected[name], name)
     services = cfg.get("services", {})
@@ -200,6 +201,10 @@ def validate(cfg):
             raise ValueError("Foundation pgAdmin uses the selected UID/GID 5050")
     else:
         discovery.validate_ingress(cfg.get("routing", {}))
+        if 'dashboard' in selected and type(selected['dashboard']) is not bool:
+            raise ValueError('Select the ingress dashboard with an explicit boolean')
+        if any('service' in route for route in cfg.get('routing', {}).get('routes', {}).values()) and not selected.get('dashboard', False):
+            raise ValueError('Enable the dashboard before exposing its internal service')
         discovery_scope.selected(cfg)
         address(selected["bind_address"])
         dns_resolvers(selected["acme_dns_resolvers"])
@@ -422,7 +427,7 @@ def files(cfg):
                 "health": {"address": "127.0.0.1:8082"},
             },
             "ping": {"entryPoint": "health"},
-            "api": {"dashboard": False},
+            "api": {"dashboard": selected.get('dashboard', False)},
             "experimental": {
                 "abortOnPluginFailure": True,
                 "plugins": {

@@ -1,5 +1,5 @@
 [Unit]
-Description=BenBeast bounded local network recovery
+Description=Configured host bounded local network recovery
 After=network.target docker.service
 
 [Service]

@@ -82,9 +82,9 @@ def validate_routes(routes, addresses=None):
         name(key)
         require(
             isinstance(route, dict)
-            and {"host", "url"} <= route.keys()
+            and 'host' in route and (('url' in route) != ('service' in route))
             and not route.keys()
-            - {"host", "url", "aliases", "middlewares", "transport", "authentik_forward_auth"},
+            - {"host", "url", "service", "aliases", "middlewares", "transport", "authentik_forward_auth"},
             "Use only the resolved routing contract fields",
         )
         aliases = route.get("aliases", [])
@@ -98,7 +98,13 @@ def validate_routes(routes, addresses=None):
             "Route hostnames must be globally unique",
         )
         hosts.update(selected)
-        backend = origin(route["url"], addresses)
+        if 'service' in route:
+            require(route['service'] == 'api@internal' and addresses is None
+                    and 'authentik_forward_auth' in route and 'transport' not in route,
+                    'Expose only the authenticated internal dashboard through ingress')
+            name(key + '-dashboard-root')
+        else:
+            backend = origin(route["url"], addresses)
         middleware = route.get("middlewares", ["security-headers"])
         require(
             isinstance(middleware, list) and len(middleware) <= 16,
@@ -167,7 +173,7 @@ def router(key, route):
     return {
         "rule": "(" + rule + ")" if len(hosts) > 1 else rule,
         "priority": 10,
-        "service": key,
+        "service": route.get('service', key),
         "entryPoints": ["websecure"],
         "tls": {"certResolver": "letsencrypt"},
         "middlewares": [
@@ -299,6 +305,13 @@ def shared(settings):
     }
     for key, route in settings.get("routes", {}).items():
         http["routers"][key] = router(key, route)
+        if 'service' in route:
+            selected = name(key + '-dashboard-root')
+            require(selected not in http['middlewares'], 'Preserve unique dashboard middleware names')
+            http['middlewares'][selected] = {'redirectRegex': {
+                'regex': r'^https://([^/]+)/?$', 'replacement': 'https://${1}/dashboard/', 'permanent': False}}
+            http['routers'][key]['middlewares'].append(selected + '@file')
+            continue
         backend = {"servers": [{"url": route["url"].rstrip("/")}]}
         if "transport" in route:
             backend["serversTransport"] = route["transport"] + "@file"
@@ -309,6 +322,7 @@ def shared(settings):
     for key, route in callbacks.items():
         selected = callback_name(key)
         callback = router(selected, route)
+        callback['service'] = selected
         callback["rule"] += " && PathPrefix(`" + AUTHENTIK_PREFIX + "`)"
         callback["priority"] = 15
         callback["middlewares"] = [value for value in callback["middlewares"]

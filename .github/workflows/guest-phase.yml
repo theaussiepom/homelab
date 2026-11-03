@@ -64,7 +64,7 @@ jobs:
           python3 - <<'PYCODE' >> "$GITHUB_OUTPUT"
           import pathlib, re
           text = pathlib.Path('.github/workflows/deploy.yml').read_text()
-          pins = re.findall(r'^\s*uses: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/\.github/workflows/deploy\.yml@([0-9a-f]{40})\s*$', text, re.M)
+          pins = re.findall(r'^(?:\s*uses:|  HOMELAB_STACK_SOURCE:) ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/\.github/workflows/deploy\.yml@([0-9a-f]{40})\s*$', text, re.M)
           if len(pins) != 1: raise SystemExit('Select one immutable stack workflow')
           print('repository='+pins[0][0]); print('revision='+pins[0][1])
           PYCODE

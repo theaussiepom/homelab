@@ -130,3 +130,27 @@ class RoutesTests(unittest.TestCase):
         changed["native"][0]["guest"]["interfaces"][0].update(ipv4="dhcp", ipv4_endpoint="198.18.30.20/27", gateway=None)
         with self.assertRaisesRegex(ValueError, "managed guest backend"):
             r.bind(changed, {"app": dict(route, target={"url": "http://198.18.30.20:80"})})
+
+    def test_dashboard_target_is_an_optin_authenticated_internal_route(self):
+        import discovery
+        cfg=fixture();stack=cfg['ingress'][1]
+        stack['foundation']['dashboard']=True
+        stack['routing']['middlewares']['login']={'forwardAuth':{
+            'address':'http://198.18.30.21:9000/outpost.goauthentik.io/auth/traefik'}}
+        route={'host':'proxy.example.invalid','target':{'internal':'dashboard'},
+               'middlewares':['security-headers','login'],'authentik_forward_auth':'login'}
+        self.assertEqual(r.bind(cfg,{'proxy':route}),{'proxy.example.invalid':'198.18.40.33'})
+        self.assertEqual(stack['routing']['routes']['proxy']['service'],'api@internal')
+        self.assertEqual(cfg['ingress'][0]['routes'],{})
+        self.assertEqual(discovery.shared(stack['routing'])['http']['routers']['proxy']['service'],'api@internal')
+        for mutation in ('disabled','foreign','noauth','rawurl','rawservice','unknownauth'):
+            cfg=fixture();cfg['ingress'][1]['foundation']['dashboard']=True
+            cfg['ingress'][1]['routing']['middlewares']['login']={'forwardAuth':{'address':'http://198.18.30.21:9000/outpost.goauthentik.io/auth/traefik'}}
+            selected=copy.deepcopy(route)
+            if mutation=='disabled':cfg['ingress'][1]['foundation']['dashboard']=False
+            elif mutation=='foreign':selected['target']['internal']='other'
+            elif mutation=='noauth':selected.pop('authentik_forward_auth')
+            elif mutation=='rawurl':selected['url']='http://198.18.30.20'
+            elif mutation=='rawservice':selected['service']='api@internal'
+            else:selected['authentik_forward_auth']='missing'
+            with self.subTest(mutation=mutation),self.assertRaises(ValueError):r.bind(cfg,{'proxy':selected})

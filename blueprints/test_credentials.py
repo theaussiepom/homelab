@@ -109,7 +109,7 @@ class CredentialTests(unittest.TestCase):
                 with self.subTest(marker=marker, phase=phase):
                     case = self.root / (marker + "-" + phase); case.mkdir()
                     bootstrap = case / "bootstrap"; bootstrap.mkdir()
-                    initial = job["steps"][0]["run"].replace("/var/lib/homelab-bootstrap", str(bootstrap))
+                    initial = oracle.phase_steps('automation','infrastructure')[0]['run'].replace("/var/lib/homelab-bootstrap", str(bootstrap))
                     self.assertEqual(subprocess.run(["bash", "-e", "-c", initial], capture_output=True).returncode, 0)
                     (bootstrap / marker).write_text("synthetic late hold")
                     self.packet = case / "packet.json"
@@ -118,11 +118,9 @@ class CredentialTests(unittest.TestCase):
                     cfg = json.loads(self.value["files"]["site.json"])
                     cfg["paths"] = {"api_token": str(self.token), "private_key": str(self.key)}
                     self.value["files"]["site.json"] = json.dumps(cfg)
-                    index = next(i for i, step in enumerate(job["steps"])
-                                 if step["name"] == "Check inputs" and step["env"]["PHASE"] == phase)
-                    start = index - 1 if job["steps"][index - 1]["name"] == "Check readiness" else index
+                    steps=oracle.phase_steps('automation',phase)
                     events = []; blocked = False
-                    for step in job["steps"][start:index + 3]:
+                    for step in steps:
                         if step["name"] == "Check readiness":
                             # Only remap the fixed marker directory into this temporary fixture.
                             script = step["run"].replace("/var/lib/homelab-bootstrap", str(bootstrap))

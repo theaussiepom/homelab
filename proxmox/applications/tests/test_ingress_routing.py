@@ -119,3 +119,22 @@ class IngressRoutingTests(unittest.TestCase):
             cfg[key] = value
             with self.assertRaises(ValueError):
                 routing.validate(cfg)
+
+    def test_configured_private_prefix_drives_exact_observed_prefix_and_reserved_routes(self):
+        self.settings['address']='10.88.40.33/25'
+        self.links[0]['addr_info'][0]['prefixlen']=25
+        self.assertTrue(routing.run(self.settings,apply=True)['changed'])
+        self.assertEqual(self.writes[0],['route','add','10.88.40.0/25','dev','eth2','scope','link','src','10.88.40.33','table','10040'])
+        self.writes.clear()
+        self.assertFalse(routing.run(self.settings,apply=True)['changed'])
+        self.links[0]['addr_info'][0]['prefixlen']=24
+        with self.assertRaisesRegex(ValueError,'prefix'):routing.run(self.settings,apply=True)
+        self.assertEqual(self.writes,[])
+        for address,gateway in [('10.88.40.33/7','10.88.40.1'),('8.8.8.33/24','8.8.8.1'),
+                                ('198.18.40.33/14','198.18.40.1'),('10.88.40.33/31','10.88.40.32'),
+                                ('10.88.40.33/32','10.88.40.1')]:
+            with self.subTest(address=address),self.assertRaises(ValueError):
+                routing.validate(dict(self.settings,address=address,gateway=gateway))
+        for address,gateway in [('10.1.1.2/8','10.1.1.1'),('172.20.1.2/16','172.20.1.1'),
+                                ('192.168.1.2/30','192.168.1.1'),('198.18.1.2/25','198.18.1.1')]:
+            self.assertEqual(routing.validate(dict(self.settings,address=address,gateway=gateway))[0],address.split('/')[0])

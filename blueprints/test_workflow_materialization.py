@@ -5,6 +5,7 @@ import hashlib
 import itertools
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -34,7 +35,7 @@ OWNED_SECRETS = {
     "ingress": {"FOUNDATION_CLOUDFLARE_DNS_TOKEN"},
 }
 APP_LABELS = {"unbound": "Unbound", "pihole": "Pi-hole", "mqtt": "MQTT", "homeassistant": "Home Assistant", "node_red": "Node-RED"}
-FROZEN_LEAF_SHA256 = "0834cf04bf9f8b0429100a1bec4f57e1be9eb2ed71a64b9e5b4b88d9ea152802"
+FROZEN_LEAF_SHA256 = "796acf6dc7cf5bea710a75e78d540ea5540ddbe7e18ed9aa5846a785b86ec6ac"
 
 
 def fixture(root):
@@ -58,6 +59,18 @@ def document(path):
     return value
 
 
+def phase_steps(guest, phase):
+    """Read actual selected action; substitute inputs without the production binder."""
+    steps = document(workflows.PHASE_RECIPE.parents[1]/'actions/guest-phase/action.yml')['runs']['steps']
+    for step in steps:
+        for key,value in step.get('env',{}).items():
+            value=value.replace('${{ inputs.guest }}',guest).replace('${{ inputs.phase }}',phase)
+            value=value.replace('inputs.guest',repr(guest))
+            value=re.sub(r'inputs\.([A-Z_]+)',r'secrets.\1',value)
+            step['env'][key]=value
+    return steps
+
+
 class MaterializationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
@@ -71,20 +84,10 @@ class MaterializationTests(unittest.TestCase):
         self.models = workflows.models(self.root)
 
     def expected_phase(self, guest, phase, display):
-        # Independent approved-substitution oracle; no production binder reuse.
-        result = copy.deepcopy(self.original["jobs"]["run"]["steps"][6:])
-        for step in result: step["env"].update(GUEST=guest, PHASE=phase)
-        for key, expression in result[2]["env"].items():
-            if key not in {"GUEST", "PHASE"}:
-                owner = expression.split(" == '", 1)[1].split("'", 1)[0]
-                result[2]["env"][key] = (
-                    expression.replace("inputs.guest", repr(guest)) if guest == owner
-                    else "${{ " + repr(guest) + " == " + repr(owner) + " && '' || '' }}"
-                )
-        for step, name in zip(result, ("Check inputs", "Load credentials", display)):
-            step["name"] = name
-            step["timeout-minutes"] = 45
-        return result
+        return {'name': display, 'uses': 'example/framework/.github/actions/guest-phase@' + '1'*40,
+                'timeout-minutes': 45, 'with': {'guest': guest, 'phase': phase,
+                'disabled': '${{ inputs.disabled }}', **{key: '${{ secrets.' + key + ' }}'
+                    for key in {'APPLICATION_SSH_KEY', 'PROXMOX_APP_TOKEN'} | OWNED_SECRETS.get(guest, set())}}}
 
     def verify(self, models):
         jobs = phases_count = phase_bodies = 0
@@ -123,33 +126,28 @@ class MaterializationTests(unittest.TestCase):
             self.assertEqual(models["deploy.yml"]["jobs"][guest]["needs"], ["selection", *DEPENDENCIES[guest]])
             job = workflow["jobs"]["deploy"]
             expected = copy.deepcopy(self.original["jobs"]["run"])
-            expected["name"] = "Deploy"
+            expected["name"] = workflows.compiler.CATALOGUE[guest]['name']
             expected["timeout-minutes"] = 45 * len(phases)
             expected["if"] = expected["if"].replace("inputs.guest", repr(guest))
-            expected["steps"] = expected["steps"][:6]
-            for step, name in zip(expected["steps"], names):
-                step["name"] = name
-                step["timeout-minutes"] = 45
+            expected['steps'] = [{'name': 'Setup',
+                'uses': 'example/framework/.github/actions/guest-setup@' + '1'*40, 'timeout-minutes':45}]
+            names = dict(workflows.compiler.CATALOGUE[guest]['application_names'],
+                         **workflows.compiler.CATALOGUE[guest].get('optional_applications',{}))
             for phase in phases:
-                if phase != "infrastructure":
-                    expected["steps"].append(copy.deepcopy(expected["steps"][0]))
-                display = {"infrastructure": "Update container", "preparation": "Prepare service"}.get(phase)
-                if display is None:
-                    display = ({"unbound": "Deploy resolver", "pihole": "Deploy DNS", "mqtt": "Deploy MQTT", "homeassistant": "Deploy Home Assistant", "node_red": "Deploy Node-RED"}[phase] if len(phases) > 3 else "Deploy service")
-                expected["steps"].extend(self.expected_phase(guest, phase, display))
+                display = {'infrastructure':'Infrastructure','preparation':'Prepare'}.get(phase, names.get(phase))
+                expected['steps'].append(self.expected_phase(guest, phase, display))
                 phases_count += 1; phase_bodies += 3
             self.assertEqual(job, expected)
-            self.assertFalse({"uses", "with", "secrets", "needs"} & set(job))
-            self.assertEqual([s["id"] for s in job["steps"] if "id" in s], ["stack", "framework"])
-            self.assertEqual(len(job["steps"]), 5 + 4 * len(phases))
-            self.assertTrue(all("if" not in s and "continue-on-error" not in s for s in job["steps"]))
+            self.assertFalse({'uses','with','secrets','needs'} & set(job))
+            self.assertEqual(len(job['steps']), 1 + len(phases))
+            self.assertTrue(all('if' not in s and 'continue-on-error' not in s and 'env' not in s for s in job['steps']))
             jobs += 1
         self.assertEqual((jobs, phases_count, phase_bodies), (11, 36, 108))
 
     def test_all11_guest_jobs_preserve36_ordered_phases_and_qualified_setup(self):
         self.assertEqual(hashlib.sha256(workflows.PHASE_RECIPE.read_bytes()).hexdigest(), FROZEN_LEAF_SHA256)
         self.verify(self.models)
-        self.assertEqual(sum(sum("run" in s for s in w["jobs"]["deploy"]["steps"]) for n, w in self.models.items() if n.startswith("guest-")), 166)
+        self.assertEqual(sum(len(w['jobs']['deploy']['steps']) for n,w in self.models.items() if n.startswith('guest-')),47)
 
     def test_all2048_exclusion_subsets_match_the_existing_selection_gate(self):
         step = self.models["deploy.yml"]["jobs"]["selection"]["steps"][0]
@@ -168,37 +166,30 @@ class MaterializationTests(unittest.TestCase):
 
     def test_mutations_cannot_pass_the_independent_execution_equivalence_oracle(self):
         mutations = [
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update(needs="infrastructure"),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update({"if": "true"}),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update({"runs-on": "ubuntu-latest"}),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update(environment="other"),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update({"timeout-minutes": 90}),
-            lambda m: m["guest-automation.yml"]["jobs"]["deploy"].update({"timeout-minutes": 45}),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][0].pop("timeout-minutes"),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][0].update({"timeout-minutes": 90}),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][8].pop("timeout-minutes"),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][8].update({"timeout-minutes": 90}),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update({"timeout-minutes": 405}),
-            lambda m: m["guest-dns.yml"]["permissions"].update(contents="write"),
-            lambda m: m["guest-dns.yml"]["defaults"]["run"].update(shell="sh"),
-            lambda m: m["guest-dns.yml"]["on"]["workflow_call"]["secrets"].update(UNRELATED_SECRET={"required": True}),
-            lambda m: m["phase.yml"]["jobs"]["run"].update(uses="example/other@main"),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"].update(uses="./.github/workflows/phase.yml"),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][-1].update(run="true"),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][-1]["env"].update(PHASE="unbound"),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"].pop(),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"].pop(9),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][9].update(run="true"),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][9].update(env={"PROXMOX_APP_TOKEN": "unexpected"}),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"].insert(10, m["guest-dns.yml"]["jobs"]["deploy"]["steps"].pop(9)),
-            lambda m: m["deploy.yml"]["jobs"]["automation"].update(needs=["selection"]),
-            lambda m: m["guest-automation.yml"]["jobs"]["deploy"]["env"].update(NODE_RED_API_TOKEN="unexpected"),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][2].update(id="other"),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][3]["with"].update(ref="main"),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][3]["with"].update({"persist-credentials": True}),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][9].update({"if": "always()"}),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"][9].update({"continue-on-error": True}),
-            lambda m: m["guest-dns.yml"]["jobs"]["deploy"]["steps"].extend(copy.deepcopy(m["guest-dns.yml"]["jobs"]["deploy"]["steps"][:6])),
+            lambda m: m['guest-dns.yml']['jobs']['deploy'].update(needs='infrastructure'),
+            lambda m: m['guest-dns.yml']['jobs']['deploy'].update({'if':'true'}),
+            lambda m: m['guest-dns.yml']['jobs']['deploy'].update({'runs-on':'ubuntu-latest'}),
+            lambda m: m['guest-dns.yml']['jobs']['deploy'].update(environment='other'),
+            lambda m: m['guest-dns.yml']['jobs']['deploy'].update({'timeout-minutes':90}),
+            lambda m: m['guest-automation.yml']['jobs']['deploy'].update({'timeout-minutes':45}),
+            lambda m: m['guest-dns.yml']['jobs']['deploy']['steps'][0].pop('timeout-minutes'),
+            lambda m: m['guest-dns.yml']['jobs']['deploy']['steps'][0].update({'timeout-minutes':90}),
+            lambda m: m['guest-dns.yml']['jobs']['deploy']['steps'][2].pop('timeout-minutes'),
+            lambda m: m['guest-dns.yml']['jobs']['deploy']['steps'][2].update({'timeout-minutes':90}),
+            lambda m: m['guest-dns.yml']['permissions'].update(contents='write'),
+            lambda m: m['guest-dns.yml']['defaults']['run'].update(shell='sh'),
+            lambda m: m['guest-dns.yml']['on']['workflow_call']['secrets'].update(UNRELATED_SECRET={'required':True}),
+            lambda m: m['phase.yml']['jobs']['run'].update(uses='example/other@main'),
+            lambda m: m['guest-dns.yml']['jobs']['deploy']['steps'][-1].update(run='true'),
+            lambda m: m['guest-dns.yml']['jobs']['deploy']['steps'][-1]['with'].update(phase='unbound'),
+            lambda m: m['guest-dns.yml']['jobs']['deploy']['steps'].pop(),
+            lambda m: m['guest-dns.yml']['jobs']['deploy']['steps'].insert(2,m['guest-dns.yml']['jobs']['deploy']['steps'].pop(1)),
+            lambda m: m['deploy.yml']['jobs']['automation'].update(needs=['selection']),
+            lambda m: m['guest-automation.yml']['jobs']['deploy']['env'].update(NODE_RED_API_TOKEN='unexpected'),
+            lambda m: m['guest-dns.yml']['jobs']['deploy']['steps'][2].update({'if':'always()'}),
+            lambda m: m['guest-dns.yml']['jobs']['deploy']['steps'][2].update({'continue-on-error':True}),
+            lambda m: m['guest-dns.yml']['jobs']['deploy']['steps'][0].update(uses='example/framework/.github/actions/guest-setup@main'),
+            lambda m: m['guest-dns.yml']['jobs']['deploy']['steps'][1]['with'].update(FOREIGN='${{ secrets.FOREIGN }}'),
         ]
         for index, mutate in enumerate(mutations):
             model = copy.deepcopy(self.models); mutate(model)
@@ -244,4 +235,50 @@ class MaterializationTests(unittest.TestCase):
             with self.assertRaises(ValueError): workflows.phase_recipe()
         path.unlink(); path.write_text(yaml.safe_dump(self.original))
         with patch.object(workflows, "PHASE_RECIPE", path):
-            self.assertEqual(workflows.phase_recipe(), (self.original["jobs"]["run"], self.original["defaults"]))
+            self.assertEqual(workflows.phase_recipe(check_actions=False), (self.original["jobs"]["run"], self.original["defaults"]))
+
+    def test_shared_action_bytes_keep_the_leaf_commands_and_actual_step_secret_boundaries(self):
+        setup=document(workflows.PHASE_RECIPE.parents[1]/'actions/guest-setup/action.yml')
+        phase=document(workflows.PHASE_RECIPE.parents[1]/'actions/guest-phase/action.yml')
+        for actual,expected in zip(setup['runs']['steps'],self.original['jobs']['run']['steps'][:6],strict=True):
+            actual=copy.deepcopy(actual);actual.pop('name',None);actual.pop('shell',None)
+            expected=copy.deepcopy(expected);expected.pop('name',None)
+            self.assertEqual(actual,expected)
+        steps=phase['runs']['steps']
+        self.assertNotIn('env',steps[0]);self.assertNotIn('env',setup)
+        self.assertEqual(steps[0]['run'],self.original['jobs']['run']['steps'][0]['run'])
+        for actual,expected in zip(steps[1:],self.original['jobs']['run']['steps'][6:],strict=True):
+            self.assertEqual(actual['run'],expected['run'])
+            self.assertEqual(actual['env'],{key:value.replace('secrets.','inputs.') for key,value in expected['env'].items()})
+            self.assertEqual(actual['shell'],'bash')
+        self.assertEqual(set(steps[1]['env']),{'GUEST','PHASE','DISABLED'})
+        self.assertEqual(set(steps[2]['env']),{'GUEST','PHASE','APPLICATION_SSH_KEY','PROXMOX_APP_TOKEN'})
+        self.assertNotIn('APPLICATION_SSH_KEY',steps[3]['env'])
+        self.assertNotIn('PROXMOX_APP_TOKEN',steps[3]['env'])
+        self.assertEqual(set(phase['inputs'])-{'guest','phase','disabled'},set(workflows.secret_declarations()))
+        # Regeneration drift must fail before materializing any guest job.
+        path=self.root/'.github/workflows/guest-phase.yml';path.write_text(yaml.safe_dump(self.original))
+        for name,value in [('guest-setup',setup),('guest-phase',phase)]:
+            action=path.parents[1]/'actions'/name/'action.yml';action.parent.mkdir(parents=True);action.write_text(yaml.safe_dump(value))
+        with patch.object(workflows,'PHASE_RECIPE',path):
+            self.assertEqual(workflows.phase_recipe()[0],self.original['jobs']['run'])
+            action=path.parents[1]/'actions/guest-phase/action.yml'
+            phase['runs']['steps'][0]['env']={'APPLICATION_SSH_KEY':'${{ inputs.APPLICATION_SSH_KEY }}'}
+            action.write_text(yaml.safe_dump(phase))
+            with self.assertRaisesRegex(ValueError,'shared actions identical'):workflows.phase_recipe()
+
+    def test_actual_flat_and_nested_setup_pins_are_closed_and_secret_free(self):
+        import subprocess
+        script=document(workflows.PHASE_RECIPE.parents[1]/'actions/guest-setup/action.yml')['runs']['steps'][2]['run']
+        directory=self.root/'.github/workflows';directory.mkdir(exist_ok=True,parents=True)
+        output=self.root/'selection-output';pin='owner/recipes/.github/workflows/deploy.yml@'+'a'*40
+        for raw in ['jobs:\n  deploy:\n    uses: '+pin+'\n','env:\n  HOMELAB_STACK_SOURCE: '+pin+'\n']:
+            (directory/'deploy.yml').write_text(raw);output.write_text('')
+            result=subprocess.run(['bash','-e','-o','pipefail','-c',script],cwd=self.root,env=dict(os.environ,GITHUB_OUTPUT=str(output)),capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(output.read_text(),'repository=owner/recipes\nrevision='+'a'*40+'\n')
+        for raw in ['', 'jobs:\n  deploy:\n    uses: '+pin.replace('a'*40,'main')+'\n',
+                    'env:\n  HOMELAB_STACK_SOURCE: '+pin+'\njobs:\n  deploy:\n    uses: '+pin+'\n']:
+            (directory/'deploy.yml').write_text(raw);output.write_text('')
+            result=subprocess.run(['bash','-e','-o','pipefail','-c',script],cwd=self.root,env=dict(os.environ,GITHUB_OUTPUT=str(output)),capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0);self.assertEqual(output.read_text(),'')

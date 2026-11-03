@@ -65,9 +65,7 @@ class PrivateWorkflowTests(unittest.TestCase):
             self.assertEqual(job['needs'],public['deploy.yml']['jobs'][guest]['needs'])
             self.assertEqual(job['timeout-minutes'],old['timeout-minutes'])
             for actual,expected in zip(job['steps'],old['steps'],strict=True):
-                if actual['name']=='Choose services':
-                    self.assertEqual(actual['run'],p.CHOOSE_STACK)
-                else:self.assertEqual(actual,p.bind(expected,'[]'))
+                self.assertEqual(actual,p.bind(expected,'[]'))
             self.assertIn("github.repository == 'owner/site'",job['if'])
             self.assertNotIn('inputs.',json.dumps(job))
         self.assertEqual(value['jobs']['selection']['needs'],['validate'])
@@ -142,7 +140,7 @@ class PrivateWorkflowTests(unittest.TestCase):
                            "${{ inputs \n ['x'] }}"]:
             def changed(stack, **kwargs):
                 value = original(stack, **kwargs)
-                value['guest-web.yml']['jobs']['deploy']['steps'][-1]['run'] += '\n' + expression
+                value['guest-web.yml']['jobs']['deploy']['steps'][-1]['with']['extra'] = expression
                 return value
             with self.subTest(expression=expression), patch.object(workflows, 'models', changed):
                 with self.assertRaisesRegex(ValueError, 'closed guest workflow inputs'):
@@ -159,7 +157,7 @@ class PrivateWorkflowTests(unittest.TestCase):
         self.env['HOMELAB_DISABLED']='["web"]';self.write()
         value=p.model(self.stack,self.site)
         self.assertIn("fromJSON('[\"web\"]')",value['jobs']['web']['if'])
-        self.assertTrue(any(s.get('env',{}).get('DISABLED')=='["web"]' for s in value['jobs']['web']['steps']))
+        self.assertTrue(any(s.get('with',{}).get('disabled')=='["web"]' for s in value['jobs']['web']['steps']))
         self.env['HOMELAB_DISABLED']='';self.write();p.model(self.stack,self.site)
         self.env['HOMELAB_DISABLED']='["database"]';self.write()
         with self.assertRaises(ValueError):p.model(self.stack,self.site)
