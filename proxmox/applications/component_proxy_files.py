@@ -163,7 +163,7 @@ def _mqtt_explorer(app, secrets, records, public_ca, context):
         require(isinstance(broker.get('image'),str)
                 and re.fullmatch(r'(?:[A-Za-z0-9._:/-]+@)?sha256:[0-9a-f]{64}',broker['image']),
                 'Bind the exact selected broker image before managed account preparation')
-        connection={'name':settings['connection_name'],'hostname':broker['hostname'],'port':broker['target']['port'],
+        connection={'name':app['properties']['connection_name'],'hostname':broker['hostname'],'port':broker['target']['port'],
             'username':owner['username'],'credential_id':selected['credential_id'],'credential_file':selected['credential_file'],
             'password_file':broker['password_file'],'access':broker['account']['access']}
         private={'connection':{key:value for key,value in connection.items() if key!='credential_file'},
@@ -181,7 +181,7 @@ def _mqtt_explorer(app, secrets, records, public_ca, context):
         require(password.strip() and not any(c in password for c in '\r\n'),
                 'Supply the explicit unchanged existing broker password')
         runtime_id=app['identity'].get('runtime_id','mqtt_explorer')
-        connection={'name':settings['connection_name'],'hostname':broker['hostname'],'port':broker['target']['port'],
+        connection={'name':app['properties']['connection_name'],'hostname':broker['hostname'],'port':broker['target']['port'],
                     'username':broker['credential']['principal'],'profile_id':runtime_id}
         private={'schema':'homelab-mqtt-explorer-existing-profile-v1','profile_id':runtime_id,
                  'connection':{key:value for key,value in connection.items() if key!='profile_id'},'password':password}

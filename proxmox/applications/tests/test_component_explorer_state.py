@@ -319,7 +319,8 @@ class ExplorerFileContractTests(unittest.TestCase):
         self.app={'id':'browser','adapter':'mqtt_explorer','identity':{'services':{'mqtt_explorer':'browser2','explorer_gateway':'gateway2'},
             'runtime_directory':'/opt/homelab-app/runtime/browser2','runtime_id':'browser2'},'project_name':'gui-project',
             'origin_url':'https://gui.example.invalid','role_addresses':{'web':'198.18.30.37'},
-            'settings':{'connection_name':'Broker','authentik_outpost_url':'http://198.18.30.20:9000','broker':self.broker},
+            'properties':{'connection_name':'Broker'},
+            'settings':{'authentik_outpost_url':'http://198.18.30.20:9000','broker':self.broker},
             'storage_paths':{'data':{'source':'/srv/example/gui'}},'software_selection':{'images':{
                 key:{'image':'example/'+key+'@sha256:'+'a'*64} for key in ('mqtt_explorer','explorer_gateway')}}}
 

@@ -192,6 +192,34 @@ jobs:
           if test -f "$RUNNER_TEMP/application-coverage/report/summary.md"; then
             cat "$RUNNER_TEMP/application-coverage/report/summary.md" >> "$GITHUB_STEP_SUMMARY"
           fi
+          python3 - "$RUNNER_TEMP/application-coverage/report" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          import uuid
+          root = Path(sys.argv[1])
+          try:
+              summary = json.loads((root / 'summary.json').read_text())
+          except (OSError, ValueError):
+              raise SystemExit(0)
+          if summary.get('tests_passed') is not False:
+              raise SystemExit(0)
+          try:
+              with (root / 'applications.txt').open('rb') as stream:
+                  stream.seek(0, 2)
+                  stream.seek(max(0, stream.tell() - 16 * 1024))
+                  tail = stream.read(16 * 1024).decode('utf-8', errors='replace')
+          except OSError:
+              print('Failed applications suite log unavailable.')
+              raise SystemExit(0)
+          token = uuid.uuid4().hex
+          selected = '\n'.join(tail.splitlines()[-120:])
+          # Only the possible partial leading UTF-8 codepoint is discarded.
+          bounded = selected.encode('utf-8')[-(16 * 1024 - 1):].decode('utf-8', errors='ignore')
+          print(f'::stop-commands::{token}')
+          print(bounded)
+          print(f'::{token}::')
+          PY
       - name: Validate current stack structure with Docker Compose
         run: |
           python3 proxmox/applications/tests/compose_fixture.py "$RUNNER_TEMP/app-compose"

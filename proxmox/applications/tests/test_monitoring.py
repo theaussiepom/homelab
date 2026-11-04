@@ -43,7 +43,7 @@ class MonitoringPureTests(unittest.TestCase):
 
 
 class SamlFrontendTests(unittest.TestCase):
-    certificate=Path(__file__).with_name('monitoring-synthetic-saml-certificate.pem').read_text()
+    certificate=Path(__file__).with_name('monitoring-synthetic-saml-certificate.txt').read_text()
 
     def selected(self):
         return {'public_url':'https://zabbix.example.invalid','idp_signing_certificate':self.certificate}

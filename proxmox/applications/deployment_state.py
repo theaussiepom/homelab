@@ -403,6 +403,10 @@ class DeploymentAttempt:
 
     def phase_complete(self, phase, result, ready, *, payload=None):
         require(
+            regular(self.hold, private=True) == encoded(self.marker),
+            "Deployment hold ownership changed",
+        )
+        require(
             sha(self.work / "terraform.tfstate") == ready["state_sha256"],
             "Backend state changed during the phase; preserve its hold and evidence",
         )
@@ -442,6 +446,10 @@ class DeploymentAttempt:
             for p in self.phases}
         if self.custody_identity is not None:
             receipt["state_identity"] = ready["state_identity"]
+        require(
+            regular(self.hold, private=True) == encoded(self.marker),
+            "Deployment hold ownership changed",
+        )
         write_new(self.operation / "complete.json", encoded(receipt))
         replace_receipt(self.receipt, receipt)
         require(

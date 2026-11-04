@@ -21,20 +21,63 @@ class CloudRuntimeComponentTests(unittest.TestCase):
     def setUp(self):
         import tempfile
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name).resolve()
-        self.r=load();self.owners={};self.original_stat=os.stat;self.original_lstat=os.lstat;self.original_fstat=os.fstat
+        self.r=load();self.owners={};self.original_stat=os.stat;self.original_lstat=os.lstat;self.original_fstat=os.fstat;self.original_open=os.open
         def virtual(value):
             fields={name:getattr(value,name)for name in dir(value)if name.startswith('st_')};uid,gid=self.owners.get((value.st_dev,value.st_ino),(0,0));fields.update(st_uid=uid,st_gid=gid);return SimpleNamespace(**fields)
         def chown(path,uid,gid,*a,**kw):
             info=self.original_lstat(path);self.owners[(info.st_dev,info.st_ino)]=(uid,gid)
         def fchown(fd,uid,gid):
             info=self.original_fstat(fd);self.owners[(info.st_dev,info.st_ino)]=(uid,gid)
-        for target,value in [('stat',lambda *a,**kw:virtual(self.original_stat(*a,**kw))),('lstat',lambda *a,**kw:virtual(self.original_lstat(*a,**kw))),('fstat',lambda fd:virtual(self.original_fstat(fd))),('chown',chown),('fchown',fchown),('geteuid',lambda:0)]:
+        def opening(path,flags,*args,**kwargs):
+            fd=self.original_open(path,flags,*args,**kwargs)
+            if flags & (os.O_CREAT | os.O_EXCL) == (os.O_CREAT | os.O_EXCL):
+                info=self.original_fstat(fd);self.owners[(info.st_dev,info.st_ino)]=(0,0)
+            return fd
+        for target,value in [('open',opening),('stat',lambda *a,**kw:virtual(self.original_stat(*a,**kw))),('lstat',lambda *a,**kw:virtual(self.original_lstat(*a,**kw))),('fstat',lambda fd:virtual(self.original_fstat(fd))),('chown',chown),('fchown',fchown),('geteuid',lambda:0)]:
             context=patch.object(self.r.os,target,value);context.start();self.addCleanup(context.stop)
         for name,value in [('WORKSPACE',self.root/'legacy-workspace'),('CUSTODY',self.root/'custody'),('PGADMIN',self.root/'pgadmin'),('RUNTIME',self.root/'runtime'),('COMPOSE',str(self.root/'application/compose.yml'))]:
             setattr(self.r,name,value)
         self.r.PERMISSIONS=self.r.RUNTIME/'cloudbeaver-permissions.json';self.r.MANAGED=self.r.RUNTIME/'cloudbeaver-admin-connections.json'
         self.r.CUSTODY.mkdir(mode=0o700);self.r.RUNTIME.mkdir(mode=0o700);Path(self.r.COMPOSE).parent.mkdir(mode=0o700)
         self.owner={'node':'fixture','vmid':808,'hostname':'tools'}
+    def test_exclusive_create_reinitializes_a_reused_inode_before_root_receipt_read(self):
+        native_open=self.original_open;injected=[]
+        def reused(path,flags,*args,**kwargs):
+            fd=native_open(path,flags,*args,**kwargs)
+            if flags & (os.O_CREAT | os.O_EXCL) == (os.O_CREAT | os.O_EXCL):
+                info=self.original_fstat(fd);key=(info.st_dev,info.st_ino)
+                self.owners[key]=(8978,8978);injected.append(key)
+            return fd
+        path=self.root/'root-receipt.json'
+        with patch.object(self,'original_open',side_effect=reused):self.r.create(path,{'owned':True})
+        # The production owner guard must succeed for the newly root-created
+        # receipt, even if this inode identity had belonged to a deleted file.
+        self.assertEqual(self.r.private(path),{'owned':True})
+        self.assertEqual(len(injected),1);self.assertEqual(self.owners[injected[0]],(0,0))
+
+    def test_exclusive_create_still_allows_the_subsequent_explicit_managed_fchown(self):
+        native_open=self.original_open
+        def reused(path,flags,*args,**kwargs):
+            fd=native_open(path,flags,*args,**kwargs)
+            if flags & (os.O_CREAT | os.O_EXCL) == (os.O_CREAT | os.O_EXCL):
+                info=self.original_fstat(fd);self.owners[(info.st_dev,info.st_ino)]=(65532,65532)
+            return fd
+        path=self.root/'managed-identity.json'
+        with patch.object(self,'original_open',side_effect=reused):self.r.create(path,{'owned':True},uid=8978)
+        self.assertEqual(self.r.managed_bytes(path,8978,(0o600,)),path.read_bytes())
+        info=self.original_lstat(path);self.assertEqual(self.owners[(info.st_dev,info.st_ino)],(8978,8978))
+
+    def test_existing_read_nonexclusive_open_and_failed_exclusive_create_never_reset_owner(self):
+        path=self.root/'existing-wrong-owner.json';self.r.create(path,{'owned':True},uid=8978);before=path.read_bytes()
+        info=self.original_lstat(path);key=(info.st_dev,info.st_ino)
+        with self.assertRaises(ValueError):self.r.private(path)
+        fd=self.r.os.open(path,os.O_RDONLY | os.O_CREAT)
+        try:self.assertEqual(self.r.os.fstat(fd).st_uid,8978)
+        finally:self.r.os.close(fd)
+        with self.assertRaises(FileExistsError):self.r.create(path,{'foreign':True})
+        self.assertEqual(self.owners[key],(8978,8978));self.assertEqual(path.read_bytes(),before)
+        with self.assertRaises(ValueError):self.r.private(path)
+
     def config(self, fresh=True, suffix='one'):
         value={'workspace':str(self.root/('workspace-'+suffix)),'project':'project-'+suffix,
             'project_file':'compose-'+suffix+'.yml','services':{'cloudbeaver':'server-'+suffix,'auth_gateway':'gateway-'+suffix},

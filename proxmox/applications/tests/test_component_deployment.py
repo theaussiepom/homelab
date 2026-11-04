@@ -13,6 +13,7 @@ sys.path[:0]=[str(ROOT/'blueprints'),str(ROOT/'proxmox/applications')]
 import component_plan
 import component_packet
 import component_ansible
+import deployment_state
 import deploy
 from private_io import encoded, read_json, sha, write_bytes, write_new
 from test_component_plan import library, site
@@ -98,6 +99,62 @@ class DeploymentIntegrationTests(unittest.TestCase):
         self.assertEqual(before,{p.name:(p.stat().st_ino,p.read_bytes()) for p in payload.iterdir()})
         self.assertEqual(self.cfg['deployment']['lifecycle'],'fresh')
         self.assertFalse((self.state/'610/ORDINARY-HOLD.json').exists())
+
+    def test_changed_hold_during_final_app_preserves_previous_success_and_payload(self):
+        self.assert_hold_failure(after_phase_marker=False)
+
+    def test_changed_hold_after_final_phase_marker_refuses_attempt_success(self):
+        self.assert_hold_failure(after_phase_marker=True)
+
+    def assert_hold_failure(self, *, after_phase_marker):
+        self.all_phases()
+        receipt=self.state/'610/ordinary-complete.json'
+        canonical=(receipt.stat().st_ino,receipt.read_bytes())
+        previous=read_json(receipt,private=True)
+        immutable=Path(previous['operation'])/'complete.json'
+        immutable_before=(immutable.stat().st_ino,immutable.read_bytes())
+        payload=Path(previous['binding']['app_inputs_directory'])/'recursive_a'
+        def payload_snapshot():
+            return {str(path.relative_to(payload)):(path.stat().st_ino,path.read_bytes())
+                    for path in payload.rglob('*') if path.is_file()}
+        payload_before=payload_snapshot()
+        hold=self.state/'610/ORDINARY-HOLD.json'
+        foreign=encoded({'synthetic_foreign_hold':'replaced during final app'})
+        final_phase=self.cfg['deployment']['phases'][-1]
+        reached=[]
+        def replace_hold_after_app(argv,environment,log):
+            self.ansible(argv,environment,log)
+            self.assertEqual(log.parent.name,final_phase)
+            reached.append(final_phase)
+            write_bytes(hold,foreign)
+        original_write=deployment_state.write_new
+        def replace_hold_after_phase(path,raw):
+            original_write(path,raw)
+            if path.name==final_phase+'-complete.json':
+                reached.append(final_phase)
+                write_bytes(hold,foreign)
+        with patch.dict(os.environ,{'GITHUB_RUN_ID':'102','GITHUB_RUN_NUMBER':'11'}):
+            deploy.run('infrastructure',self.packet,inputs=self.inputs,environment={})
+            deploy.run('preparation',self.packet,inputs=self.inputs,environment={})
+            injection=(patch.object(deployment_state,'write_new',side_effect=replace_hold_after_phase)
+                       if after_phase_marker else
+                       patch.object(component_ansible,'quiet',side_effect=replace_hold_after_app))
+            with injection:
+                with self.assertRaisesRegex(ValueError,'Deployment hold ownership changed'):
+                    deploy.run(final_phase,self.packet,inputs=self.inputs,environment={})
+        operation=self.state/'610/ordinary-102-1'
+        self.assertEqual(reached,[final_phase])
+        checks={
+            'canonical unchanged':(receipt.stat().st_ino,receipt.read_bytes())==canonical,
+            'previous immutable unchanged':(immutable.stat().st_ino,immutable.read_bytes())==immutable_before,
+            'payload unchanged':payload_snapshot()==payload_before,
+            'foreign hold unchanged':hold.read_bytes()==foreign,
+            'current STARTED preserved':(operation/(final_phase+'-started.json')).is_file(),
+            'phase marker matches mutation point':(operation/(final_phase+'-complete.json')).exists()==after_phase_marker,
+            'no final attempt success':not (operation/'complete.json').exists(),
+        }
+        for boundary,accepted in checks.items():
+            with self.subTest(boundary=boundary):self.assertTrue(accepted)
 
     def test_fresh_cannot_adopt_an_existing_unowned_backend(self):
         work=self.state/'610';work.mkdir(mode=0o700)

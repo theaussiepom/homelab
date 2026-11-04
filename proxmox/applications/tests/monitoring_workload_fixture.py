@@ -68,8 +68,7 @@ def main(args):
     password=secrets.token_hex(32);(root/'password').write_text(password);(root/'password').chmod(0o600)
     tasks=yaml.safe_load((Path(__file__).resolve().parents[1]/'ansible/tasks/monitoring-database-account.yml').read_text())
     storage=yaml.safe_load((Path(__file__).resolve().parents[1]/'ansible/tasks/monitoring-storage.yml').read_text())
-    sys.path.insert(0,str(Path(__file__).resolve().parents[3]/'blueprints'))
-    import zabbix
+    import database_hba
     def docker(*cmd,check=True,**kw):
         try:return subprocess.run(['docker',*map(str,cmd)],timeout=180,check=check,**kw)
         except subprocess.CalledProcessError as error:
@@ -120,7 +119,7 @@ def main(args):
                 docker('exec',container,*create_db['ansible.builtin.command']['argv'],capture_output=True)
                 # The real derived HBA must work even when the retained body
                 # denies every TCP source. No broad loopback rule is supplied.
-                hba=zabbix.database_hba('local all postgres peer\nhost all all 0.0.0.0/0 reject\nhost all all ::/0 reject\n','198.18.157.9')
+                hba=database_hba.monitoring('local all postgres peer\nhost all all 0.0.0.0/0 reject\nhost all all ::/0 reject\n','198.18.157.9')
                 docker('exec','-i','--user','postgres',container,'sh','-c','cat > /var/lib/postgresql/tls/pg_hba.conf',input=hba,text=True,capture_output=True)
                 docker('exec','--user','postgres',container,'psql','-U','postgres','-At','-c','SELECT pg_reload_conf()',capture_output=True)
                 auth=docker('exec','-e','PGPASSWORD='+password,container,'psql','-h','127.0.0.1','-U','zabbix','-d','zabbix','-At','-c','SELECT current_user',capture_output=True,text=True)
@@ -130,7 +129,7 @@ def main(args):
                     assert denied.returncode and b'permission denied' in denied.stderr
                 # A broad retained rule must not permit this role to downgrade
                 # its remote connection after the specific hostssl rule.
-                broad=zabbix.database_hba('local all postgres peer\nhost all all 0.0.0.0/0 scram-sha-256\n','198.18.157.9')
+                broad=database_hba.monitoring('local all postgres peer\nhost all all 0.0.0.0/0 scram-sha-256\n','198.18.157.9')
                 docker('exec','-i','--user','postgres',container,'sh','-c','cat > /var/lib/postgresql/tls/pg_hba.conf',input=broad,text=True,capture_output=True)
                 docker('exec','--user','postgres',container,'psql','-U','postgres','-At','-c','SELECT pg_reload_conf()',capture_output=True)
                 for mode in ('require','disable'):
