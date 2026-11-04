@@ -474,6 +474,44 @@ def start_community(module, selected, value):
     return cfg
 
 
+def query_error_projection(errors):
+    """Emit finite fixture diagnostics without query results or server text."""
+    fields = {'activeUser', 'userId', 'authRole', 'teams', 'teamId',
+              'sessionPermissions', 'userConnections', 'id', 'name', 'serverConfig',
+              'configurationMode', 'anonymousAccessEnabled', 'forceHttps'}
+    codes = {'ACCESS_DENIED', 'UNAUTHORIZED', 'BAD_REQUEST', 'INTERNAL_SERVER_ERROR',
+             'GRAPHQL_VALIDATION_FAILED'}
+    kinds = {'DataFetchingException', 'ValidationError', 'ExecutionAborted',
+             'NullValueInNonNullableField'}
+    if not isinstance(errors, list):
+        return [{'error_kind': 'invalid-envelope'}]
+    result = []
+    for error in errors[:8]:
+        if not isinstance(error, dict):
+            result.append({'error_kind': 'invalid-error'})
+            continue
+        extensions = error.get('extensions')
+        extensions = extensions if isinstance(extensions, dict) else {}
+        path = error.get('path')
+        path = path if isinstance(path, list) else []
+        message = error.get('message')
+        message = message[:4096].lower() if isinstance(message, str) else ''
+        category = next((name for name, tokens in (
+            ('access', ('access denied', 'permission', 'not authorized', 'unauthorized')),
+            ('session', ('session', 'not logged')),
+            ('project-resource', ('project', 'resource')),
+            ('driver', ('driver',)), ('database', ('database', 'sql')))
+            if any(token in message for token in tokens)), 'unclassified')
+        code = extensions.get('errorCode', extensions.get('code'))
+        kind = extensions.get('classification')
+        result.append({'path': [item if isinstance(item, str) and item in fields
+                                else 'other' for item in path[:8]],
+                       'error_code': code if isinstance(code, str) and code in codes else 'other',
+                       'error_kind': kind if isinstance(kind, str) and kind in kinds else 'other',
+                       'message_category': category})
+    return result
+
+
 def combined_checks(cfg):
     forged = {name: 'admin' if name in {'X-Team', 'X-Role', 'X-Role-TE', 'X-Forwarded-Groups'} else 'local-recovery'
               for name in HEADERS}
@@ -494,6 +532,7 @@ def combined_checks(cfg):
         status, _, body = get(provider.public_url+'/api/gql', jar, headers, query)
         value = json.loads(body)
         if value.get('errors'):
+            result['query_error_diagnostics'] = query_error_projection(value['errors'])
             write(ROOT/'ce-query-errors.json', json.dumps(value))
             raise RuntimeError('Community query rejected declared read-only fields')
         data = value['data']; user = data['activeUser']
@@ -744,10 +783,13 @@ def execute():
         result['source_files'] = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
             for path in (ROOT/'fixture-runner.py', ROOT/'frozen-cloudbeaver.py', ROOT/'frozen-cloudbeaver-runtime.py', ROOT/'CloudBeaverHealth.java') if path.exists()}
         write(ROOT/'result.json', json.dumps(result, indent=2)+'\n')
-        print(json.dumps({'status': result['status'], 'tests': len(result['tests']),
+        summary = {'status': result['status'], 'tests': len(result['tests']),
             'failed_tests': [row['name'] for row in result['tests'] if not row['passed']],
             'error_type': result.get('error_type'), 'error': result.get('error'),
-            'result': str(ROOT/'result.json')}))
+            'result': str(ROOT/'result.json')}
+        if 'query_error_diagnostics' in result:
+            summary['query_error_diagnostics'] = result['query_error_diagnostics']
+        print(json.dumps(summary))
     if result['status'] != 'PASS':
         raise SystemExit(1)
 
