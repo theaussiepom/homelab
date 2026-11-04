@@ -46,6 +46,22 @@ ansible-playbook -i localhost, --syntax-check proxmox/applications/ansible/prepa
 ansible-playbook -i localhost, --syntax-check proxmox/applications/ansible/reconcile.yml
 ```
 
+Guest profiles and site inputs may be authored as YAML (`profile.yaml` and
+`site.yaml`), `.yml`, or legacy JSON. Keep exactly one variant of each logical
+source. The shared reader preserves JSON-compatible values and literal text;
+`on`, `yes` and date-looking strings stay strings, while an empty `zabbix:`
+property means null. Quote string values that otherwise look like numbers,
+booleans or null. Tags, anchors, aliases, merge keys and duplicate fields refuse.
+
+`blueprints/compile.py --site PATH` reads that exact file;
+`--site-root DIRECTORY` discovers the sole `site.yaml`, `site.yml` or `site.json`.
+Both paths use the same bounded reader and redacted parse errors. Generated
+Setup prepares a separate, hash-locked PyYAML interpreter from the selected
+framework lock once per guest; the hosted selector uses the same source-only
+setup. Credential binding and deployment retain their existing interpreter and
+secret scopes. Runtime packets, embedded proofs, state, receipts and the
+`--disabled` JSON list remain JSON.
+
 CI requires 100% line and branch coverage for every production Python file in
 each repository, and 100% line, branch and function coverage for both Node-RED
 helpers. Measure and enforce the complete Python inventory locally:

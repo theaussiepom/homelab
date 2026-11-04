@@ -35,7 +35,7 @@ OWNED_SECRETS = {
     "ingress": {"FOUNDATION_CLOUDFLARE_DNS_TOKEN"},
 }
 APP_LABELS = {"unbound": "Unbound", "pihole": "Pi-hole", "mqtt": "MQTT", "homeassistant": "Home Assistant", "node_red": "Node-RED"}
-FROZEN_LEAF_SHA256 = "796acf6dc7cf5bea710a75e78d540ea5540ddbe7e18ed9aa5846a785b86ec6ac"
+FROZEN_LEAF_SHA256 = "7c52da7fca55fffe5dffafb331433a060f7652411a8882341f541eebcc2adcc5"
 
 
 def fixture(root):
@@ -217,8 +217,8 @@ class MaterializationTests(unittest.TestCase):
             lambda d: d["jobs"]["run"]["steps"][1].update(uses="actions/checkout@main"),
             lambda d: d["jobs"]["run"]["steps"][1].update({"with": None}),
             lambda d: d["jobs"]["run"]["steps"][0].update(run='echo "$GITHUB_JOB"'),
-            lambda d: d["jobs"]["run"]["steps"][6]["env"].update(DISABLED="${{ needs.previous.outputs.value }}"),
-            lambda d: d["jobs"]["run"]["steps"][6]["env"].update(GUEST="${{ inputs.guest[0] }}"),
+            lambda d: d["jobs"]["run"]["steps"][7]["env"].update(DISABLED="${{ needs.previous.outputs.value }}"),
+            lambda d: d["jobs"]["run"]["steps"][7]["env"].update(GUEST="${{ inputs.guest[0] }}"),
             lambda d: d.update({True: d["on"]}),
             lambda d: d["jobs"]["run"]["steps"][2].update(run="true"),
         ]
@@ -240,14 +240,14 @@ class MaterializationTests(unittest.TestCase):
     def test_shared_action_bytes_keep_the_leaf_commands_and_actual_step_secret_boundaries(self):
         setup=document(workflows.PHASE_RECIPE.parents[1]/'actions/guest-setup/action.yml')
         phase=document(workflows.PHASE_RECIPE.parents[1]/'actions/guest-phase/action.yml')
-        for actual,expected in zip(setup['runs']['steps'],self.original['jobs']['run']['steps'][:6],strict=True):
+        for actual,expected in zip(setup['runs']['steps'],self.original['jobs']['run']['steps'][:7],strict=True):
             actual=copy.deepcopy(actual);actual.pop('name',None);actual.pop('shell',None)
             expected=copy.deepcopy(expected);expected.pop('name',None)
             self.assertEqual(actual,expected)
         steps=phase['runs']['steps']
         self.assertNotIn('env',steps[0]);self.assertNotIn('env',setup)
         self.assertEqual(steps[0]['run'],self.original['jobs']['run']['steps'][0]['run'])
-        for actual,expected in zip(steps[1:],self.original['jobs']['run']['steps'][6:],strict=True):
+        for actual,expected in zip(steps[1:],self.original['jobs']['run']['steps'][7:],strict=True):
             self.assertEqual(actual['run'],expected['run'])
             self.assertEqual(actual['env'],{key:value.replace('secrets.','inputs.') for key,value in expected['env'].items()})
             self.assertEqual(actual['shell'],'bash')

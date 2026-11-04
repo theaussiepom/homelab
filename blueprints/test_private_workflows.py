@@ -70,6 +70,16 @@ class PrivateWorkflowTests(unittest.TestCase):
             self.assertNotIn('inputs.',json.dumps(job))
         self.assertEqual(value['jobs']['selection']['needs'],['validate'])
 
+    def test_yaml_site_uses_the_same_generator_and_ambiguous_sources_refuse(self):
+        expected=p.model(self.stack,self.site)
+        original=self.site/'site.json';original.unlink()
+        for suffix in ('.yaml','.yml'):
+            path=self.site/('site'+suffix);path.write_text('{}\n')
+            self.assertEqual(p.model(self.stack,self.site),expected)
+            original.write_text('{}')
+            with self.assertRaises(ValueError):p.model(self.stack,self.site)
+            original.unlink();path.unlink()
+
     def test_missing_or_nonreusable_local_ci_refuses_before_generation(self):
         path = self.site / '.github/workflows/ci.yml'
         for raw in [None, '', '[]', 'on: push\n', 'on: [push]\n', 'on: {}\n',

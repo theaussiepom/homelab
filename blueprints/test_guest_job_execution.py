@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -23,6 +24,7 @@ row = {'stage': stage, 'phase': phase, 'guest': guest, 'packet': str(packet),
 with open(os.environ['STUB_TRACE'], 'a') as out: out.write(json.dumps(row) + '\n')
 if os.environ.get('STUB_FAIL') == phase + ':' + stage: raise SystemExit(23)
 if stage == 'compile':
+    assert args[args.index('--site-root') + 1] == '.' and '--site' not in args
     assert args[args.index('--guest') + 1] == guest
     with packet.open('x') as out: json.dump({'phase': phase, 'guest': guest}, out)
 else:
@@ -69,7 +71,7 @@ class GuestJobExecutionTests(unittest.TestCase):
             self.assertNotIn('if', step); self.assertNotIn('continue-on-error', step)
             environment = self.environment(step.get('env', {}), values)
             script = step['run'].replace('/var/lib/homelab-bootstrap', str(bootstrap)) if step['name'] == 'Check readiness' else step['run']
-            environment.update(RUNNER_TEMP=str(runner_temp), GITHUB_RUN_ID='900', GITHUB_RUN_ATTEMPT='1',
+            environment.update(HOMELAB_CONFIG_PYTHON=sys.executable, RUNNER_TEMP=str(runner_temp), GITHUB_RUN_ID='900', GITHUB_RUN_ATTEMPT='1',
                 STUB_TRACE=str(trace), STUB_SECRET_NAMES=json.dumps(sorted(self.known)), STUB_FAIL=fail or '')
             result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script], cwd=work,
                                     env=environment, capture_output=True, text=True, timeout=15)

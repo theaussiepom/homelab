@@ -87,7 +87,7 @@ def model(stack, site):
         ['git', '-C', str(stack), 'status', '--porcelain', '--untracked-files=all'], text=True).strip(),
         'Use clean pinned stack source for private workflow generation')
     disabled = env.get('HOMELAB_DISABLED', '[]')
-    overlay = compiler.read(site / 'site.json')
+    overlay = compiler.read(compiler.site_path(site))
     spec = compiler.zabbix.selected(compiler.manifest(stack), overlay)
     selected = compiler.selection(spec, compiler.parse_disabled(disabled))
     compiler.zabbix.selection(overlay, selected)

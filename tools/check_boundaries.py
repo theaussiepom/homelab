@@ -12,6 +12,10 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blueprints"))
+import authored_config
 from urllib.parse import urlsplit
 
 CONSUMER_SCHEMA = 'homelab-site-v3'
@@ -76,7 +80,7 @@ def python_rules(text, *, consumer, fixture):
 
 def stack_allocations(root):
     findings=[]
-    spec=json.loads((root/'stack.json').read_text())
+    spec=authored_config.read(root/'stack.json')
     bindings=spec.get('required_site_bindings')
     if not isinstance(bindings,dict) or not bindings:return [('stack.json',1,'declare-site-bindings')]
     if set(spec.get('values',{})) & set(bindings):findings.append(('stack.json',1,'public-site-binding-default'))
@@ -109,8 +113,8 @@ def stack_allocations(root):
         combined=re.fullmatch(r'\$\{(addresses\.[a-z0-9_.-]+)\}/\$\{(prefixes\.[a-z0-9_.-]+)\}',value) if isinstance(value,str) else None
         return key in {'ipv4','ipv4_endpoint'} and combined and bindings.get(combined[1])=='string' and bindings.get(combined[2])=='integer'
     for guest in spec['guests']:
-        path=root/'guests'/guest/'profile.json'
-        profile=json.loads(path.read_text());cfg=profile['config']
+        path=authored_config.profile_path(root,guest)
+        profile=authored_config.read(path);cfg=profile['config']
         values=[cfg['guest'].get(k) for k in ('vmid','hostname','storage_id','template_file_id')]
         invalid=any(not reference(v) for v in values)
         for nic in cfg['guest'].get('interfaces',[]):

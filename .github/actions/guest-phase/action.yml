@@ -1,4 +1,3 @@
-# Generated from .github/workflows/guest-phase.yml by blueprints/workflows.py.
 name: Guest phase
 description: Run one guarded admitted deployment phase
 inputs:
@@ -51,7 +50,7 @@ runs:
       GUEST: ${{ inputs.guest }}
       PHASE: ${{ inputs.phase }}
       DISABLED: ${{ inputs.disabled }}
-    run: "umask 077\npython3 framework-source/blueprints/compile.py --stack stack-source --site site.json \\\n  --guest \"$GUEST\" --disabled \"$DISABLED\" --admit \\\n  --output \"$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json\"\n"
+    run: "umask 077\n\"$HOMELAB_CONFIG_PYTHON\" framework-source/blueprints/compile.py --stack stack-source --site-root . \\\n  --guest \"$GUEST\" --disabled \"$DISABLED\" --admit \\\n  --output \"$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json\"\n"
     shell: bash
   - name: Load credentials
     env:

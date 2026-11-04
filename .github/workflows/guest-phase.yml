@@ -90,6 +90,34 @@ jobs:
           ref: ${{ steps.framework.outputs.revision }}
           path: framework-source
           persist-credentials: false
+      - name: Prepare config
+        run: |
+          umask 077
+          config_env=$(mktemp -d "$RUNNER_TEMP/homelab-config-XXXXXX")
+          python3 -m venv "$config_env"
+          python3 - "$config_env/pyyaml.lock" <<'PYCODE'
+          from pathlib import Path
+          import re, sys
+          lock = Path('framework-source/requirements.lock.txt')
+          if lock.is_symlink() or not lock.is_file() or lock.stat().st_size > 1024 * 1024:
+              raise SystemExit('Use the selected framework dependency lock')
+          lines = lock.read_text().splitlines()
+          starts = [i for i, line in enumerate(lines) if line.startswith('pyyaml==')]
+          if len(starts) != 1:
+              raise SystemExit('Use one exact hash-locked authored config dependency')
+          first = starts[0]
+          block = [lines[first]]
+          for line in lines[first + 1:]:
+              if not line.startswith('    --hash='): break
+              block.append(line)
+          if (not re.fullmatch(r'pyyaml==[0-9]+(?:\.[0-9]+)+ \\', block[0]) or len(block) < 2
+                  or any(not re.fullmatch(r'    --hash=sha256:[0-9a-f]{64} \\', line) for line in block[1:-1])
+                  or not re.fullmatch(r'    --hash=sha256:[0-9a-f]{64}', block[-1])):
+              raise SystemExit('Use one exact hash-locked authored config dependency')
+          Path(sys.argv[1]).write_text('\n'.join(block) + '\n')
+          PYCODE
+          "$config_env/bin/python" -m pip --isolated install --disable-pip-version-check --require-hashes --no-deps -r "$config_env/pyyaml.lock"
+          printf 'HOMELAB_CONFIG_PYTHON=%s/bin/python\n' "$config_env" >> "$GITHUB_ENV"
       - name: Compile the admitted guest
         env:
           GUEST: ${{ inputs.guest }}
@@ -97,7 +125,7 @@ jobs:
           DISABLED: ${{ inputs.disabled }}
         run: |
           umask 077
-          python3 framework-source/blueprints/compile.py --stack stack-source --site site.json \
+          "$HOMELAB_CONFIG_PYTHON" framework-source/blueprints/compile.py --stack stack-source --site-root . \
             --guest "$GUEST" --disabled "$DISABLED" --admit \
             --output "$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json"
       - name: Bind existing credentials

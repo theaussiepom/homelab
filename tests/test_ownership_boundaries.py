@@ -7,6 +7,7 @@ import sys
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 MODULE=Path(__file__).resolve().parents[1]/'tools/check_boundaries.py'
 spec=importlib.util.spec_from_file_location('ownership_boundary',MODULE)
@@ -170,3 +171,15 @@ def test_consumer_yaml_target_steps_include_list_marker_without_matching_plain_i
     for line in ('  - docker','  - ssh','  - run: python3 tools/check.py',
                  '  - run: ssh-keygen -lf key.pub','    run: ssh-keygen -lf key.pub','    ssh-keygen -lf key.pub'):
         path.write_text('steps:\n'+line+'\n');assert b.check(root,'consumer')['status']=='passed'
+
+
+def test_yaml_profiles_share_the_source_reader_and_keep_boundary_guards(tmp_path):
+    root=repo(tmp_path)
+    write(root,'stack.json',json.dumps({'values':{},'required_site_bindings':{'vmids.web':'integer'},'guests':{'web':{}}}))
+    path=write(root,'guests/web/profile.yaml',yaml.safe_dump({'config':{'guest':{'vmid':'${vmids.web}','hostname':'example.invalid','storage_id':'example.invalid','template_file_id':'example.invalid','interfaces':[]}}}))
+    assert any(row['code']=='concrete-site-allocation' for row in b.check(root,'stack')['findings'])
+    path.write_text('config: {guest: {vmid: 123}}\nconfig: {}')
+    with pytest.raises(ValueError):b.check(root,'stack')
+    path.write_text('{}')
+    write(root,'guests/web/profile.json','{}')
+    with pytest.raises(ValueError):b.check(root,'stack')

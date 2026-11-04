@@ -26,6 +26,7 @@ import service_bindings
 import routes
 import zabbix
 import database_admin
+from authored_config import read, source_path, site_path, profile_path
 
 CATALOGUE = guest_contract.BLUEPRINTS
 PIN = re.compile(
@@ -38,18 +39,6 @@ TOKEN = re.compile(r"\$\{([a-z][a-z0-9_.-]*)\}")
 def require(ok, message):
     if not ok:
         raise ValueError(message)
-
-
-def read(path):
-    def unique(pairs):
-        result = {}
-        for k, v in pairs:
-            require(k not in result, "Duplicate JSON field")
-            result[k] = v
-        return result
-
-    require(path.is_file() and not path.is_symlink(), "Use a regular source file")
-    return json.loads(path.read_text(), object_pairs_hook=unique)
 
 
 def encoded(value):
@@ -291,7 +280,7 @@ def custody_text(raw, expected, values):
 def _resolve_guest(root, overlay, name, spec):
     values = merge(spec["values"], overlay["values"])
     bindings = binding_declarations(spec)
-    profile = read(root / "guests" / name / "profile.json")
+    profile = read(profile_path(root, name))
     require(
         set(profile) == {"config", "files", "stack"}, "Use the guest profile fields"
     )
@@ -488,7 +477,9 @@ def compile_stack(root, overlay, disabled=None, *, admit=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stack", type=Path, required=True)
-    parser.add_argument("--site", type=Path, required=True)
+    site = parser.add_mutually_exclusive_group(required=True)
+    site.add_argument("--site", type=Path)
+    site.add_argument("--site-root", type=Path)
     parser.add_argument("--guest", choices=CATALOGUE)
     parser.add_argument(
         "--disabled",
@@ -499,7 +490,7 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    overlay = read(args.site)
+    overlay = read(site_path(args.site_root) if args.site_root is not None else args.site)
     disabled = parse_disabled(args.disabled)
     if args.check:
         compile_stack(args.stack, overlay, disabled)
