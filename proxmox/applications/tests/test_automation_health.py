@@ -19,6 +19,66 @@ spec.loader.exec_module(health)
 
 
 class AutomationHealthTests(unittest.TestCase):
+    def test_selected_broker_probe_path_is_explicit_and_unavailable_to_other_modes(self):
+        selected=Path('/opt/homelab-app/runtime/broker_a/mqtt-probe.json')
+        with patch.object(health,'mqtt') as mqtt:
+            health.probe('mqtt-broker',selected)
+            mqtt.assert_called_once_with(selected,standalone=True)
+        for service,path in [('node_red',selected),('mqtt',selected),
+                ('mqtt-broker',Path('/tmp/mqtt-probe.json')),
+                ('mqtt-broker',Path('/opt/homelab-app/runtime/../mqtt-probe.json')),
+                ('mqtt-broker',Path('/opt/homelab-app/runtime/${ENV}/mqtt-probe.json'))]:
+            with self.subTest(service=service),patch.object(health,'mqtt') as mqtt,self.assertRaises(ValueError):
+                health.probe(service,path)
+            mqtt.assert_not_called()
+
+    def test_fresh_node_red_checks_only_qualified_local_ui_without_claiming_auth(self):
+        with patch.object(health, 'http', return_value=(200, b'public UI')) as http:
+            result = health.run('node_red-fresh')
+            http.assert_called_once_with(1880, '/')
+            self.assertEqual(result, {'service': 'node_red-fresh', 'read_only_probe': 'passed', 'scope': 'ui_only'})
+        for status in (201, 301, 302, 401, 403, 500):
+            with self.subTest(status=status), patch.object(health, 'http', return_value=(status, b'')), \
+                    self.assertRaises(ValueError):
+                health.probe('node_red-fresh')
+
+    def test_fresh_homeassistant_allows_only_exact_onboarding_and_keeps_api_auth(self):
+        with patch.object(health, 'local_response', side_effect=[(302, '/onboarding.html'),
+                (200, None), (401, None)]) as response, patch.object(health, 'homeassistant_auth_challenge') as challenge:
+            health.probe('homeassistant-fresh')
+            self.assertEqual([row.args[0] for row in response.call_args_list], ['/', '/onboarding.html', '/api/'])
+            challenge.assert_called_once_with()
+        with patch.object(health, 'local_response', side_effect=[(200, None), (401, None)]), \
+                patch.object(health, 'homeassistant_auth_challenge'):
+            health.probe('homeassistant-fresh')
+        for invalid in ((302, 'https://foreign.invalid/onboarding.html'), (302, '//foreign.invalid/'),
+                        (302, '/other'), (301, '/onboarding.html'), (200, '/onboarding.html')):
+            with self.subTest(response=invalid), patch.object(health, 'local_response', return_value=invalid), \
+                    self.assertRaises(ValueError):
+                health.probe('homeassistant-fresh')
+        for responses in ([(302, '/onboarding.html'), (302, '/onboarding.html')],
+                          [(302, '/onboarding.html'), (200, None), (200, None)]):
+            with self.subTest(responses=responses), patch.object(health, 'local_response', side_effect=responses), \
+                    self.assertRaises(ValueError):
+                health.probe('homeassistant-fresh')
+
+    def test_fresh_homeassistant_loopback_http_is_bounded_and_does_not_redirect(self):
+        from unittest.mock import MagicMock
+        connection = MagicMock()
+        response = connection.getresponse.return_value
+        response.status, response.getheader.return_value, response.read.return_value = 302, '/onboarding.html', b''
+        with patch.object(health, 'HTTPConnection', return_value=connection) as http:
+            self.assertEqual(health.local_response('/'), (302, '/onboarding.html'))
+            http.assert_called_once_with('127.0.0.1', 8123, timeout=5)
+            connection.request.assert_called_once_with('GET', '/')
+            response.read.assert_called_once_with(65537)
+            connection.close.assert_called_once_with()
+        response.read.return_value = b'x' * 65537
+        with patch.object(health, 'HTTPConnection', return_value=connection), self.assertRaises(ValueError):
+            health.local_response('/api/')
+        with self.assertRaises(ValueError):
+            health.local_response('https://foreign.invalid/')
+
     def test_loopback_probes_never_follow_redirects(self):
         with self.assertRaises(ValueError):
             health.NoRedirect().redirect_request(

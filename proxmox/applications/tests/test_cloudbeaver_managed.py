@@ -24,7 +24,7 @@ class ManagedFixture(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()
         self.workspace = self.root / 'workspace'
         self.custody = self.root / 'custody'
         self.directory = self.workspace / 'GlobalConfiguration/.dbeaver'
@@ -36,13 +36,14 @@ class ManagedFixture(unittest.TestCase):
         self.hold = self.custody / 'MANAGED-CONNECTIONS-HOLD.json'
         self.permissions = self.directory / 'data-sources-permissions.json'
         self.owners = {}
-        self.real_lstat, self.real_fstat, self.real_open = Path.lstat, os.fstat, os.open
+        self.real_lstat, self.real_stat, self.real_fstat, self.real_open = Path.lstat, os.stat, os.fstat, os.open
         self.stack = contextlib.ExitStack()
         self.addCleanup(self.stack.close)
         for key, value in [('WORKSPACE', self.workspace), ('CUSTODY', self.custody), ('MANAGED', self.runtime)]:
             self.stack.enter_context(patch.object(m, key, value))
         self.stack.enter_context(patch.object(m,'RUNTIME',self.root))
         self.stack.enter_context(patch.object(Path, 'lstat', lambda path: self.metadata(self.real_lstat(path))))
+        self.stack.enter_context(patch.object(m.os, 'stat', lambda *a, **kw: self.metadata(self.real_stat(*a, **kw))))
         self.stack.enter_context(patch.object(m.os, 'fstat', lambda fd: self.metadata(self.real_fstat(fd))))
         self.stack.enter_context(patch.object(m.os, 'open', self.open_file))
         self.stack.enter_context(patch.object(m.os, 'chown', lambda path, uid, gid: self.set_owner(path, uid, gid)))
@@ -66,7 +67,9 @@ class ManagedFixture(unittest.TestCase):
         self.original_metadata = self.metadata_path.read_bytes()
         self.original_custom = self.custom_path.read_bytes()
         self.passwords = {name: secrets.token_hex(24) for name in ('postgresql-admin', 'mariadb-admin')}
-        self.config = {'cloudbeaver_image': 'fixture@sha256:'+'1'*64, 'managed_connections': {name: {
+        self.context_config = {'workspace':str(self.workspace), 'project':'homelab-db-tools',
+            'retained_pgadmin_image':'dpage/pgadmin4@sha256:'+'a'*64}
+        self.config = {**self.context_config, 'cloudbeaver_image': 'fixture@sha256:'+'1'*64, 'managed_connections': {name: {
             'owner': dict(self.owner, engine=engine, source_address=source), 'driver': engine,
             'host': host, 'username': 'fixture_admin',
         } for name, engine, source, host in [
@@ -87,7 +90,7 @@ class ManagedFixture(unittest.TestCase):
         self.config['managed_sha256'] = hashlib.sha256(self.runtime.read_bytes()).hexdigest()
 
     def metadata(self, row):
-        fields = ('st_dev', 'st_ino', 'st_size', 'st_uid', 'st_gid', 'st_mode', 'st_nlink', 'st_mtime_ns', 'st_ctime_ns')
+        fields = [name for name in dir(row) if name.startswith('st_')]
         value = {name: getattr(row, name) for name in fields}
         value['st_uid'], value['st_gid'] = self.owners.get((row.st_dev, row.st_ino), (0, 0))
         return SimpleNamespace(**value)
@@ -210,13 +213,13 @@ class ManagedFixture(unittest.TestCase):
 
     def test_absent_selection_reads_no_private_input_and_owns_nothing(self):
         with patch.object(m, 'managed_bytes', side_effect=AssertionError('No selected credential')):
-            self.assertEqual(m.managed({}), {'managed_connections': 'absent'})
+            self.assertEqual(m.managed(self.context_config), {'managed_connections': 'absent'})
         self.assertFalse(self.native.exists())
         self.assertFalse(self.receipt.exists())
 
     def test_absent_selection_refuses_existing_native_ownership(self):
         self.write(self.native, self.document, 8978)
-        with self.assertRaises(ValueError):m.managed({})
+        with self.assertRaises(ValueError):m.managed(self.context_config)
 
     def test_existing_unknown_native_file_cannot_be_adopted(self):
         self.write(self.native, self.document, 8978)
@@ -321,26 +324,28 @@ class ManagedFixture(unittest.TestCase):
         with self.assertRaises(ValueError):m.managed_bytes(self.runtime, 0, (0o600,))
         self.write(self.runtime, self.document, 0)
         original = m.os.fstat;changed = False
+        identity = self.real_lstat(self.runtime)
         def mutate(fd):
             nonlocal changed
             row = original(fd)
-            if not changed:
+            if not changed and (row.st_dev,row.st_ino) == (identity.st_dev,identity.st_ino):
                 changed = True
                 self.runtime.write_bytes(self.runtime.read_bytes() + b' ')
             return row
         with patch.object(m.os, 'fstat', side_effect=mutate):
             with self.assertRaises(ValueError):m.managed_bytes(self.runtime, 0, (0o600,))
+        self.assertTrue(changed, 'The selected payload was mutated during its anchored read')
 
     def test_database_health_omitted_selection_never_reads_password_or_docker(self):
         with patch.object(m, 'managed_bytes', side_effect=AssertionError('No managed password selected')):
-            self.assertEqual(m.database_health({}), 'individual_credentials_required')
+            self.assertEqual(m.database_health(self.context_config), 'individual_credentials_required')
         self.docker.assert_not_called()
 
     def test_driver_health_requires_exact_readonly_hash_and_no_folder_or_nested_shadow(self):
         artifact=self.config['mariadb_jdbc']
         server={'Mounts':[{'Type':'bind','Source':artifact['source'],'Destination':artifact['target'],'RW':False}]}
         m.driver_health(self.config,server)
-        m.driver_health({}, {'Mounts':[]})
+        m.driver_health(self.context_config, {'Mounts':[]})
         for mutate in (lambda c,s:c['mariadb_jdbc'].update(sha256='0'*64),
             lambda c,s:c['mariadb_jdbc'].update(version='3.5.10'),
             lambda c,s:c['mariadb_jdbc'].update(source='/foreign.jar'),

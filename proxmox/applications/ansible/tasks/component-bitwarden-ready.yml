@@ -1,0 +1,28 @@
+---
+- name: Fetch only the selected immutable official vault image
+  ansible.builtin.command:
+    argv: [docker, image, pull, "{{ component_bitwarden.image }}"]
+  changed_when: false
+  no_log: true
+  when: "'@sha256:' in component_bitwarden.image"
+
+- name: Verify the observed vault image before startup
+  ansible.builtin.command:
+    argv: [docker, image, inspect, "{{ component_bitwarden.settings.image_id if component_bitwarden.image == 'ghcr.io/bitwarden/lite:latest' else component_bitwarden.image }}", --format, "{{ '{{' }}.Id{{ '}}' }}"]
+  register: component_vault_image
+  changed_when: false
+  failed_when: component_vault_image.rc != 0 or component_vault_image.stdout | trim != component_bitwarden.settings.image_id
+
+- name: Install the bounded vault health helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../bitwarden.py"
+    dest: /opt/homelab-app/bitwarden.py
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Verify the retained vault database before startup
+  ansible.builtin.include_tasks: bitwarden-database.yml
+  vars:
+    bitwarden_settings: "{{ component_bitwarden.settings }}"
+    bitwarden_environment: "{{ component_bitwarden.environment }}"

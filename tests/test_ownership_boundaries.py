@@ -61,26 +61,65 @@ def test_consumer_known_target_sinks_refuse_but_source_wrapper_and_fixtures_work
     with pytest.raises(SyntaxError):b.python_rules('invalid ! syntax',consumer=True,fixture=False)
 
 
+def component_fixture(root):
+    """Standalone reusable library matching the current synthetic site fixture."""
+    site=json.loads((MODULE.resolve().parents[1]/'tests/public-component-site-example.json').read_text())
+    spec={'schema':'homelab-components-v1','kind':'library',
+          'guest_templates':{'base':{
+              'resources':{'cpu_cores':1,'memory_mib':512,'root_gib':8,'os_reserve_mib':128},
+              'startup':{'started':True,'start_on_boot':True,'boot_order':30},
+              'security':{'unprivileged':True,'protection':True,'nesting':True,'keyctl':False}}},
+          'app_profiles':{'unbound':{'source':'apps/unbound.yaml'}}}
+    profile={'schema':'homelab-components-v1','kind':'app-profile',
+             'adapter':'unbound','display_name':'Unbound',
+             'interfaces':{'service':{'required':True,'accepts':['guest-loopback']},
+                           'private':{'required':True,'accepts':['app-network']}},
+             'listeners':{'dns':{'service':'unbound','namespace':'app-network',
+                 'interface':'private','bind':'wildcard','protocol':'udp','port':53,
+                 'publish':{'scope':'guest-loopback','port':5335}}},
+             'endpoints':{'dns':{'listener':'dns','protocol':'udp','via':'service'}}}
+    write(root,'stack.json',json.dumps(spec))
+    path=write(root,'apps/unbound.yaml',yaml.safe_dump(profile))
+    return spec,site,profile,path
+
+
+def component_scan(root,spec,site):
+    write(root,'stack.json',json.dumps(spec))
+    write(root,'site.example.yaml',yaml.safe_dump(site))
+    return b.check(root,'stack')
+
+
 def test_stack_default_concrete_and_finite_shared_network_patterns(tmp_path):
     root=repo(tmp_path)
-    bindings={'vmids.web':'integer','hostnames.web':'string','storage.web':'string','templates.web':'string','bridges.backend':'string',
-              'vlans.backend':['integer','null'],'addresses.web':'string','prefixes.backend':'integer','mac.web':'string'}
-    spec={'values':{},'required_site_bindings':bindings,'guests':{'web':{}}}
-    profile={'config':{'guest':{'vmid':'${vmids.web}','hostname':'${hostnames.web}','storage_id':'${storage.web}',
-             'template_file_id':'${templates.web}','interfaces':[{'bridge':'${bridges.backend}','vlan':'${vlans.backend}',
-             'ipv4':'${addresses.web}/${prefixes.backend}','mac':'${mac.web}'}]}}}
-    write(root,'stack.json',json.dumps(spec));path=write(root,'guests/web/profile.json',json.dumps(profile))
-    assert b.check(root,'stack')['status']=='passed'
-    for value in [True,'10.44.1.2/24','${addresses.web}/24','${addresses.web}/${unknown.prefix}','${addresses.web}/${vmids.web}']:
-        changed=json.loads(json.dumps(profile));changed['config']['guest']['interfaces'][0]['ipv4']=value
-        path.write_text(json.dumps(changed))
-        assert b.check(root,'stack')['status']=='failed'
-    changed=json.loads(json.dumps(profile));changed['config']['guest']['interfaces'][0].update(ipv4='dhcp',ipv4_endpoint='${addresses.web}/${prefixes.backend}')
-    path.write_text(json.dumps(changed));assert b.check(root,'stack')['status']=='passed'
-    path.write_text(json.dumps(profile));spec['values']['addresses.web']='10.44.1.2';write(root,'stack.json',json.dumps(spec))
-    assert b.check(root,'stack')['findings'][0]['code']=='public-site-binding-default'
-    del spec['required_site_bindings'];write(root,'stack.json',json.dumps(spec))
-    assert b.check(root,'stack')['findings'][0]['code']=='declare-site-bindings'
+    spec,site,profile,path=component_fixture(root)
+    # Two independent guests share one named network, with explicit distinct NICs.
+    site['guests']['second']=json.loads(json.dumps(site['guests']['resolver']))
+    other=site['guests']['second'];other['identity']={'vmid':611,'hostname':'example-second'}
+    other['interfaces']['primary']['address']['value']='198.18.20.11'
+    other['interfaces']['primary']['mac']='02:00:00:20:00:11'
+    site['apps']['second']=json.loads(json.dumps(site['apps']['recursive_dns']))
+    site['apps']['second']['guest']='second'
+    assert component_scan(root,spec,site)['status']=='passed'
+    # Former interpolation bags have no authority in the typed component source.
+    for value in [True,'10.44.1.2/24','${addresses.web}/24',
+                  '${addresses.web}/${unknown.prefix}','${addresses.web}/${vmids.web}']:
+        changed=json.loads(json.dumps(site))
+        changed['guests']['resolver']['interfaces']['primary']['address']['value']=value
+        with pytest.raises(ValueError):component_scan(root,spec,changed)
+    dhcp=json.loads(json.dumps(site))
+    nic=dhcp['guests']['resolver']['interfaces']['primary']
+    nic.update(address={'mode':'dhcp','endpoint':'198.18.20.10'},default_route=False)
+    assert component_scan(root,spec,dhcp)['status']=='passed'
+    # A valid consumer-owned real allocation still cannot become a public example.
+    changed=json.loads(json.dumps(site))
+    changed['networks']['services'].update(cidr='10.44.1.0/24',gateway='10.44.1.1')
+    for index,guest in enumerate(changed['guests'].values(),2):
+        guest['interfaces']['primary']['address']['value']='10.44.1.'+str(index)
+    assert any(row['code']=='concrete-site-allocation' for row in component_scan(root,spec,changed)['findings'])
+    for field in ('values','required_site_bindings','guests'):
+        changed=json.loads(json.dumps(spec));changed[field]={'site':'allocation'}
+        with pytest.raises(ValueError):component_scan(root,changed,site)
+    assert component_scan(root,spec,site)['status']=='passed'
 
 
 def test_source_scope_symlinks_bounds_and_cli_are_closed(tmp_path,capsys):
@@ -107,34 +146,50 @@ def test_source_scope_symlinks_bounds_and_cli_are_closed(tmp_path,capsys):
 
 def test_stack_firewall_frontend_and_route_policy_bindings_are_explicit(tmp_path):
     root=repo(tmp_path)
-    bindings={'vmids.web':'integer','hostnames.web':'string','storage.web':'string','templates.web':'string',
-              'addresses.frontend':'string','domains.web':'string','networks.clients':'string-list'}
-    spec={'values':{},'required_site_bindings':bindings,'guests':{'web':{}},'routes':{
-          'web':{'host':'ui.${domains.web}','aliases':['other.example.invalid'],'target':{'url':'http://${addresses.frontend}:9000'}}}}
-    profile={'config':{'guest':{'vmid':'${vmids.web}','hostname':'${hostnames.web}','storage_id':'${storage.web}',
-             'template_file_id':'${templates.web}','rules':[{'source':'${addresses.frontend}/32','destination':'224.0.0.251/32'}]},
-             'app':{'frontend_routing':{'address':'${addresses.frontend}','gateway':'127.0.0.1'}}},
-             'stack':{'routing':{'middlewares':{'clients':{'ipAllowList':{'sourceRange':'${networks.clients}'}}}}}}
-    spec_path=write(root,'stack.json',json.dumps(spec));profile_path=write(root,'guests/web/profile.json',json.dumps(profile))
-    assert b.check(root,'stack')['status']=='passed'
+    spec,site,profile,path=component_fixture(root)
+    row={'direction':'out','proto':'udp','source':{'interface':'source'},
+         'destination':{'endpoint':'resolver'},'port':{'endpoint':'resolver'},'comment':'Declared DNS'}
+    spec['policies']={'network':{'dns':{'rules':[row]}}}
+    site['networks']['frontend']={'context':'lab','cidr':'198.18.21.0/24',
+        'gateway':'198.18.21.1','bridge':'example-frontend','vlan':221}
+    guest=site['guests']['resolver']
+    guest['interfaces']['frontend']={'network':'frontend','slot':1,'mac':'02:00:00:21:00:10',
+        'address':{'mode':'static','value':'198.18.21.10'},'default_route':False,'ipv6':'manual'}
+    guest['source_policy_route']={'interface':'frontend'}
+    guest['network_policy'].append({'policy':'dns','interfaces':{'source':'frontend'},
+                                   'endpoints':{'resolver':{'external':'resolver'}}})
+    assert component_scan(root,spec,site)['status']=='passed'
+    # Role/endpoint policy remains explicit; a missing binding is not inferred.
+    changed=json.loads(json.dumps(site));del changed['guests']['resolver']['network_policy'][-1]['endpoints']
+    with pytest.raises(ValueError):component_scan(root,spec,changed)
     for value in ['10.55.1.2/32','fd55::/64','02:00:00:00:01:02']:
-        changed=json.loads(json.dumps(profile));changed['config']['guest']['rules'][0]['source']=value;profile_path.write_text(json.dumps(changed))
-        assert any(row['code']=='concrete-network-policy' for row in b.check(root,'stack')['findings'])
+        changed=json.loads(json.dumps(spec));changed['policies']['network']['dns']['rules'][0]['source']=value
+        selected=json.loads(json.dumps(site));del selected['guests']['resolver']['network_policy'][-1]['interfaces']
+        if ':' in value:
+            with pytest.raises(ValueError):component_scan(root,changed,selected)
+        else:
+            assert any(r['code']=='concrete-network-policy' for r in component_scan(root,changed,selected)['findings'])
+    # Route policy uses a named physical interface; raw address/gateway/MAC bags refuse.
     for key in ('address','gateway','mac'):
-        changed=json.loads(json.dumps(profile));changed['config']['app']['frontend_routing'][key]='10.55.1.2';profile_path.write_text(json.dumps(changed))
-        assert b.check(root,'stack')['status']=='failed'
-    changed=json.loads(json.dumps(profile));changed['stack']['routing']['middlewares']['clients']['ipAllowList']['sourceRange']=['10.55.1.0/24'];profile_path.write_text(json.dumps(changed))
-    assert b.check(root,'stack')['status']=='failed'
-    profile_path.write_text(json.dumps(profile))
+        changed=json.loads(json.dumps(site));changed['guests']['resolver']['source_policy_route'][key]='10.55.1.2'
+        with pytest.raises(ValueError):component_scan(root,spec,changed)
+    changed=json.loads(json.dumps(spec));changed['policies']['middlewares']={
+        'clients':{'type':'ip-allow-list','ranges':['10.55.1.0/24']}}
+    assert any(r['code']=='concrete-network-policy' for r in component_scan(root,changed,site)['findings'])
     for value in ['ui.company.internal','ui.company.internal.']:
-        changed=json.loads(json.dumps(spec));changed['routes']['web']['host']=value;spec_path.write_text(json.dumps(changed))
-        assert b.check(root,'stack')['findings'][0]['code']=='concrete-route-host'
-    changed=json.loads(json.dumps(spec));changed['routes']['web']['target']['url']='https://10.55.1.2:9443';spec_path.write_text(json.dumps(changed))
-    assert b.check(root,'stack')['findings'][0]['code']=='concrete-route-backend'
-    # Protocol constants and explicit synthetic examples remain usable in examples.
-    for value in ('0.0.0.0/0','127.0.0.1/32','239.255.255.250/32','198.18.1.0/24','8.8.8.8/32','not-a-network'):
-        changed=json.loads(json.dumps(profile));changed['config']['guest']['rules'][0]['source']=value;profile_path.write_text(json.dumps(changed));spec_path.write_text(json.dumps(spec))
-        assert b.check(root,'stack')['status']=='passed'
+        changed=json.loads(json.dumps(site));changed['domains']={'web':value}
+        if value.endswith('.'):
+            with pytest.raises(ValueError):component_scan(root,spec,changed)
+        else:
+            assert any(r['code']=='concrete-route-host' for r in component_scan(root,spec,changed)['findings'])
+    changed=json.loads(json.dumps(site));changed['external_endpoints']['backend']={
+        'protocol':'https','address':'10.55.1.2','port':9443}
+    assert any(r['code']=='concrete-site-allocation' for r in component_scan(root,spec,changed)['findings'])
+    for value in ('0.0.0.0/0','127.0.0.1/32','239.255.255.250/32','198.18.1.0/24','8.8.8.8/32'):
+        changed=json.loads(json.dumps(spec));changed['policies']['network']['dns']['rules'][0]['destination']=value
+        assert component_scan(root,changed,site)['status']=='passed'
+    changed=json.loads(json.dumps(spec));changed['policies']['network']['dns']['rules'][0]['source']='not-a-network'
+    with pytest.raises(ValueError):component_scan(root,changed,site)
 
 
 def test_cli_malformed_shape_and_nonrepository_return_only_fixed_error(tmp_path,capsys):
@@ -175,11 +230,17 @@ def test_consumer_yaml_target_steps_include_list_marker_without_matching_plain_i
 
 def test_yaml_profiles_share_the_source_reader_and_keep_boundary_guards(tmp_path):
     root=repo(tmp_path)
-    write(root,'stack.json',json.dumps({'values':{},'required_site_bindings':{'vmids.web':'integer'},'guests':{'web':{}}}))
-    path=write(root,'guests/web/profile.yaml',yaml.safe_dump({'config':{'guest':{'vmid':'${vmids.web}','hostname':'example.invalid','storage_id':'example.invalid','template_file_id':'example.invalid','interfaces':[]}}}))
-    assert any(row['code']=='concrete-site-allocation' for row in b.check(root,'stack')['findings'])
-    path.write_text('config: {guest: {vmid: 123}}\nconfig: {}')
-    with pytest.raises(ValueError):b.check(root,'stack')
-    path.write_text('{}')
-    write(root,'guests/web/profile.json','{}')
-    with pytest.raises(ValueError):b.check(root,'stack')
+    spec,site,profile,path=component_fixture(root)
+    # Whole-definition YAML references exercise the same strict production reader.
+    with patch.object(b.authored_config,'parse',wraps=b.authored_config.parse) as reader:
+        assert component_scan(root,spec,site)['status']=='passed'
+    assert any(call.args[1]=='.yaml' and b'kind: app-profile' in call.args[0]
+               for call in reader.call_args_list)
+    changed=json.loads(json.dumps(profile));changed['identity']={'vmid':123}
+    path.write_text(yaml.safe_dump(changed))
+    with pytest.raises(ValueError):component_scan(root,spec,site)
+    path.write_text('adapter: unbound\nadapter: unbound\n')
+    with pytest.raises(ValueError):component_scan(root,spec,site)
+    path.write_text(yaml.safe_dump(profile))
+    write(root,'apps/unbound.json','{}')
+    with pytest.raises(ValueError):component_scan(root,spec,site)

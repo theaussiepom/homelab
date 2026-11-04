@@ -59,30 +59,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tools-image", default="homelab-app-test")
     args = parser.parse_args()
-    from test_foundation import fixture, render
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import protocol_component_fixtures as component_fixtures
 
     project = "homelab-identity-fixture-" + uuid.uuid4().hex[:10]
     client_name = project + "-health-client"
     with tempfile.TemporaryDirectory(prefix=project + "-") as tmp:
         root = Path(tmp)
-        cfg = fixture(root, "identity")
-        cfg["foundation"].update(
-            postgresql_host="postgres",
-            postgresql_user="authentik",
-            postgresql_database="authentik",
-        )
-        for name in ("server", "worker"):
-            cfg["services"][name].update(
-                image=AUTH, memory_mib=768, cpus=1, user="1000:1000", pids_limit=128
-            )
-        cfg["services"]["redis"].update(image=REDIS, memory_mib=128, cpus=1)
-        document = render.compose(cfg)
+        app = component_fixtures.authentik_app(image=AUTH, redis_image=REDIS)
+        document = component_fixtures.document(app, memory_mib=4096)
+        # This protocol fixture retains its original Redis AOF command.
+        # It is a fixture-only adaptation, not an authored runtime knob.
+        document["services"]["redis"]["command"] = ["redis-server", "--appendonly", "yes"]
         document.pop("name", None)
         document["networks"] = {"default": {"internal": True}}
         document["volumes"] = {
             name: {} for name in ("secrets", "media", "templates", "certs", "redis")
         }
-        runtime_files = render.foundation.files(cfg)
+        runtime_files = component_fixtures.authentik_files(app)
         for artifact in runtime_files:
             (root / artifact["path"]).write_text(artifact["content"])
         (root / "runtime-files.json").write_text(json.dumps(runtime_files))

@@ -40,19 +40,24 @@ def existing_fixture(action="update"):
 
 
 class PlanTests(unittest.TestCase):
+    def test_component_context_protection_is_explicit_instead_of_fleet_constants(self):
+        plan.check_plan(fixture(),'pve-lab',6100,existing=False,protected_guests=[9900])
+        for protected in ([6100], [True], [0], [9900,9900], '9900'):
+            with self.subTest(protected=protected),self.assertRaises(ValueError):
+                plan.check_plan(fixture(),'pve-lab',6100,existing=False,protected_guests=protected)
     def test_creation_updates_and_noop_require_the_correct_custody_mode(self):
-        plan.check_plan(fixture(), "pve-lab", 6100, existing=False)
+        plan.check_plan(fixture(), "pve-lab", 6100, existing=False, protected_guests=[9900,9914,9915,9920])
         for action in ("update", "no-op"):
             value = existing_fixture(action)
             if action == "no-op":
                 value["applyable"] = False
-            plan.check_plan(value, "pve-lab", 6100, existing=True)
+            plan.check_plan(value, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
             with self.assertRaises(ValueError):
-                plan.check_plan(value, "pve-lab", 6100, existing=False)
+                plan.check_plan(value, "pve-lab", 6100, existing=False, protected_guests=[9900,9914,9915,9920])
         with self.assertRaises(ValueError):
-            plan.check_plan(fixture(), "pve-lab", 6100, existing=True)
+            plan.check_plan(fixture(), "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
         with self.assertRaises(TypeError):
-            plan.check_plan(fixture(), "pve-lab", 6100)
+            plan.check_plan(fixture(), "pve-lab", 6100, protected_guests=[9900,9914,9915,9920])
 
     def test_both_modes_refuse_imports_moves_drift_incomplete_plans_and_unknown_identity(
         self,
@@ -93,7 +98,7 @@ class PlanTests(unittest.TestCase):
                     self.subTest(existing=existing, index=index),
                     self.assertRaises(ValueError),
                 ):
-                    plan.check_plan(value, "pve-lab", 6100, existing=existing)
+                    plan.check_plan(value, "pve-lab", 6100, existing=existing, protected_guests=[9900,9914,9915,9920])
 
     def test_creation_cannot_adopt_or_claim_an_unapplyable_plan(self):
         value = fixture()
@@ -101,22 +106,22 @@ class PlanTests(unittest.TestCase):
             value["resource_changes"][0]["change"]["after"]
         )
         with self.assertRaises(ValueError):
-            plan.check_plan(value, "pve-lab", 6100, existing=False)
+            plan.check_plan(value, "pve-lab", 6100, existing=False, protected_guests=[9900,9914,9915,9920])
         value = fixture()
         value["applyable"] = False
         with self.assertRaises(ValueError):
-            plan.check_plan(value, "pve-lab", 6100, existing=False)
+            plan.check_plan(value, "pve-lab", 6100, existing=False, protected_guests=[9900,9914,9915,9920])
 
     def test_data_and_identity_are_immutable_in_reconciliation(self):
         for key in plan.IMMUTABLE_GUEST_FIELDS:
             value = existing_fixture()
             value["resource_changes"][0]["change"]["after"][key] = "changed"
             with self.subTest(field=key), self.assertRaises(ValueError):
-                plan.check_plan(value, "pve-lab", 6100, existing=True)
+                plan.check_plan(value, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
         value = existing_fixture()
         value["resource_changes"][1]["change"]["before"]["container_id"] = 6101
         with self.assertRaises(ValueError):
-            plan.check_plan(value, "pve-lab", 6100, existing=True)
+            plan.check_plan(value, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
 
     def test_destruction_replacement_and_other_targets_are_refused(self):
         for existing in (False, True):
@@ -127,29 +132,29 @@ class PlanTests(unittest.TestCase):
                     self.subTest(existing=existing, actions=actions),
                     self.assertRaises(ValueError),
                 ):
-                    plan.check_plan(value, "pve-lab", 6100, existing=existing)
+                    plan.check_plan(value, "pve-lab", 6100, existing=existing, protected_guests=[9900,9914,9915,9920])
             for index, key, bad in (
-                (0, "vm_id", 900),
+                (0, "vm_id", 9900),
                 (1, "container_id", 6101),
                 (2, "node_name", "other"),
             ):
                 value = existing_fixture() if existing else fixture()
                 value["resource_changes"][index]["change"]["after"][key] = bad
                 with self.assertRaises(ValueError):
-                    plan.check_plan(value, "pve-lab", 6100, existing=existing)
-            for vmid in (900, 4914, 4915, 4920, True, 0):
+                    plan.check_plan(value, "pve-lab", 6100, existing=existing, protected_guests=[9900,9914,9915,9920])
+            for vmid in (9900, 9914, 9915, 9920, True, 0):
                 with self.assertRaises(ValueError):
-                    plan.check_plan(fixture(), "pve-lab", vmid, existing=existing)
+                    plan.check_plan(fixture(), "pve-lab", vmid, existing=existing, protected_guests=[9900,9914,9915,9920])
             value = fixture()
             value["resource_changes"].append(
                 copy.deepcopy(value["resource_changes"][0])
             )
             with self.assertRaises(ValueError):
-                plan.check_plan(value, "pve-lab", 6100, existing=existing)
+                plan.check_plan(value, "pve-lab", 6100, existing=existing, protected_guests=[9900,9914,9915,9920])
             with self.assertRaises(ValueError):
                 plan.check_plan(
                     {"resource_changes": []}, "pve-lab", 6100, existing=existing
-                )
+                , protected_guests=[9900,9914,9915,9920])
 
 
 class ActiveDriftTests(unittest.TestCase):
@@ -166,7 +171,7 @@ class ActiveDriftTests(unittest.TestCase):
                 }
             ]
             row["change"].update(before=current, after=dict(current, started=True))
-            plan.check_plan(value, "pve-lab", 6100, existing=True)
+            plan.check_plan(value, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
             for mutate in (
                 lambda d: d["after"].update(started=None),
                 lambda d: d["after"].update(memory=999),
@@ -178,10 +183,10 @@ class ActiveDriftTests(unittest.TestCase):
                     self.subTest(previous=previous, mutate=mutate),
                     self.assertRaises(ValueError),
                 ):
-                    plan.check_plan(broken, "pve-lab", 6100, existing=True)
+                    plan.check_plan(broken, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
             row["change"]["after"]["started"] = False
             with self.assertRaises(ValueError):
-                plan.check_plan(value, "pve-lab", 6100, existing=True)
+                plan.check_plan(value, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
 
 
 class ComputedAddressDriftTests(unittest.TestCase):
@@ -243,7 +248,7 @@ class ComputedAddressDriftTests(unittest.TestCase):
                         r["change"]["actions"] == ["no-op"]
                         for r in value["resource_changes"]
                     ))
-                    plan.check_plan(value, "pve-lab", 6100, existing=True)
+                    plan.check_plan(value, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
                     self.assertEqual(value, original)
         value = self.observed_plan()
         change = value["resource_drift"][0]["change"]
@@ -280,7 +285,7 @@ class ComputedAddressDriftTests(unittest.TestCase):
             value = self.observed_plan()
             mutate(value["resource_drift"][0]["change"])
             with self.subTest(index=index), self.assertRaises(ValueError):
-                plan.check_plan(value, "pve-lab", 6100, existing=True)
+                plan.check_plan(value, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
         for mutate in (
             lambda v: v["resource_drift"][0].update(address="module.foreign.guest"),
             lambda v: v["resource_drift"].append(copy.deepcopy(v["resource_drift"][0])),
@@ -291,7 +296,7 @@ class ComputedAddressDriftTests(unittest.TestCase):
             value = self.observed_plan()
             mutate(value)
             with self.subTest(mutate=mutate), self.assertRaises(ValueError):
-                plan.check_plan(value, "pve-lab", 6100, existing=True)
+                plan.check_plan(value, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
 
 
 class OptionalEmptyRefreshTests(unittest.TestCase):
@@ -326,12 +331,12 @@ class OptionalEmptyRefreshTests(unittest.TestCase):
         for addresses in (False, True):
             value = self.observed_plan(addresses=addresses)
             original = copy.deepcopy(value)
-            plan.check_plan(value, "pve-lab", 6100, existing=True)
+            plan.check_plan(value, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
             self.assertEqual(value, original)
         value = self.observed_plan(addresses=False)
         change = value["resource_drift"][0]["change"]
         change["before"], change["after"] = change["after"], change["before"]
-        plan.check_plan(value, "pve-lab", 6100, existing=True)
+        plan.check_plan(value, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
 
     def test_nonempty_or_wrong_empty_values_and_desired_disk_changes_still_refuse(self):
         changes = [
@@ -355,12 +360,12 @@ class OptionalEmptyRefreshTests(unittest.TestCase):
             value = self.observed_plan()
             mutate(value["resource_drift"][0]["change"])
             with self.subTest(index=index), self.assertRaises(ValueError):
-                plan.check_plan(value, "pve-lab", 6100, existing=True)
+                plan.check_plan(value, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
         for field in ("disk", "mount_point"):
             value = self.observed_plan()
             value["resource_changes"][0]["change"]["after"][field][0]["mount_options"] = ["ro"]
             with self.subTest(field=field), self.assertRaises(ValueError):
-                plan.check_plan(value, "pve-lab", 6100, existing=True)
+                plan.check_plan(value, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
         malformed = {"disk": [None, {}, {"mount_options": False}], "features": None}
         self.assertEqual(plan.refresh_values(malformed), malformed)
         value = self.observed_plan(addresses=False)

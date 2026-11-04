@@ -9,7 +9,6 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import deploy
 import initial_ordinary
 import coordinated_generation as generation
 import ordinary_failure
@@ -58,7 +57,7 @@ class InfrastructureFailureTests(unittest.TestCase):
         with patch.dict(os.environ, {'GITHUB_RUN_ID': '778', 'GITHUB_RUN_NUMBER': '778',
                                      'GITHUB_SHA': self.case.revisions[1]}):
             with self.assertRaises(RuntimeError):
-                deploy.run('infrastructure', self.case.site)
+                self.case.phase('infrastructure')
         self.infra.side_effect = self.good_infra
         self.hold = (self.work / 'ORDINARY-HOLD.json').read_bytes()
         held = json.loads(self.hold)
@@ -87,7 +86,7 @@ class InfrastructureFailureTests(unittest.TestCase):
             'state_sha256': state_hash,
         }
         self.cfg['reviewed_ordinary_failures'] = [self.row]
-        save(self.case.site, self.cfg)
+        self.case.publish()
 
     def next_run(self, number=779):
         return patch.dict(os.environ, {'GITHUB_RUN_ID': str(number),
@@ -103,7 +102,7 @@ class InfrastructureFailureTests(unittest.TestCase):
         with self.next_run():
             before = self.infra.call_count
             with self.assertRaises((ValueError, OSError)):
-                deploy.run('infrastructure', self.case.site)
+                self.case.phase('infrastructure')
             self.assertEqual(self.infra.call_count, before)
             self.preserve_hold()  # Explicit operator action, never a deploy helper action.
             original = {p: p.read_bytes() for p in self.operation.rglob('*') if p.is_file()}
@@ -142,7 +141,7 @@ class InfrastructureFailureTests(unittest.TestCase):
             current = copy.deepcopy(self.review)
             mutate(current)
             self.row['infrastructure_sha256'] = save(self.review_path, current)
-            save(self.case.site, self.cfg)
+            self.case.publish()
             message = ('Require the exact reviewed pre-update SDN refusal' if index < 9 else
                        'Keep the prior immutable success before this failed attempt' if index < 11 else
                        'Preserve the exact prior success and its original backend' if index == 11 else
@@ -151,7 +150,7 @@ class InfrastructureFailureTests(unittest.TestCase):
             with self.subTest(index=index), self.next_run():
                 before = self.infra.call_count
                 with self.assertRaisesRegex(ValueError, re.escape(message)):
-                    deploy.run('infrastructure', self.case.site)
+                    self.case.phase('infrastructure')
                 self.assertEqual(self.infra.call_count, before)
                 self.assertFalse((self.work / 'ordinary-779-1').exists())
         self.assertEqual(self.case.canonical.read_bytes(), self.previous)
@@ -160,7 +159,7 @@ class InfrastructureFailureTests(unittest.TestCase):
         self.preserve_hold()
         original = {p: p.read_bytes() for p in self.operation.rglob('*') if p.is_file()}
         self.cfg['guest']['interfaces'][0]['bridge'] = 'vmbr1'
-        save(self.case.site, self.cfg)
+        self.case.publish()
         with self.next_run():
             self.case.all_phases()
         with self.next_run(780):
@@ -241,7 +240,7 @@ class InfrastructureFailureTests(unittest.TestCase):
                 v = b'other failure\n' if name == 'log-other' else v + b'Modifications complete\n'
                 row['log_sha256'] = save(p, v)
             row['infrastructure_sha256'] = save(self.review_path, review)
-            save(self.case.site, self.cfg)
+            self.case.publish()
             messages = {
                 'unselected': "'complete.json'",
                 'complete': 'A failed checkpoint cannot replace a completed operation',
@@ -261,7 +260,7 @@ class InfrastructureFailureTests(unittest.TestCase):
                 with patch.object(generation, 'read_existing', wraps=generation.read_existing) as history:
                     with self.assertRaisesRegex((ValueError, OSError), re.escape(messages.get(
                             name, 'Preserve the exact unfinished saved-plan attempt'))):
-                        deploy.run('infrastructure', self.case.site)
+                        self.case.phase('infrastructure')
                     if name == 'unselected':
                         history.assert_called_with(self.operation / 'complete.json')
                 self.assertEqual(self.infra.call_count, before)

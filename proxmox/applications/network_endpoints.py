@@ -27,11 +27,3 @@ def interface(nic):
 def addresses(guest):
     """Validate every interface and return its concrete assigned IPv4 address."""
     return {str(value.ip) for nic in guest["interfaces"] if (value := interface(nic)) is not None}
-
-
-def firewall_interface(guest, address):
-    """PVE firewall uses netN keys, rather than the guest's ethN names."""
-    selected = [f"net{index}" for index, nic in enumerate(guest["interfaces"])
-                if (value := interface(nic)) is not None and str(value.ip) == address]
-    require(len(selected) == 1, "Bind the firewall connection to one assigned interface")
-    return selected[0]

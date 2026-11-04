@@ -1,6 +1,8 @@
 """Qualified completed groups and evolving ordinary generations, without targets."""
 
 import copy
+from contextlib import ExitStack
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -10,7 +12,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).resolve().parents[3]/'blueprints')]
 import coordinated_contract as contract
 import coordinated_evidence as evidence
 import coordinated_generation as generation
@@ -21,6 +23,11 @@ import deploy
 import private_io as io
 import proxmox_guest as pve
 import ordinary_failure
+import component_guest
+import component_inputs
+import component_payload
+import component_evidence
+from test_component_historical_transition import HistoricalCase
 from fixtures import github_source
 from custody_fixtures import CompletedGroup, save, backend
 
@@ -31,43 +38,42 @@ class AdmissionTests(unittest.TestCase):
         self.addCleanup(td.cleanup)
         value = CompletedGroup(td.name, postgres=postgres, proof_literal=proof_literal, legacy_serializers=legacy_serializers)
         mount = patch.object(records.os.path, 'ismount', return_value=True)
-        findmnt = patch.object(records.subprocess, 'check_output', return_value='nfs4 nas.example.invalid:/backups\n')
+        real_output=subprocess.check_output
+        def output(argv,*args,**kwargs):
+            if argv[0]=='findmnt':
+                value='nfs4 nas.example.invalid:/backups\n'
+                return value if kwargs.get('text') else value.encode()
+            return real_output(argv,*args,**kwargs)
+        findmnt = patch.object(records.subprocess, 'check_output', side_effect=output)
         mount.start(); findmnt.start()
         self.addCleanup(mount.stop); self.addCleanup(findmnt.stop)
         return value
 
     def runtime(self, value, role='mariadb'):
-        cfg, site, work = value.cfgs[role], value.site(role), value.work(role)
-        source, revisions = github_source(value.root)
-        context = patch.dict(os.environ, {
-            'GITHUB_RUN_ID': '777', 'GITHUB_RUN_ATTEMPT': '1', 'GITHUB_RUN_NUMBER': '777',
-            'GITHUB_REPOSITORY': 'example/private-site',
-            'HOMELAB_DEPLOYMENT_WORKFLOW': 'example/private-site/.github/workflows/deploy.yml@refs/heads/main',
-            'GITHUB_SHA': revisions[0], 'GITHUB_WORKSPACE': str(source),
-        })
-        context.start(); self.addCleanup(context.stop)
-        # Only packet transport and native executors are substituted. Evidence,
-        # binding, filesystem admission, real local key lookup and receipts run.
-        preparation = patch.object(inputs, 'prepare', return_value=(cfg, site))
-        source_hash = patch.object(inputs, 'source_hash', return_value='7' * 64)
-        preparation.start(); source_hash.start()
-        self.addCleanup(preparation.stop); self.addCleanup(source_hash.stop)
-        def infrastructure(*args, **kwargs):
-            self.assertEqual(kwargs['state_identity'], generation.backend(work, value.group['members'][role])[1])
-            body = records.decode((work / 'terraform.tfstate').read_bytes())
-            body['serial'] += 1
-            save(work / 'terraform.tfstate', body)
-            return {'changed': True, 'created': False, 'state_sha256': io.sha(work / 'terraform.tfstate')}
-        infra = patch.object(pve, 'infrastructure', side_effect=infrastructure)
-        ansible = patch.object(deploy.ansible_guest, 'run_phase', return_value={'status': 'passed', 'changed': False})
-        i, a = infra.start(), ansible.start()
-        self.addCleanup(infra.stop); self.addCleanup(ansible.stop)
-        return SimpleNamespace(cfg=cfg, site=site, work=work, revisions=revisions, infra=i, app=a)
+        case = HistoricalCase(self, value.root, role, group=value, phase=role)
+        contexts = ExitStack();self.addCleanup(contexts.close);case.bind(contexts)
+        # Only app/native executors are fakes. Packet/static/AppPayload/binding,
+        # attempt locks, local Git ancestry and historical evidence stay real.
+        app = contexts.enter_context(patch('component_ansible.run_phase',
+            return_value={'status':'passed','changed':False}))
+        def agent(cfg, environment):
+            return component_payload.prepare(component_inputs.app_directory(cfg,create=True),
+                cfg['deployment']['input_identity'],'agent',
+                {'application.json':io.encoded({'id':'agent','adapter':'zabbix-agent'})})
+        contexts.enter_context(patch('component_prepare.prepare_agent',side_effect=agent))
+        runtime = SimpleNamespace(cfg=case.cfg,site=case.packet,work=case.work,
+            revisions=case.revisions,infra=case.native,app=app,case=case)
+        def run(phase):
+            case.revise()
+            return deploy.run(phase,case.packet,inputs=case.inputs,environment={})
+        runtime.run=run
+        return runtime
+
 
     def all_phases(self, runtime):
-        import guest_contract
-        for phase in ['infrastructure', *guest_contract.phases(runtime.cfg)]:
-            deploy.run(phase, runtime.site)
+        for phase in ['infrastructure', *component_guest.phases(runtime.cfg)]:
+            runtime.run(phase)
+
 
     def test_exact_reviewed_failed_infrastructure_can_advance_without_fabricating_application_success(self):
         value = self.fixture()
@@ -81,10 +87,10 @@ class AdmissionTests(unittest.TestCase):
             previous = (runtime.work / 'ordinary-complete.json').read_bytes()
             with patch.dict(os.environ, {'GITHUB_RUN_ID': '778', 'GITHUB_RUN_NUMBER': '778',
                                          'GITHUB_SHA': runtime.revisions[1]}):
-                deploy.run('infrastructure', runtime.site)
-                deploy.run('preparation', runtime.site)
+                runtime.run('infrastructure')
+                runtime.run('preparation')
                 runtime.app.side_effect = RuntimeError('synthetic missing sudo before account writes')
-                with self.assertRaises(RuntimeError): deploy.run('mariadb', runtime.site)
+                with self.assertRaises(RuntimeError): runtime.run('mariadb')
                 runtime.app.side_effect = None
             operation = runtime.work / 'ordinary-778-1'
             hold = (runtime.work / 'ORDINARY-HOLD.json').read_bytes()
@@ -98,7 +104,7 @@ class AdmissionTests(unittest.TestCase):
             self.assertEqual((runtime.work / 'ordinary-complete.json').read_bytes(), previous)
             with patch.dict(os.environ, {'GITHUB_RUN_ID': '779', 'GITHUB_RUN_NUMBER': '779',
                                          'GITHUB_SHA': runtime.revisions[1]}):
-                with self.assertRaises((ValueError, OSError)): deploy.run('infrastructure', runtime.site)
+                with self.assertRaises((ValueError, OSError)): runtime.run('infrastructure')
                 # Operator preservation is explicit, never performed by CD.
                 (runtime.work / 'ORDINARY-HOLD.json').rename(operation / 'preserved-failed-hold.json')
                 for change in ('log', 'started', 'infra', 'foreign', 'complete', 'nested-hold', 'unselected'):
@@ -111,7 +117,7 @@ class AdmissionTests(unittest.TestCase):
                     if change == 'nested-hold': save(log.parent / '.pending-HOLD.json', {})
                     if change == 'unselected': runtime.cfg.pop('reviewed_ordinary_failures')
                     with self.subTest(change=change), self.assertRaises((ValueError, OSError)):
-                        deploy.run('infrastructure', runtime.site)
+                        runtime.run('infrastructure')
                     for p, raw in originals.items(): save(p, raw)
                     row['previous_ordinary_sha256'] = io.digest(previous)
                     (operation / 'complete.json').unlink(missing_ok=True)
@@ -142,8 +148,7 @@ class AdmissionTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError): ordinary_failure.selection(cfg)
 
     def test_exact_final_agent_phase_can_be_selected_without_admitting_other_hyphenated_paths(self):
-        import guest_contract
-        row = {'operation': 'ordinary-100-1', 'phase': guest_contract.AGENT_PHASE,
+        row = {'operation': 'ordinary-100-1', 'phase': component_guest.AGENT_PHASE,
                **{k: 'a' * 64 for k in ('hold_sha256', 'infrastructure_sha256', 'log_sha256',
                                        'previous_ordinary_sha256', 'state_sha256')}}
         cfg = {'coordinated_custody': {}, 'reviewed_ordinary_failures': [row]}
@@ -153,16 +158,16 @@ class AdmissionTests(unittest.TestCase):
             with self.subTest(phase=phase), self.assertRaises(ValueError): ordinary_failure.selection(changed)
 
     def test_exact_reviewed_agent_failure_keeps_old_hold_and_requires_a_new_successful_run(self):
-        import guest_contract
         import monitoring_inputs
-        import test_monitoring_agent
         value = self.fixture(); real = subprocess.run
         def output(argv, **kwargs):
             if argv[0] == 'findmnt': return 'nfs4 nas.example.invalid:/backups\n'
             return real(argv, check=True, stdout=subprocess.PIPE, **kwargs).stdout
         with patch.object(subprocess, 'check_output', side_effect=output), patch.object(monitoring_inputs, 'source_files', return_value=[]):
             runtime = self.runtime(value)
-            selected = copy.deepcopy(test_monitoring_agent.cfg('mariadb')['app']['monitoring'])
+            selected = {'hostname':'fixture-808','psk_identity':'fixture-808',
+                'server_active':'198.18.25.36:10051','server_vmid':816,'server_hostname':'zabbix',
+                'profiles':['linux','mysql'],'database_uri':'tcp://127.0.0.1:3306'}
             selected.update(hostname=runtime.cfg['site']['node']+'-'+str(runtime.cfg['guest']['vmid']))
             selected['psk_identity'] = selected['hostname']
             selected['credential_file'] = str(value.root/'agent.json')
@@ -170,13 +175,15 @@ class AdmissionTests(unittest.TestCase):
             save(Path(selected['credential_file']), {'psk':'b'*64})
             save(Path(selected['database_password_file']), b'c'*64)
             runtime.cfg['app']['monitoring'] = selected
+            runtime.cfg['deployment']['phases'].append(component_guest.AGENT_PHASE)
+            runtime.cfg['deployment']['payload_phases'][component_guest.AGENT_PHASE]='agent'
             self.all_phases(runtime)
             previous = (runtime.work/'ordinary-complete.json').read_bytes()
-            phase = guest_contract.AGENT_PHASE
+            phase = component_guest.AGENT_PHASE
             with patch.dict(os.environ, {'GITHUB_RUN_ID':'778','GITHUB_RUN_NUMBER':'778','GITHUB_SHA':runtime.revisions[1]}):
-                for name in ('infrastructure','preparation','mariadb'): deploy.run(name,runtime.site)
+                for name in ('infrastructure','preparation','mariadb'): runtime.run(name)
                 runtime.app.side_effect = RuntimeError('synthetic final agent refusal')
-                with self.assertRaises(RuntimeError):deploy.run(phase,runtime.site)
+                with self.assertRaises(RuntimeError):runtime.run(phase)
                 runtime.app.side_effect = None
             operation=runtime.work/'ordinary-778-1'; hold=(runtime.work/'ORDINARY-HOLD.json').read_bytes()
             log=operation/phase/'application.log';save(log,b'original agent failure remains\n')
@@ -185,7 +192,7 @@ class AdmissionTests(unittest.TestCase):
                  'previous_ordinary_sha256':io.digest(previous),'state_sha256':io.sha(runtime.work/'terraform.tfstate')}
             runtime.cfg['reviewed_ordinary_failures']=[row]
             with patch.dict(os.environ, {'GITHUB_RUN_ID':'779','GITHUB_RUN_NUMBER':'779','GITHUB_SHA':runtime.revisions[1]}):
-                with self.assertRaises((ValueError,OSError)):deploy.run('infrastructure',runtime.site)
+                with self.assertRaises((ValueError,OSError)):runtime.run('infrastructure')
                 self.assertEqual((runtime.work/'ordinary-complete.json').read_bytes(),previous)
                 # Only the explicit fixture operator preserves the old active hold.
                 (runtime.work/'ORDINARY-HOLD.json').rename(operation/'preserved-failed-hold.json')
@@ -195,23 +202,93 @@ class AdmissionTests(unittest.TestCase):
             self.assertFalse((operation/'complete.json').exists())
             self.assertEqual(records.decode((runtime.work/'ordinary-complete.json').read_bytes())['run_number'],779)
 
+    def test_component_failed_app_and_agent_proofs_are_closed_immutable_and_owned(self):
+        import monitoring_inputs
+        for agent in (False,True):
+            value=self.fixture()
+            with patch.object(monitoring_inputs,'source_files',return_value=[]):
+                runtime=self.runtime(value)
+                if agent:
+                    runtime.cfg['app']['monitoring']={'hostname':'fixture-pve-808',
+                        'psk_identity':'fixture-pve-808','server_active':'198.18.25.36:10051',
+                        'server_vmid':816,'server_hostname':'zabbix','profiles':['linux','mysql'],
+                        'credential_file':str(value.root/'agent.json')}
+                    runtime.cfg['deployment']['phases'].append(component_guest.AGENT_PHASE)
+                    runtime.cfg['deployment']['payload_phases'][component_guest.AGENT_PHASE]='agent'
+                self.all_phases(runtime)
+                phase=component_guest.AGENT_PHASE if agent else 'mariadb'
+                with patch.dict(os.environ,{'GITHUB_RUN_ID':'778','GITHUB_RUN_NUMBER':'778',
+                                           'GITHUB_SHA':runtime.revisions[1]}):
+                    for name in ['infrastructure','preparation']+(['mariadb'] if agent else []):runtime.run(name)
+                    runtime.app.side_effect=RuntimeError('synthetic selected phase refusal')
+                    with self.assertRaises(RuntimeError):runtime.run(phase)
+                    runtime.app.side_effect=None
+                operation=runtime.work/'ordinary-778-1';row={'phase':phase}
+                hold=runtime.work/'ORDINARY-HOLD.json';raw=hold.read_bytes();held=records.decode(raw)
+                hold.rename(operation/'preserved-failed-hold.json')
+                started_path=operation/(phase+'-started.json');started_raw=started_path.read_bytes()
+                started=records.decode(started_raw);proof=started['phase_inputs']
+                payload=Path(held['binding']['app_inputs_directory'])/proof['app']
+                manifest=payload/'selected-app.json';application=payload/'application.json'
+                prior_site=Path(held['binding']['app_inputs_directory']).parent/'site.json'
+                before={path:path.read_bytes() for path in (manifest,application,prior_site)}
+                attempt=SimpleNamespace(cfg=runtime.cfg)
+                ordinary_failure.phase_start(attempt,operation,row,held,raw)
+                for variant in ('missing-proof','foreign-app','wrong-input-identity','noncanonical-start','noncanonical-hold',
+                                'payload-tamper','missing-manifest','foreign-old-guest','foreign-old-phase-map'):
+                    bad=copy.deepcopy(started);owner=copy.deepcopy(held)
+                    if variant=='missing-proof':bad.pop('phase_inputs')
+                    elif variant=='foreign-app':bad['phase_inputs']['app']='foreign'
+                    elif variant=='wrong-input-identity':bad['phase_inputs']['identity']='0'*64
+                    elif variant=='payload-tamper':application.write_bytes(before[application]+b' ')
+                    elif variant=='missing-manifest':manifest.unlink()
+                    elif variant in ('foreign-old-guest','foreign-old-phase-map'):
+                        cfg=records.decode(before[prior_site])
+                        if variant=='foreign-old-guest':cfg['guest']['hostname']='foreign'
+                        else:cfg['deployment']['payload_phases'][phase]='foreign'
+                        save(prior_site,cfg);owner['binding']['site_sha256']=io.sha(prior_site)
+                        bad['binding']=copy.deepcopy(owner['binding'])
+                    save(started_path,io.encoded(bad)+(b' ' if variant=='noncanonical-start' else b''))
+                    with self.subTest(agent=agent,variant=variant),self.assertRaises((ValueError,OSError)):
+                        ordinary_failure.phase_start(attempt,operation,row,owner,
+                            io.encoded(owner)+(b' ' if variant=='noncanonical-hold' else b''))
+                    save(started_path,started_raw)
+                    for path,content in before.items():save(path,content)
+                ordinary_failure.phase_start(attempt,operation,row,held,raw)
+                self.assertEqual((operation/'preserved-failed-hold.json').read_bytes(),raw)
+                self.assertEqual(started_path.read_bytes(),started_raw)
+                self.assertFalse((operation/'complete.json').exists())
+                self.assertFalse((runtime.work/'ORDINARY-HOLD.json').exists())
+                self.assertEqual(runtime.infra.call_count,2)
+
     def test_complete_local_and_nas_provenance_includes_disabled_members(self):
         value = self.fixture(postgres=True)
-        contract.configured_closure(value.resolved())
+        component_evidence.bind(self.source_evidence(value))
         for role, cfg in value.cfgs.items():
             proofs, lineage, baseline = evidence.inspect(cfg)
             self.assertEqual(lineage, f"fixture-{cfg['guest']['vmid']}")
             self.assertEqual(baseline is None, role == 'postgresql')
             self.assertIn(str(value.work('db-tools') / 'plan.json'), proofs)
             self.assertIn(str(value.remote / 'complete.json'), proofs)
+        # Current component closure runs before execution selection; a disabled
+        # member's document and exact raw assets remain configured source inputs.
         for variant in ('missing', 'changed', 'missing-proof', 'changed-proof'):
-            resolved = copy.deepcopy(value.resolved())
-            if variant == 'missing': resolved.pop('db-tools')
-            if variant == 'changed': resolved['db-tools'][0]['coordinated_custody']['group']['members']['db-tools']['initial_state_sha256'] = '4' * 64
-            if variant == 'missing-proof': resolved['db-tools'][2].pop('acceptance.json')
-            if variant == 'changed-proof': resolved['db-tools'][2]['acceptance.json'] += ' '
+            source = self.source_evidence(value)
+            if variant == 'missing':
+                source.guests.pop('db-tools'); source.apps.pop('db-tools')
+            elif variant == 'changed':
+                changed = copy.deepcopy(source.site['evidence']['group'])
+                changed['document']['group']['members']['db-tools']['initial_state_sha256'] = '4' * 64
+                source.site['evidence']['changed-group'] = changed
+                source.guests['db-tools']['admission']['coordinated_custody']['evidence'] = 'changed-group'
+            elif variant == 'missing-proof':
+                source.guests['db-tools']['admission']['assets'].pop('acceptance')
+            else:
+                source.site['evidence']['changed-acceptance'] = {
+                    'text': source.site['evidence']['acceptance']['text'] + ' '}
+                source.guests['db-tools']['admission']['assets']['acceptance'] = 'changed-acceptance'
             with self.subTest(variant=variant), self.assertRaises(ValueError):
-                contract.configured_closure(resolved)
+                component_evidence.bind(source)
         cfg = value.cfgs['postgresql']
         path = value.work('db-tools') / 'plan.json'
         old = path.read_bytes(); save(path, old + b' ')
@@ -238,7 +315,7 @@ class AdmissionTests(unittest.TestCase):
                         self.assertEqual(receipt['run_number'], number)
                         self.assertEqual(receipt['state_sha256'], io.sha(runtime.work / 'terraform.tfstate'))
                         self.assertEqual((Path(receipt['operation']) / 'complete.json').read_bytes(), (runtime.work / 'ordinary-complete.json').read_bytes())
-                        self.assertFalse(deploy.run('infrastructure', runtime.site)['target_contacted'])
+                        self.assertFalse(runtime.run('infrastructure')['target_contacted'])
                 self.assertEqual(runtime.infra.call_count, 3)
                 self.assertEqual(first_overlay, value.group['members'][role]['overlay']['sha256'])
                 for path, raw in originals.items():
@@ -443,36 +520,47 @@ class AdmissionTests(unittest.TestCase):
             else: bad['resource_changes'][0]['change'][side]['id'] = 'foreign'
             with self.assertRaises(ValueError): generation.plan_identity(bad, identity)
 
-    def test_packet_proofs_are_checked_before_materialization_and_cannot_escape_its_directory(self):
-        value = self.fixture(); cfg = value.cfgs['mariadb']
-        identity = '8' * 64
-        destination = value.root / 'fresh-inputs' / 'mariadb' / identity
-        cfg['paths']['coordinated_custody_inputs'] = str(destination)
-        packet = {'schema': deploy.guest_contract.SCHEMA, 'kind': 'mariadb', 'enabled': True,
-                  'identity': identity, 'files': dict(value.files(), **{'site.json': io.encoded(cfg).decode()})}
-        path = value.root / 'packet.json'
-        for variant in ('missing-proof', 'changed-proof', 'wrong-directory', 'valid'):
-            v = copy.deepcopy(packet)
-            if variant == 'missing-proof': v['files'].pop('acceptance.json')
-            if variant == 'changed-proof': v['files']['catalogue.json'] += ' '
-            if variant == 'wrong-directory':
-                c = copy.deepcopy(cfg); c['paths']['coordinated_custody_inputs'] = str(value.root / 'elsewhere')
-                v['files']['site.json'] = io.encoded(c).decode()
-            save(path, v)
-            if variant == 'valid':
-                observed, site = inputs.prepare(path, value.root / 'fresh-inputs')
-                self.assertEqual(observed, cfg); self.assertEqual(site, destination / 'site.json')
-                self.assertEqual((destination / 'acceptance.json').read_bytes(), value.acceptance_raw)
-            else:
-                with self.subTest(variant=variant), self.assertRaises(ValueError): inputs.prepare(path, value.root / 'fresh-inputs')
-                self.assertFalse(destination.exists())
+    def test_component_packet_proof_tamper_is_preserved_as_static_evidence_but_never_reaches_native(self):
+        for variant in ('missing-proof','changed-proof','wrong-directory','valid'):
+            value=self.fixture();case=HistoricalCase(self,value.root,'mariadb',group=value,phase='mariadb')
+            packet=records.decode(case.packet.read_bytes())
+            if variant=='missing-proof':packet['files'].pop('acceptance.json')
+            if variant=='changed-proof':packet['files']['catalogue.json']+=' '
+            if variant=='wrong-directory':
+                cfg=records.decode(packet['files']['site.json'])
+                cfg['paths']['coordinated_custody_inputs']=str(value.root/'elsewhere')
+                packet['files']['site.json']=io.encoded(cfg).decode()
+            save(case.packet,packet)
+            destination=Path(case.cfg['deployment']['input_directory'])
+            with ExitStack() as contexts:
+                case.bind(contexts)
+                if variant=='valid':
+                    deploy.run('infrastructure',case.packet,inputs=case.inputs,environment={})
+                    observed=records.decode((destination/'site.json').read_bytes())
+                    self.assertEqual(observed,case.cfg)
+                    self.assertEqual((destination/'acceptance.json').read_bytes(),value.acceptance_raw)
+                else:
+                    with self.subTest(variant=variant),self.assertRaises((ValueError,OSError)):
+                        deploy.run('infrastructure',case.packet,inputs=case.inputs,environment={})
+                    self.assertEqual(case.native_calls,[]);case.prepare.assert_not_called()
+                    self.assertFalse((case.work/'ORDINARY-HOLD.json').exists())
+                    self.assertFalse((destination/'applications').exists())
+                    # Versioned receiver keeps only the refused static witness.
+                    self.assertFalse((value.root/'elsewhere').exists())
+                    self.assertTrue((destination/'component-prepared.json').is_file())
+                    for name,raw in packet['files'].items():
+                        self.assertEqual((destination/name).read_bytes(),raw.encode())
+
 
     def test_plan_identity_is_enforced_before_apply_and_missing_trust_is_never_created(self):
         from test_plan import existing_fixture
         value = self.fixture(); cfg = value.cfgs['mariadb']; work = value.work('mariadb')
         trust = work / 'ssh-trust.json'; trust.unlink()
-        with self.assertRaisesRegex(ValueError, 'existing commissioned guest trust'):
+        with patch.object(pve.subprocess,'run',return_value=SimpleNamespace(
+                returncode=0,stdout=cfg['app']['address']+' ssh-ed25519 fixture\n')) as lookup, \
+                self.assertRaisesRegex(ValueError, 'existing commissioned guest trust'):
             pve.guest_trust(cfg, work, persist=False)
+        self.assertEqual(lookup.call_args.args[0][0],'ssh-keygen')
         self.assertFalse(trust.exists())
         cfg['site']['node'] = 'pve-lab'; cfg['guest']['vmid'] = cfg['app']['vmid'] = 6100
         save(value.root / 'api', b'fixture@pve!deploy=synthetic')
@@ -492,46 +580,17 @@ class AdmissionTests(unittest.TestCase):
         self.assertTrue(command.called)
         self.assertFalse((operation / 'apply-window.json').exists())
 
-    def test_actual_dependency_cases_keep_all_configured_copies_and_only_enable_valid_subsets(self):
-        import importlib.util
-        path = Path(__file__).resolve().parents[3] / 'blueprints/compile.py'
-        spec = importlib.util.spec_from_file_location('custody_blueprints', path)
-        compiler = importlib.util.module_from_spec(spec); spec.loader.exec_module(compiler)
-        value = self.fixture(postgres=True)
-        deps = {'dns': [], 'ingress': ['dns'], 'postgresql': ['dns'], 'mariadb': ['dns'], 'influxdb': ['dns'],
-                'identity': ['postgresql', 'ingress'], 'db-tools': ['postgresql', 'ingress', 'identity'],
-                'automation': ['ingress', 'identity', 'mariadb', 'influxdb'], 'bitwarden': ['ingress', 'mariadb'],
-                'pegaprox': ['dns'], 'zigbee2mqtt': ['automation']}
-        manifest = {'guests': {r: {'depends_on': d, 'prerequisites': []} for r, d in deps.items()}, 'routes': {}, 'values': {}}
-        resolved = value.resolved()
-        for index, role in enumerate(deps):
-            if role not in resolved: resolved[role] = ({'guest': {'vmid': 6000 + index}}, {}, {})
-        for role in value.roles: resolved[role] = (resolved[role][0], {}, resolved[role][2])
-        overlay = {'schema': 'homelab-site-v3', 'routes': {}, 'values': {}, 'common': {}, 'guests': {}, 'images': {}, 'accepted': {}}
-        def compile_guest(name, cfg, stack, files, enabled):
-            return cfg, {'enabled': name in enabled}
-        cases = [(None, 11), (['db-tools'], 10), (['identity'], None), (['identity', 'db-tools'], None),
-                 (['identity', 'automation'], None), (['identity', 'db-tools', 'automation'], None),
-                 (['identity', 'db-tools', 'automation', 'zigbee2mqtt'], 7), (['pegaprox'], 10),
-                 (['bitwarden'], 10), (['dns'], None)]
-        with patch.object(compiler, 'manifest', return_value=manifest), \
-             patch.object(compiler, '_resolve_guest', side_effect=lambda root, overlay, name, spec: resolved[name]), \
-             patch.object(compiler, '_compile_guest', side_effect=compile_guest), \
-             patch.object(compiler.routes, 'bind', return_value={}), patch.object(compiler.service_bindings, 'bind'), \
-             patch.object(compiler.connections, 'validate'):
-            for disabled, expected in cases:
-                with self.subTest(disabled=disabled):
-                    if expected is None:
-                        with self.assertRaises(ValueError): compiler.compile_stack(value.root, overlay, disabled)
-                    else:
-                        packets = compiler.compile_stack(value.root, overlay, disabled)
-                        self.assertEqual(len(packets), 11)
-                        self.assertEqual(sum(p['enabled'] for p in packets.values()), expected)
-            # Disabled source copy remains mandatory, and no target executors are
-            # part of compile. Remove just that copy to prove refusal is early.
-            resolved['db-tools'][0].pop('coordinated_custody')
-            with self.assertRaisesRegex(ValueError, 'Custody inputs|provenance copies'):
-                compiler.compile_stack(value.root, overlay, ['db-tools'])
+    def test_component_evidence_keeps_every_configured_member_independent_of_execution_selection(self):
+        value=self.fixture(postgres=True)
+        source=self.source_evidence(value)
+        result=component_evidence.bind(source)
+        self.assertEqual(set(result),set(value.roles))
+        self.assertTrue(all(row['coordinated_custody']==value.cfgs[role]['coordinated_custody']
+                            for role,row in result.items()))
+        # A disabled/otherwise unexecuted copy is still part of source closure.
+        source.guests['db-tools'].pop('admission')
+        with self.assertRaisesRegex(ValueError,'evidence-closure'):component_evidence.bind(source)
+
 
     def test_other_pending_paths_and_changed_immutable_inputs_refuse_before_native_executor(self):
         value = self.fixture()
@@ -552,6 +611,13 @@ class AdmissionTests(unittest.TestCase):
             # nested custody cannot bypass the directory/marker examination.
             expected, _, _ = evidence.inspect(value.cfgs['mariadb'])
             a = self.attempt(value, 'mariadb', expected)
+            # The completed group remains historical input; a new ordinary
+            # attempt uses the current closed common binding and guest schema.
+            a.cfg = dict(a.cfg, schema='homelab-component-guest-v1',
+                         deployment=dict(a.cfg['deployment'], lifecycle='retained'))
+            a.binding = dict(a.binding, schema=state.BINDING_SCHEMA, site_sha256='a'*64,
+                source_sha256='b'*64, input_identity='c'*64,
+                app_inputs_directory=str(value.work('mariadb')/'applications'))
             with patch.object(pve, 'guest_trust'), patch.object(generation, 'classify', return_value={}), \
                  patch.object(pve, 'infrastructure') as native:
                 if leaf.endswith('unexpected'):
@@ -561,105 +627,89 @@ class AdmissionTests(unittest.TestCase):
                 native.assert_not_called()
             child.unlink()
 
-    def test_real_packet_compiler_resolves_input_slot_before_runtime_validation(self):
-        import importlib.util
-        path = Path(__file__).resolve().parents[3] / 'blueprints/compile.py'
-        spec = importlib.util.spec_from_file_location('custody_slot_blueprints', path)
-        compiler = importlib.util.module_from_spec(spec); spec.loader.exec_module(compiler)
-        value = self.fixture(); cfg = value.cfgs['mariadb']
-        cfg['paths']['coordinated_custody_inputs'] = '${inputs}'
-        with self.assertRaisesRegex(ValueError, 'absolute custody paths'):
-            contract.selection(cfg)
-        contract.configured_closure(value.resolved())
-        result, packet = compiler._compile_guest('mariadb', cfg, None, value.files(), ['mariadb'])
-        directory = '/var/lib/homelab-inputs/ordinary/mariadb/' + packet['identity']
-        self.assertEqual(result['paths']['coordinated_custody_inputs'], directory)
-        self.assertEqual(contract.selection_digest(result), contract.selection_digest(cfg))
-        self.assertEqual(packet['files']['catalogue.json'], value.catalogue_raw.decode())
-        self.assertEqual(packet['files']['acceptance.json'], value.acceptance_raw.decode())
-        self.assertEqual(contract.selection(result), cfg['coordinated_custody']['group'])
-        # Exercise real source resolution too: public profile placeholders carry
-        # private proof bytes through existing central values, not a new adapter.
-        source = value.root / 'stack-source'
-        base = copy.deepcopy(cfg)
-        base.pop('deployment'); selected = base.pop('coordinated_custody')
-        base['paths'].pop('coordinated_custody_inputs')
-        base['guest'].update(dns_servers=[], rules=[])
-        save(source / 'common.json', {})
-        save(source / 'guests/mariadb/profile.json', {'config': base, 'stack': None,
-             'files': {'catalogue.json': '${custody.catalogue}', 'acceptance.json': '${custody.acceptance}'}})
-        save(source / 'stack.json', {'schema': 'homelab-stack-v2', 'values': {}, 'routes': {},
-             'guests': {'mariadb': {'depends_on': [], 'prerequisites': []}}})
-        overlay = {'schema': 'homelab-site-v3', 'common': {}, 'images': {}, 'accepted': {}, 'routes': {},
-                   'values': {'custody.catalogue': value.catalogue_raw.decode(), 'custody.acceptance': value.acceptance_raw.decode()},
-                   'guests': {'mariadb': {'config': {'coordinated_custody': selected,
-                       'paths': {'coordinated_custody_inputs': '${inputs}'}}}}}
-        with patch.object(compiler, 'CATALOGUE', {'mariadb': compiler.CATALOGUE['mariadb']}):
-            packets = compiler.compile_stack(source, overlay)
-        self.assertTrue(packets['mariadb']['enabled'])
-        self.assertEqual(packets['mariadb']['files']['acceptance.json'], value.acceptance_raw.decode())
-        self.assertEqual(records.decode(packets['mariadb']['files']['site.json'])['coordinated_custody'], selected)
-        cfg['paths']['coordinated_custody_inputs'] = '${other}'
-        with self.assertRaises(ValueError): contract.configured_closure(value.resolved())
+    def source_evidence(self,value):
+        first=next(iter(value.cfgs.values()))
+        context={'node':first['site']['node'],'paths':{key:first['paths'][key] for key in
+                 ('state_root','backup_mount','backup_directory','backup_source')}}
+        source=SimpleNamespace(site={'contexts':{'selected':context},'evidence':{
+            'group':{'document':copy.deepcopy(first['coordinated_custody'])},
+            'catalogue':{'text':value.catalogue_raw.decode()},
+            'acceptance':{'text':value.acceptance_raw.decode()}}},guests={},apps={})
+        for role,cfg in value.cfgs.items():
+            source.guests[role]={'context':'selected','identity':{'vmid':cfg['guest']['vmid']},
+                'admission':{'coordinated_custody':{'evidence':'group','member':role},
+                             'assets':{'catalogue':'catalogue','acceptance':'acceptance'}}}
+            source.apps[role]={'guest':role,'adapter':{'identity':'authentik','db-tools':'cloudbeaver'}.get(role,role)}
+        return source
 
-    def test_literal_proof_bytes_survive_real_resolution_compilation_and_preparation(self):
-        import importlib.util
-        path = Path(__file__).resolve().parents[3] / 'blueprints/compile.py'
-        spec = importlib.util.spec_from_file_location('literal_custody_compiler', path)
-        compiler = importlib.util.module_from_spec(spec); spec.loader.exec_module(compiler)
-        for mode in ('central-value', 'literal'):
-            value = self.fixture(proof_literal='retain ${inputs} and ${literal.name} exactly')
-            cfg = copy.deepcopy(value.cfgs['mariadb']); cfg.pop('deployment')
-            selected = cfg.pop('coordinated_custody'); cfg['paths'].pop('coordinated_custody_inputs')
-            cfg['guest'].update(dns_servers=[], rules=[])
-            source = value.root / 'source'
-            save(source / 'common.json', {})
-            profile = {'config': cfg, 'stack': None, 'files': {
-                'catalogue.json': '${custody.catalogue}' if mode == 'central-value' else value.catalogue_raw.decode(),
-                'acceptance.json': '${custody.acceptance}' if mode == 'central-value' else value.acceptance_raw.decode(),
-                'ordinary.txt': 'directory=${inputs};value=${literal.name}'}}
-            save(source / 'guests/mariadb/profile.json', profile)
-            save(source / 'stack.json', {'schema': 'homelab-stack-v2', 'values': {}, 'routes': {},
-                                        'guests': {'mariadb': {'depends_on': [], 'prerequisites': []}}})
-            overlay = {'schema': 'homelab-site-v3', 'common': {}, 'images': {}, 'accepted': {}, 'routes': {},
-                       'values': {'custody.catalogue': value.catalogue_raw.decode(),
-                                  'custody.acceptance': value.acceptance_raw.decode(), 'literal.name': 'ordinary-value'},
-                       'guests': {'mariadb': {'config': {'coordinated_custody': selected,
-                                             'paths': {'coordinated_custody_inputs': '${inputs}'}}}}}
-            with patch.object(compiler, 'CATALOGUE', {'mariadb': compiler.CATALOGUE['mariadb']}):
-                packet = compiler.compile_stack(source, overlay)['mariadb']
-                changed = copy.deepcopy(overlay)
-                if mode == 'central-value': changed['values']['custody.catalogue'] += ' '
-                else:
-                    bad_profile = copy.deepcopy(profile); bad_profile['files']['catalogue.json'] += ' '
-                    save(source / 'guests/mariadb/profile.json', bad_profile)
-                with self.assertRaisesRegex(ValueError, 'custody.*proof'):
-                    compiler.compile_stack(source, changed)
-            self.assertEqual(packet['files']['catalogue.json'].encode(), value.catalogue_raw)
-            self.assertEqual(packet['files']['acceptance.json'].encode(), value.acceptance_raw)
-            bound = '/var/lib/homelab-inputs/ordinary/mariadb/' + packet['identity']
-            self.assertEqual(packet['files']['ordinary.txt'], 'directory=' + bound + ';value=ordinary-value')
-            # Rehome only the configured materialization path into this test's
-            # temporary directory; proof and ordinary-file bytes stay unchanged.
-            prepared_cfg = records.decode(packet['files']['site.json'])
-            base = value.root / 'packet-inputs'
-            destination = base / 'mariadb' / packet['identity']
-            prepared_cfg['paths']['coordinated_custody_inputs'] = str(destination)
-            packet['files']['site.json'] = io.encoded(prepared_cfg).decode()
-            packet_path = value.root / 'packet.json'; save(packet_path, packet)
-            observed, site = inputs.prepare(packet_path, base)
-            self.assertEqual(site, destination / 'site.json')
-            proofs, _, _ = evidence.inspect(observed)
-            self.assertEqual(proofs[str(destination / 'catalogue.json')], value.group['catalogue']['sha256'])
-            self.assertEqual((destination / 'acceptance.json').read_bytes(), value.acceptance_raw)
-            bad = copy.deepcopy(packet); bad['files']['acceptance.json'] += ' '
-            save(value.root / 'changed-packet.json', bad)
-            with self.assertRaisesRegex(ValueError, 'custody source proof bytes'):
-                inputs.prepare(value.root / 'changed-packet.json', base)
-            self.assertEqual((destination / 'acceptance.json').read_bytes(), value.acceptance_raw)
-        with self.assertRaisesRegex(ValueError, 'custody.*proof'):
-            compiler.custody_text('${inputs}', io.digest(b'not-a-proof'), {'inputs': 'not-a-proof'})
-        with self.assertRaisesRegex(ValueError, 'custody.*proof'):
-            compiler.custody_text('${numeric}', 'f' * 64, {'numeric': 1})
-        with self.assertRaisesRegex(ValueError, 'custody.*proof'):
-            compiler._compile_guest('mariadb', value.cfgs['mariadb'], None, {'catalogue.json': 'changed'}, ['mariadb'])
+    def lower_evidence_packet(self,value,*,literal='ordinary ${inputs} and ${literal.name}'):
+        """Packet unit: conforming component collaborators, real proof/slot builder."""
+        import component_packet
+        source=self.source_evidence(value);selected=component_evidence.bind(source)['mariadb']
+        cfg=value.cfgs['mariadb'];app_id='database'
+        runtime={'schema':'homelab-component-runtime-v1','guest':{'id':'database'},'applications':{app_id:{
+            'id':app_id,'adapter':'mariadb','lifecycle':'retained','identity':{'phase':'mariadb',
+            'runtime_id':'database','services':{},'networks':{}},'settings':{},'storage_paths':{}}}}
+        context={**copy.deepcopy(source.site['contexts']['selected']),
+            'trust':{'ca_file':cfg['paths']['ca_file'],'known_hosts':cfg['paths']['known_hosts']},
+            'credentials':{'api_token':'api','ssh_private_key':'ssh'},'protected_guests':[9900]}
+        guest={'context':'selected','lifecycle':'retained','identity':copy.deepcopy(cfg['guest']),
+            'resources':{'memory_mib':cfg['guest']['memory_mib']},
+            'control':{'address':cfg['app']['address'],'mac':cfg['app']['mac']},
+            'software_selection':{'packages':[],'repositories':[]}}
+        plan=SimpleNamespace(check=lambda:None,site={'secret_sources':{
+            'api':{'type':'file','path':cfg['paths']['api_token']},
+            'ssh':{'type':'file','path':cfg['paths']['private_key']}}},library={'assets':{}},
+            resolved={'guests':{'database':guest},'contexts':{'selected':context},
+                      'evidence':{'database':selected},'enabled':['database']})
+        provider={key:copy.deepcopy(cfg[key]) for key in ('site','guest','ssh_public_keys')}
+        with patch.object(component_packet,'provider_config',return_value=provider), \
+             patch.object(component_packet,'runtime_config',return_value=runtime), \
+             patch.object(component_packet.component_runtime,'artifacts',return_value={'ordinary.txt':literal.encode()}), \
+             patch.object(component_packet.component_routes,'provider_routes',return_value=[]), \
+             patch.object(component_packet,'application_order',return_value=[app_id]), \
+             patch.object(component_packet.component_checks,'checks',return_value=[{'name':'fake native','argv':['true']}]), \
+             patch.object(component_packet,'INPUTS',value.root/'packet-inputs'):
+            return component_packet.lower_guest(plan,'database',inputs=value.root/'packet-inputs')
+
+    def test_component_packet_binds_only_declared_slots_and_never_interpolates_proof_or_ordinary_text(self):
+        value=self.fixture(proof_literal='retain ${inputs} and ${literal.name} exactly')
+        selected=component_evidence.bind(self.source_evidence(value))['mariadb']
+        with self.assertRaisesRegex(ValueError,'absolute custody paths'):contract.selection(selected)
+        packet=self.lower_evidence_packet(value)
+        cfg=records.decode(packet['files']['site.json'])
+        directory=value.root/'packet-inputs/database'/packet['identity']
+        self.assertEqual(cfg['paths']['coordinated_custody_inputs'],str(directory))
+        self.assertEqual(cfg['deployment']['input_directory'],str(directory))
+        self.assertEqual(contract.selection_digest(cfg),contract.selection_digest(selected))
+        self.assertEqual(packet['files']['catalogue.json'].encode(),value.catalogue_raw)
+        self.assertEqual(packet['files']['acceptance.json'].encode(),value.acceptance_raw)
+        self.assertEqual(packet['files']['ordinary.txt'],'ordinary ${inputs} and ${literal.name}')
+        component_guest.packet(packet,value.root/'packet-inputs')
+
+
+    def test_literal_proof_bytes_survive_component_source_binding_lowering_and_preparation(self):
+        value=self.fixture(proof_literal='retain ${inputs} and ${literal.name} exactly')
+        source=self.source_evidence(value)
+        for key in ('catalogue','acceptance'):
+            raw=source.site['evidence'][key]['text'];source.site['evidence'][key]['text']+=' '
+            with self.subTest(asset=key),self.assertRaisesRegex(ValueError,'evidence-asset'):
+                component_evidence.bind(source)
+            source.site['evidence'][key]['text']=raw
+        self.assertFalse((value.root/'packet-inputs').exists())
+        packet=self.lower_evidence_packet(value)
+        self.assertEqual(packet['files']['catalogue.json'].encode(),value.catalogue_raw)
+        self.assertEqual(packet['files']['acceptance.json'].encode(),value.acceptance_raw)
+        packet_path=value.root/'packet.json';save(packet_path,packet)
+        observed,site=component_inputs.prepare(packet_path,value.root/'packet-inputs',create=True)
+        destination=value.root/'packet-inputs/database'/packet['identity']
+        self.assertEqual(site,destination/'site.json')
+        proofs,_,_=evidence.inspect(observed)
+        self.assertEqual(proofs[str(destination/'catalogue.json')],value.group['catalogue']['sha256'])
+        self.assertEqual((destination/'acceptance.json').read_bytes(),value.acceptance_raw)
+        before={path:path.read_bytes() for path in destination.iterdir()}
+        bad=copy.deepcopy(packet);bad['files']['acceptance.json']+=' '
+        save(value.root/'changed-packet.json',bad)
+        with self.assertRaisesRegex(ValueError,'differs or was interrupted'):
+            component_inputs.prepare(value.root/'changed-packet.json',value.root/'packet-inputs',create=True)
+        self.assertEqual(before,{path:path.read_bytes() for path in destination.iterdir()})

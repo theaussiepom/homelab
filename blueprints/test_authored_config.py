@@ -13,6 +13,8 @@ from unittest.mock import patch
 import yaml
 import authored_config as a
 import compile as c
+import component_monitoring
+from types import SimpleNamespace
 import workflows
 
 
@@ -67,13 +69,12 @@ class AuthoredConfigTests(unittest.TestCase):
         self.assertEqual(a.read(self.file('"<<": ordinary string key')), {'<<':'ordinary string key'})
 
     def test_empty_zabbix_property_is_null_and_selects_the_same_monitoring_graph(self):
-        spec = {'guests': {'monitoring': {}, 'dns': {}}}
         for raw in ('zabbix:\n', 'zabbix: null\n', '{"zabbix":null}'):
             path = self.file(raw)
             value = a.read(path)
             self.assertEqual(value, {'zabbix': None})
-            self.assertTrue(c.zabbix.enabled(value))
-            self.assertEqual(c.zabbix.selected(spec, value), spec)
+            self.assertEqual(component_monitoring.server(SimpleNamespace(site=value,apps={
+                'observer':{'adapter':'zabbix'}})),'observer')
             path.unlink()
 
     def test_each_variant_is_exact_and_siblings_are_ambiguous_even_for_explicit_paths(self):
@@ -89,12 +90,6 @@ class AuthoredConfigTests(unittest.TestCase):
             extra.unlink();path.unlink()
         with self.assertRaises(ValueError): a.site_path(self.root)
         with self.assertRaises(ValueError): a.source_path(self.root/'site.txt')
-        self.assertIsNone(a.profile_path(self.root, 'dns', optional=True))
-        with self.assertRaises(ValueError): a.profile_path(self.root, 'dns')
-        for guest in ('../dns', '', None):
-            with self.subTest(guest=guest), self.assertRaises(ValueError): a.profile_path(self.root, guest)
-        profile = self.root/'guests/dns/profile.yml';profile.parent.mkdir(parents=True);profile.write_text('{}')
-        self.assertEqual(a.profile_path(self.root,'dns'), profile)
 
     def test_nonregular_symlink_and_encoding_sources_refuse(self):
         path = self.root/'site.yaml';path.mkdir()
@@ -121,44 +116,14 @@ class AuthoredConfigTests(unittest.TestCase):
             with self.assertRaises(ValueError):a._shape(value)
         with patch.object(a.yaml,'load',side_effect=RecursionError('private-sentinel')),self.assertRaisesRegex(ValueError,a.ERROR):a.read(path)
 
-    def test_cli_site_root_and_legacy_explicit_file_are_mutually_exclusive(self):
+    def test_cli_site_root_and_explicit_file_are_mutually_exclusive(self):
         path=self.root/'site.yaml';path.write_text('{}')
         for args in (['--site-root',str(self.root)],['--site',str(path)]):
-            with patch.object(sys,'argv',['compile','--stack',str(self.root),'--check',*args]),patch.object(c,'compile_stack') as compile_stack:
-                c.main();self.assertEqual(compile_stack.call_args.args,(self.root,{},[]))
+            with patch.object(sys,'argv',['compile','--stack',str(self.root),'--check',*args]),patch.object(c,'compile_site',return_value={}) as compile_site:
+                c.main();self.assertEqual(compile_site.call_args.args,(self.root,path,[]))
         with patch.object(sys,'argv',['compile','--stack',str(self.root),'--check','--site',str(path.with_suffix('.json'))]),self.assertRaises(ValueError):c.main()
         with patch.object(sys,'argv',['compile','--stack',str(self.root),'--check','--site',str(path),'--site-root',str(self.root)]),self.assertRaises(SystemExit):c.main()
 
-    def test_hosted_selector_uses_declared_source_setup_and_same_yaml_json_selection(self):
-        spec={'guests':{'dns':{'depends_on':[]},'monitoring':{'depends_on':['dns']}}}
-        phase=self.root/'.github/workflows/phase.yml';phase.parent.mkdir(parents=True)
-        phase.write_text('jobs:\n  run:\n    uses: owner/framework/.github/workflows/guest-phase.yml@'+'a'*40+'\n')
-        with patch.object(c,'manifest',return_value=spec):
-            gate=workflows.models(self.root)['deploy.yml']['jobs']['selection']
-        self.assertEqual(gate['timeout-minutes'],2)
-        self.assertNotIn('environment',gate);self.assertNotIn('secrets',gate)
-        recipe=workflows.phase_recipe()[0]['steps']
-        for actual,expected in zip(gate['steps'][:-1],recipe[1:7],strict=True):
-            actual=copy.deepcopy(actual);expected=copy.deepcopy(expected)
-            actual.pop('name',None);expected.pop('name',None);self.assertEqual(actual,expected)
-            self.assertNotIn('env',actual)
-        self.assertNotIn('/var/lib/homelab-bootstrap',json.dumps(gate))
-        source=self.root/'framework-source/blueprints';source.mkdir(parents=True)
-        (source/'authored_config.py').write_bytes(Path(a.__file__).read_bytes())
-        step=gate['steps'][-1];output=self.root/'output';output.touch()
-        env={'PATH':os.environ['PATH'],'HOMELAB_CONFIG_PYTHON':sys.executable,'GITHUB_OUTPUT':str(output),**step['env']}
-        cases=[('zabbix:\n','[]',0,'true'),('zabbix: null\n','[]',0,'true'),
-               ('{}','[]',0,'false'),('zabbix: true','[]',1,None),
-               ('zabbix:\n','["monitoring"]',1,'true'),('zabbix:\n','null',1,None)]
-        for suffix in a.SUFFIXES:
-            for raw,disabled,status,zabbix in cases:
-                if suffix=='.json':
-                    raw=json.dumps({'zabbix':None} if raw.startswith('zabbix:') and 'true' not in raw else {'zabbix':True} if 'true' in raw else {})
-                path=self.root/('site'+suffix);path.write_text(raw);output.write_text('')
-                result=subprocess.run(['bash','-e','-o','pipefail','-c',step['run']],cwd=self.root,env=dict(env,DISABLED=disabled),capture_output=True,text=True)
-                self.assertEqual(result.returncode,status,result.stderr)
-                self.assertEqual(output.read_text(),'' if zabbix is None else 'zabbix='+zabbix+'\n')
-                path.unlink()
 
     def test_selected_lock_extractor_uses_only_exact_pyyaml_hashblock(self):
         script=workflows.phase_recipe()[0]['steps'][6]['run']

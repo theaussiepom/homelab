@@ -1,5 +1,12 @@
 variable "node" { type = string }
 variable "ssh_public_keys" { type = list(string) }
+variable "protected_guests" {
+  type = list(number)
+  validation {
+    condition = length(distinct(var.protected_guests)) == length(var.protected_guests) && alltrue([for vmid in var.protected_guests : vmid >= 1 && floor(vmid) == vmid])
+    error_message = "Declare unique positive protected guest identities in the execution context."
+  }
+}
 variable "guest" {
   type = object({
     vmid           = number, hostname = string, cpu = number, memory_mib = number,
@@ -12,6 +19,7 @@ variable "guest" {
       gateway = optional(string), ipv6 = optional(string)
     })),
     volumes = map(object({ path = string, size_gib = number })),
+    volume_order = optional(list(string)),
     rules = list(object({
       direction = string, proto = string, port = optional(string),
       source    = optional(string), destination = optional(string), comment = string, interface = optional(string)
@@ -31,7 +39,7 @@ variable "guest" {
   validation {
     condition = (
       var.guest.vmid >= 100 && floor(var.guest.vmid) == var.guest.vmid &&
-      !contains([900, 4914, 4915, 4920], var.guest.vmid) &&
+      !contains(var.protected_guests, var.guest.vmid) &&
       can(regex("^[a-z][a-z0-9-]{0,62}$", var.guest.hostname)) &&
       var.guest.cpu >= 1 && floor(var.guest.cpu) == var.guest.cpu &&
       var.guest.memory_mib >= 256 && floor(var.guest.memory_mib) == var.guest.memory_mib &&
@@ -56,8 +64,16 @@ variable "guest" {
     error_message = "Use static IPv4 or one DHCP interface, unique literal MACs, valid VLANs and exactly one default route. DHCP supplies its own gateway."
   }
   validation {
+    condition = var.guest.volume_order == null ? true : (
+      length(var.guest.volume_order) == length(var.guest.volumes) &&
+      length(distinct(var.guest.volume_order)) == length(var.guest.volume_order) &&
+      alltrue([for key in var.guest.volume_order : contains(keys(var.guest.volumes), key)])
+    )
+    error_message = "Bind every provider volume once in its validated persistent slot order."
+  }
+  validation {
     condition = alltrue([for volume in values(var.guest.volumes) :
-      volume.size_gib >= 1 && floor(volume.size_gib) == volume.size_gib && can(regex("^(/srv/homelab|/var/lib/(mysql|postgresql|influxdb))(/[a-z0-9_-]+)*$", volume.path))
+      volume.size_gib >= 1 && floor(volume.size_gib) == volume.size_gib && can(regex("^(/srv/[a-z0-9_-]+|/var/lib/(mysql|postgresql|influxdb))(/[a-z0-9_-]+)*$", volume.path))
     ])
     error_message = "Data volumes must be managed guest volumes at explicit service paths, never host bind mounts."
   }

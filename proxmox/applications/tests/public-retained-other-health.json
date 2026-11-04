@@ -1,0 +1,616 @@
+{
+  "cases": {
+    "authentik": {
+      "app": {
+        "adapter": "authentik",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "authentik",
+        "identity": {
+          "runtime_id": "authentik",
+          "services": {
+            "authentik": "authentik"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {
+          "web": {
+            "port": 9000,
+            "protocol": "tcp",
+            "publication_address": "198.18.30.20",
+            "publish": {
+              "interface": "web",
+              "port": 9000,
+              "scope": "guest-interface"
+            }
+          }
+        },
+        "project_name": "homelab-identity",
+        "resolved_connections": {},
+        "role_addresses": {
+          "web": "198.18.30.20"
+        },
+        "settings": {},
+        "storage_paths": {}
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "curl",
+            "--retry",
+            "30",
+            "--retry-delay",
+            "2",
+            "--retry-all-errors",
+            "--retry-max-time",
+            "180",
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "15",
+            "http://198.18.30.20:9000/-/health/ready/"
+          ],
+          "expect": "",
+          "name": "Authentik application ready on its backend"
+        }
+      ],
+      "guest": {}
+    },
+    "bitwarden": {
+      "app": {
+        "adapter": "bitwarden",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "bitwarden",
+        "identity": {
+          "runtime_id": "bitwarden",
+          "services": {
+            "bitwarden": "bitwarden"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {
+          "web": {
+            "port": 8080,
+            "protocol": "tcp",
+            "publication_address": "198.18.30.35",
+            "publish": {
+              "interface": "web",
+              "port": 8080,
+              "scope": "guest-interface"
+            }
+          }
+        },
+        "project_name": "homelab-bitwarden",
+        "resolved_connections": {},
+        "role_addresses": {
+          "web": "198.18.30.35"
+        },
+        "settings": {
+          "runtime": {
+            "issuer": "http://localhost"
+          }
+        },
+        "storage_paths": {}
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/bitwarden.py",
+            "--origin",
+            "http://198.18.30.35:8080",
+            "--issuer",
+            "http://localhost",
+            "--backend"
+          ],
+          "expect": "\"status\": \"passed\"",
+          "name": "Bitwarden alive/config/identity"
+        }
+      ],
+      "guest": {}
+    },
+    "cloudbeaver": {
+      "app": {
+        "adapter": "cloudbeaver",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "cloudbeaver",
+        "identity": {
+          "runtime_directory": "/opt/homelab-app/runtime",
+          "runtime_id": "cloudbeaver",
+          "services": {
+            "cloudbeaver": "cloudbeaver"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {},
+        "origin_url": "https://db.example.invalid",
+        "project_name": "homelab-db-tools",
+        "resolved_connections": {
+          "public": {
+            "target": {
+              "address": "198.18.40.33",
+              "port": 443,
+              "protocol": "https"
+            },
+            "type": "https"
+          }
+        },
+        "role_addresses": {},
+        "settings": {},
+        "storage_paths": {}
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/cloudbeaver-runtime.py",
+            "health",
+            "--config",
+            "/opt/homelab-app/runtime/cloudbeaver-public.json"
+          ],
+          "expect": "\"cloudbeaver\": \"passed\"",
+          "name": "CloudBeaver and authentication gateway"
+        },
+        {
+          "argv": [
+            "curl",
+            "--retry",
+            "1200",
+            "--retry-delay",
+            "2",
+            "--retry-all-errors",
+            "--retry-max-time",
+            "2250",
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "15",
+            "--resolve",
+            "db.example.invalid:443:198.18.40.33",
+            "--output",
+            "/dev/null",
+            "--write-out",
+            "%{http_code}",
+            "https://db.example.invalid/"
+          ],
+          "expect": "302",
+          "name": "CloudBeaver HTTPS sign-in redirect"
+        }
+      ],
+      "guest": {}
+    },
+    "mqtt": {
+      "app": {
+        "adapter": "mqtt",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "mqtt",
+        "identity": {
+          "runtime_directory": "/opt/homelab-app/runtime",
+          "runtime_id": "mqtt",
+          "services": {
+            "mqtt": "mqtt"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {},
+        "project_name": "homelab-mqtt",
+        "resolved_connections": {},
+        "role_addresses": {},
+        "settings": {},
+        "storage_paths": {}
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/automation-health.py",
+            "mqtt-broker"
+          ],
+          "expect": "\"read_only_probe\": \"passed\"",
+          "name": "Retained MQTT credentials accepted and anonymous refused"
+        }
+      ],
+      "guest": {}
+    },
+    "mqtt_explorer": {
+      "app": {
+        "adapter": "mqtt_explorer",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "mqtt_explorer",
+        "identity": {
+          "runtime_directory": "/opt/homelab-app/runtime",
+          "runtime_id": "mqtt_explorer",
+          "services": {
+            "mqtt_explorer": "mqtt_explorer"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {},
+        "project_name": "homelab-mqtt",
+        "resolved_connections": {},
+        "role_addresses": {},
+        "settings": {},
+        "storage_paths": {}
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "python3",
+            "/usr/local/bin/homelab-mqtt-explorer.py",
+            "health",
+            "--config",
+            "/opt/homelab-app/runtime/mqtt-explorer-public.json"
+          ],
+          "expect": "\"mqtt_explorer\": \"passed\"",
+          "name": "MQTT Explorer private service and authentication gateway"
+        }
+      ],
+      "guest": {}
+    },
+    "music_assistant": {
+      "app": {
+        "adapter": "music_assistant",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "music_assistant",
+        "identity": {
+          "runtime_id": "music_assistant",
+          "services": {
+            "music_assistant": "music_assistant"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {
+          "stream": {
+            "namespace": "host",
+            "port": 8097,
+            "protocol": "tcp"
+          },
+          "web": {
+            "namespace": "host",
+            "port": 8095,
+            "protocol": "tcp"
+          }
+        },
+        "origin_url": "https://music.example.invalid",
+        "project_name": "homelab-music",
+        "resolved_connections": {
+          "public": {
+            "source_address": "198.19.100.241",
+            "target": {
+              "address": "198.18.40.33",
+              "port": 443,
+              "protocol": "https"
+            },
+            "type": "https"
+          }
+        },
+        "role_addresses": {
+          "web": "198.19.100.241"
+        },
+        "settings": {},
+        "storage_paths": {}
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "docker",
+            "compose",
+            "-f",
+            "/opt/homelab-app/compose.yml",
+            "exec",
+            "-T",
+            "music_assistant",
+            "python3",
+            "-c",
+            "import socket,urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://198.19.100.241:8095/info',timeout=5).close(); socket.create_connection(('198.19.100.241',8097),timeout=3).close(); print('core service only: passed')"
+          ],
+          "expect": "core service only: passed",
+          "name": "Music Assistant core info and stream listener"
+        },
+        {
+          "argv": [
+            "curl",
+            "--retry",
+            "30",
+            "--retry-delay",
+            "2",
+            "--retry-all-errors",
+            "--retry-max-time",
+            "180",
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "15",
+            "--interface",
+            "198.19.100.241",
+            "--resolve",
+            "music.example.invalid:443:198.18.40.33",
+            "https://music.example.invalid/info"
+          ],
+          "expect": "server_version",
+          "name": "Music Assistant HTTPS route"
+        }
+      ],
+      "guest": {}
+    },
+    "pegaprox": {
+      "app": {
+        "adapter": "pegaprox",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "pegaprox",
+        "identity": {
+          "runtime_id": "pegaprox",
+          "services": {
+            "pegaprox": "pegaprox"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {},
+        "project_name": "homelab-pegaprox",
+        "resolved_connections": {},
+        "role_addresses": {},
+        "settings": {},
+        "storage_paths": {}
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/pegaprox-health.py"
+          ],
+          "expect": "PegaProx verification passed",
+          "name": "PegaProx health and closed initial setup"
+        }
+      ],
+      "guest": {}
+    },
+    "traefik": {
+      "app": {
+        "adapter": "traefik",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "traefik",
+        "identity": {
+          "runtime_id": "traefik",
+          "services": {
+            "traefik": "traefik"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {
+          "http": {
+            "namespace": "host",
+            "port": 80,
+            "protocol": "tcp"
+          },
+          "https": {
+            "namespace": "host",
+            "port": 443,
+            "protocol": "tcp"
+          }
+        },
+        "project_name": "homelab-ingress",
+        "resolved_connections": {},
+        "role_addresses": {},
+        "settings": {},
+        "storage_paths": {}
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "curl",
+            "--retry",
+            "30",
+            "--retry-delay",
+            "2",
+            "--retry-all-errors",
+            "--retry-max-time",
+            "180",
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "10",
+            "http://127.0.0.1:8082/ping"
+          ],
+          "expect": "OK",
+          "name": "Proxy health endpoint"
+        }
+      ],
+      "guest": {}
+    },
+    "winet": {
+      "app": {
+        "adapter": "winet",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "winet",
+        "identity": {
+          "runtime_id": "winet",
+          "services": {
+            "winet": "winet"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {},
+        "project_name": "homelab-zigbee2mqtt",
+        "resolved_connections": {},
+        "role_addresses": {},
+        "settings": {},
+        "storage_paths": {}
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "python3",
+            "-c",
+            "import json,subprocess,sys; d=json.loads(subprocess.check_output(['docker','inspect','--type=container','homelab-zigbee2mqtt-winet-1'],timeout=5)); healthy=len(d)==1 and d[0]['State']['Running'] and d[0]['State'].get('Health',{}).get('Status')=='healthy'; print(json.dumps({'healthy':healthy})); sys.exit(0 if healthy else 1)"
+          ],
+          "expect": "\"healthy\": true",
+          "name": "WiNet broker and inverter availability"
+        }
+      ],
+      "guest": {}
+    },
+    "zabbix": {
+      "app": {
+        "adapter": "zabbix",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "zabbix",
+        "identity": {
+          "runtime_id": "zabbix",
+          "services": {
+            "zabbix": "zabbix"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {
+          "web": {
+            "port": 8080,
+            "protocol": "tcp",
+            "publication_address": "198.18.25.36",
+            "publish": {
+              "interface": "web",
+              "port": 8080,
+              "scope": "guest-interface"
+            }
+          }
+        },
+        "project_name": "homelab-monitoring",
+        "resolved_connections": {},
+        "role_addresses": {
+          "web": "198.18.25.36"
+        },
+        "settings": {},
+        "storage_paths": {}
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "curl",
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "10",
+            "http://198.18.25.36:8080/"
+          ],
+          "expect": "",
+          "name": "Zabbix frontend ready"
+        }
+      ],
+      "guest": {}
+    },
+    "zigbee2mqtt": {
+      "app": {
+        "adapter": "zigbee2mqtt",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "zigbee2mqtt",
+        "identity": {
+          "runtime_id": "zigbee2mqtt",
+          "services": {
+            "zigbee2mqtt": "zigbee2mqtt"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {},
+        "project_name": "homelab-zigbee2mqtt",
+        "resolved_connections": {},
+        "role_addresses": {},
+        "settings": {},
+        "storage_paths": {
+          "data": {
+            "kind": "directory",
+            "read_only": false,
+            "source": "/srv/homelab/data/zigbee2mqtt",
+            "target": "/app/data"
+          }
+        }
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/zigbee2mqtt.py",
+            "health",
+            "--settings",
+            "/opt/homelab-app/zigbee-settings.json"
+          ],
+          "expect": "\"healthy\": true",
+          "name": "Zigbee frontend and preserved network configuration"
+        }
+      ],
+      "guest": {}
+    }
+  },
+  "framework": "f28725b1e8334a0baba26dfc2fa623cb3a63cdf5",
+  "schema": "public-retained-readiness-extension-v1",
+  "source_is_public_example": true,
+  "stack": "70d694b38bd8df51dafe7282de9fb2bdbc990fe9"
+}

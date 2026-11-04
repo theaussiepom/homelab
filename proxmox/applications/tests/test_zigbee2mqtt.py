@@ -17,9 +17,22 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import zigbee2mqtt as zigbee
 import plan_policy
-import guest_contract
-from fixtures import guest
+import component_runtime
 from test_plan import fixture as plan_fixture, existing_fixture
+
+
+def runtime_app(selected):
+    return {'id':'radio','adapter':'zigbee2mqtt','lifecycle':'retained',
+        'identity':{'services':{'zigbee2mqtt':'coordinator'},'networks':{'default':'default'}},
+        'containers':{'zigbee2mqtt':{'memory_mib':512,'cpu_limit':1,'pids_limit':256}},
+        'software_selection':{'images':{'zigbee2mqtt':{'image':'ghcr.io/koenkk/zigbee2mqtt@sha256:'+'1'*64}}},
+        'settings':copy.deepcopy(selected),
+        'storage_paths':{'data':{'source':'/srv/homelab/data/zigbee2mqtt','target':'/app/data',
+                                 'kind':'directory','read_only':False}},
+        'listeners':{'web':{'service':'zigbee2mqtt','namespace':'app-network','interface':'private',
+            'bind':'wildcard','protocol':'tcp','port':selected['frontend_port'],
+            'publication_address':selected['bind_address'],
+            'publish':{'scope':'guest-interface','interface':'web','port':selected['frontend_port']}}}}
 
 
 def settings():
@@ -35,19 +48,16 @@ def settings():
 
 class ZigbeeTests(unittest.TestCase):
     def test_nested_user_namespace_can_bind_the_device_without_a_guest_tty_alias(self):
-        import render
-        from test_render import fixture
-
-        stack = fixture("zigbee2mqtt")
-        original = copy.deepcopy(stack)
-        device = stack["zigbee"]["serial_device"]
+        app = runtime_app(self.selected)
+        original = copy.deepcopy(app)
+        device = self.selected["serial_device"]
         guest_nodes = {device: (166, 0)}
         application_path = yaml.safe_load(self.configuration.read_bytes())["serial"][
             "port"
         ]
         self.assertNotIn(application_path, guest_nodes)
 
-        service = render.compose(stack)["services"]["zigbee2mqtt"]
+        service = component_runtime._zigbee2mqtt(app,{'timezone':'Etc/UTC','memory_mib':2048})['zigbee2mqtt']
         self.assertEqual(len(service["devices"]), 1)
         host, container, access = service["devices"][0].split(":")
         self.assertIn(
@@ -84,7 +94,7 @@ class ZigbeeTests(unittest.TestCase):
         self.assertEqual(service["restart"], "always")
         for field in ("privileged", "cap_add", "device_cgroup_rules"):
             self.assertNotIn(field, service)
-        self.assertEqual(stack, original)
+        self.assertEqual(app, original)
 
     def test_saved_plans_allow_only_the_declared_coordinator_and_preserve_existing_devices(
         self,
@@ -101,7 +111,7 @@ class ZigbeeTests(unittest.TestCase):
             value = existing_fixture() if existing else plan_fixture()
             value["resource_changes"][0]["change"]["after"]["device_passthrough"] = []
             plan_policy.check_plan(
-                value, "pve-lab", 6100, existing=existing, serial_device=selected
+                value, "pve-lab", 6100, existing=existing, protected_guests=[9900,9914,9915,9920], serial_device=selected
             )
         value = existing_fixture()
         change = value["resource_changes"][0]["change"]
@@ -109,7 +119,7 @@ class ZigbeeTests(unittest.TestCase):
         change["after"]["device_passthrough"] = [copy.deepcopy(device)]
         change["after_unknown"] = {"device_passthrough": [{"path": False}]}
         plan_policy.check_plan(
-            value, "pve-lab", 6100, existing=True, serial_device=selected
+            value, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920], serial_device=selected
         )
         for mutate in (
             lambda c: c["after"]["device_passthrough"].append(dict(device)),
@@ -125,7 +135,7 @@ class ZigbeeTests(unittest.TestCase):
             mutate(changed["resource_changes"][0]["change"])
             with self.subTest(mutate=mutate), self.assertRaises(ValueError):
                 plan_policy.check_plan(
-                    changed, "pve-lab", 6100, existing=True, serial_device=selected
+                    changed, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920], serial_device=selected
                 )
 
     def setUp(self):
@@ -306,26 +316,13 @@ class ZigbeeTests(unittest.TestCase):
                 zigbee.validate(dict(self.selected, **patch_value))
         with self.assertRaises(ValueError):
             zigbee.validate(None)
-        cfg = {
-            "guest": {
-                "serial_device": {"path": self.selected["serial_device"]},
-                "interfaces": [{"ipv4": "198.18.30.22/24"}],
-            }
-        }
-        stack = {"zigbee": self.selected, "services": {"zigbee2mqtt": {}}}
-        zigbee.validate_deployment(cfg, stack)
-        for changed in (
-            dict(cfg["guest"], serial_device={"path": "/dev/serial/by-id/usb-other"}),
-            dict(cfg["guest"], interfaces=[{"ipv4": "198.18.30.99/24"}]),
-        ):
-            with self.assertRaises(ValueError):
-                zigbee.validate_deployment({"guest": changed}, stack)
+        app=runtime_app(self.selected)
+        for key,value in [('bind_address','198.18.30.99'),('frontend_port',8100)]:
+            changed=copy.deepcopy(app);changed['settings'][key]=value
+            with self.subTest(key=key),self.assertRaises(ValueError):
+                component_runtime._zigbee2mqtt(changed,{'timezone':'Etc/UTC','memory_mib':2048})
 
     def test_file_boundaries_and_cli_never_emit_configuration_or_key(self):
-        cfg = guest(self.root)
-        cfg["guest"]["started"] = False
-        with self.assertRaisesRegex(ValueError, "active guest"):
-            guest_contract.validate(cfg)
         selected = self.root / "settings.json"
         selected.write_text(json.dumps(self.selected))
         argv = [

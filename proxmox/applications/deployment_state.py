@@ -12,6 +12,7 @@ import coordinated_evidence
 import coordinated_generation
 import initial_ordinary
 from custody_records import no_markers, read_existing
+from component_payload import AppPayload, BINDING_SCHEMA
 from private_io import (
     require,
     regular,
@@ -75,7 +76,7 @@ def bootstrap_closed(root=Path("/var/lib/homelab-bootstrap")):
 class DeploymentAttempt:
     """Own an existing state directory and one GitHub run's ordered phase evidence."""
 
-    def __init__(self, cfg, binding, phases):
+    def __init__(self, cfg, binding, phases, *, prepare_inputs=None):
         self.cfg = cfg
         self.custody = coordinated_contract.selection(cfg)
         self.initial_selection = initial_ordinary.selection(cfg)
@@ -86,12 +87,20 @@ class DeploymentAttempt:
         self.root = Path(cfg["paths"]["state_root"])
         self.work = self.root / str(cfg["guest"]["vmid"])
         self.binding = binding
+        require(prepare_inputs is None or (cfg.get('schema') == 'homelab-component-guest-v1'
+                and binding is None and callable(prepare_inputs)),
+                'Only component static inputs may prepare under the existing attempt locks')
+        self.prepare_inputs = prepare_inputs
         self.phases = phases
         self.hold = self.work / "ORDINARY-HOLD.json"
         self.receipt = self.work / "ordinary-complete.json"
         self.locks = ExitStack()
 
     def __enter__(self):
+        require(self.cfg.get('schema') == 'homelab-component-guest-v1',
+                'New attempts require the component guest contract')
+        if self.prepare_inputs is None:
+            coordinated_generation.component_binding(self.binding)
         private_directory(self.root)
         private_directory(self.work, create=not self.work.exists())
         try:
@@ -142,6 +151,11 @@ class DeploymentAttempt:
                     require(self.custody is not None and directory.name == self.custody["directory"] and not matched,
                             "This guest belongs to coordinated maintenance; preserve its custody before mutation")
                     matched = True
+            if self.prepare_inputs is not None:
+                # Existing ordinary custody is verification-only. No selected
+                # app secret/account inputs are accepted by this callback.
+                self.binding = self.prepare_inputs(not (self.hold.exists() or self.hold.is_symlink()))
+                coordinated_generation.component_binding(self.binding)
             self._require_backend()
             if self.custody is not None:
                 require(matched, "The selected completed group is missing")
@@ -203,6 +217,20 @@ class DeploymentAttempt:
                 stat.S_ISREG(info.st_mode),
                 "Preserve a backend that is not a regular file",
             )
+            if self.cfg.get('schema') == 'homelab-component-guest-v1' and self.cfg['deployment']['lifecycle'] == 'fresh':
+                if self.hold.exists() or self.hold.is_symlink():
+                    self._select_run()
+                    require(regular(self.hold,private=True)==encoded(self.marker),
+                            'Fresh repeat requires this exact owned attempt')
+                    ready=json.loads(regular(self.operation/'infrastructure-complete.json',private=True))
+                    require(ready['binding']==self.binding and ready['state_sha256']==sha(self.work/'terraform.tfstate'),
+                            'Fresh phase requires its owned infrastructure checkpoint')
+                else:
+                    from coordinated_generation import component_success
+                    value=json.loads(regular(self.receipt,private=True))
+                    require(component_success(value,Path(value.get('operation',''))) and
+                            value['state_sha256']==sha(self.work/'terraform.tfstate'),
+                            'Fresh source cannot adopt an unowned existing backend')
 
     def completed(self, is_ancestor):
         if self.initial_ordinary is not None and (self.receipt.exists() or self.receipt.is_symlink()):
@@ -212,6 +240,10 @@ class DeploymentAttempt:
         if self.receipt.exists() or self.receipt.is_symlink():
             self._select_run()
             old = json.loads(regular(self.receipt, private=True))
+            from coordinated_generation import component_success
+            old_binding=old.get('binding')
+            if old.get('schema') is not None or isinstance(old_binding,dict) and old_binding.get('schema') is not None:
+                component_success(old, Path(old.get('operation', '')))
             require(not isinstance(old.get("binding"), dict)
                     or initial_ordinary.BINDING not in old["binding"]
                     or self.initial_selection is not None,
@@ -321,7 +353,18 @@ class DeploymentAttempt:
             encoded({"binding": self.binding, **result}),
         )
 
-    def begin_phase(self, phase):
+    def _phase_payload(self, phase, payload):
+        require(self.binding.get('schema') == BINDING_SCHEMA,
+                'New phases require the versioned component input binding')
+        app = self.cfg['deployment']['payload_phases'].get(phase)
+        require((app is None and payload is None) or
+                (isinstance(payload, AppPayload) and payload.app == app and
+                 payload.identity == self.cfg['deployment']['input_identity'] == self.binding['input_identity']
+                 and payload.directory == Path(self.binding['app_inputs_directory'])/app),
+                'Bind exactly this phase selected-app payload')
+        return payload.check() if payload is not None else None
+
+    def phase_ready(self, phase):
         require(self.receipt_checked, "Validate ordinary receipt provenance before mutation")
         self._select_run()
         require(
@@ -347,17 +390,33 @@ class DeploymentAttempt:
                 == self.binding,
                 "Complete the preceding phase before its consumer",
             )
-        write_new(self.operation / (phase + "-started.json"), encoded(self.marker))
         return ready
 
-    def phase_complete(self, phase, result, ready):
+    def begin_phase(self, phase, *, payload=None):
+        ready = self.phase_ready(phase)
+        selected = self._phase_payload(phase, payload)
+        marker = dict(self.marker, phase_inputs=selected) if selected is not None else self.marker
+        write_new(self.operation / (phase + "-started.json"), encoded(marker))
+        if selected is not None:
+            ready = dict(ready, phase_inputs=selected)
+        return ready
+
+    def phase_complete(self, phase, result, ready, *, payload=None):
         require(
             sha(self.work / "terraform.tfstate") == ready["state_sha256"],
             "Backend state changed during the phase; preserve its hold and evidence",
         )
+        selected = self._phase_payload(phase, payload)
+        marker = dict(self.marker, phase_inputs=selected) if selected is not None else self.marker
+        require(regular(self.operation / (phase + '-started.json'), private=True) == encoded(marker)
+                and ready.get('phase_inputs') == selected,
+                'Selected-app payload changed during the phase')
+        record = {"binding": self.binding, "result": result}
+        if selected is not None:
+            record['phase_inputs'] = selected
         write_new(
             self.operation / (phase + "-complete.json"),
-            encoded({"binding": self.binding, "result": result}),
+            encoded(record),
         )
         if phase != self.phases[-1]:
             return result["changed"]
@@ -377,6 +436,10 @@ class DeploymentAttempt:
             "site_revision": self.site_revision,
             "operation": str(self.operation),
         }
+        receipt['schema'] = 'homelab-component-ordinary-complete-v1'
+        receipt['phase_inputs'] = {p: json.loads(regular(
+            self.operation / (p + '-complete.json'), private=True)).get('phase_inputs')
+            for p in self.phases}
         if self.custody_identity is not None:
             receipt["state_identity"] = ready["state_identity"]
         write_new(self.operation / "complete.json", encoded(receipt))

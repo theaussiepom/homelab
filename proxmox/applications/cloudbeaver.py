@@ -2,22 +2,18 @@
 import base64
 import hashlib
 import hmac
-import ipaddress
 import json
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
 
 from private_io import require
-import database_admin
 
 WORKSPACE = '/srv/homelab/data/cloudbeaver'
 HEADERS = ('X-User', 'X-Team', 'X-Role', 'X-Role-TE', 'X-First-name', 'X-Last-name',
            'X-Full-name', 'X-Forwarded-User', 'X-Forwarded-Email', 'X-Forwarded-Groups')
 DRIVERS = {'postgresql': ('postgresql', 'postgres-jdbc', 5432),
            'mariadb': ('mysql', 'mariaDB', 3306)}
-SIGNING_ALGORITHMS = {'RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512',
-                      'ES256', 'ES384', 'ES512', 'EdDSA'}
 
 
 def jdbc(value):
@@ -40,117 +36,12 @@ def jdbc(value):
                 target='/opt/cloudbeaver/drivers/mariadb/'+artifact['image_filename'])
 
 
-def selected(cfg):
-    """Legacy database-tools inputs retain their existing pgAdmin implementation."""
-    variant = cfg.get('variant', 'pgadmin')
-    require(cfg.get('kind') == 'db-tools' or 'variant' not in cfg,
-            'Application variants belong only to database tools')
-    if cfg.get('kind') == 'db-tools':
-        require(isinstance(variant, str) and variant in {'pgadmin', 'cloudbeaver'}, 'Select pgadmin or cloudbeaver')
-    return cfg.get('kind') == 'db-tools' and variant == 'cloudbeaver'
 
 
-def https(value, *, issuer=False):
-    require(isinstance(value, str) and len(value) <= 2048 and not any(c.isspace() for c in value)
-            and '\\' not in value, 'Use a literal credential-free HTTPS URL')
-    try:
-        url = urlsplit(value)
-    except ValueError:
-        raise ValueError('Use a literal credential-free HTTPS URL') from None
-    require(url.scheme == 'https' and url.hostname and '.' in url.hostname and not url.username
-            and not url.password and not url.query and not url.fragment
-            and (issuer or url.path in {'', '/'}), 'Use a literal credential-free HTTPS URL')
-    try:
-        require(url.port is None or 1 <= url.port <= 65535, 'Use a valid HTTPS port')
-    except ValueError:
-        raise ValueError('Use a valid HTTPS port') from None
-    return value if issuer else value.rstrip('/')
 
 
-def validate(cfg):
-    if not selected(cfg):
-        require('cloudbeaver' not in cfg, 'CloudBeaver settings require its explicit variant')
-        return None
-    value = cfg.get('cloudbeaver')
-    require(isinstance(value, dict) and set(value) - {'managed_connections', 'mariadb_jdbc'} == {'bind_address', 'public_url', 'server_name',
-            'recovery_admin', 'heap_mib', 'auth_headers', 'connections', 'retained_pgadmin_image'},
-            'Use the closed CloudBeaver Community configuration')
-    try:
-        address = ipaddress.IPv4Address(value['bind_address'])
-    except (ValueError, TypeError):
-        raise ValueError('Publish only on the selected private guest address') from None
-    require(address.is_private and not (address.is_loopback or address.is_link_local or address.is_multicast
-            or address.is_unspecified), 'Publish only on the selected private guest address')
-    https(value['public_url'])
-    require(isinstance(value['server_name'], str) and 1 <= len(value['server_name']) <= 100
-            and not any(c in value['server_name'] for c in '\r\n\x00'), 'Use a bounded server display name')
-    require(isinstance(value['recovery_admin'], str) and re.fullmatch('[a-z][a-z0-9_-]{2,63}', value['recovery_admin']),
-            'Use a literal application recovery administrator name')
-    require(type(value['heap_mib']) is int and 256 <= value['heap_mib'] <= 16384,
-            'Select a bounded explicit JVM heap')
-    headers = value['auth_headers']
-    require(isinstance(headers, dict) and set(headers) == {'user', 'team'} and
-            all(isinstance(v, str) and re.fullmatch('X-[A-Za-z][A-Za-z0-9-]{0,60}', v) for v in headers.values())
-            and len({v.lower() for v in headers.values()}) == 2
-            and not {v.lower() for v in headers.values()} & {'x-forwarded-for', 'x-forwarded-proto',
-                'x-forwarded-host', 'x-forwarded-port', 'x-real-ip'}, 'Use distinct identity headers, never routing headers')
-    require(isinstance(value['retained_pgadmin_image'], str) and re.fullmatch(r'(?:[A-Za-z0-9._:/-]+@)?sha256:[0-9a-f]{64}', value['retained_pgadmin_image']),
-            'Bind the exact retained pgAdmin image before its managed retirement')
-    connections = value['connections']
-    require(isinstance(connections, dict) and 1 <= len(connections) <= 16, 'Declare finite metadata-only connections')
-    for name, connection in connections.items():
-        require(isinstance(name, str) and re.fullmatch('[a-z][a-z0-9_-]{0,62}', name) and isinstance(connection, dict)
-                and isinstance(connection.get('driver'), str) and connection['driver'] in DRIVERS, 'Select a supported named database connection')
-        expected = {'name', 'driver', 'database'} | ({'sslmode'} if connection['driver'] == 'postgresql' else set())
-        require(set(connection) in (expected, expected | {'host', 'port'})
-                and isinstance(connection['name'], str) and 1 <= len(connection['name']) <= 100
-                and isinstance(connection['database'], str) and len(connection['database']) <= 128
-                and not any(c in connection['name'] + connection['database'] for c in '\r\n\x00'),
-                'Connection metadata never contains shared usernames, passwords or keys')
-        if connection['driver'] == 'postgresql':
-            require(isinstance(connection['sslmode'], str) and connection['sslmode'] in {'disable', 'prefer', 'require'}, 'Select explicit supported PostgreSQL SSL mode')
-        if 'host' in connection:
-            ipaddress.IPv4Address(connection['host'])
-            require(connection['port'] == DRIVERS[connection['driver']][2], 'Bind the selected database engine listener')
-    managed = value.get('managed_connections', {})
-    database_admin.connections(value, compiled=isinstance(managed, dict) and bool(managed)
-        and all(isinstance(v, dict) and 'owner' in v for v in managed.values()))
-    jdbc(value)
-    services = cfg.get('services')
-    require(isinstance(services, dict) and set(services) == {'cloudbeaver', 'auth_gateway'}, 'Use only CloudBeaver and its OIDC gateway')
-    for service in services.values():
-        require(isinstance(service, dict) and not service.get('environment') and not any(k in service for k in ('user', 'command', 'entrypoint',
-                'extra_mounts', 'cap_add', 'privileged', 'network_mode', 'ports', 'security_opt')),
-                'CloudBeaver and gateway runtime placement and identity are generated')
-    require(all(type(s.get('memory_mib')) is int for s in services.values())
-            and services['cloudbeaver']['memory_mib'] >= value['heap_mib'] + 512
-            and services['auth_gateway']['memory_mib'] >= 128, 'Reserve JVM native and gateway memory')
-    return value
 
 
-def foundation(cfg, selected):
-    """Validate explicit OIDC inputs without provider-specific URL construction."""
-    require(set(selected) - {'oidc_endpoints'} == {'version', 'oidc_issuer', 'oauth_client_id', 'oauth_name', 'user_claim', 'secret_files'}
-            and selected['version'] == 1, 'Use the closed CloudBeaver OIDC foundation configuration')
-    https(selected['oidc_issuer'], issuer=True)
-    require(all(isinstance(selected[k], str) and 1 <= len(selected[k]) <= 256 and
-            not any(c in selected[k] for c in '\r\n\x00') for k in ('oauth_client_id', 'oauth_name'))
-            and isinstance(selected['user_claim'], str) and selected['user_claim'] in {'sub', 'preferred_username', 'email'}, 'Select a verified OIDC identity claim')
-    if 'oidc_endpoints' in selected:
-        endpoints = selected['oidc_endpoints']
-        urls = ('authorization_url', 'token_url', 'userinfo_url', 'jwks_url')
-        require(isinstance(endpoints, dict) and set(endpoints) == {*urls, 'signing_algorithms'},
-                'Declare complete explicit OIDC endpoints and signing algorithms')
-        for key in urls:
-            https(endpoints[key], issuer=True)
-            require('?' not in endpoints[key] and '#' not in endpoints[key],
-                    'Use OIDC endpoint URLs without query or fragment delimiters')
-        algorithms = endpoints['signing_algorithms']
-        require(isinstance(algorithms, list) and 1 <= len(algorithms) <= len(SIGNING_ALGORITHMS)
-                and all(isinstance(item, str) and item in SIGNING_ALGORITHMS for item in algorithms)
-                and len(set(algorithms)) == len(algorithms),
-                'Select unique supported asymmetric OIDC signing algorithms')
-    return selected
 
 
 def derive(secret, purpose):
@@ -192,7 +83,9 @@ def configuration(value):
     return result
 
 
-def gateway(value, selected, secret):
+def gateway(value, selected, secret, *, server_service='cloudbeaver'):
+    require(isinstance(server_service, str) and re.fullmatch('[a-z0-9][a-z0-9_-]{0,127}', server_service),
+            'Use the exact owned Community service name')
     headers = {name.lower(): name for name in (*HEADERS, *value['auth_headers'].values())}
     injections = []
     for name in headers.values():
@@ -203,7 +96,7 @@ def gateway(value, selected, secret):
             values = [{'secretSource': {'value': 'user'}}]
         injections.append({'name': name, 'preserveRequestValue': False, 'values': values})
     alpha = {'upstreamConfig': {'upstreams': [{'id': 'community', 'path': '/',
-                'uri': 'http://cloudbeaver:8978', 'proxyWebSockets': True, 'passHostHeader': True}]},
+                'uri': 'http://' + server_service + ':8978', 'proxyWebSockets': True, 'passHostHeader': True}]},
         'injectRequestHeaders': injections, 'injectResponseHeaders': [],
         'server': {'bindAddress': '0.0.0.0:4180'},
         'providers': [{'id': 'identity', 'provider': 'oidc', 'name': selected['oauth_name'],
@@ -226,53 +119,22 @@ def gateway(value, selected, secret):
     return alpha, '\n'.join(k + ' = ' + json.dumps(v) for k, v in options.items()) + '\n'
 
 
-def files(cfg, secret):
-    value = validate(cfg)
-    selected = foundation(cfg, cfg['foundation'])
-    alpha, options = gateway(value, selected, secret)
-    encoded_name = value['server_name'].encode('utf-16-be').hex()
-    properties_name = ''.join('\\u' + encoded_name[i:i+4] for i in range(0, len(encoded_name), 4))
-    auto = ('CB_SERVER_NAME=' + properties_name + '\n'
-        + 'CB_ADMIN_NAME=' + value['recovery_admin'] + '\nCB_ADMIN_PASSWORD='
-        + base64.urlsafe_b64encode(derive(secret, 'local-recovery')).decode() + 'aA1!\n')
-    public = dict(value, workspace=WORKSPACE, project='homelab-db-tools')
-    rows = [('CloudBeaverHealth.java', Path(__file__).with_name('CloudBeaverHealth.java').read_text(), 8978),
-            ('cloudbeaver.conf', json.dumps(configuration(value)), 8978),
-            ('cloudbeaver.auto.conf', auto, 8978),
-            ('cloudbeaver-connections.json', json.dumps(connection_document(value)), 8978),
-            ('cloudbeaver-permissions.json', json.dumps({name: ['user'] for name in value['connections']}), 8978),
-            ('oauth2-alpha.json', json.dumps(alpha), 65532), ('oauth2.cfg', options, 65532),
-            ('cloudbeaver-public.json', json.dumps(public), 0)]
-    if value.get('managed_connections'):
-        public['cloudbeaver_image'] = cfg['services']['cloudbeaver']['image']
-        if jdbc(value) is not None:
-            public['mariadb_jdbc'] = jdbc(value)
-        managed = json.loads(database_admin.document(value))
-        public['managed_sha256'] = hashlib.sha256((json.dumps(managed, sort_keys=True)+'\n').encode()).hexdigest()
-        rows[-1] = ('cloudbeaver-public.json', json.dumps(public), 0)
-        rows.append(('cloudbeaver-admin-connections.json', json.dumps(managed, sort_keys=True), 0))
-        rows.append(('CloudBeaverDatabaseHealth.java', Path(__file__).with_name('CloudBeaverDatabaseHealth.java').read_text(), 8978))
-    return [{'path': name, 'content': content + '\n', 'uid': uid, 'gid': uid, 'mode': '0400'}
-            for name, content, uid in rows]
 
 
-def configure(cfg, result):
-    value = validate(cfg)
-    def mount(name, target):
-        return {'type': 'bind', 'source': '/opt/homelab-app/runtime/' + name, 'target': target,
-                'read_only': True, 'bind': {'create_host_path': False}}
-    services = result['services']
-    result['networks'] = {'database_tools': {}}
+def service_configuration(value, services, *, mount, workspace=WORKSPACE,
+                          server_service='cloudbeaver', ports=None):
+    """Pure service transformation for the selected component renderer."""
+    require(isinstance(server_service, str) and re.fullmatch('[a-z0-9][a-z0-9_-]{0,127}', server_service),
+            'Use the exact owned Community service name')
     for name, service in services.items():
-        service.pop('network_mode')
-        service['networks'] = ['database_tools']
+        service.pop('network_mode', None)
         service['cap_drop'] = ['ALL']
         service['security_opt'] = ['no-new-privileges:true']
     server = services['cloudbeaver']
     server['user'] = '8978:8978'
     server['environment'] = {'JAVA_OPTS': '-Xms128m -Xmx' + str(value['heap_mib'])
         + 'm -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=64m'}
-    server['volumes'] = [{'type': 'bind', 'source': WORKSPACE, 'target': '/opt/cloudbeaver/workspace',
+    server['volumes'] = [{'type': 'bind', 'source': workspace, 'target': '/opt/cloudbeaver/workspace',
                           'bind': {'create_host_path': False}},
         mount('cloudbeaver.conf', '/opt/cloudbeaver/conf/cloudbeaver.conf'),
         mount('cloudbeaver.auto.conf', '/opt/cloudbeaver/conf/.cloudbeaver.auto.conf'),
@@ -282,8 +144,7 @@ def configure(cfg, result):
         server['volumes'].append(mount('CloudBeaverDatabaseHealth.java', '/opt/cloudbeaver/conf/CloudBeaverDatabaseHealth.java'))
     if jdbc(value) is not None:
         artifact = jdbc(value)
-        server['volumes'].append({'type':'bind', 'source':artifact['source'], 'target':artifact['target'],
-            'read_only':True, 'bind':{'create_host_path':False}})
+        server['volumes'].append(mount(Path(artifact['source']).name, artifact['target']))
     server['healthcheck'] = {'test': ['CMD', '/opt/java/openjdk/bin/java', '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m', '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC',
         '/opt/cloudbeaver/conf/CloudBeaverHealth.java'] + (['--postgresql'] if any(item['driver'] == 'postgresql'
             for item in value.get('managed_connections', {}).values()) else []) + ([artifact['version'], artifact['sha256'], artifact['image_filename']]
@@ -293,9 +154,9 @@ def configure(cfg, result):
     proxy['user'] = '65532:65532'
     proxy['read_only'] = True
     proxy['environment'] = {'GOMEMLIMIT': '96MiB'}
-    proxy['ports'] = [value['bind_address'] + ':80:4180']
+    proxy['ports'] = ports if ports is not None else [value['bind_address'] + ':80:4180']
     proxy['volumes'] = [mount('oauth2-alpha.json', '/etc/oauth2-proxy/alpha.json'),
                         mount('oauth2.cfg', '/etc/oauth2-proxy/oauth2.cfg')]
     proxy['command'] = ['--config=/etc/oauth2-proxy/oauth2.cfg', '--alpha-config=/etc/oauth2-proxy/alpha.json']
-    proxy['depends_on'] = {'cloudbeaver': {'condition': 'service_healthy'}}
-    return result
+    proxy['depends_on'] = {server_service: {'condition': 'service_healthy'}}
+    return services

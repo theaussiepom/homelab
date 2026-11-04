@@ -1,0 +1,720 @@
+{
+  "cases": {
+    "homeassistant": {
+      "app": {
+        "adapter": "homeassistant",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "homeassistant",
+        "identity": {
+          "services": {
+            "homeassistant": "homeassistant"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {
+          "web": {
+            "namespace": "host",
+            "port": 8123,
+            "protocol": "tcp",
+            "service": "homeassistant"
+          }
+        },
+        "software_selection": {
+          "packages": [
+            "docker.io=26.1.5+dfsg1-9+deb13u1",
+            "docker-cli=26.1.5+dfsg1-9+deb13u1",
+            "docker-compose=2.26.1-4",
+            "curl=8.14.1-2+deb13u7"
+          ]
+        }
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/automation-health.py",
+            "homeassistant"
+          ],
+          "expect": "\"read_only_probe\": \"passed\"",
+          "name": "HA web responds and unauthenticated API refused"
+        }
+      ],
+      "guest": {}
+    },
+    "influxdb": {
+      "app": {
+        "adapter": "influxdb",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "influxdb",
+        "identity": {
+          "services": {
+            "influxdb": "influxdb"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {
+          "web": {
+            "namespace": "host",
+            "port": 8086,
+            "protocol": "tcp",
+            "service": "influxdb"
+          }
+        },
+        "role_addresses": {
+          "service": "198.18.33.26"
+        },
+        "software_selection": {
+          "packages": [
+            "influxdb2=2.7.12-1",
+            "influxdb2-cli=2.7.5-1"
+          ]
+        }
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "python3",
+            "-c",
+            "import subprocess; assert subprocess.check_output(['systemctl','is-enabled','influxdb'],text=True).strip()=='enabled'; subprocess.run(['systemctl','is-active','--quiet','influxdb'],check=True); print('SERVICE_OK')"
+          ],
+          "expect": "SERVICE_OK",
+          "name": "Service is enabled and active"
+        },
+        {
+          "argv": [
+            "python3",
+            "-c",
+            "import json,urllib.request; d=json.load(urllib.request.urlopen('http://198.18.33.26:8086/health',timeout=5)); assert d['status']=='pass' and d['version']=='v2.7.12'; print('INFLUX_OK')"
+          ],
+          "expect": "INFLUX_OK",
+          "name": "InfluxDB health without initial setup or application data"
+        },
+        {
+          "argv": [
+            "python3",
+            "-c",
+            "import socket; s=socket.create_connection(('198.18.33.26',8086),timeout=5); s.close(); print('BACKEND_OK')"
+          ],
+          "expect": "BACKEND_OK",
+          "name": "Backend TCP listener"
+        }
+      ],
+      "guest": {}
+    },
+    "mariadb": {
+      "app": {
+        "adapter": "mariadb",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "mariadb",
+        "identity": {
+          "services": {
+            "mariadb": "mariadb"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {
+          "web": {
+            "namespace": "host",
+            "port": 3306,
+            "protocol": "tcp",
+            "service": "mariadb"
+          }
+        },
+        "role_addresses": {
+          "service": "198.18.32.24"
+        },
+        "software_selection": {
+          "packages": [
+            "mariadb-server=1:12.3.3+maria~deb13",
+            "mariadb-client=1:12.3.3+maria~deb13"
+          ]
+        }
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "python3",
+            "-c",
+            "import subprocess; assert subprocess.check_output(['systemctl','is-enabled','mariadb'],text=True).strip()=='enabled'; subprocess.run(['systemctl','is-active','--quiet','mariadb'],check=True); print('SERVICE_OK')"
+          ],
+          "expect": "SERVICE_OK",
+          "name": "Service is enabled and active"
+        },
+        {
+          "argv": [
+            "mariadb",
+            "--protocol=socket",
+            "--user=root",
+            "--batch",
+            "--skip-column-names",
+            "-e",
+            "SELECT VERSION();"
+          ],
+          "expect": "12.3.3",
+          "name": "Local root socket query"
+        },
+        {
+          "argv": [
+            "python3",
+            "-c",
+            "import socket; s=socket.create_connection(('198.18.32.24',3306),timeout=5); s.close(); print('BACKEND_OK')"
+          ],
+          "expect": "BACKEND_OK",
+          "name": "Backend TCP listener"
+        }
+      ],
+      "guest": {}
+    },
+    "node_red": {
+      "app": {
+        "adapter": "node_red",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "node_red",
+        "identity": {
+          "services": {
+            "node_red": "node_red"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {
+          "web": {
+            "namespace": "host",
+            "port": 1880,
+            "protocol": "tcp",
+            "service": "node_red"
+          }
+        },
+        "software_selection": {
+          "packages": [
+            "docker.io=26.1.5+dfsg1-9+deb13u1",
+            "docker-cli=26.1.5+dfsg1-9+deb13u1",
+            "docker-compose=2.26.1-4",
+            "curl=8.14.1-2+deb13u7"
+          ]
+        }
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/automation-health.py",
+            "node_red"
+          ],
+          "expect": "\"read_only_probe\": \"passed\"",
+          "name": "Node-RED native login ready and unauthenticated flows refused"
+        }
+      ],
+      "guest": {}
+    },
+    "pihole": {
+      "app": {
+        "adapter": "pihole",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "pihole",
+        "identity": {
+          "services": {
+            "pihole": "pihole"
+          }
+        },
+        "lifecycle": "retained",
+        "settings": {
+          "dns_records": {
+            "broker.mqtt": "198.18.41.21",
+            "db.example.invalid": "198.18.40.33",
+            "hass.service-9.example.invalid": "198.18.40.33",
+            "host.service-9.example.invalid": "198.18.40.33",
+            "influx.service-9.example.invalid": "198.18.40.33",
+            "mariadb.database.example.invalid": "198.18.32.24",
+            "matter.service-7.example.invalid": "198.18.40.33",
+            "mqtt-ui-a.example.invalid": "198.18.40.33",
+            "music.example.invalid": "198.18.40.33",
+            "nas.service-7.example.invalid": "198.18.40.33",
+            "nas.service-9.example.invalid": "198.18.40.33",
+            "pihole1.service-7.example.invalid": "198.18.40.33",
+            "pihole2.service-7.example.invalid": "198.18.40.33",
+            "postgresql.database.example.invalid": "198.18.31.23",
+            "prox.service-9.example.invalid": "198.18.40.33",
+            "proxmox.service-9.example.invalid": "198.18.40.33",
+            "service-1.example.invalid": "198.18.40.33",
+            "service-2.example.invalid": "198.18.40.33",
+            "service-3.example.invalid": "198.18.40.33",
+            "service-4.example.invalid": "198.18.40.33",
+            "service-5.example.invalid": "198.18.40.33",
+            "service-6.example.invalid": "198.18.40.33",
+            "thread.service-7.example.invalid": "198.18.40.33",
+            "zigbee1.service-7.example.invalid": "198.18.40.33",
+            "zigbee2.service-7.example.invalid": "198.18.40.33"
+          }
+        },
+        "software_selection": {
+          "packages": [
+            "docker.io=26.1.5+dfsg1-9+deb13u1",
+            "docker-cli=26.1.5+dfsg1-9+deb13u1",
+            "docker-compose=2.26.1-4",
+            "curl=8.14.1-2+deb13u7"
+          ]
+        }
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "docker",
+            "compose",
+            "-f",
+            "/opt/homelab-app/compose.yml",
+            "exec",
+            "-T",
+            "pihole",
+            "pihole",
+            "status"
+          ],
+          "expect": "",
+          "name": "pihole ready"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "broker.mqtt",
+            "198.18.41.21"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record broker.mqtt"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "db.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record db.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "hass.service-9.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record hass.service-9.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "host.service-9.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record host.service-9.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "influx.service-9.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record influx.service-9.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "mariadb.database.example.invalid",
+            "198.18.32.24"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record mariadb.database.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "matter.service-7.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record matter.service-7.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "mqtt-ui-a.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record mqtt-ui-a.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "music.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record music.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "nas.service-7.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record nas.service-7.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "nas.service-9.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record nas.service-9.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "pihole1.service-7.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record pihole1.service-7.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "pihole2.service-7.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record pihole2.service-7.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "postgresql.database.example.invalid",
+            "198.18.31.23"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record postgresql.database.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "prox.service-9.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record prox.service-9.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "proxmox.service-9.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record proxmox.service-9.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "service-1.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record service-1.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "service-2.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record service-2.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "service-3.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record service-3.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "service-4.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record service-4.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "service-5.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record service-5.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "service-6.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record service-6.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "thread.service-7.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record thread.service-7.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "zigbee1.service-7.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record zigbee1.service-7.example.invalid"
+        },
+        {
+          "argv": [
+            "python3",
+            "/opt/homelab-app/dns_records.py",
+            "probe",
+            "zigbee2.service-7.example.invalid",
+            "198.18.40.33"
+          ],
+          "expect": "\"read_only_dns_check\": \"passed\"",
+          "name": "DNS service record zigbee2.service-7.example.invalid"
+        }
+      ],
+      "guest": {}
+    },
+    "postgresql": {
+      "app": {
+        "adapter": "postgresql",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "postgresql",
+        "identity": {
+          "services": {
+            "postgresql": "postgresql"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {
+          "web": {
+            "namespace": "host",
+            "port": 5432,
+            "protocol": "tcp",
+            "service": "postgresql"
+          }
+        },
+        "role_addresses": {
+          "service": "198.18.31.23"
+        },
+        "software_selection": {
+          "packages": [
+            "postgresql-16=16.10-1.pgdg13+1",
+            "postgresql-client-16=16.10-1.pgdg13+1",
+            "libpq5=16.10-1.pgdg13+1"
+          ]
+        }
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "python3",
+            "-c",
+            "import subprocess; assert subprocess.check_output(['systemctl','is-enabled','postgresql'],text=True).strip()=='enabled'; subprocess.run(['systemctl','is-active','--quiet','postgresql'],check=True); print('SERVICE_OK')"
+          ],
+          "expect": "SERVICE_OK",
+          "name": "Service is enabled and active"
+        },
+        {
+          "argv": [
+            "pg_isready",
+            "-h",
+            "198.18.31.23",
+            "-p",
+            "5432"
+          ],
+          "expect": "accepting connections",
+          "name": "PostgreSQL backend listener accepts connections"
+        },
+        {
+          "argv": [
+            "runuser",
+            "-u",
+            "postgres",
+            "--",
+            "psql",
+            "-X",
+            "-At",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-d",
+            "postgres",
+            "-c",
+            "SELECT 1"
+          ],
+          "expect": "1",
+          "name": "Local maintenance query"
+        },
+        {
+          "argv": [
+            "python3",
+            "-c",
+            "import socket; s=socket.create_connection(('198.18.31.23',5432),timeout=5); s.close(); print('BACKEND_OK')"
+          ],
+          "expect": "BACKEND_OK",
+          "name": "Backend TCP listener"
+        }
+      ],
+      "guest": {}
+    },
+    "unbound": {
+      "app": {
+        "adapter": "unbound",
+        "health": {
+          "ready": {
+            "check": "readiness",
+            "type": "adapter"
+          }
+        },
+        "id": "unbound",
+        "identity": {
+          "services": {
+            "unbound": "unbound"
+          }
+        },
+        "lifecycle": "retained",
+        "software_selection": {
+          "packages": [
+            "docker.io=26.1.5+dfsg1-9+deb13u1",
+            "docker-cli=26.1.5+dfsg1-9+deb13u1",
+            "docker-compose=2.26.1-4",
+            "curl=8.14.1-2+deb13u7"
+          ]
+        }
+      },
+      "compose_file": "/opt/homelab-app/compose.yml",
+      "expected": [
+        {
+          "argv": [
+            "docker",
+            "compose",
+            "-f",
+            "/opt/homelab-app/compose.yml",
+            "exec",
+            "-T",
+            "unbound",
+            "unbound-checkconf",
+            "/opt/unbound/etc/unbound/unbound.conf"
+          ],
+          "expect": "",
+          "name": "unbound ready"
+        }
+      ],
+      "guest": {}
+    }
+  },
+  "framework": "f28725b1e8334a0baba26dfc2fa623cb3a63cdf5",
+  "schema": "public-retained-health-metadata-v1",
+  "source_is_public_example": true,
+  "stack": "70d694b38bd8df51dafe7282de9fb2bdbc990fe9"
+}

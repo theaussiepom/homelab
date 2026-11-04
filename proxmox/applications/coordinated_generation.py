@@ -6,8 +6,100 @@ import re
 from private_io import require, digest, encoded, private_directory
 from plan_policy import RESOURCES
 from custody_records import decode, read_existing, no_markers
-from coordinated_contract import shape
+from coordinated_contract import shape, fingerprint, absolute
+from component_payload import AppPayload, SCHEMA as APP_SCHEMA, BINDING_SCHEMA
 import ordinary_failure
+
+
+COMPONENT_COMPLETE='homelab-component-ordinary-complete-v1'
+
+
+def component_binding(binding):
+    """The same closed common input binding for complete and failed phases."""
+    require(isinstance(binding,dict),'Preserve the component ordinary binding')
+    required={'schema','vmid','site_sha256','source_sha256','input_identity','app_inputs_directory','input_hashes'}
+    optional={'coordinated_custody_sha256','initial_ordinary_sha256'}
+    require(required<=set(binding)<=required|optional and len(set(binding)&optional)<=1
+            and binding['schema']==BINDING_SCHEMA and type(binding['vmid']) is int and binding['vmid']>0,
+            'Use the closed component ordinary binding')
+    for field in ('site_sha256','source_sha256','input_identity',*(set(binding)&optional)):
+        fingerprint(binding[field])
+    absolute(binding['app_inputs_directory'])
+    require(isinstance(binding['input_hashes'],dict),'Preserve component static input pins')
+    for path,digest in binding['input_hashes'].items():
+        absolute(path);fingerprint(digest)
+    return binding
+
+
+def component_success(value, operation):
+    """Validate only versioned component history; leave legacy nine fields separate."""
+    binding=value.get('binding',{}) if isinstance(value,dict) else {}
+    component=isinstance(value,dict) and ('schema' in value or isinstance(binding,dict)
+                                          and 'schema' in binding)
+    if not component:
+        return False
+    component_binding(binding)
+    optional={'coordinated_custody_sha256','initial_ordinary_sha256'}
+    fields={'schema','status','binding','state_sha256','result','workflow','run_number','site_revision',
+            'operation','phase_inputs'}
+    if set(binding)&optional:fields.add('state_identity')
+    shape(value,fields)
+    require(value['schema']==COMPONENT_COMPLETE and value['status']=='passed'
+            and isinstance(value['result'],dict) and value['operation']==str(operation),
+            'Preserve a complete component ordinary success')
+    fingerprint(value['state_sha256']);fingerprint(value['site_revision'],40)
+    workflow=value['workflow']
+    require(isinstance(workflow,list) and len(workflow)==2 and all(isinstance(x,str) for x in workflow)
+            and re.fullmatch('[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',workflow[0])
+            and re.fullmatch(re.escape(workflow[0])+r'/\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml',workflow[1])
+            and type(value['run_number']) is int and value['run_number']>0,
+            'Preserve component workflow and run provenance')
+    phases=value['phase_inputs']
+    require(isinstance(phases,dict) and 0<len(phases)<=128 and 'preparation' in phases
+            and phases['preparation'] is None
+            and all(isinstance(p,str) and re.fullmatch('[a-z][a-z0-9_-]{0,62}',p) for p in phases),
+            'Preserve the component completion phase set')
+    absolute(str(operation))
+    require(re.fullmatch(r'ordinary-[1-9][0-9]*-[1-9][0-9]*',operation.name),'Keep the immutable component operation identity')
+    private_directory(operation);no_markers(operation)
+    found={path.name for path in operation.iterdir()
+           if path.name!='infrastructure-complete.json' and re.fullmatch(r'[a-z][a-z0-9_-]{0,62}-(started|complete)\.json',path.name)}
+    require(found=={p+suffix for p in phases for suffix in ('-started.json','-complete.json')},
+            'Preserve every immutable completed component phase')
+    ready=decode(read_existing(operation/'infrastructure-complete.json'))
+    require(isinstance(ready,dict) and ready.get('binding')==binding
+            and ready.get('state_sha256')==value['state_sha256']
+            and ('state_identity' not in fields or ready.get('state_identity')==value['state_identity']),
+            'Preserve component infrastructure checkpoint provenance')
+    common={'binding':binding,'operation':str(operation),'automatic_retry':False,'workflow':workflow,
+            'run_number':value['run_number'],'site_revision':value['site_revision']}
+    prior=object();unselected=prior
+    for phase,proof in phases.items():
+        if phase!='preparation':
+            shape(proof,{'schema','identity','app','payload_sha256'})
+            require(proof['schema']==APP_SCHEMA and proof['identity']==binding['input_identity']
+                    and isinstance(proof['app'],str) and re.fullmatch('[a-z][a-z0-9_-]{0,62}',proof['app']),
+                    'Preserve this phase selected-app identity')
+            fingerprint(proof['payload_sha256'])
+            AppPayload.load(Path(binding['app_inputs_directory'])/proof['app'],proof)
+        started=decode(read_existing(operation/(phase+'-started.json')))
+        complete=decode(read_existing(operation/(phase+'-complete.json')))
+        require(isinstance(started,dict),'Preserve the component phase start marker')
+        marker=dict(common)
+        if 'previous_ordinary_sha256' in started:
+            previous=started['previous_ordinary_sha256']
+            if previous is not None:fingerprint(previous)
+            marker['previous_ordinary_sha256']=previous
+        if proof is not None:marker['phase_inputs']=proof
+        require(encoded(started)==encoded(marker),'Preserve the exact component phase start ownership')
+        previous=marker.get('previous_ordinary_sha256','absent')
+        require(prior is unselected or prior==previous,'Preserve the component prior-success binding')
+        prior=previous
+        shape(complete,{'binding','result'}|({'phase_inputs'} if proof is not None else set()))
+        require(complete['binding']==binding and isinstance(complete['result'],dict)
+                and (proof is None or complete['phase_inputs']==proof),
+                'Preserve the completed phase selected-app proof')
+    return True
 
 
 def backend(work, member):
@@ -116,6 +208,7 @@ def latest_success(attempt, member, *, binding_key="coordinated_custody_sha256")
                     and value.get("operation") == str(path) and value.get("workflow") == attempt.workflow
                     and type(value.get("run_number")) is int and value["run_number"] > 0,
                     "Preserve foreign or failed coordinated ordinary history")
+            component_success(value, path)
             number = value["run_number"]
             require(number not in found, "Preserve ambiguous ordinary run history")
             found[number] = raw
@@ -152,11 +245,12 @@ def classify(attempt, member, lineage, baseline, *, binding_key="coordinated_cus
                 require(state_hash == member["initial_state_sha256"], "The initial backend has unproven changes")
             else:
                 value = decode(raw)
-                shape(value, {"status", "binding", "state_sha256", "state_identity", "result", "workflow", "run_number", "site_revision", "operation"})
-                operation = value["operation"]
+                operation = value.get("operation") if isinstance(value, dict) else None
                 require(isinstance(operation, str) and Path(operation).parent == attempt.work
                         and re.fullmatch(r"ordinary-[1-9][0-9]*-[1-9][0-9]*", Path(operation).name),
                         "Keep this member's immutable ordinary operation")
+                if not component_success(value, Path(operation)):
+                    shape(value, {"status", "binding", "state_sha256", "state_identity", "result", "workflow", "run_number", "site_revision", "operation"})
                 checkpoints = [row for row in attempt.reviewed_failures.values()
                                if row["previous_ordinary_sha256"] == digest(raw)
                                and row["state_sha256"] == state_hash and row["identity"] == identity]

@@ -1,16 +1,16 @@
 # HomeLab framework
 
 Build a small Proxmox homelab with reusable OpenTofu resources, Ansible preparation
-and application blueprints. The executable platform is Debian 13 LXC. VM guests
+and independent application components. The executable platform is Debian 13 LXC. VM guests
 require separate implementation and qualification.
 
 Three repositories have different jobs:
 
 | Repository | What belongs there |
 | --- | --- |
-| **homelab** (this one) | Reusable infrastructure, preparation and app blueprints, phase runner and tests |
-| **homelab-stack** | Copyable composition: guests, applications, dependencies, images and example topology |
-| **Private consumer** | Reviewed stack selection, actual private overrides, Secrets references and deployment controls |
+| **homelab** (this one) | Reusable component contracts, infrastructure, phase runner and tests |
+| **homelab-stack** | Reusable component library and small explicit starter sites |
+| **Private consumer** | Reviewed library selection, site allocations, Secret references and deployment policy |
 
 ```mermaid
 flowchart LR
@@ -21,16 +21,14 @@ flowchart LR
   prep --> apps[Applications]
 ```
 
-Start with the [stack contract](docs/stack-contract.md), then the stack's README.
-[Blueprint definitions](blueprints/catalogue.json) list exactly the supported
-guest applications and Linux/Docker capabilities. Ordinary deployment reuses
-[the guarded adapter](proxmox/applications/deploy.py), the existing LXC
-[module](proxmox/applications/tofu/guest/main.tf) and Ansible tasks.
-OpenTofu owns guest CPU/RAM/disks/NICs/firewall/autostart. Ansible owns packages,
-Docker/Compose where selected, and applications. A native database omits Docker.
-
-The Zigbee guest can also select [WiNet telemetry](docs/winet.md) as a separate
-application step, retaining the same guest, coordinator and preparation phase.
+Start with [component configuration](docs/components.md) and the selected library's
+README. The library has no implicit guest set. A site places stable app instances
+on named guests and explicitly binds interfaces, endpoints, storage, credentials,
+policies and readiness. [The phase runner](proxmox/applications/deploy.py) reuses
+the guarded [LXC module](proxmox/applications/tofu/guest/main.tf) and Ansible.
+OpenTofu owns guest resources/state; Ansible owns packages and selected services.
+Native database apps do not require Docker. WiNet and Zigbee, HA and Node-RED,
+and broker and Explorer remain independently selectable profiles.
 
 For local source tests, use Python 3.12+ with the pinned dependencies in
 [pyproject.toml](pyproject.toml):
@@ -38,16 +36,17 @@ For local source tests, use Python 3.12+ with the pinned dependencies in
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-python3 -m pip install -r requirements.lock.txt
+python3 -m pip install --require-hashes -r requirements.lock.txt
 python3 -m pytest -q tests
 python3 -m unittest discover -s blueprints
 python3 -m unittest discover -s proxmox/applications/tests
-ansible-playbook -i localhost, --syntax-check proxmox/applications/ansible/preparation.yml
-ansible-playbook -i localhost, --syntax-check proxmox/applications/ansible/reconcile.yml
+ansible-playbook -i localhost, --syntax-check proxmox/applications/ansible/component-preparation.yml
+ansible-playbook -i localhost, --syntax-check proxmox/applications/ansible/component-reconcile.yml
 ```
 
-Guest profiles and site inputs may be authored as YAML (`profile.yaml` and
-`site.yaml`), `.yml`, or legacy JSON. Keep exactly one variant of each logical
+Component definitions and sites may be authored as YAML (`.yaml` or `.yml`) or
+JSON. The new head supports the component schema only; previous fixed authored
+contracts remain at their immutable older pins. Keep exactly one variant of each logical
 source. The shared reader preserves JSON-compatible values and literal text;
 `on`, `yes` and date-looking strings stay strings, while an empty `zabbix:`
 property means null. Quote string values that otherwise look like numbers,
@@ -88,7 +87,7 @@ upload coverage-report artifacts.
 `--suite framework`, `--suite blueprints`, `--suite applications`,
 `--suite stack --stack PATH` and `--suite site --site PATH` select individual suites.
 Use `--all` for the complete Python inventory, including bootstrap, installer,
-CI tooling, recovery and the private checker. Failing tests still fail their jobs.
+CI tooling and recovery. Failing tests still fail their jobs.
 
 The full application suite includes explicitly gated Docker/native fixtures;
 read its skips and prerequisites. These tests are not target qualification.

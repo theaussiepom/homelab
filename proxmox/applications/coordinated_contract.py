@@ -108,20 +108,3 @@ def selection(cfg, *, allow_input_slot=False):
 
 def selection_digest(cfg):
     return digest(encoded(cfg["coordinated_custody"]))
-
-
-def configured_closure(resolved):
-    """Require every configured copy, including disabled members, without enabling it."""
-    for cfg, _, files in resolved.values():
-        group = selection(cfg, allow_input_slot=True)
-        if group is None:
-            continue
-        for role, member in group["members"].items():
-            require(role in resolved, "Keep every configured group member")
-            peer, _, _ = resolved[role]
-            require(selection(peer, allow_input_slot=True) == group and peer["guest"]["vmid"] == member["vmid"],
-                    "Configured group provenance copies must agree, including disabled members")
-        for key in ("catalogue", "acceptance"):
-            row = group[key]
-            require(row["file"] in files and digest(files[row["file"]].encode()) == row["sha256"],
-                    "Bind the complete immutable custody source inputs")

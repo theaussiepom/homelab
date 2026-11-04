@@ -1,39 +1,23 @@
 #!/usr/bin/env python3
-"""Compile the whole composition into current per-guest deployment packets.
+"""Compile explicit component JSON/YAML sites to versioned deployment packets.
 
-Pure input handling: this module never reads credentials, contacts targets or
-runs deployers. Runtime admission is deliberately separate from offline previews.
+The fixed guest-bundle authored API is available only at its immutable older pins.
+This compiler performs no credential reads or native operations.
 """
 import argparse
-import copy
-import hashlib
-import ipaddress
 import json
+import os
 from pathlib import Path
 import re
-import sys
 import subprocess
+import sys
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'proxmox/applications'))
+sys.path.insert(0,str(ROOT/'blueprints'))
+from authored_config import read, site_path
 
-sys.path.insert(0, str(ROOT / "proxmox/applications"))
-sys.path.insert(0, str(ROOT / "blueprints"))
-import connections
-import network_endpoints
-import coordinated_contract
-import guest_contract
-import service_bindings
-import routes
-import zabbix
-import database_admin
-from authored_config import read, source_path, site_path, profile_path
-
-CATALOGUE = guest_contract.BLUEPRINTS
-PIN = re.compile(
-    r"^\s*uses: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/\.github/workflows/([a-z-]+\.yml)@([0-9a-f]{40})\s*$",
-    re.M,
-)
-TOKEN = re.compile(r"\$\{([a-z][a-z0-9_.-]*)\}")
+PIN=re.compile(r"^\s*uses: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/\.github/workflows/([a-z-]+\.yml)@([0-9a-f]{40})\s*$",re.M)
 
 
 def require(ok, message):
@@ -66,412 +50,30 @@ def check_revision(path, revision):
     )
 
 
-def merge(base, override):
-    if isinstance(base, dict) and isinstance(override, dict):
-        result = copy.deepcopy(base)
-        for key, value in override.items():
-            result[key] = merge(result.get(key), value)
-        return result
-    return copy.deepcopy(override)
-
-
-def binding_declarations(spec):
-    declared = spec.get('required_site_bindings', {})
-    require(isinstance(declared, dict) and len(declared) <= 512,
-            'Declare bounded required site bindings')
-    for key, kind in declared.items():
-        require(isinstance(key, str) and key != 'inputs' and len(key) <= 160 and TOKEN.fullmatch('${' + key + '}'),
-                'Use literal central binding names')
-        require(kind in ('string', 'integer', 'string-list') if isinstance(kind, str)
-                else kind == ['integer', 'null'], 'Use declared scalar or flat string-list binding types')
-    return declared
-
-
-def binding_value(value, kind):
-    if kind == 'string':
-        return isinstance(value, str) and bool(value)
-    if kind == 'integer':
-        return type(value) is int
-    if kind == 'string-list':
-        return isinstance(value, list) and bool(value) and all(isinstance(v, str) and v for v in value)
-    return kind == ['integer', 'null'] and (value is None or type(value) is int)
-
-
-def synthetic_binding(key, value):
-    """Reject known examples only in declared address/network/domain inputs."""
-    network = key.startswith(('addresses.', 'gateways.', 'networks.')) or re.fullmatch(r'interfaces\..+\.ipv4(?:_endpoint)?', key)
-    domain = key.startswith(('domains.', 'hostnames.'))
-    if not network and not domain:
-        return False
-    for item in value if isinstance(value, list) else [value]:
-        if not isinstance(item, str) or item in {'manual', 'dhcp'}:
-            continue
-        if domain:
-            name = item.lower().rstrip('.')
-            if any(name == suffix or name.endswith('.' + suffix)
-                   for suffix in ('example.com', 'example.net', 'example.org', 'example', 'invalid', 'test', 'localhost')):
-                return True
-        else:
-            try:
-                candidate = ipaddress.ip_network(item, strict=False)
-            except ValueError:
-                continue  # The existing receiver validates its complete semantic contract.
-            examples = ('192.0.2.0/24', '198.51.100.0/24', '203.0.113.0/24', '198.18.0.0/15', '2001:db8::/32')
-            if any(candidate.version == example.version and candidate.subnet_of(example)
-                   for example in map(ipaddress.ip_network, examples)):
-                return True
-    return False
-
-
-def validate_site_bindings(spec, overlay, *, admit):
-    declared = binding_declarations(spec)
-    values = merge(spec['values'], overlay['values'])
-    for key, kind in declared.items():
-        require(key in values and binding_value(values[key], kind), 'Supply the declared site binding type: ' + key)
-        if admit:
-            require(key in overlay['values'], 'Supply an explicit consumer binding: ' + key)
-            require(not synthetic_binding(key, values[key]), 'Replace the known synthetic site binding: ' + key)
-    return declared
-
-
-def substitute(value, values, bindings=None):
-    if isinstance(value, dict):
-        return {k: substitute(v, values, bindings) for k, v in value.items()}
-    if isinstance(value, list):
-        return [substitute(v, values, bindings) for v in value]
-    if not isinstance(value, str):
-        return value
-    whole = TOKEN.fullmatch(value)
-    if whole and bindings and whole[1] in bindings:
-        require(whole[1] in values and binding_value(values[whole[1]], bindings[whole[1]]),
-                'Supply the declared whole-value binding')
-        return copy.deepcopy(values[whole[1]])
-
-    def replacement(match):
-        key = match[1]
-        if key == "inputs" and key not in values:
-            return match[0]
-        require(
-            key in values and isinstance(values[key], (str, int)),
-            "Supply every declared central value",
-        )
-        return str(values[key])
-
-    return TOKEN.sub(replacement, value)
-
-
-def manifest(root):
-    spec = read(root / "stack.json")
-    require(
-        {"schema", "values", "guests", "routes"} <= set(spec)
-        <= {"schema", "values", "guests", "routes", "required_site_bindings"}
-        and spec["schema"] == "homelab-stack-v2",
-        "Use the stack contract",
-    )
-    binding_declarations(spec)
-    guests = spec["guests"]
-    require(
-        set(guests) in (set(CATALOGUE), {k for k, v in CATALOGUE.items() if "feature" not in v}), "Keep a permanent path for every prepared guest"
-    )
-    for name, row in guests.items():
-        require(
-            set(row) == {"depends_on", "prerequisites"}
-            and isinstance(row["depends_on"], list)
-            and len(set(row["depends_on"])) == len(row["depends_on"])
-            and name not in row["depends_on"]
-            and set(row["depends_on"]) <= set(guests)
-            and isinstance(row["prerequisites"], list)
-            and all(re.fullmatch("[a-z][a-z0-9-]*", s) for s in row["prerequisites"]),
-            "Use explicit guest dependencies and prerequisites",
-        )
-
-    def visit(name, path):
-        require(name not in path, "Guest dependency cycle")
-        for parent in guests[name]["depends_on"]:
-            visit(parent, path | {name})
-
-    for name in guests:
-        visit(name, set())
-    return spec
-
-
 def parse_disabled(value):
     """An omitted/blank workflow input disables no guests."""
-    if value == "":
-        return []
-    disabled = json.loads(value)
-    require(isinstance(disabled, list), "Use a JSON disabled guest list")
-    return disabled
+    from component_workflows import disabled_json
+    return disabled_json(value)
 
 
-def selection(spec, disabled=None):
-    if disabled is None:
-        disabled = []
-    require(
-        isinstance(disabled, list)
-        and all(isinstance(name, str) for name in disabled)
-        and len(set(disabled)) == len(disabled)
-        and set(disabled) <= set(spec["guests"]) | set(spec.get("_inactive_guests", [])),
-        "Disable only unique known guest names",
-    )
-    enabled = [name for name in spec["guests"] if name not in disabled]
-    for name in enabled:
-        require(
-            set(spec["guests"][name]["depends_on"]) <= set(enabled),
-            "Cannot disable a prerequisite while its consumers remain active",
-        )
-    return enabled
+def resolve_plan(stack_root, site_source, disabled=None, *, admit=False):
+    """Resolve one explicit component site, with no fixed guest catalogue."""
+    from component_plan import resolve
+    return resolve(stack_root, site_source, disabled, admit=admit)
 
 
-def image(value):
-    if value in ({
-        "repository": repository,
-        "tag": "latest",
-        "digest": None,
-    } for repository in ("ghcr.io/bitwarden/lite", "ghcr.io/music-assistant/server")):
-        return {"image": value["repository"] + ":latest"}
-    # A local image ID is a retained private archive selection, never an update.
-    if set(value) == {"local_id", "archive", "archive_sha256"}:
-        require(
-            re.fullmatch(r"sha256:[0-9a-f]{64}", value["local_id"])
-            and Path(value["archive"]).is_absolute()
-            and re.fullmatch("[0-9a-f]{64}", value["archive_sha256"]),
-            "Supply the preserved custom image and archive identity",
-        )
-        return {
-            "image": value["local_id"],
-            "archive": value["archive"],
-            "archive_sha256": value["archive_sha256"],
-        }
-    require(
-        set(value) == {"repository", "tag", "digest"}
-        and re.fullmatch(r"[a-z0-9./_-]+", value["repository"])
-        and (value["tag"] is None or re.fullmatch(r"[A-Za-z0-9_.-]+", value["tag"]))
-        and isinstance(value["digest"], str)
-        and re.fullmatch(r"sha256:[0-9a-f]{64}", value["digest"]),
-        "Keep a repository, optional recorded tag and immutable digest",
-    )
-    return {
-        "image": value["repository"]
-        + (":" + value["tag"] if value["tag"] else "")
-        + "@"
-        + value["digest"]
-    }
+def workflow_disabled(text):
+    from component_workflows import workflow_disabled as selected
+    return selected(text)
 
 
-def custody_proofs(cfg):
-    """Identify exact proof bytes before resolving the compiler input slot."""
-    group = coordinated_contract.selection(cfg, allow_input_slot=True)
-    return {} if group is None else {group[k]["file"]: group[k]["sha256"] for k in ("catalogue", "acceptance")}
+def lower_plan(plan):
+    from component_packet import lower_plan as lower
+    return lower(plan)
 
 
-def custody_text(raw, expected, values):
-    """Retain a literal proof, or select its complete raw central value once."""
-    if hashlib.sha256(raw.encode()).hexdigest() != expected:
-        token = TOKEN.fullmatch(raw)
-        require(token and token[1] != "inputs" and isinstance(values.get(token[1]), str),
-                "Select exact raw custody proof text or one complete central value")
-        raw = values[token[1]]
-    require(hashlib.sha256(raw.encode()).hexdigest() == expected,
-            "Preserve exact custody source proof bytes during resolution")
-    return raw
-
-
-def _resolve_guest(root, overlay, name, spec):
-    values = merge(spec["values"], overlay["values"])
-    bindings = binding_declarations(spec)
-    profile = read(profile_path(root, name))
-    require(
-        set(profile) == {"config", "files", "stack"}, "Use the guest profile fields"
-    )
-    overrides = overlay["guests"].get(name, {})
-    require(
-        set(overrides) <= {"config", "stack"},
-        "Override only selected guest configuration or stack fields",
-    )
-    cfg = substitute(
-        merge(
-            merge(read(root / "common.json"), profile["config"]),
-            merge(overlay["common"], overrides.get("config", {})),
-        ),
-        values, bindings,
-    )
-    require(
-        "deployment" not in cfg
-        and cfg["app"]["kind"] == name
-        and "capture" not in cfg["app"]
-        and "ha_http" not in cfg["app"]
-        and "clean_install_confirmed" not in cfg["app"],
-        "Ordinary deployment cannot include migration or account bootstrap",
-    )
-    require(
-        cfg["guest"].get("platform", "debian-lxc") == "debian-lxc",
-        "Only Debian LXC is implemented",
-    )
-    optional = set(CATALOGUE[name].get("optional_applications", {}))
-    require(set(cfg["app"]["service_health_checks"]) & optional
-            == set(profile["config"]["app"]["service_health_checks"]) & optional,
-            "Select optional application phases in the shared profile, not a private override")
-    cfg["guest"].pop("platform", None)
-    cfg["deployment"] = {"contract": 2, "capabilities": CATALOGUE[name]["capabilities"]}
-    cfg["app"]["required_paths"] = list(
-        {
-            row["path"]: row
-            for row in [
-                *guest_contract.required_paths(cfg),
-                *cfg["app"].get("required_paths", []),
-            ]
-        }.values()
-    )
-    require(
-        cfg["app"]["vmid"] == cfg["guest"]["vmid"]
-        and cfg["app"]["hostname"] == cfg["guest"]["hostname"]
-        and cfg["app"]["memory_mib"] == cfg["guest"]["memory_mib"],
-        "Keep the selected guest identity consistent",
-    )
-    nics = cfg["guest"]["interfaces"]
-    network_endpoints.addresses(cfg["guest"])
-    require(
-        any(
-            n["mac"] == cfg["app"]["mac"]
-            and n["ipv4"] != "manual"
-            and str(network_endpoints.interface(n).ip) == cfg["app"]["address"]
-            for n in nics
-        ),
-        "Bind application SSH to an assigned interface",
-    )
-    require(
-        set(cfg["app"]["service_health_checks"]) == set(guest_contract.applications(cfg))
-        and all(cfg["app"]["service_health_checks"].values()),
-        "Every application needs a bounded health check",
-    )
-    require(
-        all(
-            re.fullmatch(r"[a-z][a-z0-9_.-]{0,63}", k) and isinstance(v, str)
-            for k, v in profile["files"].items()
-        ),
-        "Use bounded text input files",
-    )
-    proofs = custody_proofs(cfg)
-    files = {k: custody_text(v, proofs[k], values) if k in proofs else substitute(v, values)
-             for k, v in profile["files"].items()}
-    stack = substitute(
-        (
-            merge(profile["stack"], overrides.get("stack", {}))
-            if profile["stack"] is not None
-            else None
-        ),
-        values, bindings,
-    )
-    if stack is not None:
-        images = merge(read(root / "images.json"), overlay["images"])
-        for row in guest_contract.runtime_images(stack).values():
-            row.update(image(images[row.pop("image_ref")]))
-    return cfg, stack, files
-
-
-def _compile_guest(name, cfg, stack, files, enabled):
-    database_admin.hba(cfg, files)
-    if stack is not None:
-        files["stack.json"] = encoded(stack).decode()
-    # The identity hashes the abstract input slot before binding absolute paths.
-    identity = hashlib.sha256(encoded({"config": cfg, "files": files})).hexdigest()
-    destination = "/var/lib/homelab-inputs/ordinary/" + name + "/" + identity
-    proofs = custody_proofs(cfg)
-    require(all(name in files and hashlib.sha256(files[name].encode()).hexdigest() == expected
-                for name, expected in proofs.items()), "Preserve exact custody source proof bytes before packet binding")
-    cfg = substitute(cfg, {"inputs": destination})
-    files = {k: v if k in proofs else v.replace("${inputs}", destination) for k, v in files.items()}
-    guest_contract.validate(
-        cfg, json.loads(files["stack.json"]) if "stack.json" in files else None
-    )
-    files["site.json"] = encoded(cfg).decode()
-    return cfg, {
-        "schema": guest_contract.SCHEMA,
-        "kind": name,
-        "enabled": name in enabled,
-        "identity": identity,
-        "files": files,
-    }
-
-
-def compile_stack(root, overlay, disabled=None, *, admit=False):
-    """Resolve the composition once; reject identity collisions before admission."""
-    spec = zabbix.selected(manifest(root), overlay)
-    enabled = selection(spec, disabled)
-    zabbix.selection(overlay, enabled)
-    require(
-        set(overlay) - {"zabbix"}
-        == {"schema", "values", "common", "guests", "images", "accepted", "routes"}
-        and overlay["schema"] == "homelab-site-v3"
-        and set(overlay["guests"]) <= set(CATALOGUE),
-        "Use a thin private overlay",
-    )
-    require(
-        isinstance(overlay["accepted"], dict)
-        and set(overlay["accepted"]) <= set(CATALOGUE),
-        "Record explicit prerequisite acceptance",
-    )
-    validate_site_bindings(spec, overlay, admit=admit)
-    resolved = {name: _resolve_guest(root, overlay, name, spec) for name in spec["guests"]}
-    if zabbix.enabled(overlay):
-        zabbix.bind(resolved, enabled, merge(spec["values"], overlay["values"]))
-    coordinated_contract.configured_closure(resolved)
-    declared_routes = merge(spec["routes"], overlay["routes"])
-    if zabbix.enabled(overlay):
-        require("zabbix" not in declared_routes, "Zabbix route is derived from its root feature")
-        declared_routes["zabbix"] = {"target": {"endpoint": "monitoring.zabbix.web"},
-                                     "host": "${domains.monitoring}",
-                                      "middlewares": ["security-headers"]}
-    route_records = routes.bind(
-        resolved, substitute(declared_routes, merge(spec["values"], overlay["values"]), binding_declarations(spec)),
-    )
-    service_bindings.bind(resolved, route_records)
-    compiled = {
-        name: _compile_guest(name, *value, enabled) for name, value in resolved.items()
-    }
-    vmids = [cfg["guest"]["vmid"] for cfg, _ in compiled.values()]
-    require(
-        len(vmids) == len(set(vmids)), "Each guest needs a unique composition identity"
-    )
-    connections.validate(
-        {name: cfg for name, (cfg, _) in compiled.items()},
-        external_routes=(
-            resolved["ingress"][1].get("routing", {}).get("routes", {})
-            if "ingress" in resolved
-            else {}
-        ),
-    )
-    if admit:
-        require(enabled, "Keep disabled guests outside deployment admission")
-        for name in enabled:
-            cfg, packet = compiled[name]
-            missing = set(spec["guests"][name]["prerequisites"]) - set(
-                overlay["accepted"].get(name, [])
-            )
-            require(
-                not missing,
-                name
-                + ": missing prerequisite acceptance: "
-                + ", ".join(sorted(missing)),
-            )
-            require(
-                cfg["ssh_public_keys"]
-                and all(
-                    "AAAAAAAAAAAAAAAA" not in key for key in cfg["ssh_public_keys"]
-                ),
-                "Supply the approved SSH public key",
-            )
-            require(
-                not any("0" * 64 in raw for raw in packet["files"].values()),
-                "Replace private image and runtime identity placeholders",
-            )
-            require(
-                "docker" not in CATALOGUE[name]["capabilities"]
-                or cfg["app"]["exclusive_writer_confirmed"] is True,
-                "Confirm the exclusive writer separately",
-            )
-    return {name: packet for name, (_, packet) in compiled.items()}
+def compile_site(stack_root, site_source, disabled=None, *, admit=False):
+    return lower_plan(resolve_plan(stack_root, site_source, disabled, admit=admit))
 
 
 def main():
@@ -480,7 +82,7 @@ def main():
     site = parser.add_mutually_exclusive_group(required=True)
     site.add_argument("--site", type=Path)
     site.add_argument("--site-root", type=Path)
-    parser.add_argument("--guest", choices=CATALOGUE)
+    parser.add_argument("--guest")
     parser.add_argument(
         "--disabled",
         default="[]",
@@ -490,22 +92,29 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    overlay = read(site_path(args.site_root) if args.site_root is not None else args.site)
     disabled = parse_disabled(args.disabled)
+    selected = site_path(args.site_root) if args.site_root is not None else args.site
+    packets = compile_site(args.stack, selected, disabled, admit=args.admit)
     if args.check:
-        compile_stack(args.stack, overlay, disabled)
-        print("All guest profiles compile offline; no credentials or targets accessed.")
+        print("All component guests compile offline; no credentials or targets accessed.")
     else:
         require(args.guest and args.output, "Supply a guest and new packet output")
-        packets = compile_stack(args.stack, overlay, disabled, admit=args.admit)
+        require(args.guest in packets, "Select an authored component guest")
         if args.admit:
             require(
                 packets[args.guest]["enabled"],
                 "Keep disabled guests outside deployment admission",
             )
-        with args.output.open("x") as stream:
+        descriptor = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "w") as stream:
             stream.write(encoded(packets[args.guest]).decode())
 
 
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        from component_errors import ComponentError
+        raise SystemExit(str(error) if isinstance(error, ComponentError) else
+                         'Component compilation refused; no credentials or targets accessed.') from None

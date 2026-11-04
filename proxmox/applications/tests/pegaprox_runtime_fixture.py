@@ -8,7 +8,7 @@ import sys
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import pegaprox
+from component_pegaprox_fixture import service as component_service
 import pegaprox_health
 
 IMAGE = "ghcr.io/pegaprox/pegaprox@sha256:8d295a524a52f0b923616a3eb415ff6422fe62beba5bb441f35c75d8985f1add"
@@ -101,9 +101,7 @@ def main():
         assert net['Internal'] is True
         assert ipaddress.IPv4Network(net['IPAM']['Config'][0]['Subnet']) == subnet
         backend, proxy, stranger = [str(subnet.network_address + n) for n in (2, 3, 4)]
-        runtime = {'kind':'pegaprox', 'image':IMAGE, 'bind_address':backend, 'trusted_proxy':proxy+'/32',
-                   'guest_memory_mib':2048, 'container_memory_mib':1024, 'cpus':1, 'pids_limit':256}
-        preview = pegaprox.compose(runtime)['services']['pegaprox']
+        preview = component_service(backend,proxy+'/32',IMAGE)
         assert preview['ports'] == [backend+':5000:5000/tcp']
         bounded = ['--pull=never', '--platform','linux/amd64', '--network',network, '--read-only',
                    '--cap-drop','ALL', '--security-opt','no-new-privileges',

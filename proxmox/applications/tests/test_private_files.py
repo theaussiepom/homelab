@@ -10,10 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import commands
-import foundation
-import monitoring
 import private_io
-from test_monitoring import fixture as monitoring_fixture
 
 
 class PrivateFileTests(unittest.TestCase):
@@ -48,34 +45,32 @@ class PrivateFileTests(unittest.TestCase):
     ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            cfg = monitoring_fixture(root)
             password = root / "password"
+            password.write_text("synthetic-fixture-password")
+            password.chmod(0o600)
             for mode in (0o400, 0o600):
                 password.chmod(mode)
                 self.assertEqual(
-                    foundation.read_private(password), "synthetic-fixture-password"
-                )
-                files = {row["path"]: row["content"] for row in monitoring.files(cfg)}
-                self.assertEqual(
-                    files["database-password"], "synthetic-fixture-password"
+                    private_io.regular(password, private=True, limit=65536,
+                        modes=(0o400, 0o600)).decode().removesuffix("\n"), "synthetic-fixture-password"
                 )
                 self.assertEqual(password.stat().st_mode & 0o777, mode)
 
     def test_monitoring_source_refuses_public_or_symlinked_secret_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            cfg = monitoring_fixture(root)
             password = root / "password"
+            password.write_text("synthetic-fixture-password")
+            password.chmod(0o600)
             password.chmod(0o644)
             with self.assertRaises(ValueError):
-                monitoring.files(cfg)
+                private_io.regular(password, private=True, modes=(0o400, 0o600))
             self.assertEqual(password.stat().st_mode & 0o777, 0o644)
             password.chmod(0o600)
             link = root / "link"
             link.symlink_to(password)
-            cfg["monitoring"]["secret_files"]["database_password"] = str(link)
             with self.assertRaises(OSError):
-                monitoring.files(cfg)
+                private_io.regular(link, private=True, modes=(0o400, 0o600))
             self.assertTrue(link.is_symlink())
             self.assertEqual(password.read_text(), "synthetic-fixture-password")
 

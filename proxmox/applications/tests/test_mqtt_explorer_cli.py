@@ -30,7 +30,7 @@ class ExplorerCLITests(unittest.TestCase):
                     contextlib.redirect_stdout(io.StringIO()) as out:
                 m.main()
             if arguments[0]=='workspace':
-                workspace.assert_called_once_with({'vmid':12017});reader.assert_not_called();health.assert_not_called()
+                workspace.assert_called_once_with({'vmid':12017},None,None);reader.assert_not_called();health.assert_not_called()
                 self.assertEqual(json.loads(out.getvalue()),{'workspace':'owned'})
             else:
                 reader.assert_called_once_with(Path('/fixture/config.json'));health.assert_called_once_with({'images':{}})

@@ -15,16 +15,18 @@ def identifier(value):
     return value
 
 
-def credential(state, name, owner):
+def credential(state, name, owner, *, create=True):
     """Serialize only creation/read of this record, never guest or service work."""
     identifier(name)
     require(isinstance(owner, dict) and owner and all(isinstance(key, str) for key in owner),
             'Bind the exact application account owner')
     root = Path(state) / 'managed-credentials'
     private_directory(root.parent)
-    root.mkdir(mode=0o700, exist_ok=True)
+    require(type(create) is bool, 'Select explicit account credential create or verify behavior')
+    if create:
+        root.mkdir(mode=0o700, exist_ok=True)
     private_directory(root)
-    fd = os.open(root / (name+'.lock'), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    fd = os.open(root / (name+'.lock'), (os.O_CREAT if create else 0) | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'rb') as lock:
         info = os.fstat(lock.fileno())
         require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_uid == os.getuid()
@@ -32,6 +34,7 @@ def credential(state, name, owner):
         fcntl.flock(lock, fcntl.LOCK_EX)
         path = root / (name+'.json')
         if not path.exists() and not path.is_symlink():
+            require(create, 'The declared producer must own the existing account credential')
             write_new(path, encoded({'schema': 'homelab-application-account-v1', 'owner': owner,
                 'password': secrets.token_hex(32)}))
         require(path.lstat().st_nlink == 1, 'Refuse a linked account credential record')

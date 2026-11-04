@@ -16,6 +16,7 @@ tofu validate -no-color
 tofu test -no-color
 export ANSIBLE_LOCAL_TEMP=/tmp/ansible-local
 export ANSIBLE_CONFIG=/src/proxmox/applications/ansible/ansible.cfg
-ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/reconcile.yml
-ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/preparation.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-preparation.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-reconcile.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-agent.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/bootstrap/ansible/host-device.yml

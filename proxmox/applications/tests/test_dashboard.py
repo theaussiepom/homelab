@@ -9,8 +9,6 @@ import unittest
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import discovery as d
-import foundation
-from test_foundation import fixture
 
 
 def selected():
@@ -58,20 +56,3 @@ class DashboardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'unique dashboard'):d.shared(value)
         value=settings();value['middlewares']['login']={'headers':{}}
         with self.assertRaisesRegex(ValueError,'forwardAuth'):d.shared(value)
-
-    def test_default_static_unchanged_exact_bool_optin_only_and_no_insecure_api(self):
-        with tempfile.TemporaryDirectory() as directory:
-            cfg=fixture(directory,'ingress')
-            before=foundation.files(cfg)
-            cfg['foundation']['dashboard']=False
-            self.assertEqual(foundation.files(cfg),before)
-            cfg['foundation']['dashboard']=True;cfg['routing']=settings()
-            static=json.loads(next(a['content'] for a in foundation.files(cfg) if a['path']=='traefik.yml'))
-            self.assertEqual(static['api'],{'dashboard':True})
-            self.assertEqual(set(static['entryPoints']),{'web','websecure','health'})
-            self.assertNotIn('insecure',json.dumps(static['api']))
-            for invalid in ('true',1,None,[]):
-                cfg['foundation']['dashboard']=invalid
-                with self.subTest(invalid=invalid),self.assertRaises(ValueError):foundation.validate(cfg)
-            cfg['foundation']['dashboard']=False
-            with self.assertRaisesRegex(ValueError,'Enable the dashboard'):foundation.validate(cfg)

@@ -24,8 +24,18 @@ def fixture(tmp_path, monkeypatch):
     base = tmp_path.resolve();data = base / 'data' / 'mqtt-explorer';data.parent.mkdir()
     custody = base / 'custody';runtime = base / 'runtime';runtime.mkdir()
     monkeypatch.setattr(m, 'DATA', data);monkeypatch.setattr(m, 'CUSTODY', custody);monkeypatch.setattr(m, 'RUNTIME', runtime)
-    owners, calls = {}, []
+    state_spec=importlib.util.spec_from_file_location('runtime_fixture_state',CODE.with_name('mqtt_explorer_state.py'))
+    state=importlib.util.module_from_spec(state_spec);state_spec.loader.exec_module(state)
+    monkeypatch.setattr(m,'state',state)
+    state.DATA=str(data);state.CUSTODY=str(custody);state.RUNTIME=str(runtime)
+    selected={'project':state.PROJECT,'services':dict(state.SERVICES),
+        'data_path':str(data),'runtime_directory':str(runtime),
+        'runtime_id':'mqtt_explorer','custody':str(custody)}
+    monkeypatch.setattr(state,'context',lambda value=None:dict(selected))
+    owners, calls, descriptor_calls = {}, [], []
     original_lstat, original_fstat, original_open = Path.lstat, os.fstat, os.open
+    original_stat=os.stat
+    descriptors={}
 
     def local(path):
         return isinstance(path, (str, bytes, Path)) and str(Path(path).absolute()).startswith(str(base) + '/')
@@ -45,7 +55,11 @@ def fixture(tmp_path, monkeypatch):
 
     def opened(path, flags, mode=0o600, **kwargs):
         fd = original_open(path, flags, mode, **kwargs)
-        if local(path):
+        actual=Path(path)
+        if not actual.is_absolute():
+            actual=(descriptors[kwargs['dir_fd']] if 'dir_fd' in kwargs else Path.cwd())/actual
+        descriptors[fd]=actual
+        if local(actual):
             owners.setdefault(key(original_fstat(fd)), (0, 0))
         return fd
 
@@ -54,15 +68,23 @@ def fixture(tmp_path, monkeypatch):
         owners[key(original_lstat(Path(path)))] = uid, gid
         calls.append((Path(path), uid, gid))
 
+    def fchown(fd, uid, gid):
+        assert local(descriptors[fd])
+        owners[key(original_fstat(fd))]=uid,gid
+        descriptor_calls.append((descriptors[fd],uid,gid))
+        if descriptors[fd]==data: calls.append((data,uid,gid))
+
     def own(path, uid, gid):
         owners[key(original_lstat(Path(path)))] = uid, gid
 
     monkeypatch.setattr(Path, 'lstat', lstat)
     monkeypatch.setattr(m.os, 'fstat', lambda fd: overlay(original_fstat(fd)))
+    monkeypatch.setattr(m.os, 'stat', lambda path,*args,**kwargs: overlay(original_stat(path,*args,**kwargs),local(path)))
     monkeypatch.setattr(m.os, 'open', opened)
     monkeypatch.setattr(m.os, 'chown', chown)
+    monkeypatch.setattr(m.os, 'fchown', fchown)
     monkeypatch.setattr(m.os, 'geteuid', lambda: 0)
-    return SimpleNamespace(m=m, data=data, custody=custody, runtime=runtime, own=own, calls=calls,
+    return SimpleNamespace(m=m, data=data, custody=custody, runtime=runtime, own=own, calls=calls, descriptor_calls=descriptor_calls,
                            owner={'node': 'fixture-node', 'vmid': 123, 'hostname': 'fixture-guest'})
 
 def healthy(f, monkeypatch):
@@ -134,10 +156,13 @@ class MqttExplorerRuntimeTest(unittest.TestCase):
         assert json.loads(before) == f.owner and receipt.stat().st_mode & 0o777 == 0o600
         assert f.data.stat().st_mode & 0o777 == 0o700
         assert f.calls == [(f.data, 1001, 1001)]
+        ownership=[(f.custody,0,0),(f.data,1001,1001),(receipt,0,0)]
+        assert f.descriptor_calls==ownership
         content = f.data / 'retained-profile.json';content.write_bytes(b'public retained profile')
         assert m.workspace(f.owner) == {'workspace': 'owned'}
         assert receipt.read_bytes() == before and content.read_bytes() == b'public retained profile'
         assert len(f.calls) == 1
+        assert f.descriptor_calls==ownership
 
     def test_existing_unowned_nonempty_directory_refuses_without_chown(self):
         fixture = self.fixture
@@ -145,6 +170,7 @@ class MqttExplorerRuntimeTest(unittest.TestCase):
         f = fixture;f.data.mkdir(mode=0o700);(f.data / 'existing').write_bytes(b'preserve')
         with self.assertRaises(ValueError):f.m.workspace(f.owner)
         assert f.calls == [] and (f.data / 'existing').read_bytes() == b'preserve'
+        assert f.descriptor_calls==[(f.custody,0,0)]
         assert not (f.custody / 'workspace.json').exists()
 
     def test_foreign_receipt_or_data_identity_refuses_without_recommissioning(self):
@@ -155,6 +181,7 @@ class MqttExplorerRuntimeTest(unittest.TestCase):
         f.own(f.data, 55, 55)
         with self.assertRaises(ValueError):f.m.workspace(f.owner)
         assert (f.custody / 'workspace.json').read_bytes() == before and len(f.calls) == 1
+        assert f.descriptor_calls==[(f.custody,0,0),(f.data,1001,1001),(f.custody/'workspace.json',0,0)]
 
     def test_real_private_read_refuses_mode_link_and_identity_drift(self):
         fixture = self.fixture

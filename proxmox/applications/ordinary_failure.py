@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 from coordinated_contract import fingerprint, shape
 from custody_records import decode, no_markers, read_existing
-from private_io import digest, private_directory, require
+from private_io import digest, private_directory, require, encoded
 
 
 def historical_network_paths(attributes):
@@ -100,12 +100,52 @@ def selection(cfg):
                 and name not in seen, "Select each exact failed ordinary operation once")
         seen.add(name)
         require(isinstance(row["phase"], str)
-                and (re.fullmatch(r"[a-z][a-z0-9_]{0,31}", row["phase"])
+                and (re.fullmatch(r"[a-z][a-z0-9_-]{0,62}" if cfg.get('schema')=='homelab-component-guest-v1'
+                                  else r"[a-z][a-z0-9_]{0,31}", row["phase"])
                      or row["phase"] == "zabbix-agent"),
                 "Select a fixed failed application phase")
         for key in row.keys() - {"operation", "phase"}:
             fingerprint(row[key])
     return rows
+
+
+def phase_start(attempt,path,row,held,raw):
+    """A component STARTED binds its selected payload; the global hold stays exact."""
+    from component_payload import AppPayload,BINDING_SCHEMA,SCHEMA,_directory,_read,_id
+    binding=held['binding']
+    if binding.get('schema')!=BINDING_SCHEMA:
+        require(raw==read_existing(path/(row['phase']+'-started.json')),
+                "Bind only the failed attempt's completed infrastructure checkpoint")
+        return
+    from coordinated_generation import component_binding
+    component_binding(binding)
+    shape(held,{'binding','operation','automatic_retry','workflow','run_number','site_revision',
+                'previous_ordinary_sha256'})
+    started_raw=read_existing(path/(row['phase']+'-started.json'))
+    started=decode(started_raw)
+    require(raw==encoded(held) and started_raw==encoded(started),
+            'Preserve the exact generated component hold and phase-start bytes')
+    if row['phase']=='preparation':
+        require(encoded(started)==encoded(held),'Preserve the failed preparation input boundary')
+        return
+    require(isinstance(started,dict) and set(started)==set(held)|{'phase_inputs'}
+            and {key:value for key,value in started.items()if key!='phase_inputs'}==held,
+            'Preserve the exact failed component phase start')
+    proof=started['phase_inputs']
+    shape(proof,{'schema','identity','app','payload_sha256'})
+    require(proof['schema']==SCHEMA and _id(proof['app']) and proof['identity']==binding['input_identity'],
+            'Preserve the failed phase input identity')
+    selected=Path(binding['app_inputs_directory'])
+    AppPayload.load(selected/proof['app'],proof)
+    with _directory(selected.parent)as directory:
+        site=_read(directory,'site.json')
+    require(digest(site)==binding['site_sha256'],'Preserve the failed phase static source')
+    cfg=decode(site)
+    require(cfg.get('schema')=='homelab-component-guest-v1'
+            and cfg['site']['node']==attempt.cfg['site']['node']
+            and all(cfg['guest'][key]==attempt.cfg['guest'][key]for key in ('vmid','hostname'))
+            and cfg['deployment']['payload_phases'].get(row['phase'])==proof['app'],
+            'Preserve the failed phase selected app owner')
 
 
 def inspect(attempt, member, binding_key):
@@ -141,8 +181,8 @@ def inspect(attempt, member, binding_key):
         if infrastructure:
             identity, reviewed_drift = infrastructure_review(attempt, member, path, held, ready, row)
         else:
-            require(read_existing(path / (row["phase"] + "-started.json")) == raw["hold_sha256"]
-                    and ready.get("binding") == binding and ready.get("state_sha256") == row["state_sha256"]
+            phase_start(attempt,path,row,held,raw['hold_sha256'])
+            require(ready.get("binding") == binding and ready.get("state_sha256") == row["state_sha256"]
                     and isinstance(ready.get("state_identity"), dict),
                     "Bind only the failed attempt's completed infrastructure checkpoint")
             identity = ready["state_identity"]

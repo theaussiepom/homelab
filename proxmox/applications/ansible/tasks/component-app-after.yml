@@ -1,0 +1,14 @@
+---
+- name: Reconcile only Pi-hole's owned DNS records
+  ansible.builtin.command:
+    argv: "{{ pihole_records.reconcile_argv }}"
+  register: component_dns_records
+  changed_when: (component_dns_records.stdout | from_json).changed
+  no_log: true
+  when: pihole_records is defined
+
+- name: Restart only Pi-hole after its owned DNS records change
+  ansible.builtin.command:
+    argv: "{{ pihole_records.restart_argv }}"
+  when: pihole_records is defined and component_dns_records.changed
+  no_log: true

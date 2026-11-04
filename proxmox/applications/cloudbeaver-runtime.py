@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Own only the CloudBeaver workspace and exact managed pgAdmin retirement."""
 import argparse
+from contextlib import contextmanager
+from types import SimpleNamespace
 import hashlib
 import json
 import os
@@ -23,52 +25,146 @@ def need(value):
         raise ValueError('CloudBeaver managed lifecycle refused')
 
 
+def _path(value):
+    need(isinstance(value, str) and value.startswith('/') and str(Path(value)) == value
+         and not any(part in ('.', '..') for part in value.split('/'))
+         and not any(char in value for char in '$:\\')
+         and not any(ord(char) < 32 or ord(char) == 127 for char in value))
+    return Path(value)
+
+
+@contextmanager
+def _parent(path):
+    """Anchor every parent from root, reject symlinks and path replacement."""
+    path = _path(str(path)); need(path.name)
+    descriptors = []
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    descriptors.append(fd); anchors = []
+    try:
+        for name in path.parts[1:-1]:
+            parent = fd
+            fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            descriptors.append(fd)
+            info = os.fstat(fd); need(stat.S_ISDIR(info.st_mode))
+            anchors.append((parent, name, (info.st_dev, info.st_ino)))
+        yield fd, path.name
+        for parent, name, identity in anchors:
+            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            need(stat.S_ISDIR(info.st_mode) and (info.st_dev, info.st_ino) == identity)
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def _bytes(path, uid, modes, *, same_gid=False):
+    with _parent(path) as (parent, name):
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        with os.fdopen(fd, 'rb') as stream:
+            info = os.fstat(stream.fileno())
+            need(stat.S_ISREG(info.st_mode) and info.st_uid == uid and info.st_nlink == 1
+                 and (not same_gid or info.st_gid == uid)
+                 and stat.S_IMODE(info.st_mode) in modes and info.st_size <= 1024*1024)
+            raw = stream.read(1024*1024+1)
+            fields = ('st_dev', 'st_ino', 'st_uid', 'st_gid', 'st_mode', 'st_nlink',
+                      'st_size', 'st_mtime_ns', 'st_ctime_ns')
+            key = lambda row: tuple(getattr(row, field) for field in fields)
+            need(len(raw) == info.st_size and key(info) == key(os.fstat(stream.fileno()))
+                 == key(os.stat(name, dir_fd=parent, follow_symlinks=False)))
+        return raw
+
+
 def private(path, uid=0, modes=(0o400, 0o600)):
-    metadata = path.lstat()
-    need(stat.S_ISREG(metadata.st_mode) and metadata.st_uid == uid and metadata.st_nlink == 1
-         and stat.S_IMODE(metadata.st_mode) in modes)
-    with path.open('rb') as stream:
-        raw = stream.read(1024 * 1024 + 1)
-    need(len(raw) <= 1024 * 1024)
-    return json.loads(raw)
+    return json.loads(_bytes(path, uid, modes))
+
+
+def context(config=None):
+    """Only compiler-owned identity metadata; old retained defaults stay exact."""
+    if config is None:
+        return SimpleNamespace(workspace=WORKSPACE, custody=CUSTODY, runtime=RUNTIME,
+            permissions=PERMISSIONS, managed=MANAGED, compose=COMPOSE,
+            project='homelab-db-tools', services={'cloudbeaver': 'cloudbeaver', 'auth_gateway': 'auth_gateway'},
+            lifecycle='retained', runtime_id='cloudbeaver')
+    need(isinstance(config, dict) and isinstance(config.get('project'), str)
+         and re.fullmatch('[a-z0-9][a-z0-9_-]{0,127}', config['project']))
+    lifecycle = config.get('lifecycle', 'retained')
+    need(lifecycle in ('fresh', 'retained') and
+         (isinstance(config.get('retained_pgadmin_image'), str) if lifecycle == 'retained'
+          else 'retained_pgadmin_image' not in config))
+    services = config.get('services', {'cloudbeaver': 'cloudbeaver', 'auth_gateway': 'auth_gateway'})
+    need(isinstance(services, dict) and set(services) == {'cloudbeaver', 'auth_gateway'}
+         and all(isinstance(value, str) and re.fullmatch('[a-z0-9][a-z0-9_-]{0,127}', value) for value in services.values())
+         and len(set(services.values())) == 2)
+    runtime = _path(config.get('runtime_directory', str(RUNTIME)))
+    need(runtime == RUNTIME or RUNTIME in runtime.parents)
+    custody = _path(config.get('custody_directory', str(CUSTODY)))
+    need(custody == CUSTODY or CUSTODY in custody.parents)
+    runtime_id = config.get('runtime_id', 'cloudbeaver')
+    need(isinstance(runtime_id, str) and re.fullmatch('[a-z][a-z0-9_-]{0,62}', runtime_id))
+    if lifecycle == 'fresh':
+        need({'lifecycle', 'custody_directory', 'runtime_id'} <= set(config))
+    filename = config.get('project_file', Path(COMPOSE).name)
+    need(isinstance(filename, str) and re.fullmatch(r'[a-z0-9][a-z0-9_.-]{0,127}\.ya?ml', filename))
+    return SimpleNamespace(workspace=_path(config['workspace']), custody=custody, runtime=runtime,
+        permissions=runtime/'cloudbeaver-permissions.json' if 'runtime_directory' in config else PERMISSIONS,
+        managed=runtime/'cloudbeaver-admin-connections.json' if 'runtime_directory' in config else MANAGED,
+        compose=str(Path(COMPOSE).parent/filename), project=config['project'], services=services, lifecycle=lifecycle, runtime_id=runtime_id)
 
 
 def create(path, value, uid=0, mode=0o600):
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
-    with os.fdopen(fd, 'wb') as stream:
-        stream.write(json.dumps(value, sort_keys=True).encode() + b'\n')
-        stream.flush()
-        if uid:
-            os.fchown(stream.fileno(), uid, uid)
-        os.fsync(stream.fileno())
-    parent = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-    try:
+    with _parent(path) as (parent, name):
+        fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=parent)
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(json.dumps(value, sort_keys=True).encode() + b'\n')
+            stream.flush()
+            if uid:
+                os.fchown(stream.fileno(), uid, uid)
+            os.fsync(stream.fileno())
         os.fsync(parent)
-    finally:
-        os.close(parent)
 
 
-def workspace(owner):
+def _workspace_receipt(ctx, owner):
+    legacy = (ctx.lifecycle == 'retained' and ctx.workspace == WORKSPACE and ctx.custody == CUSTODY
+        and ctx.project == 'homelab-db-tools' and ctx.services == {'cloudbeaver': 'cloudbeaver', 'auth_gateway': 'auth_gateway'}
+        and ctx.runtime == RUNTIME and ctx.compose == COMPOSE and ctx.runtime_id == 'cloudbeaver')
+    if legacy:
+        return owner
+    return {'schema': 'homelab-cloudbeaver-workspace-v1', 'owner': owner,
+        'workspace': str(ctx.workspace), 'custody_directory': str(ctx.custody),
+        'project': ctx.project, 'services': ctx.services, 'runtime_id': ctx.runtime_id,
+        'runtime_directory': str(ctx.runtime), 'project_file': Path(ctx.compose).name}
+
+
+def workspace_owner(config):
+    ctx = context(config)
+    value = private(ctx.custody/'workspace.json')
+    owner = value.get('owner') if isinstance(value, dict) and 'schema' in value else value
+    need(value == _workspace_receipt(ctx, owner))
+    return owner
+
+
+def workspace(owner, config=None):
+    ctx = context(config)
     need(isinstance(owner, dict) and set(owner) == {'node', 'vmid', 'hostname'}
          and isinstance(owner['node'], str) and isinstance(owner['hostname'], str)
          and type(owner['vmid']) is int and owner['vmid'] >= 100)
-    need(stat.S_ISDIR(WORKSPACE.parent.lstat().st_mode))
-    CUSTODY.mkdir(mode=0o700, exist_ok=True)
-    meta = CUSTODY.lstat()
+    need(stat.S_ISDIR(ctx.workspace.parent.lstat().st_mode))
+    ctx.custody.mkdir(mode=0o700, exist_ok=True)
+    meta = ctx.custody.lstat()
     need(stat.S_ISDIR(meta.st_mode) and meta.st_uid == 0 and stat.S_IMODE(meta.st_mode) == 0o700)
-    receipt = CUSTODY / 'workspace.json'
+    receipt = ctx.custody / 'workspace.json'
+    desired = _workspace_receipt(ctx, owner)
     if receipt.exists() or receipt.is_symlink():
-        need(private(receipt) == owner)
+        need(private(receipt) == desired)
     else:
-        need(not WORKSPACE.is_symlink() and (not WORKSPACE.exists() or not any(WORKSPACE.iterdir())))
-        WORKSPACE.mkdir(mode=0o700, exist_ok=True)
-        os.chown(WORKSPACE, 8978, 8978)
-        os.chmod(WORKSPACE, 0o700)
-        create(receipt, owner)
-    metadata = WORKSPACE.lstat()
+        need(not ctx.workspace.is_symlink() and (not ctx.workspace.exists() or not any(ctx.workspace.iterdir())))
+        ctx.workspace.mkdir(mode=0o700, exist_ok=True)
+        os.chown(ctx.workspace, 8978, 8978)
+        os.chmod(ctx.workspace, 0o700)
+        create(receipt, desired)
+    metadata = ctx.workspace.lstat()
     need(stat.S_ISDIR(metadata.st_mode) and metadata.st_uid == metadata.st_gid == 8978
          and stat.S_IMODE(metadata.st_mode) == 0o700)
-    for directory in (WORKSPACE / 'GlobalConfiguration', WORKSPACE / 'GlobalConfiguration/.dbeaver'):
+    for directory in (ctx.workspace / 'GlobalConfiguration', ctx.workspace / 'GlobalConfiguration/.dbeaver'):
         if not directory.exists() and not directory.is_symlink():
             directory.mkdir(mode=0o700)
             os.chown(directory, 8978, 8978)
@@ -83,6 +179,10 @@ def docker(args, *, input=None, timeout=90):
 
 def retirement(config):
     """Gracefully retire one exact Compose service, preserving its bind and evidence."""
+    ctx = context(config)
+    if ctx.lifecycle == 'fresh':
+        return {'pgadmin': 'not_selected'}
+    need(ctx.project == 'homelab-db-tools')
     ids = docker(['ps', '--all', '--quiet', '--filter', 'label=com.docker.compose.project=homelab-db-tools',
                   '--filter', 'label=com.docker.compose.service=pgadmin']).split()
     need(len(ids) <= 1)
@@ -100,7 +200,7 @@ def retirement(config):
     need(stat.S_ISDIR(metadata.st_mode) and metadata.st_uid == 5050)
     proof = {'container': container['Id'], 'image': config['retained_pgadmin_image'],
              'source': str(source), 'device': metadata.st_dev, 'inode': metadata.st_ino}
-    receipt = CUSTODY / 'pgadmin-retirement.json'
+    receipt = ctx.custody / 'pgadmin-retirement.json'
     if receipt.exists() or receipt.is_symlink():
         need(private(receipt) == proof)
     else:
@@ -116,9 +216,10 @@ def retirement(config):
 
 def templates(config, seed=True):
     """Seed only our initial template permissions; later verify without overwriting."""
-    path = WORKSPACE / 'GlobalConfiguration/.dbeaver/data-sources-permissions.json'
+    ctx = context(config)
+    path = ctx.workspace / 'GlobalConfiguration/.dbeaver/data-sources-permissions.json'
     desired = {name: ['user'] for name in config['connections']}
-    need(private(PERMISSIONS, uid=8978) == desired)
+    need(private(ctx.permissions, uid=8978) == desired)
     if not path.exists() and not path.is_symlink():
         need(seed)
         create(path, desired, uid=8978, mode=0o400)
@@ -128,22 +229,14 @@ def templates(config, seed=True):
 
 
 def managed_bytes(path, uid, modes):
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    with os.fdopen(fd, 'rb') as stream:
-        info = os.fstat(stream.fileno())
-        need(stat.S_ISREG(info.st_mode) and info.st_uid == info.st_gid == uid and info.st_nlink == 1
-             and stat.S_IMODE(info.st_mode) in modes and info.st_size <= 1024*1024)
-        raw = stream.read(1024*1024+1)
-        key = lambda row: (row.st_dev, row.st_ino, row.st_uid, row.st_gid, row.st_mode, row.st_nlink,
-                           row.st_size, row.st_mtime_ns, row.st_ctime_ns)
-        need(len(raw) == info.st_size and key(info) == key(os.fstat(stream.fileno())) == key(path.lstat()))
-    return raw
+    return _bytes(path, uid, modes, same_gid=True)
 
 
 def managed_writer(config):
     """Flush only our existing server before its first owned datasource seed."""
-    ids = docker(['ps', '--all', '--quiet', '--filter', 'label=com.docker.compose.project=homelab-db-tools',
-                  '--filter', 'label=com.docker.compose.service=cloudbeaver']).split()
+    ctx = context(config)
+    ids = docker(['ps', '--all', '--quiet', '--filter', 'label=com.docker.compose.project='+ctx.project,
+                  '--filter', 'label=com.docker.compose.service='+ctx.services['cloudbeaver']]).split()
     need(len(ids) <= 1)
     if not ids:
         return
@@ -151,9 +244,9 @@ def managed_writer(config):
     mounts = [item for item in row['Mounts'] if item['Destination'] == '/opt/cloudbeaver/workspace'
               or item['Destination'].startswith('/opt/cloudbeaver/workspace/')]
     need(row['Id'].startswith(ids[0]) and row['Config']['Image'] == config['cloudbeaver_image']
-         and row['Config']['Labels'].get('com.docker.compose.project') == 'homelab-db-tools'
-         and row['Config']['Labels'].get('com.docker.compose.service') == 'cloudbeaver'
-         and len(mounts) == 1 and mounts[0]['Type'] == 'bind' and mounts[0]['Source'] == str(WORKSPACE)
+         and row['Config']['Labels'].get('com.docker.compose.project') == ctx.project
+         and row['Config']['Labels'].get('com.docker.compose.service') == ctx.services['cloudbeaver']
+         and len(mounts) == 1 and mounts[0]['Type'] == 'bind' and mounts[0]['Source'] == str(ctx.workspace)
          and mounts[0]['RW'] is True)
     if row['State']['Running']:
         docker(['stop', '--time', '30', row['Id']], timeout=45)
@@ -163,18 +256,19 @@ def managed_writer(config):
 
 def managed(config, seed=True):
     """Own one native credential file, keeping every other datasource and grant."""
-    directory = WORKSPACE/'GlobalConfiguration/.dbeaver'
+    ctx = context(config)
+    directory = ctx.workspace/'GlobalConfiguration/.dbeaver'
     path = directory/'data-sources-homelab-administrators.json'
-    receipt, hold = CUSTODY/'managed-connections.json', CUSTODY/'MANAGED-CONNECTIONS-HOLD.json'
+    receipt, hold = ctx.custody/'managed-connections.json', ctx.custody/'MANAGED-CONNECTIONS-HOLD.json'
     selected = config.get('managed_connections')
     if not selected:
         need(not any(p.exists() or p.is_symlink() for p in (path, receipt, hold)))
         return {'managed_connections': 'absent'}
     need(isinstance(selected, dict) and 1 <= len(selected) <= 8 and os.geteuid() == 0)
-    workspace(private(CUSTODY/'workspace.json'))
+    workspace(workspace_owner(config), config)
     for parent in (directory.parent, directory):
         info = parent.lstat(); need(stat.S_ISDIR(info.st_mode) and info.st_uid == info.st_gid == 8978)
-    raw = managed_bytes(MANAGED, 0, (0o400, 0o600))
+    raw = managed_bytes(ctx.managed, 0, (0o400, 0o600))
     need(hashlib.sha256(raw).hexdigest() == config['managed_sha256'])
     desired = json.loads(raw)
     need(isinstance(desired, dict) and set(desired) == {'folders', 'connections'} and desired['folders'] == {}
@@ -220,7 +314,7 @@ def managed(config, seed=True):
             os.close(fd)
         create(receipt, proof)
         hold.unlink()
-        fd = os.open(CUSTODY, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        fd = os.open(ctx.custody, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
             os.fsync(fd)
         finally:
@@ -229,14 +323,18 @@ def managed(config, seed=True):
 
 
 def prepare(config):
-    need(config['workspace'] == str(WORKSPACE) and config['project'] == 'homelab-db-tools')
-    workspace(private(CUSTODY / 'workspace.json'))
+    ctx = context(config)
+    need(config['workspace'] == str(ctx.workspace))
+    workspace(workspace_owner(config), config)
     return retirement(config)
 
 
 def metadata(config):
     """Check only our template IDs; custom connections and per-user workspaces stay owned by the application."""
-    current = private(WORKSPACE / 'GlobalConfiguration/.dbeaver/data-sources.json', uid=8978,
+    ctx = context(config)
+    if not config['connections']:
+        return {'connections': 'verified'}
+    current = private(ctx.workspace / 'GlobalConfiguration/.dbeaver/data-sources.json', uid=8978,
                       modes=(0o400, 0o600, 0o640, 0o644))['connections']
     for name, expected in config['connections'].items():
         value = current.get(name, {})
@@ -254,6 +352,7 @@ def metadata(config):
 
 
 def driver_health(config, server):
+    ctx = context(config)
     artifact = config.get('mariadb_jdbc')
     needed = any(item.get('driver') == 'mariadb' for item in config.get('managed_connections', {}).values())
     need(bool(artifact) == needed)
@@ -265,7 +364,7 @@ def driver_health(config, server):
          and isinstance(artifact['sha256'], str) and re.fullmatch('[0-9a-f]{64}', artifact['sha256'])
          and isinstance(artifact['image_filename'], str)
          and artifact['image_filename'] in {'mariadb-java-client-'+artifact['version']+'.jar', 'mariadb-java-client-3.5.10.jar'})
-    source = RUNTIME/('mariadb-java-client-'+artifact['version']+'.jar')
+    source = ctx.runtime/('mariadb-java-client-'+artifact['version']+'.jar')
     target = '/opt/cloudbeaver/drivers/mariadb/'+artifact['image_filename']
     need(artifact['source'] == str(source) and artifact['target'] == target
          and artifact['url'] == 'https://repo.maven.apache.org/maven2/org/mariadb/jdbc/mariadb-java-client/'
@@ -278,15 +377,16 @@ def driver_health(config, server):
 
 
 def database_health(config):
+    ctx = context(config)
     selected = config.get('managed_connections')
     if not selected:
         return 'individual_credentials_required'
-    document = json.loads(managed_bytes(MANAGED, 0, (0o400, 0o600)))
+    document = json.loads(managed_bytes(ctx.managed, 0, (0o400, 0o600)))
     for key, item in selected.items():
         password = document['connections'][key]['configuration']['auth-properties']['userPassword']
         artifact = config['mariadb_jdbc'] if item['driver'] == 'mariadb' else None
         extra = [artifact['version'], artifact['sha256'], artifact['image_filename']] if artifact else []
-        raw = docker(['compose', '-f', COMPOSE, 'exec', '-T', 'cloudbeaver', '/opt/java/openjdk/bin/java',
+        raw = docker(['compose', '-f', ctx.compose, 'exec', '-T', ctx.services['cloudbeaver'], '/opt/java/openjdk/bin/java',
             '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m',
             '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC', '--class-path',
             '/opt/cloudbeaver/drivers/postgresql/*:/opt/cloudbeaver/drivers/mariadb/*',
@@ -297,18 +397,22 @@ def database_health(config):
 
 
 def health(config):
+    ctx = context(config)
     templates(config, seed=False)
     managed(config, seed=False)
     metadata(config)
-    prepare_owner = private(CUSTODY / 'workspace.json')
-    workspace(prepare_owner)
-    need(not docker(['ps', '--all', '--quiet', '--filter', 'label=com.docker.compose.project=homelab-db-tools',
+    prepare_owner = workspace_owner(config)
+    workspace(prepare_owner, config)
+    need(ctx.lifecycle == 'fresh' or not docker(['ps', '--all', '--quiet', '--filter', 'label=com.docker.compose.project=homelab-db-tools',
                      '--filter', 'label=com.docker.compose.service=pgadmin']).strip())
-    raw = docker(['compose', '-f', COMPOSE, 'ps', '--all', '--format', 'json'])
+    raw = docker(['compose', '-f', ctx.compose, 'ps', '--all', '--format', 'json'])
     containers = json.loads(raw) if raw.lstrip().startswith('[') else [json.loads(line) for line in raw.splitlines()]
-    need(isinstance(containers, list) and {r['Service'] for r in containers} == {'cloudbeaver', 'auth_gateway'})
+    need(isinstance(containers, list) and len(containers) == 2
+         and {r['Service'] for r in containers} == set(ctx.services.values()))
     rows = {r['Service']: json.loads(docker(['inspect', r['ID']]))[0] for r in containers}
-    server, gateway = rows['cloudbeaver'], rows['auth_gateway']
+    server, gateway = rows[ctx.services['cloudbeaver']], rows[ctx.services['auth_gateway']]
+    need(all(obj['Config'].get('Labels', {}).get('com.docker.compose.project') == ctx.project
+             and obj['Config']['Labels'].get('com.docker.compose.service') == name for name, obj in rows.items()))
     driver_health(config, server)
     if config.get('managed_connections'):
         mounts = [m for m in server['Mounts'] if m['Destination'] == '/opt/cloudbeaver/workspace'
@@ -323,14 +427,14 @@ def health(config):
          and gateway['HostConfig']['PortBindings']['4180/tcp'] == [{'HostIp': config['bind_address'], 'HostPort': '80'}]
          and len(server['NetworkSettings']['Networks']) == 1
          and server['HostConfig']['NetworkMode'] not in {'host', 'none', 'bridge', 'default'}
-         and any(m['Source'] == str(WORKSPACE) and m['Destination'] == '/opt/cloudbeaver/workspace'
+         and any(m['Source'] == str(ctx.workspace) and m['Destination'] == '/opt/cloudbeaver/workspace'
                  and m['Type'] == 'bind' and m['RW'] is True for m in server['Mounts'])
          and server['NetworkSettings']['Networks'].keys() == gateway['NetworkSettings']['Networks'].keys())
     artifact = config.get('mariadb_jdbc')
     extra = [artifact['version'], artifact['sha256'], artifact['image_filename']] if artifact else []
     if any(item['driver'] == 'postgresql' for item in config.get('managed_connections', {}).values()):
         extra.insert(0, '--postgresql')
-    raw = docker(['compose', '-f', COMPOSE, 'exec', '-T', 'cloudbeaver', '/opt/java/openjdk/bin/java', '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m', '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC',
+    raw = docker(['compose', '-f', ctx.compose, 'exec', '-T', ctx.services['cloudbeaver'], '/opt/java/openjdk/bin/java', '-Xms8m', '-Xmx64m', '-Xss512k', '-XX:MaxMetaspaceSize=64m', '-XX:ReservedCodeCacheSize=16m', '-XX:ActiveProcessorCount=1', '-XX:CICompilerCount=2', '-XX:+UseSerialGC',
                   '/opt/cloudbeaver/conf/CloudBeaverHealth.java', '--configuration', *extra], timeout=15)
     current = json.loads(raw)['data']['serverConfig']
     need(current['forceHttps'] is True and current['configurationMode'] is False and current['anonymousAccessEnabled'] is False
@@ -346,7 +450,7 @@ def main():
     parser.add_argument('--owner')
     args = parser.parse_args()
     if args.action == 'workspace':
-        result = workspace(json.loads(args.owner))
+        result = workspace(json.loads(args.owner), private(args.config) if args.config is not None else None)
     else:
         value = private(args.config)
         result = {'prepare': prepare, 'health': health, 'templates': templates, 'managed': managed}[args.action](value)

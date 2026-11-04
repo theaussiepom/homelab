@@ -28,7 +28,7 @@ def profiles(cfg):
     return value
 
 
-def validate(cfg):
+def validate_legacy(cfg):
     selected = cfg['app']['monitoring']
     required = {'hostname', 'psk_identity', 'server_active', 'profiles', 'server_vmid', 'credential_file'}
     kind = cfg['app']['kind']
@@ -86,6 +86,122 @@ def validate(cfg):
     return selected
 
 
+COMPONENT_SCHEMA = 'homelab-component-guest-v1'
+COMPONENT_PROFILES = {'linux', 'docker', 'postgresql', 'mysql', 'influxdb'}
+
+
+def _component_path(value, filename):
+    require(isinstance(value, str) and Path(value).is_absolute() and '..' not in Path(value).parts
+            and Path(value).name == filename, 'Use the owned immutable monitoring input leaf')
+
+
+def _component_profiles(value):
+    require(isinstance(value, list) and value and value[0] == 'linux'
+            and all(isinstance(item, str) and item in COMPONENT_PROFILES for item in value)
+            and len(value) == len(set(value)), 'Use explicit closed monitoring workload profiles')
+    return set(value)
+
+
+def validate_component(cfg):
+    """Validate compiled monitoring selections without inventing a guest kind."""
+    selected = cfg['app']['monitoring']
+    required = {'hostname', 'psk_identity', 'server_active', 'profiles', 'server_vmid',
+                'server_hostname', 'credential_file'}
+    optional = {'database_uri', 'database_password_file', 'storage_password_file', 'members',
+                'proxmox', 'server_file', 'postgresql_address', 'influxdb_address'}
+    require(isinstance(selected, dict) and required <= set(selected) <= required | optional,
+            'Use only the compiled component monitoring settings')
+    profiles = _component_profiles(selected['profiles'])
+    applications = cfg['deployment']['applications']
+    require(isinstance(applications, dict) and all(isinstance(row, dict)
+            and isinstance(row.get('adapter'), str) for row in applications.values()),
+            'Bind workload monitoring to selected owned applications')
+    require('docker' not in profiles or 'docker' in cfg['deployment']['capabilities'],
+            'Monitor Docker only when that capability is selected')
+    native = {'postgresql': 'postgresql', 'mysql': 'mariadb', 'influxdb': 'influxdb'}
+    for workload in profiles & set(native):
+        require(sum(row['adapter'] == native[workload] for row in applications.values()) == 1,
+                'Bind each requested native workload to one supported selected application')
+    require(len(profiles & {'postgresql', 'mysql'}) <= 1,
+            'Multiple database monitoring sessions require a separate supported capability')
+    expected = cfg['site']['node'] + '-' + str(cfg['guest']['vmid'])
+    require(selected['hostname'] == selected['psk_identity'] == expected,
+            'Bind monitoring to the declared context and guest identity')
+    active = selected['server_active']
+    require(isinstance(active, str) and active.endswith(':10051'),
+            'Use one private active server on TCP10051')
+    address = active.removesuffix(':10051')
+    try:
+        parsed = ipaddress.IPv4Address(address)
+    except (ValueError, TypeError):
+        raise ValueError('Use one private active server on TCP10051') from None
+    require(parsed.is_private and not (parsed.is_loopback or parsed.is_link_local
+            or parsed.is_unspecified or parsed.is_multicast), 'Use one private active server on TCP10051')
+    require(type(selected['server_vmid']) is int and selected['server_vmid'] >= 100
+            and isinstance(selected['server_hostname'], str)
+            and re.fullmatch('[a-z][a-z0-9-]{0,62}', selected['server_hostname']),
+            'Bind the explicit monitoring server identity')
+    _component_path(selected['credential_file'], 'monitoring-agent.json')
+    database = bool(profiles & {'postgresql', 'mysql'})
+    require(('database_uri' in selected) == ('database_password_file' in selected) == database,
+            'Supply the database session only for its selected workload')
+    if database:
+        _component_path(selected['database_password_file'], 'monitoring-database-password')
+        # configuration() retains the exact own-IP/loopback, protocol, port and
+        # no-credentials/path/query/fragment checks before emitting this URI.
+    if 'storage_password_file' in selected:
+        require(sum(row['adapter'] == 'postgresql' for row in applications.values()) == 1,
+                'Only the selected PostgreSQL storage app owns the shared monitoring password')
+        _component_path(selected['storage_password_file'], 'monitoring-storage-password')
+    server_fields = {'members', 'proxmox', 'server_file', 'postgresql_address'}
+    root = bool(set(selected) & server_fields)
+    if not root:
+        require('influxdb_address' not in selected, 'Only the root server owns member endpoint metadata')
+        return selected
+    require(server_fields <= set(selected)
+            and any(row['adapter'] == 'zabbix' for row in applications.values())
+            and selected['server_vmid'] == cfg['guest']['vmid']
+            and selected['server_hostname'] == cfg['guest']['hostname'],
+            'Bind root monitoring metadata to its actual selected server guest')
+    _component_path(selected['server_file'], 'monitoring-server.json')
+    require(selected['proxmox'] == {'hostname': cfg['site']['node'],
+        'endpoint': cfg['site']['api_endpoint'], 'ca_file': cfg['paths']['ca_file']},
+        'Preserve the root server execution context and public trust')
+    for key in ('postgresql_address', 'influxdb_address'):
+        if key in selected:
+            try:
+                address = ipaddress.IPv4Address(selected[key])
+            except (ValueError, TypeError):
+                raise ValueError('Use only selected private monitoring endpoints') from None
+            require(address.is_private and not (address.is_loopback or address.is_unspecified
+                    or address.is_link_local or address.is_multicast), 'Use only selected private monitoring endpoints')
+    members = selected['members']
+    require(isinstance(members, list) and len(members) <= 32, 'Use the finite selected monitoring member inventory')
+    identities = []
+    for member in members:
+        fields = {'guest', 'vmid', 'guest_hostname', 'hostname', 'psk_identity', 'profiles'}
+        require(isinstance(member, dict) and type(member.get('vmid')) is int and member['vmid'] >= 100,
+                'Bind a declared monitoring member guest')
+        member_profiles = _component_profiles(member.get('profiles'))
+        require(set(member) == fields | ({'url'} if 'influxdb' in member_profiles else set())
+                and isinstance(member['guest'], str) and re.fullmatch('[a-z][a-z0-9_-]{0,62}', member['guest'])
+                and isinstance(member['guest_hostname'], str) and re.fullmatch('[a-z][a-z0-9-]{0,62}', member['guest_hostname'])
+                and member['hostname'] == member['psk_identity'] == cfg['site']['node']+'-'+str(member['vmid']),
+                'Preserve each member identity and selected closed profiles')
+        if 'influxdb' in member_profiles:
+            require('influxdb_address' in selected and member['url'] == 'http://'+selected['influxdb_address']+':8086',
+                    'Use only the explicit selected InfluxDB endpoint')
+        identities.append(member['hostname'])
+    require(len(identities) == len(set(identities)), 'Keep monitoring member identities unique')
+    return selected
+
+
+def validate(cfg):
+    if cfg.get('schema') == COMPONENT_SCHEMA:
+        return validate_component(cfg)
+    return validate_legacy(cfg)
+
+
 def configuration(cfg, password=None):
     selected = validate(cfg)
     text = monitoring.agent_config({k: selected[k] for k in ('hostname', 'server_active', 'psk_identity')}
@@ -97,8 +213,12 @@ def configuration(cfg, password=None):
             continue
         from urllib.parse import urlsplit
         url = urlsplit(selected['database_uri'])
-        own = {str(ipaddress.ip_interface(n['ipv4']).ip) for n in cfg['guest']['interfaces']
-               if n['ipv4'] not in {'manual', 'dhcp'}} | {'127.0.0.1'}
+        if cfg.get('schema') == COMPONENT_SCHEMA:
+            import network_endpoints
+            own = network_endpoints.addresses(cfg['guest']) | {'127.0.0.1'}
+        else:
+            own = {str(ipaddress.ip_interface(n['ipv4']).ip) for n in cfg['guest']['interfaces']
+                   if n['ipv4'] not in {'manual', 'dhcp'}} | {'127.0.0.1'}
         require(url.scheme == 'tcp' and url.hostname in own and url.port == port
                 and not (url.username or url.password or url.path or url.query or url.fragment),
                 'Monitor a native database only from its owning guest')

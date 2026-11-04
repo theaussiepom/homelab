@@ -1,13 +1,9 @@
-"""Invoke preparation or one application using the selected guest SSH trust."""
-
+"""The shared pinned SSH environment for the Ansible component caller."""
 import os
 from pathlib import Path
-import re
 import shlex
-from guest_contract import SOURCE, AGENT_PHASE, phases, required_network_interfaces, archive_inputs
-import proxmox_guest
-from commands import quiet
-from private_io import require, private_directory, write, read_json
+
+SOURCE=Path(__file__).resolve().parent
 
 
 def ansible_environment(cfg, environment=None):
@@ -22,100 +18,3 @@ def ansible_environment(cfg, environment=None):
         }
     )
     return environment
-
-
-def run_phase(cfg, site, work, operation, expected, phase):
-    """Reuse guarded packages/configuration tasks, with restoration excluded."""
-    from deployment_inputs import binding
-
-    require(binding(cfg, site) == expected, "Approved inputs changed before Ansible")
-    require(phase in phases(cfg), "Select a current preparation or application phase")
-    if cfg['app']['kind'] == 'ingress' and phase == 'traefik':
-        import discovery_scope
-        discovery_scope.verify(cfg, read_json(Path(cfg['app']['stack_config']), private=True))
-    proxmox_guest.dhcp_admission(cfg)
-    proxmox_guest.guest_trust(cfg, work)
-    phase_work = operation / phase
-    private_directory(phase_work, create=True)
-    app = dict(cfg["app"], render_dir=str(phase_work / "rendered"), start_services=True)
-    preparation = phase == "preparation"
-    agent = phase == AGENT_PHASE
-    if not preparation and not agent and "stack_config" in app:
-        app["image_archives"] = archive_inputs(
-            read_json(Path(app["stack_config"]), private=True)
-        )
-    if not preparation and not agent:
-        app["health_checks"] = cfg["app"]["service_health_checks"][phase]
-    if preparation or agent:
-        app["start_services"] = False
-    monitoring = {}
-    if "monitoring" in app:
-        import monitoring_agent
-        selected = monitoring_agent.validate(cfg)
-        monitoring = {"monitoring_agent_package": monitoring_agent.AGENT_PACKAGE,
-                      "monitoring_postgresql_package": monitoring_agent.POSTGRESQL_PACKAGE}
-        if agent:
-            password = None
-            if "database_password_file" in selected:
-                from private_io import regular
-                password = regular(Path(selected["database_password_file"]), private=True).decode()
-            monitoring["monitoring_agent_configuration"] = monitoring_agent.configuration(cfg, password)
-        if app["kind"] == "monitoring" and phase == "zabbix":
-            import monitoring_templates
-            value = read_json(Path(selected["server_file"]), private=True)
-            value["owner"] = {"node": cfg["site"]["node"], "vmid": cfg["guest"]["vmid"],
-                              "hostname": cfg["guest"]["hostname"]}
-            value["templates"] = [monitoring_templates.prepared(name)
-                                  for name in monitoring_templates.monitoring.VERSIONS["templates"]]
-            payload = phase_work / "monitoring-server.json"
-            write(payload, value)
-            monitoring["monitoring_server_owner"] = value["owner"]
-            monitoring["monitoring_server_configuration_file"] = str(payload)
-    write(
-        phase_work / "variables.json",
-        {
-            "app": app,
-            **monitoring,
-            **({'cloudbeaver_owner': {'node': cfg['site']['node'], 'vmid': cfg['guest']['vmid'],
-                  'hostname': cfg['guest']['hostname']}} if app.get('variant') == 'cloudbeaver' else {}),
-            **({'mqtt_explorer_owner': {'node': cfg['site']['node'], 'vmid': cfg['guest']['vmid'],
-                  'hostname': cfg['guest']['hostname']}} if app['kind'] == 'mqtt'
-                and 'mqtt_explorer' in app['service_health_checks'] else {}),
-            "network_ready_interfaces": required_network_interfaces(cfg),
-            **({"application_service": phase} if not preparation and not agent else {}),
-            "preparation_capabilities": cfg["deployment"]["capabilities"],
-        },
-    )
-    write(
-        phase_work / "inventory.json",
-        {
-            "application": {
-                "hosts": {
-                    app["hostname"]: {
-                        "ansible_host": app["address"],
-                        "ansible_user": "root",
-                    }
-                }
-            }
-        },
-    )
-    command = [
-        "ansible-playbook",
-        "-i",
-        str(phase_work / "inventory.json"),
-        "--private-key",
-        cfg["paths"]["private_key"],
-        str(
-            SOURCE
-            / ("ansible/preparation.yml" if preparation else
-               "ansible/monitoring-agent.yml" if agent else "ansible/reconcile.yml")
-        ),
-        "--extra-vars",
-        "@" + str(phase_work / "variables.json"),
-    ]
-    quiet(command, ansible_environment(cfg), phase_work / "application.log")
-    require(binding(cfg, site) == expected, "Approved inputs changed during Ansible")
-    text = (phase_work / "application.log").read_text()
-    counts = re.findall(r"changed=(\d+)", text)
-    require(counts, "Ansible did not produce its completion recap")
-    return {"status": "passed", "changed": any(int(n) for n in counts)}

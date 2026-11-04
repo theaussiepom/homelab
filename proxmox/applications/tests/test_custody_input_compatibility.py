@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import coordinated_contract as contract
+import component_evidence
 import coordinated_evidence as evidence
 import coordinated_generation as generation
 import deployment_state as state
@@ -63,7 +64,7 @@ class InputCompatibilityTests(unittest.TestCase):
             self.assertEqual(decode(canonical), decode(immutable))
             self.assertTrue(canonical.endswith(b'\n') and immutable.endswith(b'\n'))
             cfg = value.cfgs[role]
-            contract.configured_closure(value.resolved())
+            component_evidence.bind(case.source_evidence(value))
             proofs, lineage, baseline = evidence.inspect(cfg)
             self.assertEqual(baseline, immutable)
             self.assertNotIn(str(value.work(role) / 'ordinary-complete.json'), proofs)
@@ -78,7 +79,8 @@ class InputCompatibilityTests(unittest.TestCase):
                 final = (runtime.work / 'ordinary-complete.json').read_bytes()
                 receipt = decode(final)
                 self.assertEqual(set(receipt), {'status', 'binding', 'state_sha256', 'state_identity',
-                                               'result', 'workflow', 'run_number', 'site_revision', 'operation'})
+                                               'result', 'workflow', 'run_number', 'site_revision', 'operation',
+                                               'schema', 'phase_inputs'})
                 self.assertEqual(final, (Path(receipt['operation']) / 'complete.json').read_bytes())
                 self.assertEqual((runtime.work / 'ordinary-100-1/complete.json').read_bytes(), immutable)
                 runtime.infra.assert_called_once()
@@ -183,7 +185,7 @@ class InputCompatibilityTests(unittest.TestCase):
             with patch.dict(os.environ, {'GITHUB_RUN_ID': '778', 'GITHUB_RUN_NUMBER': '778',
                                          'GITHUB_SHA': runtime.revisions[1]}), \
                  self.assertRaisesRegex(ValueError, 'latest ordinary success'):
-                deploy.run('infrastructure', runtime.site)
+                runtime.run('infrastructure')
             runtime.infra.assert_called_once()
             self.assertEqual((runtime.work / 'ordinary-100-1/complete.json').read_bytes(), immutable)
             self.assertFalse((runtime.work / 'ORDINARY-HOLD.json').exists())

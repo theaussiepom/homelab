@@ -52,8 +52,10 @@ def desired_hosts(existing, records):
     return result + [address + " " + name for name, address in sorted(records.items())]
 
 
-def reconcile(records, compose):
+def reconcile(records, compose, *, service="pihole"):
     validate(records)
+    if not isinstance(service, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,127}", service):
+        raise ValueError("Select one literal Pi-hole Compose service")
     command = [
         "docker",
         "compose",
@@ -61,7 +63,7 @@ def reconcile(records, compose):
         str(compose),
         "exec",
         "-T",
-        "pihole",
+        service,
         "pihole-FTL",
         "--config",
         "dns.hosts",
@@ -149,11 +151,12 @@ def main():
     update = commands.add_parser("reconcile")
     update.add_argument("--records", type=Path, required=True)
     update.add_argument("--compose", type=Path, required=True)
+    update.add_argument("--service", default="pihole")
     args = parser.parse_args()
     result = (
         probe(args.hostname, args.address)
         if args.operation == "probe"
-        else {"changed": reconcile(json.loads(args.records.read_bytes()), args.compose)}
+        else {"changed": reconcile(json.loads(args.records.read_bytes()), args.compose, service=args.service)}
     )
     print(json.dumps(result))
 

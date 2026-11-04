@@ -1,222 +1,227 @@
-"""Typed ownership, real immutable credentials and preserved native HBA inputs."""
+"""Current component account/connection integration and pure native HBA guards.
+
+Public synthetic component collaborators supply endpoint/role metadata.  There
+is no fixed guest compiler, legacy Cloud fixture, private parser or target call.
+"""
 import copy
+import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.append(str(Path(__file__).resolve().parents[3]/'blueprints'))
-import database_admin as m
-import service_bindings
+F=Path(os.environ.get('HOMELAB_FRAMEWORK',Path(__file__).resolve().parents[3]))
+sys.path[:0]=[str(F/'proxmox/applications'),str(F/'blueprints')]
 import cloudbeaver
-from test_cloudbeaver import fixture
+import component_accounts
+import component_connections
+from component_errors import ComponentError
+import component_prepare
+import component_properties
+import component_proxy_files
+import component_runtime
+from component_sources import named
+import database_admin as m
+import database_hba
+import managed_credentials
+from private_io import encoded
+from protocol_component_fixtures import cloudbeaver_app,document
+
+
+def source():
+    cloud=cloudbeaver_app({'oidc_issuer':'https://sso.example.invalid/oidc/',
+        'oauth_client_id':'fixture-client','oauth_name':'Synthetic SSO','user_claim':'preferred_username'},
+        {'public_url':'https://db.example.invalid'},image='example/cloud@sha256:'+'b'*64,
+        gateway_image='example/gateway@sha256:'+'b'*64)
+    cloud.update(id='cloud',guest='client',profile='cloud',origin_url=cloud['settings']['public_url'],interfaces={key:{'interface':key}
+        for key in ('web','postgresql','mariadb')},role_addresses={'web':'198.18.30.32',
+            'postgresql':'198.18.11.81','mariadb':'198.19.12.83'})
+    cloud['properties']={'server_name':'Database Tools','recovery_admin':'local-recovery','heap_mib':1024,
+        'auth_headers':{'user':'X-User','team':'X-Team'},'retained_pgadmin_image':'old-client',
+        'connections':{'postgresql':{'name':'PostgreSQL','database':'postgres','sslmode':'prefer'},
+            'mariadb':{'name':'MariaDB','database':''},'postgresql-admin':{'name':'postgresql administrator','database':'postgres'},
+            'mariadb-admin':{'name':'mariadb administrator','database':''}},
+        'mariadb_jdbc':{'version':'3.5.11','sha256':'b'*64,'image_filename':'mariadb-java-client-3.5.10.jar'}}
+    apps={'cloud':cloud};guests={'client':{'context':'primary','identity':{'vmid':902,'hostname':'client'}}}
+    site={'contexts':{'primary':{'node':'fixture-node'}},'accounts':{},'connections':{},'secret_sources':{}}
+    declarations={};addresses={'postgresql':'198.18.11.80','mariadb':'198.19.12.82'}
+    for engine,vmid in (('postgresql',901),('mariadb',903)):
+        apps[engine]={'id':engine,'adapter':engine,'guest':engine,'profile':'native','interfaces':{}}
+        guests[engine]={'context':'primary','identity':{'vmid':vmid,'hostname':engine}}
+        site['secret_sources'][engine]={'type':'generated','credential_id':'fixture-'+engine}
+        site['accounts'][engine]={'adapter':engine+'-admin','owner':'cloud','target':{'app':engine,'endpoint':'sql'},
+            'principal':engine+'_administrator','credential':engine,'access':'server-administration','lifecycle':'create-once'}
+        for suffix in ('','-admin'):
+            role=engine+suffix
+            declarations[role]={'type':engine,'required':True,'accounts':[engine+'-admin'],'readiness':['start']}
+            site['connections'][role]={'consumer':{'app':'cloud','connection':role},'target':{'app':engine,'endpoint':'sql'},
+                'source_interface':engine,'readiness':'start'}
+            if suffix:site['connections'][role]['account']=engine
+    def endpoint(ref):
+        if set(ref)!={'app','endpoint'}or ref['app']not in addresses or ref['endpoint']!='sql':raise ComponentError('component.reference')
+        engine=ref['app']
+        return {'app':engine,'guest':engine,'protocol':'tcp','port':m.KINDS[engine],'address':addresses[engine]}
+    resolver=SimpleNamespace(apps=apps,guests=guests,site=site,library={'app_profiles':{
+        'cloud':{'connections':declarations},'native':{}}},policy={'transport':{}},endpoint=endpoint,
+        role_address=lambda app,role:app['role_addresses'][role],
+        image_values=lambda:{'old-client':{'image':'dpage/pgadmin4@sha256:'+'a'*64}})
+    return resolver,SimpleNamespace(hostname=lambda reference,target:'database.example.invalid')
+
+
+def bind(resolver,exposures):
+    connections=component_connections.bind(resolver,exposures)
+    settings=component_properties.bind(resolver)
+    resolver.apps['cloud']['settings']=settings['cloud']
+    accounts=component_accounts.bind(resolver,connections['accounts'])
+    return connections,accounts
 
 
 def composition():
-    cloud = fixture()
-    # Synthetic artifact fingerprint; these unit fixtures never download a JAR.
-    cloud['cloudbeaver']['mariadb_jdbc']={'version':'3.5.11','sha256':'b'*64,
-        'image_filename':'mariadb-java-client-3.5.10.jar'}
-    cloud['cloudbeaver']['managed_connections'] = {engine+'-admin': {'name': engine+' administrator',
-        'driver': engine, 'database': 'postgres' if engine == 'postgresql' else '', 'account_id': 'server-admin'}
-        for engine in m.KINDS}
-    source = {'guest': {'vmid': 902, 'interfaces': [{'ipv4': '198.18.11.81/25'}, {'ipv4': '198.19.12.83/25'}]},
-        'site': {'node': 'fixture-node'}, 'paths': {'state_root': '/synthetic/state'}, 'app': {'kind': 'db-tools', 'service_health_checks': {'cloudbeaver': [{}]},
-            'service_connections': {'cloudbeaver.'+name: {'service': engine+'.'+engine, 'address': 'backend'}
-                for engine in m.KINDS for name in (engine, engine+'-admin')}}}
-    resolved = {'db-tools': (source, cloud, {})}
-    for engine, vmid, address in [('postgresql', 901, '198.18.11.80'), ('mariadb', 903, '198.19.12.82')]:
-        cfg = {'guest': {'vmid': vmid, 'interfaces': [{'ipv4': address+'/25'}]}, 'site': {'node': 'fixture-node'}, 'paths': {'state_root': '/synthetic/state'},
-            'app': {'kind': engine, 'service_health_checks': {engine: [{}]}, 'published_services': {engine: {
-                'hostname': engine+'.example.invalid', 'addresses': {'backend': address}, 'dns_address': 'backend',
-                'protocol': 'tcp', 'port': m.KINDS[engine]}}, 'database_administrators': {'server-admin': {
-                    'username': engine+'_administrator', 'source_guest': 'db-tools', 'credential_id': 'fixture-'+engine,
-                    'credential_file': '${inputs}/managed-fixture-'+engine+'.json', 'access': 'server-administration',
-                    'transport': 'tls'}}, 'database': {'config_files': [{'source': '${inputs}/pg_hba.conf',
-                        'destination': '/etc/postgresql/16/main/pg_hba.conf'}]}}}
-        resolved[engine] = (cfg, None, {'pg_hba.conf': 'local all postgres peer\nhost all all 127.0.0.1/32 scram-sha-256\n'})
-    return resolved
+    resolver,exposures=source();bind(resolver,exposures);return resolver
 
 
 class DatabaseAdministratorTests(unittest.TestCase):
     def test_postgresql_hba_wildcard_and_reserved_roles_refuse_before_configuration(self):
-        for compiled in (False, True):
-            for username in ('all', 'public', 'none', 'pg_', 'pg_fixture'):
-                resolved=composition()
-                if compiled:service_bindings.bind(resolved)
-                cfg=resolved['postgresql'][0]
-                item=cfg['app']['database_administrators']['server-admin'];item['username']=username
-                if compiled:item['owner']['username']=username
-                with self.subTest(compiled=compiled,username=username),self.assertRaisesRegex(ValueError,'literal non-reserved'):
-                    m.accounts(cfg,compiled=compiled)
-                if compiled:
-                    files={'pg_hba.conf':'local all postgres peer\n'};before=copy.deepcopy(files)
-                    with self.assertRaisesRegex(ValueError,'literal non-reserved'):m.hba(cfg,files)
-                    self.assertEqual(files,before)
+        for username in ('all','public','none','pg_','pg_fixture'):
+            resolver,exposures=source();resolver.site['accounts']['postgresql']['principal']=username
+            before=copy.deepcopy(resolver.site)
+            with self.subTest(username=username),self.assertRaises(ComponentError):bind(resolver,exposures)
+            self.assertEqual(resolver.site,before)
+            self.assertNotIn('database_administrators',resolver.apps['postgresql'])
 
     def test_role_refusal_preserves_literal_postgresql_names_and_other_engine_accounts(self):
-        for compiled in (False, True):
-            for engine,names in [('postgresql',('fixture_admin','pgadmin','all_admin','current_user','current_role','session_user')),
-                                 ('mariadb',('all','public','none','pg_fixture'))]:
-                for username in names:
-                    resolved=composition()
-                    if compiled:service_bindings.bind(resolved)
-                    cfg=resolved[engine][0]
-                    item=cfg['app']['database_administrators']['server-admin'];item['username']=username
-                    if compiled:item['owner']['username']=username
-                    with self.subTest(engine=engine,compiled=compiled,username=username):
-                        self.assertEqual(m.accounts(cfg,compiled=compiled)['server-admin']['username'],username)
+        for engine,names in (('postgresql',('fixture_admin','pgadmin','all_admin','current_user','current_role','session_user')),
+                             ('mariadb',('all','public','none','pg_fixture'))):
+            for username in names:
+                resolver,exposures=source();resolver.site['accounts'][engine]['principal']=username
+                with self.subTest(engine=engine,username=username):
+                    bind(resolver,exposures)
+                    self.assertEqual(resolver.apps[engine]['database_administrators'][engine]['username'],username)
 
     def test_managed_maria_driver_is_one_closed_official_artifact_with_exact_readonly_mount(self):
-        resolved=composition();service_bindings.bind(resolved);stack=resolved['db-tools'][1]
-        value=stack['cloudbeaver'];artifact=cloudbeaver.jdbc(value)
+        resolver=composition();app=resolver.apps['cloud'];value=app['settings'];artifact=cloudbeaver.jdbc(value)
         self.assertEqual(artifact['url'],'https://repo.maven.apache.org/maven2/org/mariadb/jdbc/mariadb-java-client/3.5.11/mariadb-java-client-3.5.11.jar')
         self.assertEqual(artifact['source'],'/opt/homelab-app/runtime/mariadb-java-client-3.5.11.jar')
-        import render
-        mounts=render.compose(stack)['services']['cloudbeaver']['volumes']
-        driver=[row for row in mounts if row['target'].startswith('/opt/cloudbeaver/drivers/mariadb/')]
-        self.assertEqual(driver,[{'type':'bind','source':artifact['source'],'target':artifact['target'],
-            'read_only':True,'bind':{'create_host_path':False}}])
-        self.assertEqual(render.compose(stack)['services']['cloudbeaver']['healthcheck']['test'][-4:],
-                         ['--postgresql', artifact['version'], artifact['sha256'], artifact['image_filename']])
-        for key,bad in [('version','3.5.10'),('version','latest'),('version',True),('sha256','short'),
-            ('sha256',None),('image_filename','../foreign.jar'),('image_filename','other.jar')]:
-            changed=copy.deepcopy(stack);changed['cloudbeaver']['mariadb_jdbc'][key]=bad
-            with self.subTest(key=key,bad=bad),self.assertRaises(ValueError):cloudbeaver.validate(changed)
-        changed=copy.deepcopy(stack);changed['cloudbeaver']['mariadb_jdbc']['url']='https://foreign.example.invalid/driver.jar'
-        with self.assertRaises(ValueError):cloudbeaver.validate(changed)
-        changed=copy.deepcopy(stack);changed['cloudbeaver'].pop('mariadb_jdbc')
-        with self.assertRaises(ValueError):cloudbeaver.validate(changed)
-        changed=copy.deepcopy(stack);changed['cloudbeaver']['managed_connections'].pop('mariadb-admin')
-        with self.assertRaises(ValueError):cloudbeaver.validate(changed)
-        changed['cloudbeaver'].pop('mariadb_jdbc');self.assertIsNone(cloudbeaver.jdbc(changed['cloudbeaver']))
-        self.assertEqual(render.compose(changed)['services']['cloudbeaver']['healthcheck']['test'][-1], '--postgresql')
-        self.assertIsNone(cloudbeaver.jdbc(fixture()['cloudbeaver']))
-        self.assertNotIn('--postgresql', render.compose(fixture())['services']['cloudbeaver']['healthcheck']['test'])
+        service=document(app)['services']['cloudbeaver']
+        self.assertEqual([row for row in service['volumes']if row['target'].startswith('/opt/cloudbeaver/drivers/mariadb/')],
+            [{'type':'bind','source':artifact['source'],'target':artifact['target'],'read_only':True,'bind':{'create_host_path':False}}])
+        self.assertEqual(service['healthcheck']['test'][-4:],['--postgresql',artifact['version'],artifact['sha256'],artifact['image_filename']])
+        for key,bad in (('version','3.5.10'),('version','latest'),('version',True),('sha256','short'),('sha256',None),
+                        ('image_filename','../foreign.jar'),('image_filename','other.jar'),('url','https://foreign.invalid/driver.jar')):
+            changed=copy.deepcopy(value);changed['mariadb_jdbc'][key]=bad
+            with self.subTest(key=key,bad=bad),self.assertRaises(ValueError):cloudbeaver.jdbc(changed)
+        missing=copy.deepcopy(value);missing.pop('mariadb_jdbc')
+        with self.assertRaises(ValueError):cloudbeaver.jdbc(missing)
+        app=copy.deepcopy(app);app['settings']['managed_connections'].pop('mariadb-admin')
+        with self.assertRaises(ValueError):cloudbeaver.jdbc(app['settings'])
+        app['settings'].pop('mariadb_jdbc')
+        self.assertIsNone(cloudbeaver.jdbc(app['settings']))
+        self.assertEqual(document(app)['services']['cloudbeaver']['healthcheck']['test'][-1],'--postgresql')
+        app['settings']['managed_connections']={}
+        self.assertNotIn('--postgresql',document(app)['services']['cloudbeaver']['healthcheck']['test'])
 
     def test_resolved_topology_links_only_new_ids_and_preserves_metadata_policies(self):
-        resolved = composition(); original = copy.deepcopy(resolved['db-tools'][1]['cloudbeaver']['connections'])
-        endpoints = service_bindings.bind(resolved)
-        source, cloud, _ = resolved['db-tools']
-        self.assertEqual(set(endpoints), {'postgresql.postgresql', 'mariadb.mariadb'})
+        resolver,exposures=source();metadata=copy.deepcopy(resolver.apps['cloud']['properties']['connections'])
+        result,accounts=bind(resolver,exposures);cloud=resolver.apps['cloud']['settings']
+        self.assertEqual(set(cloud['connections']),{'postgresql','mariadb'})
+        self.assertEqual(set(cloud['managed_connections']),{'postgresql-admin','mariadb-admin'})
         for engine in m.KINDS:
-            cfg = resolved[engine][0]; item = m.accounts(cfg, compiled=True)['server-admin']
-            connection = m.connections(cloud['cloudbeaver'], compiled=True)[engine+'-admin']
-            self.assertEqual(item['owner'], connection['owner'])
-            self.assertEqual(connection['owner']['source_vmid'], 902)
-            self.assertEqual(connection['owner']['database_vmid'], cfg['guest']['vmid'])
-            self.assertEqual(connection['username'], item['username'])
-            self.assertEqual(connection['port'], m.KINDS[engine])
-            self.assertEqual(set(cloud['cloudbeaver']['connections'][engine]), set(original[engine]) | {'host', 'port'})
-        self.assertEqual(cloud['cloudbeaver']['connections']['postgresql']['sslmode'], original['postgresql']['sslmode'])
-        edges = list(service_bindings.connections_for({k: v[0] for k, v in resolved.items()}))
-        self.assertEqual(len(edges), 4)
-        self.assertEqual({edge.source for edge in edges}, {'db-tools'})
+            item=resolver.apps[engine]['database_administrators'][engine]
+            connection=m.connections(cloud)[engine+'-admin']
+            self.assertEqual(item['owner'],connection['owner'])
+            self.assertEqual(connection['owner']['source_vmid'],902)
+            self.assertEqual(connection['owner']['database_vmid'],resolver.guests[engine]['identity']['vmid'])
+            self.assertEqual(connection['username'],item['username']);self.assertEqual(connection['port'],m.KINDS[engine])
+            self.assertEqual(item['credential_file'],'${inputs}/applications/'+engine+'/managed-fixture-'+engine+'.json')
+            self.assertEqual(connection['credential_file'],'${inputs}/applications/cloud/managed-fixture-'+engine+'.json')
+            self.assertEqual({key:cloud['connections'][engine][key]for key in metadata[engine]},metadata[engine])
+        self.assertEqual(len(resolver.apps['cloud']['resolved_connections']),4)
+        self.assertEqual(result['guest_dependencies']['client'],['postgresql','mariadb'])
 
     def test_cross_guest_orphan_duplicate_and_wrong_engine_bindings_refuse(self):
-        changes = [lambda r: r['postgresql'][0]['app']['database_administrators']['server-admin'].update(source_guest='missing'),
-            lambda r: r['postgresql'][0]['app']['database_administrators']['server-admin'].update(source_guest='mariadb'),
-            lambda r: r['mariadb'][0]['app']['database_administrators']['server-admin'].update(credential_id='fixture-postgresql',credential_file='${inputs}/managed-fixture-postgresql.json'),
-            lambda r: r['db-tools'][1]['cloudbeaver']['managed_connections']['postgresql-admin'].update(account_id='missing'),
-            lambda r: r['db-tools'][0]['app']['service_connections']['cloudbeaver.postgresql-admin'].update(service='mariadb.mariadb'),
-            lambda r: r['db-tools'][0]['app']['service_connections'].pop('cloudbeaver.mariadb-admin'),
-            lambda r: r['postgresql'][0]['paths'].update(state_root='/foreign/state'),
-            lambda r: r['postgresql'][0]['app']['published_services']['postgresql'].update(port=3306)]
+        changes=[lambda r:r.site['accounts']['postgresql'].update(owner='missing'),
+            lambda r:r.site['accounts']['postgresql'].update(owner='mariadb'),
+            lambda r:r.site['secret_sources']['mariadb'].update(credential_id='fixture-postgresql'),
+            lambda r:r.site['connections']['postgresql-admin'].update(account='missing'),
+            lambda r:r.site['connections']['postgresql-admin'].update(target={'app':'mariadb','endpoint':'sql'}),
+            lambda r:r.site['connections'].pop('mariadb-admin'),
+            lambda r:r.guests['postgresql'].update(context='foreign')]
         for change in changes:
-            resolved = composition(); change(resolved)
-            with self.subTest(change=change), self.assertRaises(ValueError):service_bindings.bind(resolved)
-        resolved = composition(); resolved['db-tools'][1]['cloudbeaver']['managed_connections'].pop('postgresql-admin')
-        resolved['db-tools'][0]['app']['service_connections'].pop('cloudbeaver.postgresql-admin')
-        with self.assertRaises(ValueError):service_bindings.bind(resolved)
+            resolver,exposures=source();change(resolver)
+            with self.subTest(change=change),self.assertRaises((ValueError,KeyError)):bind(resolver,exposures)
+        resolver,exposures=source();endpoint=resolver.endpoint
+        resolver.endpoint=lambda ref:dict(endpoint(ref),port=3306)if ref['app']=='postgresql'else endpoint(ref)
+        with self.assertRaises(ValueError):bind(resolver,exposures)
 
     def test_private_credentials_are_independent_but_exactly_shared_with_their_declared_client(self):
-        resolved = composition(); service_bindings.bind(resolved)
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory); root.chmod(0o700)
-            packets = {}
+        resolver=composition();cloud=resolver.apps['cloud']
+        with tempfile.TemporaryDirectory()as directory:
+            root=Path(directory);root.chmod(0o700);producer={}
             for engine in m.KINDS:
-                cfg = resolved[engine][0]; cfg['paths'] = {'state_root': str(root)}
-                item = cfg['app']['database_administrators']['server-admin']
-                item['credential_file'] = str(root/engine/Path(item['credential_file']).name)
-                packets[engine] = m.prepare(cfg, None, root/engine)
-            cfg, cloud, _ = resolved['db-tools']; cfg['paths'] = {'state_root': str(root)}
-            for item in cloud['cloudbeaver']['managed_connections'].values():
-                item['credential_file'] = str(root/'cloud'/Path(item['credential_file']).name)
-            payload = m.prepare(cfg, cloud, root/'cloud')
+                item=resolver.apps[engine]['database_administrators'][engine]
+                _,producer[engine]=managed_credentials.payload(root,item['credential_id'],item['owner'],root/engine)
+            payload={};records=component_prepare.account_records({'paths':{'state_root':str(root)}},cloud,payload)
             for engine in m.KINDS:
-                filename = 'managed-fixture-'+engine+'.json'
-                self.assertEqual(payload[filename], packets[engine][filename])
-                path = root/'cloud'/filename; path.parent.mkdir(mode=0o700, exist_ok=True); path.write_bytes(payload[filename]); path.chmod(0o600)
-            self.assertNotEqual(json.loads(next(iter(packets['postgresql'].values())))['password'],
-                                json.loads(next(iter(packets['mariadb'].values())))['password'])
-            document = json.loads(m.document(cloud['cloudbeaver']))
-            self.assertEqual(set(document['connections']), {'postgresql-admin', 'mariadb-admin'})
-            self.assertEqual(document['connections']['postgresql-admin']['configuration']['properties'],
-                             {'sslmode': 'require', 'channelBinding': 'require', 'requireAuth': 'scram-sha-256'})
-            self.assertEqual(document['connections']['mariadb-admin']['configuration']['properties'], {'sslMode': 'verify-full'})
-            before = cloudbeaver.configuration(fixture()['cloudbeaver'])
-            after = cloudbeaver.configuration(cloud['cloudbeaver'])
-            self.assertFalse(before['app']['adminCredentialsSaveEnabled'])
-            self.assertTrue(after['app']['adminCredentialsSaveEnabled']); self.assertTrue(after['app']['secretManagerEnabled'])
-            self.assertEqual(cloud['cloudbeaver']['connections'].keys(), {'postgresql', 'mariadb'})
-            rows = cloudbeaver.files(cloud, b'synthetic-oidc-client-secret-'*2)
-            public = json.loads(next(row['content'] for row in rows if row['path'] == 'cloudbeaver-public.json'))
-            native = next(row for row in rows if row['path'] == 'cloudbeaver-admin-connections.json')
-            import hashlib
-            self.assertEqual(public['managed_sha256'], hashlib.sha256(native['content'].encode()).hexdigest())
-            self.assertEqual(public['cloudbeaver_image'], cloud['services']['cloudbeaver']['image'])
-            self.assertEqual(native['uid'], 0); self.assertEqual(native['mode'], '0400')
-            import render
-            service = render.compose(cloud)['services']['cloudbeaver']
-            self.assertTrue(any(row['target'].endswith('/CloudBeaverDatabaseHealth.java') and row['read_only']
-                                for row in service['volumes']))
-            pg_only=copy.deepcopy(cloud)
-            pg_only['cloudbeaver']['managed_connections'].pop('mariadb-admin')
-            pg_only['cloudbeaver'].pop('mariadb_jdbc')
-            pg_public=json.loads(next(row['content'] for row in cloudbeaver.files(pg_only,b'synthetic-client-secret-'*2)
-                if row['path']=='cloudbeaver-public.json'))
-            self.assertNotIn('mariadb_jdbc',pg_public)
-            cfg['paths']['state_root'] = str(root)
-            cloud['cloudbeaver']['managed_connections']['postgresql-admin']['credential_file'] = '/foreign/managed-fixture-postgresql.json'
-            with self.assertRaises(ValueError):m.prepare(cfg, cloud, root/'cloud')
+                filename='managed-fixture-'+engine+'.json';self.assertEqual(payload[filename],producer[engine][filename])
+            self.assertNotEqual(records['fixture-postgresql']['password'],records['fixture-mariadb']['password'])
+            rows=component_proxy_files.files(cloud,secrets={'client_secret':b'synthetic-oidc-client-secret-'*2},records=records,public_ca=None)
+            by_name={row['path']:row for row in rows};native=by_name['cloudbeaver-admin-connections.json']
+            public=json.loads(by_name['cloudbeaver-public.json']['content']);document_=json.loads(native['content'])
+            self.assertEqual(document_['connections']['postgresql-admin']['configuration']['properties'],{'sslmode':'require','channelBinding':'require','requireAuth':'scram-sha-256'})
+            self.assertEqual(document_['connections']['mariadb-admin']['configuration']['properties'],{'sslMode':'verify-full'})
+            self.assertEqual(public['managed_sha256'],hashlib.sha256(native['content'].encode()).hexdigest())
+            self.assertEqual(public['cloudbeaver_image'],cloud['software_selection']['images']['cloudbeaver']['image'])
+            self.assertEqual((native['uid'],native['mode']),(0,'0400'))
+            repeated={};self.assertEqual(component_prepare.account_records({'paths':{'state_root':str(root)}},cloud,repeated),records)
+            self.assertEqual(repeated,payload)
+            foreign=copy.deepcopy(cloud);foreign['settings']['managed_connections']['postgresql-admin']['owner']['username']='foreign'
+            with self.assertRaises(ValueError):component_prepare.account_records({'paths':{'state_root':str(root)}},foreign,{})
+            with tempfile.TemporaryDirectory()as absent:
+                with self.assertRaises((ValueError,OSError)):component_prepare.account_records({'paths':{'state_root':absent}},cloud,{})
 
     def test_hba_is_a_finite_source_prefix_and_original_tail_is_byte_exact(self):
-        resolved = composition(); service_bindings.bind(resolved)
-        cfg, _, files = resolved['postgresql']; old = files['pg_hba.conf']; before = copy.deepcopy(cfg)
-        m.hba(cfg, files)
-        self.assertEqual(cfg, before); self.assertTrue(files['pg_hba.conf'].endswith(old))
-        self.assertIn('hostssl all,replication postgresql_administrator 198.18.11.81/32 scram-sha-256\n', files['pg_hba.conf'])
-        self.assertIn('local all,replication postgresql_administrator reject\n', files['pg_hba.conf'])
-        self.assertIn('host all,replication postgresql_administrator ::/0 reject\n', files['pg_hba.conf'])
-        with self.assertRaises(ValueError):m.hba(cfg, files)
-        cfg['app']['database']['config_files'] = []
-        with self.assertRaises(ValueError):m.hba(cfg, {'pg_hba.conf': old})
-        self.assertIsNone(m.hba(resolved['mariadb'][0], {}))
+        resolver=composition();values=resolver.apps['postgresql']['database_administrators']
+        old='local all postgres peer\nhost all all 127.0.0.1/32 scram-sha-256\n';before=copy.deepcopy(values)
+        current=database_hba.administrators(old,values)
+        prefix=('# homelab managed administrator accounts\n'
+            'hostssl all,replication postgresql_administrator 198.18.11.81/32 scram-sha-256\n'
+            'local all,replication postgresql_administrator reject\n'
+            'host all,replication postgresql_administrator 0.0.0.0/0 reject\n'
+            'host all,replication postgresql_administrator ::/0 reject\n')
+        self.assertEqual(current,prefix+old);self.assertEqual(values,before)
+        with self.assertRaises(ValueError):database_hba.administrators(current,values)
+        self.assertEqual(database_hba.administrators(old,{}),old)
 
     def test_closed_account_connection_ownership_and_input_contracts(self):
-        resolved = composition(); account = resolved['postgresql'][0]['app']['database_administrators']['server-admin']
-        for key, value in [('username', "bad'"), ('credential_id', '../key'), ('credential_file', 'relative'),
-                           ('credential_file', '/synthetic/other.json'), ('access', 'read-only'), ('transport', 'plaintext')]:
-            cfg = copy.deepcopy(resolved['postgresql'][0]); cfg['app']['database_administrators']['server-admin'][key] = value
-            with self.subTest(key=key), self.assertRaises(ValueError):m.accounts(cfg)
-        for values in ([], {}, None, {'bad id': account}, {'one': account, 'two': account}):
-            cfg = copy.deepcopy(resolved['postgresql'][0]); cfg['app']['database_administrators'] = values
-            with self.assertRaises(ValueError):m.accounts(cfg)
-        self.assertEqual(m.accounts({'app': {'kind': 'music'}}), {})
-        service_bindings.bind(resolved); value = resolved['db-tools'][1]['cloudbeaver']; original = copy.deepcopy(value)
-        for key, bad in [('host', '198.18.11.99'), ('port', 3306), ('username', 'foreign'), ('transport', 'plaintext')]:
-            row = copy.deepcopy(original); row['managed_connections']['postgresql-admin'][key] = bad
-            with self.subTest(key=key), self.assertRaises(ValueError):m.connections(row, compiled=True)
-        for field, bad in [('database_vmid', True), ('source_vmid', 1), ('source_address', '127.0.0.1'),
-                           ('source_address', 'invalid-address'), ('source_address', False), ('engine', []), ('purpose', 'other')]:
-            own = copy.deepcopy(account['owner']); own[field] = bad
-            with self.subTest(field=field), self.assertRaises(ValueError):m.owner(own)
-        row = copy.deepcopy(original); row['managed_connections']['postgresql'] = row['managed_connections'].pop('postgresql-admin')
-        with self.assertRaises(ValueError):m.connections(row, compiled=True)
-        self.assertEqual(m.connections({'connections': {}}), {})
+        for changes in ({'principal':"bad'"},{'access':'read-only'},{'lifecycle':'rotate'},
+                        {'credential_file':'/foreign/input'},{'transport':'plaintext'}):
+            resolver,exposures=source();resolver.site['accounts']['postgresql'].update(changes)
+            with self.subTest(changes=changes),self.assertRaises(ValueError):bind(resolver,exposures)
+        for credential in ('../key','bad/key',''):
+            resolver,exposures=source();resolver.site['secret_sources']['postgresql']['credential_id']=credential
+            with self.subTest(credential=credential),self.assertRaises(ValueError):bind(resolver,exposures)
+        for collection in (None,[],{'bad id':{}}):
+            with self.subTest(collection=type(collection).__name__),self.assertRaises(ComponentError):named(collection)
+        for duplicate in (False,True):
+            resolver,exposures=source()
+            if duplicate:resolver.site['accounts']['duplicate']=copy.deepcopy(resolver.site['accounts']['postgresql'])
+            else:resolver.site['accounts']={}
+            with self.assertRaises(ValueError):bind(resolver,exposures)
+        value=composition().apps['cloud']['settings'];original=copy.deepcopy(value)
+        for key,bad in (('host','198.18.11.99'),('port',3306),('username','foreign'),('transport','plaintext')):
+            changed=copy.deepcopy(original);changed['managed_connections']['postgresql-admin'][key]=bad
+            with self.subTest(key=key),self.assertRaises(ValueError):m.connections(changed)
+        account=original['managed_connections']['postgresql-admin']
+        for field,bad in (('database_vmid',True),('source_vmid',1),('source_address','127.0.0.1'),
+                ('source_address','invalid-address'),('source_address',False),('engine',[]),('purpose','other')):
+            own=copy.deepcopy(account['owner']);own[field]=bad
+            with self.subTest(field=field),self.assertRaises(ValueError):m.owner(own)
+        duplicate=copy.deepcopy(original);duplicate['managed_connections']['postgresql']=duplicate['managed_connections'].pop('postgresql-admin')
+        with self.assertRaises(ValueError):m.connections(duplicate)
+        self.assertEqual(m.connections({'connections':{}}),{})
 
 
-if __name__ == '__main__':
-    unittest.main()
+if __name__=='__main__':unittest.main()

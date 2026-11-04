@@ -21,23 +21,26 @@ import network_endpoints
 BOOTSTRAP = Path(__file__).resolve().parents[1] / 'bootstrap'
 
 
-def selected(stack):
-    value = stack.get('foundation', {}).get('discovery_scope')
-    if value is None:
-        return None
-    require(stack.get('kind') == 'ingress' and isinstance(value, dict)
-            and set(value) == {'local_directory', 'mirror_directory', 'owner_sha256', 'guests'},
-            'Discovery verification belongs only to the ingress foundation')
+def selected_scope(value, protected_guests=None):
+    """Validate the same explicit finite discovery scope without guest-kind tags."""
+    require(isinstance(value, dict) and set(value) ==
+            {'local_directory', 'mirror_directory', 'owner_sha256', 'guests'},
+            'Bind one exact finite owned discovery scope')
     for name in ('local_directory', 'mirror_directory'):
         path = value[name]
         require(isinstance(path, str) and Path(path).is_absolute() and '..' not in Path(path).parts
                 and Path(path).name == 'service-discovery', 'Bind existing discovery custody directories')
+    protected = {900,4914,4915,4920} if protected_guests is None else protected_guests
+    require(isinstance(protected,(list,set)) and all(type(v) is int and v>=1 for v in protected)
+            and len(set(protected))==len(protected), 'Preserve explicit context protection')
     require(value['local_directory'] != value['mirror_directory']
             and isinstance(value['owner_sha256'], str) and re.fullmatch('[0-9a-f]{64}', value['owner_sha256'])
             and isinstance(value['guests'], list) and 1 <= len(value['guests']) <= 32
-            and all(type(v) is int and v >= 100 and v not in {900, 4914, 4915, 4920} for v in value['guests'])
+            and all(type(v) is int and v >= 100 and v not in protected for v in value['guests'])
             and len(set(value['guests'])) == len(value['guests']), 'Bind one exact finite owned discovery scope')
     return value
+
+
 
 
 def origin(value):
@@ -67,10 +70,10 @@ def provider():
     return module
 
 
-def source_files(stack):
-    value = selected(stack)
-    if value is None:
-        return []
+
+
+def scope_source_files(value, protected_guests=None):
+    value=selected_scope(value,protected_guests)
     result = []
     for key in ('local_directory', 'mirror_directory'):
         root = Path(value[key])
@@ -114,10 +117,10 @@ class Reader:
         return value
 
 
-def verify(cfg, stack, api=None):
-    value = selected(stack)
-    if value is None:
-        return {'status': 'not_selected', 'writes': False}
+def verify_selection(cfg, value, *, endpoint, token_id, ca_file, read_configured, api=None,
+                     protected_guests=None):
+    """Verify existing owned scope, mirrored READY/token and exact effective GETs."""
+    value = selected_scope(value,protected_guests)
     access = provider()
     local, mirror = Path(value['local_directory']), Path(value['mirror_directory'])
     owner = access.scope_owner(local, mirror)
@@ -126,20 +129,19 @@ def verify(cfg, stack, api=None):
             and owner['configuration']['vmid'] == cfg['guest']['vmid']
             and owner['configuration']['address'] in network_endpoints.addresses(cfg['guest'])
             and owner['node'] == cfg['site']['node']
-            and origin(owner['endpoint']) == origin(stack['foundation']['proxmox_url']),
+            and origin(owner['endpoint']) == origin(endpoint),
             'Discovery desired scope is not owned; complete reviewed privileged bootstrap CD')
     selected_config = {'node': owner['node'], 'endpoint': owner['endpoint'],
         'service_discovery': owner['configuration'], 'applications': [{'vmid': v} for v in value['guests']]}
     access.validate(selected_config)
-    require(access.identity(selected_config)[1] == stack['foundation']['proxmox_token_id'],
+    require(access.identity(selected_config)[1] == token_id,
             'Preserve the retained discovery identity')
     secret = access.retained(selected_config, local.parent, mirror.parent)
     require(secret is not None, 'Discovery access is missing; complete reviewed privileged bootstrap CD')
-    from foundation import read_private
-    configured = stack['foundation']['proxmox_token_id'] + '=' + read_private(stack['foundation']['secret_files']['proxmox_token'])
+    configured = read_configured()
     require(hmac.compare_digest(configured, secret),
             'Configured discovery credential differs from its retained owner')
-    api = Reader(owner['endpoint'], stack['foundation']['pve_ca_file']) if api is None else api
+    api = Reader(owner['endpoint'], ca_file) if api is None else api
     # Effective privilege values are non-propagation flags: zero means a present
     # non-propagating grant, NOT an absent privilege. Reuse the exact owner check.
     try:

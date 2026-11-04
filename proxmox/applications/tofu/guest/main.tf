@@ -53,7 +53,7 @@ resource "proxmox_virtual_environment_container" "guest" {
     }
   }
   dynamic "mount_point" {
-    for_each = var.guest.volumes
+    for_each = [for key in (var.guest.volume_order == null ? sort(keys(var.guest.volumes)) : var.guest.volume_order) : var.guest.volumes[key]]
     content {
       volume    = var.guest.storage_id
       size      = "${mount_point.value.size_gib}G"

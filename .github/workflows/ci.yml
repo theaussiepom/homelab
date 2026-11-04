@@ -129,7 +129,7 @@ jobs:
         run: python3 proxmox/applications/tests/bitwarden_runtime_fixture.py
   retained-runtimes:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
-    name: PegaProx and pgAdmin retained runtime (Docker)
+    name: PegaProx retained runtime (Docker)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -146,11 +146,8 @@ jobs:
       - name: Fetch only the selected immutable application images
         run: |
           docker pull --platform linux/amd64 ghcr.io/pegaprox/pegaprox@sha256:8d295a524a52f0b923616a3eb415ff6422fe62beba5bb441f35c75d8985f1add
-          docker pull --platform linux/amd64 dpage/pgadmin4@sha256:cefc4cc6b7d9d71a9e81e76fb9d7e14038ab5661b539a190eea1b63fa612589a
       - name: Replace retained PegaProx TLS with HTTP and verify proxy trust and restart
         run: python3 proxmox/applications/tests/pegaprox_runtime_fixture.py
-      - name: Start the retained pgAdmin profile without bootstrap credentials and check OIDC
-        run: python3 proxmox/applications/tests/pgadmin_runtime_fixture.py
   applications:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     name: Application contracts and runtime components (Docker)
@@ -198,8 +195,8 @@ jobs:
       - name: Validate current stack structure with Docker Compose
         run: |
           python3 proxmox/applications/tests/compose_fixture.py "$RUNNER_TEMP/app-compose"
-          for kind in dns identity ingress automation db-tools zigbee2mqtt; do
-            docker compose -f "$RUNNER_TEMP/app-compose/$kind.json" config --quiet
+          for composition in "$RUNNER_TEMP/app-compose/"*.json; do
+            docker compose -f "$composition" config --quiet
           done
       - name: Reconcile owned MQTT DNS records against the pinned Pi-hole image
         run: python3 proxmox/applications/tests/dns_records_fixture.py --output "$RUNNER_TEMP/service-dns-records"

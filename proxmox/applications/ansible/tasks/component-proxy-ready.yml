@@ -1,0 +1,66 @@
+---
+- name: Install the selected verified managed database driver
+  ansible.builtin.get_url:
+    url: "{{ component_jdbc.url }}"
+    dest: "{{ component_jdbc.source }}"
+    checksum: "{{ 'sha256:' + component_jdbc.sha256 }}"
+    owner: '8978'
+    group: '8978'
+    mode: '0400'
+    validate_certs: true
+    timeout: 30
+  register: component_driver_install
+  no_log: true
+  when: component_proxy_lifecycle.adapter == 'cloudbeaver' and component_jdbc.version is defined
+
+- name: Own only the selected CloudBeaver workspace
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/cloudbeaver-runtime.py, workspace, --config, "{{ component_proxy_lifecycle.config }}", --owner, "{{ component_proxy_lifecycle.owner | to_json }}"]
+  changed_when: false
+  no_log: true
+  when: component_proxy_lifecycle.adapter == 'cloudbeaver'
+
+- name: Preserve selected connection template permissions
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/cloudbeaver-runtime.py, templates, --config, "{{ component_proxy_lifecycle.config }}"]
+  changed_when: false
+  no_log: true
+  when: component_proxy_lifecycle.adapter == 'cloudbeaver'
+
+- name: Retire only the declared retained pgAdmin container
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/cloudbeaver-runtime.py, prepare, --config, "{{ component_proxy_lifecycle.config }}"]
+  changed_when: false
+  no_log: true
+  when: component_proxy_lifecycle.adapter == 'cloudbeaver'
+
+- name: Preserve declared managed administrator datasources
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/cloudbeaver-runtime.py, managed, --config, "{{ component_proxy_lifecycle.config }}"]
+  changed_when: false
+  no_log: true
+  when: component_proxy_lifecycle.adapter == 'cloudbeaver'
+
+- name: Own only the selected Explorer workspace
+  ansible.builtin.set_fact:
+    component_explorer_creation: "{{ ((component_directory_prepare.stdout | from_json).created_directories | selectattr('path', 'equalto', component_application.storage_paths.data.source) | list) if component_directory_prepare.stdout is defined else [] }}"
+  when: component_proxy_lifecycle.adapter == 'mqtt_explorer'
+
+- name: Bind at most this workspace's newly created directory
+  ansible.builtin.assert:
+    that: component_explorer_creation | length <= 1
+  when: component_proxy_lifecycle.adapter == 'mqtt_explorer'
+
+- name: Own only the selected Explorer workspace
+  ansible.builtin.command:
+    argv: "{{ ['python3','/usr/local/bin/homelab-mqtt-explorer.py','workspace','--config',component_proxy_lifecycle.config,'--owner',component_proxy_lifecycle.owner | to_json] + (['--created-directory',component_explorer_creation[0] | to_json] if component_explorer_creation | length == 1 else []) }}"
+  changed_when: false
+  no_log: true
+  when: component_proxy_lifecycle.adapter == 'mqtt_explorer'
+
+- name: Preserve the selected saved broker connection and credential ownership
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/mqtt-explorer-account.py, --config, "{{ component_proxy_lifecycle.profile }}"]
+  changed_when: false
+  no_log: true
+  when: component_proxy_lifecycle.adapter == 'mqtt_explorer'

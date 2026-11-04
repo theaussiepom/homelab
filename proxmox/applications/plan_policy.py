@@ -9,7 +9,6 @@ RESOURCES = {
     "module.guest.proxmox_virtual_environment_firewall_options.guest": "container_id",
     "module.guest.proxmox_virtual_environment_firewall_rules.guest": "container_id",
 }
-PROTECTED = {900, 4914, 4915, 4920}
 IMMUTABLE_GUEST_FIELDS = (
     "node_name",
     "vm_id",
@@ -124,11 +123,14 @@ def reviewed_guest_drift(rows, node, vmid, reviewed):
     )
 
 
-def check_plan(value, node, vmid, *, existing, serial_device=None, reviewed_drift=None):
+def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=None, reviewed_drift=None):
     """Validate the exact saved plan under an explicit backend custody decision."""
     require(type(existing) is bool, "Select creation or reconciliation explicitly")
+    protected = protected_guests
+    require(isinstance(protected,(list,set)) and all(type(value) is int and value >= 1 for value in protected)
+            and len(protected)==len(set(protected)), 'Preserve the explicit execution context protection policy')
     require(
-        type(vmid) is int and vmid >= 100 and vmid not in PROTECTED,
+        type(vmid) is int and vmid >= 100 and vmid not in protected,
         "Preserve protected guest identities",
     )
     require(isinstance(node, str) and node, "Select a known Proxmox node")

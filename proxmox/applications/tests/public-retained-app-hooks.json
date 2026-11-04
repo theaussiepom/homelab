@@ -1,0 +1,61 @@
+{
+  "source_is_public_synthetic": true,
+  "framework_commit": "f28725b1e8334a0baba26dfc2fa623cb3a63cdf5",
+  "source_pins": {
+    "proxmox/applications/ansible/tasks/compose.yml": "c10b164d73840b220112572656287b67a354833fa223d3e1ea50701d49308f5a",
+    "proxmox/applications/ansible/tasks/zigbee-runtime.yml": "d358ed335e77bcaf10932b7a4fdbf3a90575d3ffc9f949ad45baac60d25ba0af"
+  },
+  "settings": {
+    "serial_device": "/dev/serial/by-id/usb-Synthetic_coordinator",
+    "bind_address": "198.18.41.8",
+    "frontend_port": 8080,
+    "adapter": "zstack",
+    "mqtt_server": "mqtt://broker.example.invalid:1883",
+    "mqtt_base_topic": "fixture_zigbee"
+  },
+  "pihole": {
+    "reconcile_argv": [
+      "python3",
+      "/opt/homelab-app/dns_records.py",
+      "reconcile",
+      "--records",
+      "/opt/homelab-app/dns-records.json",
+      "--compose",
+      "/opt/homelab-app/compose.yml"
+    ],
+    "restart_argv": [
+      "docker",
+      "compose",
+      "-f",
+      "/opt/homelab-app/compose.yml",
+      "restart",
+      "--no-deps",
+      "pihole"
+    ]
+  },
+  "music_assistant": {
+    "argv": [
+      "python3",
+      "/opt/homelab-app/music_assistant.py",
+      "--address",
+      "198.18.41.9"
+    ]
+  },
+  "zigbee2mqtt": {
+    "validate_argv": [
+      "python3",
+      "/opt/homelab-app/zigbee2mqtt.py",
+      "validate",
+      "--settings",
+      "/opt/homelab-app/zigbee-settings.json"
+    ],
+    "health_argv": [
+      "python3",
+      "/opt/homelab-app/zigbee2mqtt.py",
+      "health",
+      "--settings",
+      "/opt/homelab-app/zigbee-settings.json"
+    ],
+    "settings_json": "{\"serial_device\": \"/dev/serial/by-id/usb-Synthetic_coordinator\", \"bind_address\": \"198.18.41.8\", \"frontend_port\": 8080, \"adapter\": \"zstack\", \"mqtt_server\": \"mqtt://broker.example.invalid:1883\", \"mqtt_base_topic\": \"fixture_zigbee\"}\n"
+  }
+}

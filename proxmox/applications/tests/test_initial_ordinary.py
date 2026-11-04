@@ -13,92 +13,39 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import commands
 import coordinated_generation as generation
-import deploy
-import deployment_inputs as inputs
-import deployment_state as state
-import guest_contract
+import component_guest
+import component_inputs
+from current_initial_fixtures import CurrentInitialCase
 import initial_ordinary as initial
 import private_io as io
 from custody_fixtures import save, backend, legacy_canonical, legacy_immutable
-from fixtures import guest, github_source
 
 
 class InitialOrdinaryTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name).resolve()
-        self.root.chmod(0o700)
-        self.cfg = guest(self.root)
-        self.cfg["app"].update(kind="influxdb", packages=["influxdb2=2.7.12-1"],
-            service_health_checks={"influxdb": [{"name": "fixture", "argv": ["true"]}]},
-            required_paths=guest_contract.BLUEPRINTS["influxdb"]["required_paths"])
-        self.work = Path(self.cfg["paths"]["state_root"]) / "808"
-        self.work.parent.mkdir(mode=0o700)
-        self.work.mkdir(mode=0o700)
-        ca = save(self.root / "ca", b"fixture public CA\n")
-        save(self.root / "hosts", b"198.18.25.8 ssh-ed25519 fixture\n")
-        save(self.work / "ssh-trust.json", {"address": self.cfg["app"]["address"],
-                                           "keys": [["ssh-ed25519", "fixture"]]})
-        self.installed = self.root / "installed-influx.json"
-        site_hash = save(self.installed, self.cfg)
-        state_hash = save(self.work / "terraform.tfstate", backend(808))
-        self.old = {"status": "passed", "binding": {
-            "vmid": 808, "source_sha256": "a" * 64, "site_sha256": site_hash,
-            "input_hashes": {str(self.root / "ca"): ca}},
-            "state_sha256": state_hash, "result": {"status": "passed", "rows": [1, True]}}
-        self.immutable = self.work / "ordinary-100-1/complete.json"
-        immutable_hash = save(self.immutable, legacy_immutable(self.old))
-        self.canonical = self.work / "ordinary-complete.json"
-        canonical_hash = save(self.canonical, legacy_canonical(self.old))
-        older = copy.deepcopy(self.old)
-        older["binding"]["source_sha256"] = "b" * 64
-        save(self.work / "ordinary-90-1/complete.json", legacy_immutable(older))
-        self.cfg["initial_ordinary"] = {
-            "schema": initial.SCHEMA, "vmid": 808, "node": "fixture-pve",
-            "installed_site": str(self.installed), "installed_site_sha256": site_hash,
-            "initial_state_sha256": state_hash, "receipt": {
-                "operation": "ordinary-100-1", "sha256": canonical_hash,
-                "immutable_sha256": immutable_hash, "source_sha256": "a" * 64}}
-        self.site = self.root / "current-site.json"
-        save(self.site, self.cfg)
-        source, self.revisions = github_source(self.root)
-        context = patch.dict(os.environ, {
-            "GITHUB_RUN_ID": "777", "GITHUB_RUN_ATTEMPT": "1", "GITHUB_RUN_NUMBER": "777",
-            "GITHUB_REPOSITORY": "example/private-site",
-            "HOMELAB_DEPLOYMENT_WORKFLOW": "example/private-site/.github/workflows/deploy.yml@refs/heads/main",
-            "GITHUB_SHA": self.revisions[0], "GITHUB_WORKSPACE": str(source)})
-        context.start(); self.addCleanup(context.stop)
-        p = patch.object(inputs, "source_hash", return_value="7" * 64)
-        p.start(); self.addCleanup(p.stop)
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name).resolve()
+        self.current=CurrentInitialCase(self,self.root,getattr(self,'role','influxdb'))
+        self.cfg=self.current.cfg;self.work=self.current.work
+        self.installed=self.current.installed;self.immutable=self.current.immutable
+        self.canonical=self.current.canonical;self.old=self.current.old
+        self.site=self.current.h.packet;self.revisions=self.current.h.revisions
+        self.ca_raw=self.current.ca_raw
 
-    def binding(self):
-        return inputs.binding(self.cfg, self.site)
+    def binding(self):return self.current.binding()
 
-    def attempt(self, binding=None):
-        return state.DeploymentAttempt(self.cfg, binding or self.binding(), guest_contract.phases(self.cfg))
+    def attempt(self,binding=None):return self.current.attempt(binding)
 
-    def runtime(self):
-        preparation = patch.object(inputs, "prepare", return_value=(self.cfg, self.site))
-        preparation.start(); self.addCleanup(preparation.stop)
-        def infrastructure(*args, **kwargs):
-            self.assertEqual(kwargs["state_identity"], generation.backend(self.work, initial.selection(self.cfg))[1])
-            body = copy.deepcopy(backend(808))
-            body["serial"] = json.loads((self.work / "terraform.tfstate").read_bytes())["serial"] + 1
-            save(self.work / "terraform.tfstate", body)
-            return {"changed": True, "created": False, "state_sha256": io.sha(self.work / "terraform.tfstate")}
-        infra = patch.object(deploy.proxmox_guest, "infrastructure", side_effect=infrastructure)
-        apps = patch.object(deploy.ansible_guest, "run_phase", return_value={"status": "passed", "changed": False})
-        i, a = infra.start(), apps.start()
-        self.addCleanup(infra.stop); self.addCleanup(apps.stop)
-        return i, a
+    def runtime(self):return self.current.h.native,self.current.apps
 
-    def all_phases(self):
-        for phase in ["infrastructure", *guest_contract.phases(self.cfg)]:
-            deploy.run(phase, self.site)
+    def all_phases(self):return self.current.all_phases()
+
+    def phase(self,phase):return self.current.phase(phase)
+
+    def publish(self):self.current.publish()
 
     def test_first_anchor_and_later_generations_keep_all_original_bytes(self):
-        self.assertEqual(guest_contract.validate(self.cfg), 808)
+        self.assertEqual(component_guest.validate(self.cfg), 808)
         proofs, member, raw = initial.inspect(self.cfg)
         self.assertEqual(raw, self.immutable.read_bytes())
         self.assertNotEqual(raw, self.canonical.read_bytes())
@@ -117,30 +64,39 @@ class InitialOrdinaryTests(unittest.TestCase):
                 current = json.loads(self.canonical.read_bytes())
                 self.assertEqual(current["run_number"], number)
                 self.assertEqual(current["site_revision"], revision)
-                self.assertEqual(set(current), {"status", "binding", "state_sha256", "state_identity", "result", "workflow", "run_number", "site_revision", "operation"})
+                self.assertEqual(set(current), {"status", "binding", "state_sha256", "state_identity", "result", "workflow", "run_number", "site_revision", "operation", "schema", "phase_inputs"})
                 self.assertEqual(current["binding"][initial.BINDING], initial.selection_digest(self.cfg))
                 self.assertEqual((Path(current["operation"]) / "complete.json").read_bytes(), self.canonical.read_bytes())
-                self.assertFalse(deploy.run("infrastructure", self.site)["target_contacted"])
+                self.assertFalse(self.phase("infrastructure")["target_contacted"])
         self.assertEqual(infra.call_count, 3)
         self.assertEqual(apps.call_count, 6)
         self.assertEqual(installed, self.installed.read_bytes())
         for path, raw in original.items(): self.assertEqual(path.read_bytes(), raw)
 
     def test_real_packet_compilation_and_preparation_bind_the_explicit_selection(self):
-        import importlib.util
-        path = Path(__file__).resolve().parents[3] / "blueprints/compile.py"
-        spec = importlib.util.spec_from_file_location("initial_blueprints", path)
-        compiler = importlib.util.module_from_spec(spec); spec.loader.exec_module(compiler)
-        cfg, packet = compiler._compile_guest("influxdb", copy.deepcopy(self.cfg), None, {}, {"influxdb"})
-        source = self.root / "packet.json"; save(source, packet)
-        observed, site = inputs.prepare(source, self.root / "inputs")
-        self.assertEqual(observed, cfg)
-        self.assertEqual(observed["initial_ordinary"], self.cfg["initial_ordinary"])
-        binding = inputs.binding(observed, site)
-        self.assertEqual(binding[initial.BINDING], initial.selection_digest(cfg))
-        self.assertIn(str(self.immutable), binding["input_hashes"])
-        self.assertNotIn(str(self.canonical), binding["input_hashes"])
-        self.assertNotIn("workflow", json.loads(self.immutable.read_bytes()))
+        import component_packet
+        import test_component_packet as packets
+        fixture=packets.PacketIntegrationTests();fixture.setUp();self.addCleanup(fixture.doCleanups)
+        fixture.native('influxdb');fixture.site['apps'].pop('recursive_a')
+        guest=fixture.site['guests']['resolver'];guest['lifecycle']='retained'
+        guest['identity']={'vmid':808,'hostname':self.cfg['guest']['hostname']}
+        context=fixture.site['contexts']['lab'];context['node']=self.cfg['site']['node']
+        context['paths']=copy.deepcopy({key:self.cfg['paths'][key] for key in
+            ('state_root','backup_directory','backup_mount','backup_source')})
+        context['trust']={'ca_file':self.cfg['paths']['ca_file'],'known_hosts':self.cfg['paths']['known_hosts']}
+        fixture.site['apps']['influxdb'].update(lifecycle='retained',identity={'phase':'influxdb','runtime_id':'owned-influx'})
+        fixture.site['evidence']={'initial':{'type':'initial-ordinary','document':copy.deepcopy(self.cfg['initial_ordinary'])}}
+        guest['admission']={'initial_ordinary':{'evidence':'initial'}}
+        packet=component_packet.lower_plan(fixture.resolve(),inputs=self.root/'real-inputs')['resolver']
+        source=self.root/'real-packet.json';save(source,packet)
+        observed,site=component_inputs.prepare(source,self.root/'real-inputs',create=True)
+        self.assertEqual(observed,json.loads(packet['files']['site.json']))
+        self.assertEqual(observed['initial_ordinary'],self.cfg['initial_ordinary'])
+        binding=component_inputs.binding(observed,site)
+        self.assertEqual(binding[initial.BINDING],initial.selection_digest(observed))
+        self.assertIn(str(self.immutable),binding['input_hashes'])
+        self.assertNotIn(str(self.canonical),binding['input_hashes'])
+        self.assertNotIn('workflow',json.loads(self.immutable.read_bytes()))
 
     def test_exact_closed_pins_and_standalone_kind_are_required(self):
         changes = [
@@ -205,7 +161,7 @@ class InitialOrdinaryTests(unittest.TestCase):
                     link = self.root / "link"; link.symlink_to(self.installed); cfg["initial_ordinary"]["installed_site"] = str(link)
                 with self.assertRaises((ValueError, OSError)): initial.inspect(cfg)
                 save(self.installed, old_installed); save(self.immutable, old_copy)
-                save(self.root / "ca", b"fixture public CA\n")
+                save(self.root / "ca", self.ca_raw)
                 save(self.work / "ssh-trust.json", {"address": self.cfg["app"]["address"], "keys": [["ssh-ed25519", "fixture"]]})
 
     def test_canonical_backend_and_bound_evidence_changes_refuse_before_targets(self):
@@ -228,7 +184,7 @@ class InitialOrdinaryTests(unittest.TestCase):
                 save(self.work / "terraform.tfstate", value)
             if variant == "known-hosts": save(self.root / "hosts", b"unrelated ssh-ed25519 fixture\n")
             with self.subTest(variant=variant), self.assertRaises((ValueError, OSError)):
-                deploy.run("infrastructure", self.site)
+                self.phase("infrastructure")
             save(self.canonical, canonical); save(self.work / "terraform.tfstate", state_raw)
             save(self.root / "hosts", b"198.18.25.8 ssh-ed25519 fixture\n")
             self.cfg["initial_ordinary"] = selected
@@ -261,9 +217,9 @@ class InitialOrdinaryTests(unittest.TestCase):
     def test_failed_infrastructure_hold_is_retained_without_replay(self):
         infra, apps = self.runtime()
         infra.side_effect = subprocess.CalledProcessError(7, ["fixture"])
-        with self.assertRaises(subprocess.CalledProcessError): deploy.run("infrastructure", self.site)
+        with self.assertRaises(subprocess.CalledProcessError): self.phase("infrastructure")
         hold = self.work / "ORDINARY-HOLD.json"; original = hold.read_bytes()
-        with self.assertRaises((ValueError, OSError)): deploy.run("infrastructure", self.site)
+        with self.assertRaises((ValueError, OSError)): self.phase("infrastructure")
         self.assertEqual(hold.read_bytes(), original)
         infra.assert_called_once(); apps.assert_not_called()
 
@@ -285,11 +241,11 @@ class InitialOrdinaryTests(unittest.TestCase):
                     else: value = {k: value[k] for k in ("status", "binding", "state_sha256", "result")}; value["binding"].pop(initial.BINDING)
                     save(current, value)
                 with self.subTest(variant=variant), self.assertRaises((ValueError, OSError)):
-                    deploy.run("infrastructure", self.site)
+                    self.phase("infrastructure")
                 save(current, original); save(self.canonical, receipt)
         self.cfg.pop("initial_ordinary")
         with self.assertRaisesRegex(ValueError, "Keep the selected"):
-            deploy.run("infrastructure", self.site)
+            self.phase("infrastructure")
         self.assertEqual(infra.call_count, 1)
 
     def test_new_profile_retains_ordinary_workflow_sequence_and_source_ancestry(self):
@@ -300,9 +256,9 @@ class InitialOrdinaryTests(unittest.TestCase):
             {"GITHUB_SHA": self.revisions[1]},
             {"GITHUB_REPOSITORY": "example/other", "HOMELAB_DEPLOYMENT_WORKFLOW": "example/other/.github/workflows/deploy.yml@refs/heads/main"},
         ):
-            with patch.dict(os.environ, environment), self.assertRaises(ValueError): deploy.run("infrastructure", self.site)
+            with patch.dict(os.environ, environment), self.assertRaises(ValueError): self.phase("infrastructure")
         with patch.object(commands, "is_ancestor", return_value=False), self.assertRaises(ValueError):
-            deploy.run("infrastructure", self.site)
+            self.phase("infrastructure")
         self.assertEqual(infra.call_count, 1)
 
     def test_unselected_malformed_old_binding_keeps_ordinary_provenance_refusal(self):

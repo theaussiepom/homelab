@@ -1,1 +1,16 @@
-[]
+[
+  {
+    "path": "proxmox/applications/tests/protocol-compose-baseline.json",
+    "sha256": "9117177d3f9d11cb60e0b6b878823d8a6254350a2192ca4ef4ad0f6d6c4d6665",
+    "rule": "generic-api-key",
+    "line": 328,
+    "reason": "Expected SHA-256 of public synthetic OAuth fixture output, frozen from the old renderer for byte-parity verification; not an API credential."
+  },
+  {
+    "path": "proxmox/applications/tests/protocol-compose-baseline.json",
+    "sha256": "9117177d3f9d11cb60e0b6b878823d8a6254350a2192ca4ef4ad0f6d6c4d6665",
+    "rule": "generic-api-key",
+    "line": 329,
+    "reason": "Expected SHA-256 of public synthetic OAuth fixture output, frozen from the old renderer for byte-parity verification; not an API credential."
+  }
+]

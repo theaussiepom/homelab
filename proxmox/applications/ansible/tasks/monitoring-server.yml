@@ -32,8 +32,8 @@
 
 - name: Publish the frontend after the initial password and host configuration are complete
   ansible.builtin.copy:
-    src: "{{ app.render_dir }}/compose.yml"
-    dest: /opt/homelab-app/compose.yml
+    src: "{{ monitoring_compose_source | default(app.render_dir + '/compose.yml') }}"
+    dest: "{{ monitoring_compose_file | default('/opt/homelab-app/compose.yml') }}"
     owner: root
     group: root
     mode: '0600'
@@ -42,6 +42,6 @@
 
 - name: Start the configured browser listener
   ansible.builtin.command:
-    argv: [docker, compose, -f, /opt/homelab-app/compose.yml, up, -d, --wait, --wait-timeout, '180', --remove-orphans=false]
+    argv: "{{ ['docker','compose','-f',monitoring_compose_file | default('/opt/homelab-app/compose.yml'),'up','-d','--wait','--wait-timeout','180','--remove-orphans=false'] + (['--no-deps'] + monitoring_services if monitoring_services is defined else []) }}"
   when: monitoring_first_install | default(false)
   no_log: true

@@ -10,7 +10,8 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import render
 import private_io
-from test_foundation import fixture
+from protocol_component_fixtures import dns_apps
+import component_runtime
 from test_plan import fixture as plan_fixture
 
 
@@ -40,7 +41,8 @@ class StrictCleanupTests(unittest.TestCase):
     def test_rendering_does_not_repair_private_artifact_permission_drift(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            cfg = fixture(directory, "ingress")
+            cfg={'schema':component_runtime.SCHEMA,'guest':{'timezone':'Etc/UTC','memory_mib':2048,'os_reserve_mib':256},
+                 'applications':dns_apps(image='example/dns@sha256:'+'a'*64,records={})}
             source = root / "stack.json"
             source.write_text(json.dumps(cfg))
             output = root / "rendered"
@@ -54,7 +56,7 @@ class StrictCleanupTests(unittest.TestCase):
             ]
             first = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(first.returncode, 0, first.stderr)
-            artifact = output / "traefik.yml"
+            artifact = output / "compose.yml"
             artifact.chmod(0o644)
             before = artifact.read_bytes()
             stamps = {p.name: p.stat().st_mtime_ns for p in output.iterdir()}
@@ -82,4 +84,4 @@ class StrictCleanupTests(unittest.TestCase):
         value = plan_fixture()
         value["resource_changes"][0]["change"]["importing"] = {"id": "6100"}
         with self.assertRaises(ValueError):
-            plan_policy.check_plan(value, "pve-lab", 6100, existing=False)
+            plan_policy.check_plan(value, "pve-lab", 6100, existing=False, protected_guests=[9900,9914,9915,9920])

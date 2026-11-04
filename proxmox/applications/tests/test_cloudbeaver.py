@@ -1,160 +1,108 @@
-"""Closed Community rendering and authentication configuration, without private inputs."""
+"""Pure Community protocol/JDBC contracts; no fixed guest-kind wrapper."""
+import base64
 import copy
-import importlib.util
 import json
 from pathlib import Path
 import sys
 import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import cloudbeaver as c
-import render
-import foundation
+from protocol_component_fixtures import cloudbeaver_app
 
 
-def fixture():
-    return {'kind': 'db-tools', 'variant': 'cloudbeaver', 'guest_memory_mib': 2048,
-        'cloudbeaver': {'bind_address': '198.18.30.32', 'public_url': 'https://db.example.invalid',
-          'server_name': 'Database Tools', 'recovery_admin': 'recovery_admin', 'heap_mib': 1024,
-          'auth_headers': {'user': 'X-User', 'team': 'X-Team'},
-          'connections': {'postgresql': {'name': 'PostgreSQL', 'driver': 'postgresql', 'database': 'postgres',
-              'sslmode': 'prefer', 'host': '198.18.31.23', 'port': 5432},
-            'mariadb': {'name': 'MariaDB', 'driver': 'mariadb', 'database': '', 'host': '198.18.32.24', 'port': 3306}},
-          'retained_pgadmin_image': 'dpage/pgadmin4@sha256:' + 'a'*64},
-        'foundation': {'version': 1, 'oidc_issuer': 'https://sso.example.invalid/application/o/database/',
-          'oauth_client_id': 'fixture-client', 'oauth_name': 'Sign in', 'user_claim': 'preferred_username',
-          'secret_files': {'oauth_client_secret': '/private/oauth-secret'}},
-        'services': {k: {'image': 'example.invalid/' + k + '@sha256:' + 'b'*64, 'memory_mib': m,
-                    'cpus': 1, 'pids_limit': 128, 'environment': {}}
-                    for k, m in [('cloudbeaver',1536),('auth_gateway',128)]}}
+def app():
+    return cloudbeaver_app({'oidc_issuer':'https://sso.example.invalid/application/o/database/',
+        'oauth_client_id':'fixture-client','oauth_name':'Sign in','user_claim':'preferred_username'},
+        {'public_url':'https://db.example.invalid'},image='example.invalid/cloudbeaver@sha256:'+'b'*64,
+        gateway_image='example.invalid/gateway@sha256:'+'b'*64)
 
 
 def endpoints():
-    return {**{name: 'https://sso.example.invalid/oidc/' + path for name, path in (
-        ('authorization_url', 'authorize'), ('token_url', 'token'),
-        ('userinfo_url', 'userinfo'), ('jwks_url', 'jwks'))}, 'signing_algorithms': ['RS256']}
+    return {**{name:'https://sso.example.invalid/oidc/'+path for name,path in (
+        ('authorization_url','authorize'),('token_url','token'),('userinfo_url','userinfo'),('jwks_url','jwks'))},
+        'signing_algorithms':['RS256']}
 
 
-class CloudBeaverTests(unittest.TestCase):
-    def test_legacy_variant_and_other_kinds_remain_explicit(self):
-        self.assertFalse(c.selected({'kind':'db-tools'}))
-        self.assertFalse(c.selected({'kind':'music'}))
-        self.assertIsNone(c.validate({'kind':'db-tools'}))
-        for value in ({'kind':'music','variant':'cloudbeaver'}, {'kind':'db-tools','variant':[]},
-                      {'kind':'db-tools','cloudbeaver':{}}):
-            with self.assertRaises(ValueError):c.validate(value)
-
-    def test_closed_input_refusals(self):
-        mutations = [lambda v:v.update(cloudbeaver=None), lambda v:v['cloudbeaver'].update(extra=True),
-          lambda v:v['cloudbeaver'].update(bind_address=None),lambda v:v['cloudbeaver'].update(bind_address='127.0.0.1'),
-          lambda v:v['cloudbeaver'].update(server_name='bad\nname'),lambda v:v['cloudbeaver'].update(recovery_admin='oidc.admin'),
-          lambda v:v['cloudbeaver'].update(heap_mib=True),lambda v:v['cloudbeaver'].update(auth_headers={'user':'X-User','team':'x-user'}),
-          lambda v:v['cloudbeaver'].update(auth_headers={'user':'X-Forwarded-For','team':'X-Team'}),
-          lambda v:v['cloudbeaver'].update(retained_pgadmin_image='latest'),lambda v:v['cloudbeaver'].update(connections=[]),
-          lambda v:v['cloudbeaver']['connections'].update(bad={'driver':[]}),
-          lambda v:v['cloudbeaver']['connections']['postgresql'].update(password='never'),
-          lambda v:v['cloudbeaver']['connections']['postgresql'].update(sslmode='verify-ca'),
-          lambda v:v['cloudbeaver']['connections']['postgresql'].update(port=3306),lambda v:v.update(services={}),
-          lambda v:v['services']['cloudbeaver'].update(environment={'ADMIN_PASSWORD':'never'}),
-          lambda v:v['services']['cloudbeaver'].update(memory_mib=1024)]
-        for mutate in mutations:
-            value=fixture();mutate(value)
-            with self.subTest(value=value),self.assertRaises(ValueError):c.validate(value)
-        for url in (None,'http://db.example.invalid','https://user@db.example.invalid','https://[bad',
-                    'https://db.example.invalid:bad','https://db.example.invalid:0','https://db.example.invalid/a',
-                    'https://db.example.invalid/?bad','https://db.example.invalid/\\bad'):
-            with self.subTest(url=url),self.assertRaises(ValueError):c.https(url)
-        self.assertEqual(c.https('https://db.example.invalid/'),'https://db.example.invalid')
-        self.assertEqual(c.https('https://sso.example.invalid/app/',issuer=True),'https://sso.example.invalid/app/')
-
-    def test_oidc_contract_and_domain_separated_private_files(self):
-        cfg=fixture();self.assertIs(foundation.validate(cfg),cfg['foundation'])
-        self.assertEqual(foundation.source_files(cfg),['/private/oauth-secret'])
-        for change in ({'user_claim':[]},{'version':2},{'oauth_name':'bad\nname'}):
-            value=fixture();value['foundation'].update(change)
-            with self.assertRaises(ValueError):foundation.validate(value)
-        for secret in (b'x',b'a'*32+b'\n',b'a'*32+b'\x00'):
-            with self.assertRaises(ValueError):c.derive(secret,'cookie')
+class CommunityProtocolTests(unittest.TestCase):
+    def test_domain_separated_keys_preserve_private_secret_validation(self):
         secret=b'fixture-secret-entropy-not-production'*2
         self.assertNotEqual(c.derive(secret,'session-cookie'),c.derive(secret,'local-recovery'))
-        files=c.files(cfg,secret);rows={r['path']:r for r in files}
-        self.assertEqual(len(rows),8)
-        self.assertTrue(all(r['mode']=='0400' for r in files))
-        self.assertNotIn(secret.decode(),rows['cloudbeaver-public.json']['content'])
-        self.assertIn(secret.decode(),rows['oauth2-alpha.json']['content'])
-        self.assertNotIn(secret.decode(),rows['oauth2.cfg']['content'])
-        doc=json.loads(rows['cloudbeaver-connections.json']['content'])
-        self.assertEqual(doc['connections']['postgresql']['configuration']['properties'],{'sslmode':'prefer'})
-        self.assertEqual(doc['connections']['mariadb']['configuration']['database'],'')
-        self.assertNotIn('password',doc['connections']['postgresql'])
-        unresolved=copy.deepcopy(cfg['cloudbeaver']);unresolved['connections']['mariadb'].pop('host');unresolved['connections']['mariadb'].pop('port')
-        with self.assertRaises(ValueError):c.connection_document(unresolved)
-        cfg['cloudbeaver']['connections'] = unresolved['connections']
-        self.assertIsNotNone(c.validate(cfg))
+        self.assertEqual(len(c.derive(secret,'session-cookie')),32)
+        for bad in (b'x',b'a'*32+b'\n',b'a'*32+b'\x00',b'',b' '*64,b'x'*65537):
+            with self.subTest(length=len(bad)),self.assertRaises(ValueError):c.derive(bad,'cookie')
 
     def test_gateway_strips_every_auth_header_and_namespaces_verified_user(self):
-        cfg=fixture();cfg['cloudbeaver']['auth_headers']={'user':'X-Custom-User','team':'X-Custom-Team'}
-        alpha,toml=c.gateway(cfg['cloudbeaver'],cfg['foundation'],b'a'*64)
-        rows={r['name']:r for r in alpha['injectRequestHeaders']}
+        value=app();value['settings']['auth_headers']={'user':'X-Custom-User','team':'X-Custom-Team'}
+        alpha,toml=c.gateway(value['settings'],value['authentication_resolved'],b'a'*64)
+        rows={row['name']:row for row in alpha['injectRequestHeaders']}
         self.assertEqual(set(rows),set(c.HEADERS)|{'X-Custom-User','X-Custom-Team'})
-        self.assertTrue(all(r['preserveRequestValue'] is False for r in rows.values()))
+        self.assertTrue(all(row['preserveRequestValue']is False for row in rows.values()))
         self.assertEqual(rows['X-Custom-User']['values'],[{'claimSource':{'claim':'preferred_username','prefix':'oidc.'}}])
         self.assertEqual(rows['X-Custom-Team']['values'],[{'secretSource':{'value':'user'}}])
         self.assertEqual(rows['X-Role-TE']['values'],[])
         self.assertIn('cookie_secure = true',toml);self.assertIn('cookie_samesite = "lax"',toml)
         self.assertNotIn('cookie_domains',toml);self.assertNotIn('insecure',toml)
 
-    def test_explicit_endpoints_preserve_security_and_legacy_discovery_bytes(self):
-        cfg = fixture(); secret = b'a'*64
-        old_alpha, old_options = c.gateway(cfg['cloudbeaver'], cfg['foundation'], secret)
-        self.assertEqual(old_alpha['providers'][0]['oidcConfig'],
-                         {'issuerURL': cfg['foundation']['oidc_issuer'], 'insecureSkipNonce': False})
-        before = copy.deepcopy(cfg)
-        cfg['foundation']['oidc_endpoints'] = endpoints()
-        self.assertIs(foundation.validate(cfg), cfg['foundation'])
-        self.assertEqual(foundation.source_files(cfg), ['/private/oauth-secret'])
-        alpha, options = c.gateway(cfg['cloudbeaver'], cfg['foundation'], secret)
-        provider = alpha['providers'][0]
-        self.assertEqual(provider['oidcConfig'], {
-            **old_alpha['providers'][0]['oidcConfig'], 'skipDiscovery': True,
-            'jwksURL': endpoints()['jwks_url'], 'enabledSigningAlgs': ['RS256']})
-        self.assertEqual({key: provider[key] for key in ('loginURL', 'redeemURL', 'profileURL')},
-                         {'loginURL': endpoints()['authorization_url'], 'redeemURL': endpoints()['token_url'],
-                          'profileURL': endpoints()['userinfo_url']})
-        self.assertEqual(options, old_options)
-        self.assertEqual(alpha['injectRequestHeaders'], old_alpha['injectRequestHeaders'])
-        self.assertEqual(provider['code_challenge_method'], 'S256')
-        self.assertNotIn('insecureSkipIssuerVerification', provider['oidcConfig'])
-        self.assertNotIn('insecureAllowUnverifiedEmail', provider['oidcConfig'])
-        cfg['foundation'].pop('oidc_endpoints')
-        self.assertEqual(cfg, before)
-        self.assertEqual(c.gateway(cfg['cloudbeaver'], cfg['foundation'], secret), (old_alpha, old_options))
+    def test_explicit_endpoints_preserve_nonce_pkce_claim_and_discovery_output(self):
+        value=app();secret=b'a'*64
+        original=c.gateway(value['settings'],value['authentication_resolved'],secret)
+        alpha,options=original
+        self.assertEqual(alpha['providers'][0]['oidcConfig'],{
+            'issuerURL':value['authentication_resolved']['oidc_issuer'],'insecureSkipNonce':False})
+        value['authentication_resolved']['oidc_endpoints']=endpoints()
+        explicit,explicit_options=c.gateway(value['settings'],value['authentication_resolved'],secret)
+        provider=explicit['providers'][0]
+        self.assertEqual(provider['oidcConfig'],{**alpha['providers'][0]['oidcConfig'],
+            'skipDiscovery':True,'jwksURL':endpoints()['jwks_url'],'enabledSigningAlgs':['RS256']})
+        self.assertEqual({key:provider[key]for key in('loginURL','redeemURL','profileURL')},
+            dict(loginURL=endpoints()['authorization_url'],redeemURL=endpoints()['token_url'],profileURL=endpoints()['userinfo_url']))
+        self.assertEqual(explicit_options,options)
+        self.assertEqual(explicit['injectRequestHeaders'],alpha['injectRequestHeaders'])
+        self.assertEqual(provider['code_challenge_method'],'S256')
+        value['authentication_resolved'].pop('oidc_endpoints')
+        self.assertEqual(c.gateway(value['settings'],value['authentication_resolved'],secret),original)
 
-    def test_explicit_endpoint_shape_https_and_signing_algorithm_refusals(self):
-        bad = [None, [], {}, {**endpoints(), 'extra': True}]
-        for field in ('authorization_url', 'token_url', 'userinfo_url', 'jwks_url', 'signing_algorithms'):
-            row = endpoints(); row.pop(field); bad.append(row)
-        for url in (None, 'http://sso.example.invalid/token', 'https://user:pass@sso.example.invalid/token',
-                    'https://sso.example.invalid/token?', 'https://sso.example.invalid/token#',
-                    'https://sso.example.invalid/token?query=1', 'https://sso.example.invalid/token#fragment'):
-            bad.append({**endpoints(), 'token_url': url})
-        for algorithms in (None, 'RS256', [], [True], [[]], ['none'], ['HS256'], ['RS256', 'RS256'], ['RS256']*11):
-            bad.append({**endpoints(), 'signing_algorithms': algorithms})
-        for value in bad:
-            cfg = fixture(); cfg['foundation']['oidc_endpoints'] = value
-            with self.subTest(value=value), self.assertRaises(ValueError):
-                foundation.validate(cfg)
+    def test_metadata_connections_are_password_free_and_require_resolved_engine_listener(self):
+        value=app()['settings'];doc=c.connection_document(value)
+        self.assertEqual(doc['connections']['postgresql']['configuration']['properties'],{'sslmode':'prefer'})
+        self.assertEqual(doc['connections']['mariadb']['configuration']['database'],'')
+        self.assertNotIn('password',doc['connections']['postgresql'])
+        self.assertFalse(doc['connections']['postgresql']['save-password'])
+        for change in ('host','port'):
+            bad=copy.deepcopy(value)
+            if change=='host':bad['connections']['postgresql'].pop('host')
+            else:bad['connections']['postgresql']['port']=3306
+            with self.assertRaises(ValueError):c.connection_document(bad)
 
-    def test_compose_only_gateway_publishes_and_database_bridge_can_egress(self):
-        cfg=fixture();before=copy.deepcopy(cfg);doc=render.compose(cfg)
-        self.assertEqual(cfg,before)
-        self.assertNotIn('ports',doc['services']['cloudbeaver'])
-        self.assertEqual(doc['services']['auth_gateway']['ports'],['198.18.30.32:80:4180'])
-        self.assertEqual(doc['networks'],{'database_tools':{}})
-        self.assertEqual(doc['services']['cloudbeaver']['user'],'8978:8978')
-        self.assertIn('/opt/cloudbeaver/conf/CloudBeaverHealth.java',doc['services']['cloudbeaver']['healthcheck']['test'])
-        self.assertEqual(doc['services']['auth_gateway']['depends_on'],{'cloudbeaver':{'condition':'service_healthy'}})
-        self.assertNotIn('secret',json.dumps(doc))
+    def test_configuration_keeps_closed_trust_and_enables_saved_credentials_only_when_selected(self):
+        value=app()['settings'];original=c.configuration(value)
+        self.assertFalse(original['app']['anonymousAccessEnabled'])
+        self.assertFalse(original['app']['adminCredentialsSaveEnabled'])
+        self.assertEqual(original['app']['enabledAuthProviders'],['local','reverseProxy'])
+        self.assertTrue(original['server']['forceHttps'])
+        value['managed_connections']={'one':{'driver':'postgresql'}}
+        current=c.configuration(value)
+        self.assertTrue(current['app'].pop('adminCredentialsSaveEnabled'))
+        self.assertTrue(current['app'].pop('secretManagerEnabled'))
+        original['app'].pop('adminCredentialsSaveEnabled')
+        self.assertEqual(current,original)
+
+    def test_jdbc_vendor_artifact_is_closed_and_only_selected_for_managed_maria(self):
+        value=app()['settings'];self.assertIsNone(c.jdbc(value))
+        value['managed_connections']={'maria':{'driver':'mariadb'}}
+        artifact={'version':'3.5.11','sha256':'42604178b9e57ec08ee0035079961516f086e455d0141f0b22c6eff29fb2fff4',
+                  'image_filename':'mariadb-java-client-3.5.10.jar'}
+        value['mariadb_jdbc']=artifact
+        actual=c.jdbc(value)
+        self.assertTrue(actual['url'].startswith('https://repo.maven.apache.org/maven2/org/mariadb/jdbc/mariadb-java-client/3.5.11/'))
+        self.assertEqual(actual['target'],'/opt/cloudbeaver/drivers/mariadb/mariadb-java-client-3.5.10.jar')
+        for changes in ({'version':'3.5.10'},{'version':'3.6.0'},{'sha256':'bad'},
+                        {'image_filename':'../other.jar'},{'foreign':True}):
+            bad=copy.deepcopy(value);bad['mariadb_jdbc'].update(changes)
+            with self.subTest(changes=changes),self.assertRaises(ValueError):c.jdbc(bad)
+        value.pop('managed_connections')
+        with self.assertRaises(ValueError):c.jdbc(value)
 
 
 if __name__=='__main__':unittest.main()

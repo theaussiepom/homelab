@@ -15,7 +15,7 @@ class CredentialTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         for name in ("selected", "other"):
             subprocess.run(
                 [
@@ -38,21 +38,23 @@ class CredentialTests(unittest.TestCase):
         self.token = self.directory / "token"
         self.key = self.directory / "key"
         self.public = " ".join((self.root / "selected.pub").read_text().split()[:2])
-        self.value = {
-            "schema": "homelab-guest-deployment-v2",
-            "enabled": True,
-            "files": {
-                "site.json": json.dumps(
-                    {
-                        "paths": {
-                            "api_token": str(self.token),
-                            "private_key": str(self.key),
-                        },
-                        "ssh_public_keys": [self.public],
-                    }
-                )
-            },
-        }
+        from test_component_plan import library, site
+        import component_plan, component_packet
+        spec, source = library(), site()
+        spec['software'] = {'resolver': {'images': {'unbound': 'unbound'}}}
+        spec['runtime_profiles'] = {'resolver': {'containers': {'unbound': {
+            'memory_mib': 256, 'cpu_limit': 1, 'pids_limit': 128}}}}
+        spec['app_profiles']['recursive'].update(software=['resolver'], runtime=['resolver'],
+            health={'ready': {'type':'adapter','check':'readiness'}})
+        source['contexts']['lab']['ssh_public_keys'] = [self.public]
+        source['secret_sources']['token']['path'] = str(self.token)
+        source['secret_sources']['ssh']['path'] = str(self.key)
+        stack = self.root/'library'; stack.mkdir()
+        (stack/'stack.json').write_text(json.dumps(spec))
+        (stack/'images.json').write_text(json.dumps({'unbound': {
+            'repository':'example/unbound','tag':'1','digest':'sha256:'+'a'*64}}))
+        source_file=self.root/'site.json';source_file.write_text(json.dumps(source))
+        self.value=component_packet.lower_plan(component_plan.resolve(stack,source_file))['resolver']
         self.packet = self.root / "packet.json"
         self.environment = {
             "GITHUB_REF": "refs/heads/main",
@@ -97,48 +99,35 @@ class CredentialTests(unittest.TestCase):
         self.assertNotEqual(failed.returncode, 0)
         self.assertIn("Credential binding held", failed.stderr)
 
-    def test_late_bootstrap_hold_stops_next_phase_before_packet_or_actual_credential_writes(self):
+    def test_late_bootstrap_hold_blocks_current_recipe_before_credentials(self):
         import workflows
-        import test_workflow_materialization as oracle
-        from deployment_state import bootstrap_closed
+        job,_=workflows.phase_recipe()
+        script=job['steps'][0]['run']
+        self.assertIn('BOOTSTRAP-CD-HOLD.json',script)
+        for marker in ('CONFIGURING','BOOTSTRAP-CD-HOLD.json'):
+            for phase in ('infrastructure','preparation','independent_app'):
+                with self.subTest(marker=marker,phase=phase):
+                    case=self.root/(marker+'-'+phase);case.mkdir()
+                    (case/marker).write_text('synthetic late hold')
+                    result=subprocess.run(['bash','-e','-c',script.replace(
+                        '/var/lib/homelab-bootstrap',str(case))],capture_output=True)
+                    self.assertNotEqual(result.returncode,0)
+                    self.assertFalse(self.packet.exists())
+                    self.assertEqual(list(self.directory.iterdir()),[])
 
-        stack = self.root / "stack"; stack.mkdir(); oracle.fixture(stack)
-        job = oracle.legacy_models(stack)["guest-automation.yml"]["jobs"]["deploy"]
-        for marker in ("CONFIGURING", "BOOTSTRAP-CD-HOLD.json"):
-            for phase in oracle.PHASES["automation"][1:]:
-                with self.subTest(marker=marker, phase=phase):
-                    case = self.root / (marker + "-" + phase); case.mkdir()
-                    bootstrap = case / "bootstrap"; bootstrap.mkdir()
-                    initial = oracle.phase_steps('automation','infrastructure')[0]['run'].replace("/var/lib/homelab-bootstrap", str(bootstrap))
-                    self.assertEqual(subprocess.run(["bash", "-e", "-c", initial], capture_output=True).returncode, 0)
-                    (bootstrap / marker).write_text("synthetic late hold")
-                    self.packet = case / "packet.json"
-                    self.directory = case / "credentials"; self.directory.mkdir(mode=0o700)
-                    self.token, self.key = self.directory / "token", self.directory / "key"
-                    cfg = json.loads(self.value["files"]["site.json"])
-                    cfg["paths"] = {"api_token": str(self.token), "private_key": str(self.key)}
-                    self.value["files"]["site.json"] = json.dumps(cfg)
-                    steps=oracle.phase_steps('automation',phase)
-                    events = []; blocked = False
-                    for step in steps:
-                        if step["name"] == "Check readiness":
-                            # Only remap the fixed marker directory into this temporary fixture.
-                            script = step["run"].replace("/var/lib/homelab-bootstrap", str(bootstrap))
-                            if subprocess.run(["bash", "-e", "-c", script], capture_output=True).returncode:
-                                blocked = True; break
-                        elif step["name"] == "Check inputs":
-                            events.append("compile"); self.save()
-                        elif step["name"] == "Load credentials":
-                            events.append("credentials"); credentials.bind(self.packet, self.environment)
-                        else:
-                            events.append("deploy")
-                            try: bootstrap_closed(bootstrap)
-                            except ValueError: blocked = True; break
-                    self.assertTrue(blocked)
-                    self.assertEqual({"events": events, "packet": self.packet.exists(),
-                                      "token": self.token.exists(), "key": self.key.exists()},
-                                     {"events": [], "packet": False, "token": False, "key": False})
-                    self.assertEqual((bootstrap / marker).read_text(), "synthetic late hold")
+    def test_unreviewed_push_disabled_and_old_packets_refuse_before_key_check(self):
+        from unittest.mock import patch
+        for field,value in [('GITHUB_REF','refs/heads/feature'),('GITHUB_EVENT_NAME','pull_request')]:
+            self.save()
+            with patch.object(credentials.subprocess,'run') as process,self.assertRaises(ValueError):
+                credentials.bind(self.packet,dict(self.environment,**{field:value}))
+            process.assert_not_called()
+        for change in ({'enabled':False},{'schema':'homelab-guest-deployment-v2'}):
+            original=dict(self.value);self.value.update(change);self.save()
+            with patch.object(credentials.subprocess,'run') as process,self.assertRaises(ValueError):
+                credentials.bind(self.packet,self.environment)
+            process.assert_not_called();self.value=original
+        self.assertEqual(list(self.directory.iterdir()),[])
 
     def test_matching_key_binds_once_without_rotation(self):
         self.save()

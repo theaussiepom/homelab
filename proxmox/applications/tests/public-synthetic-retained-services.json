@@ -1,0 +1,359 @@
+{
+  "cases": {
+    "node_red": {
+      "app": {
+        "adapter": "node_red",
+        "authentication_resolved": {
+          "client_id": "example-node-red-client",
+          "identity_url": "https://service-6.example.invalid",
+          "node_red_url": "https://service-4.example.invalid",
+          "provider_slug": "nodered"
+        },
+        "containers": {
+          "node_red": {
+            "cpu_limit": 1,
+            "memory_mib": 1024,
+            "pids_limit": 256,
+            "user": "node-red"
+          }
+        },
+        "identity": {
+          "networks": {},
+          "services": {
+            "node_red": "node_red"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {
+          "web": {
+            "bind": "wildcard",
+            "namespace": "host",
+            "port": 1880,
+            "protocol": "tcp",
+            "service": "node_red"
+          }
+        },
+        "properties": {},
+        "resolved_connections": {
+          "broker.mqtt": {
+            "hostname": "broker.mqtt",
+            "target": {
+              "address": "198.18.30.37"
+            }
+          }
+        },
+        "software_selection": {
+          "images": {
+            "node_red": {
+              "archive": "/var/lib/homelab-inputs/private-images/node_red.tar",
+              "archive_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "image": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          }
+        },
+        "storage_paths": {
+          "config": {
+            "kind": "directory",
+            "read_only": false,
+            "source": "/srv/homelab/data/node-red/config",
+            "target": "/config"
+          },
+          "data": {
+            "kind": "directory",
+            "read_only": false,
+            "source": "/srv/homelab/data/node-red/data",
+            "target": "/data"
+          },
+          "healthcheck": {
+            "kind": "file",
+            "read_only": true,
+            "source": "/srv/homelab/data/node-red/healthcheck.js",
+            "target": "/healthcheck.js"
+          },
+          "settings": {
+            "kind": "file",
+            "read_only": true,
+            "source": "/srv/homelab/data/node-red/runtime-settings.js",
+            "target": "/runtime-settings.js"
+          }
+        }
+      },
+      "expected_service": {
+        "command": [
+          "--settings",
+          "/runtime-settings.js"
+        ],
+        "cpus": 1,
+        "entrypoint": [
+          "./entrypoint.sh"
+        ],
+        "environment": {
+          "FLOWS": "/config/flows.json",
+          "NODE_RED_EXTERNAL_URL": "https://service-4.example.invalid",
+          "NODE_RED_IDENTITY_URL": "https://service-6.example.invalid",
+          "NODE_RED_OIDC_CLIENT_ID": "example-node-red-client",
+          "NODE_RED_OIDC_PROVIDER": "nodered",
+          "TZ": "Australia/Brisbane"
+        },
+        "extra_hosts": {
+          "broker.mqtt": "198.18.30.37"
+        },
+        "image": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "1024m",
+        "network_mode": "host",
+        "pids_limit": 256,
+        "pull_policy": "never",
+        "restart": "always",
+        "stop_grace_period": "60s",
+        "user": "node-red",
+        "volumes": [
+          "/srv/homelab/data/node-red/data:/data",
+          "/srv/homelab/data/node-red/config:/config",
+          "/srv/homelab/data/node-red/runtime-settings.js:/runtime-settings.js:ro",
+          "/srv/homelab/data/node-red/healthcheck.js:/healthcheck.js:ro"
+        ]
+      },
+      "guest": {
+        "timezone": "Australia/Brisbane"
+      }
+    },
+    "winet": {
+      "app": {
+        "adapter": "winet",
+        "containers": {
+          "winet": {
+            "cpu_limit": 1,
+            "memory_mib": 256,
+            "pids_limit": 128
+          }
+        },
+        "identity": {
+          "networks": {},
+          "runtime_directory": "/opt/homelab-app/runtime",
+          "services": {
+            "winet": "winet"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {},
+        "properties": {
+          "mqtt_prefix": "homeassistant"
+        },
+        "resolved_connections": {
+          "broker.mqtt": {
+            "hostname": "broker.mqtt",
+            "target": {
+              "address": "198.18.30.37"
+            }
+          }
+        },
+        "settings": {
+          "configuration_file": "/var/lib/homelab-inputs/winet-options.json",
+          "inverter_address": "198.19.107.23",
+          "mqtt_prefix": "homeassistant",
+          "mqtt_server": "mqtt://broker.mqtt:1883"
+        },
+        "software_selection": {
+          "images": {
+            "winet": {
+              "image": "ghcr.io/theaussiepom/winet-extractor@sha256:82c6b886967995f0a3cfe6fb5e20eeef70d10aa525d5bd824064eb272e1ce51a"
+            }
+          }
+        },
+        "storage_paths": {}
+      },
+      "expected_service": {
+        "cpus": 1,
+        "environment": {
+          "TZ": "Australia/Brisbane"
+        },
+        "extra_hosts": {
+          "broker.mqtt": "198.18.30.37"
+        },
+        "healthcheck": {
+          "interval": "30s",
+          "retries": 3,
+          "start_period": "30s",
+          "test": [
+            "CMD",
+            "node",
+            "-e",
+            "const c=require('./build/src/config').loadConfig();\nconst slug=require('./build/src/homeassistant').hostSlug(c.winets[0].host);\nconst topics=new Set(['winet-extractor/'+slug+'/status','winet-extractor/'+slug+'/availability']);\nconst latest=new Map([...topics].map(topic=>[topic,'unknown']));\nconst client=require('mqtt').connect(c.mqttUrl,{reconnectPeriod:0,connectTimeout:5000});\nconst done=code=>{client.end(true);process.exit(code)};\nsetTimeout(()=>done(1),10000);\nclient.on('error',()=>done(1));\nclient.on('connect',()=>client.subscribe([...topics]));\nclient.on('message',(topic,payload)=>{if(!latest.has(topic))return;latest.set(topic,payload.toString());if([...latest.values()].every(value=>value==='online'))done(0)});\n"
+          ],
+          "timeout": "15s"
+        },
+        "image": "ghcr.io/theaussiepom/winet-extractor@sha256:82c6b886967995f0a3cfe6fb5e20eeef70d10aa525d5bd824064eb272e1ce51a",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "256m",
+        "network_mode": "host",
+        "pids_limit": 128,
+        "pull_policy": "missing",
+        "restart": "always",
+        "stop_grace_period": "60s",
+        "volumes": [
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/winet-options.json",
+            "target": "/data/options.json",
+            "type": "bind"
+          }
+        ]
+      },
+      "guest": {
+        "timezone": "Australia/Brisbane"
+      }
+    },
+    "zigbee2mqtt": {
+      "app": {
+        "adapter": "zigbee2mqtt",
+        "containers": {
+          "zigbee2mqtt": {
+            "cpu_limit": 2,
+            "memory_mib": 512,
+            "pids_limit": 128
+          }
+        },
+        "identity": {
+          "networks": {
+            "default": "default"
+          },
+          "services": {
+            "zigbee2mqtt": "zigbee2mqtt"
+          }
+        },
+        "lifecycle": "retained",
+        "listeners": {
+          "web": {
+            "bind": "wildcard",
+            "interface": "private",
+            "namespace": "app-network",
+            "port": 8099,
+            "protocol": "tcp",
+            "publication_address": "198.18.30.22",
+            "publish": {
+              "interface": "web",
+              "port": 8099,
+              "scope": "guest-interface"
+            },
+            "service": "zigbee2mqtt"
+          }
+        },
+        "properties": {},
+        "resolved_connections": {
+          "broker.mqtt": {
+            "hostname": "broker.mqtt",
+            "target": {
+              "address": "198.18.30.37"
+            }
+          }
+        },
+        "settings": {
+          "adapter": "ember",
+          "bind_address": "198.18.30.22",
+          "frontend_port": 8099,
+          "mqtt_base_topic": "home",
+          "mqtt_server": "mqtt://broker.mqtt:1883",
+          "serial_device": "/dev/serial/by-id/usb-example-coordinator"
+        },
+        "software_selection": {
+          "images": {
+            "zigbee2mqtt": {
+              "image": "koenkk/zigbee2mqtt@sha256:fef0de769dcd04c27b3a6d277b61046eb96284bdd4198dcb1687c3a01b3020f3"
+            }
+          }
+        },
+        "storage_paths": {
+          "data": {
+            "kind": "directory",
+            "read_only": false,
+            "source": "/srv/homelab/data/zigbee2mqtt",
+            "target": "/app/data"
+          }
+        }
+      },
+      "expected_service": {
+        "cpus": 2,
+        "devices": [
+          "/dev/serial/by-id/usb-example-coordinator:/dev/serial/by-id/usb-example-coordinator:rw"
+        ],
+        "environment": {
+          "TZ": "Australia/Brisbane"
+        },
+        "extra_hosts": {
+          "broker.mqtt": "198.18.30.37"
+        },
+        "healthcheck": {
+          "interval": "5s",
+          "retries": 30,
+          "start_period": "30s",
+          "test": [
+            "CMD",
+            "node",
+            "-e",
+            "const h=require('http');const q=h.get('http://127.0.0.1:8099/',r=>process.exit(r.statusCode===200?0:1));q.setTimeout(3000,()=>{q.destroy();process.exit(1)});q.on('error',()=>process.exit(1))"
+          ],
+          "timeout": "4s"
+        },
+        "image": "koenkk/zigbee2mqtt@sha256:fef0de769dcd04c27b3a6d277b61046eb96284bdd4198dcb1687c3a01b3020f3",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "512m",
+        "pids_limit": 128,
+        "ports": [
+          "198.18.30.22:8099:8099/tcp"
+        ],
+        "pull_policy": "missing",
+        "restart": "always",
+        "stop_grace_period": "60s",
+        "volumes": [
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "source": "/srv/homelab/data/zigbee2mqtt",
+            "target": "/app/data",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": false,
+            "source": "/dev/serial/by-id/usb-example-coordinator",
+            "target": "/dev/ttyACM0",
+            "type": "bind"
+          }
+        ]
+      },
+      "guest": {
+        "timezone": "Australia/Brisbane"
+      }
+    }
+  },
+  "framework": "f28725b1e8334a0baba26dfc2fa623cb3a63cdf5",
+  "schema": "public-synthetic-retained-handler-baseline-v1",
+  "site_source_sha256": "dac16f5dc6fb3d5af6e3d22f459d337ad4d8d4736ce8b189de881e71f1533652",
+  "source_is_public_example": true,
+  "stack": "70d694b38bd8df51dafe7282de9fb2bdbc990fe9"
+}

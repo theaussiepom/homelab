@@ -15,6 +15,10 @@ variable "guest" {
   type = any
 }
 
+variable "protected_guests" {
+  type = list(number)
+}
+
 variable "ssh_public_keys" {
   type = list(string)
   validation {
@@ -28,6 +32,7 @@ module "guest" {
   node            = var.site.node
   guest           = var.guest
   ssh_public_keys = var.ssh_public_keys
+  protected_guests = var.protected_guests
 }
 
 output "identity" {

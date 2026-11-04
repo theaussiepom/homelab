@@ -20,7 +20,7 @@ from urllib.request import (
 import discovery
 import guest_identity
 import host_devices
-from guest_contract import SOURCE
+SOURCE = Path(__file__).resolve().parent
 from private_io import (
     sha,
     write,
@@ -240,6 +240,7 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
         ignore=shutil.ignore_patterns(".terraform", "*.tfstate*", "*.tfplan"),
     )
     variables = {k: cfg[k] for k in ("site", "guest", "ssh_public_keys")}
+    variables['protected_guests'] = cfg['deployment']['protected_guests']
     variables["guest"] = dict(
         {key: value for key, value in cfg["guest"].items() if key != "serial_device"},
         interfaces=[
@@ -293,6 +294,7 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
         cfg["guest"]["vmid"],
         existing=existing,
         serial_device=cfg["guest"].get("serial_device"),
+        protected_guests=cfg['deployment']['protected_guests'],
         **({"reviewed_drift": reviewed_drift} if reviewed_drift is not None else {}),
     )
     if state_identity is not None:

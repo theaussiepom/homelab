@@ -147,11 +147,12 @@ def apply_native(values):
 SHELL = "import json,sys; v=json.loads(sys.stdin.read()); n={'__name__':'typed_identity_callbacks'}; exec(compile(v['source'],'identity_callbacks.py','exec'),n); print(json.dumps(n['apply_native'](v['configuration'])))"
 
 
-def run(values, compose):
+def run(values, compose, service='server'):
     validate(values)
+    need(isinstance(service,str) and re.fullmatch('[a-z0-9][a-z0-9_-]{0,127}',service))
     payload = json.dumps({'source': Path(__file__).read_text(), 'configuration': values})
     result = subprocess.run(['docker', 'compose', '-f', str(compose), 'exec', '-T',
-        '-e', 'PGOPTIONS=-c default_transaction_read_only=on', 'server', 'python', 'manage.py', 'shell',
+        '-e', 'PGOPTIONS=-c default_transaction_read_only=on', service, 'python', 'manage.py', 'shell',
         '-c', SHELL], input=payload, text=True, capture_output=True, timeout=60, check=True)
     # Native framework startup may log, but its private output is never echoed.
     rows = [json.loads(row) for row in result.stdout.splitlines() if row.startswith('{"callbacks":')]
@@ -166,8 +167,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', required=True, type=Path)
     parser.add_argument('--compose', required=True, type=Path)
+    parser.add_argument('--service', default='server')
     args = parser.parse_args()
-    print(json.dumps(run(json.loads(args.config.read_text()), args.compose), sort_keys=True))
+    print(json.dumps(run(json.loads(args.config.read_text()), args.compose, args.service), sort_keys=True))
 
 
 if __name__ == '__main__':

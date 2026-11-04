@@ -11,6 +11,8 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import coordinated_generation as generation
 import deployment_inputs
+import component_inputs
+from unittest.mock import patch
 import initial_ordinary as initial
 import private_io as io
 from custody_fixtures import save, backend, legacy_canonical, legacy_immutable
@@ -113,13 +115,19 @@ class ZigbeeInitialTests(unittest.TestCase):
                 initial.inspect(self.cfg)
 
     def test_new_helper_inputs_are_hashed_without_inventing_old_hashes(self):
-        hashes = deployment_inputs.input_hashes(self.cfg)
-        for name in ("host_device_key", "host_known_hosts"):
-            path = self.cfg["paths"][name]
-            self.assertNotIn(path, self.old["binding"]["input_hashes"])
-            self.assertEqual(hashes[path], io.sha(Path(path)))
-        key = Path(self.cfg["paths"]["host_device_key"]); key.unlink()
-        with self.assertRaises(FileNotFoundError): deployment_inputs.input_hashes(self.cfg)
+        runtime=self.root/'component-runtime.json';save(runtime,{'applications':{}})
+        self.cfg['deployment']={'runtime_file':str(runtime),'input_directory':str(self.root),
+            'input_identity':'a'*64,'protected_guests':[9900,9914,9915,9920]}
+        site=self.root/'current-site.json';save(site,self.cfg)
+        with patch.object(component_inputs,'inspect',side_effect=lambda *args:{}), \
+                patch.object(deployment_inputs,'source_hash',return_value='b'*64):
+            hashes=component_inputs.binding(self.cfg,site)['input_hashes']
+            for name in ('host_device_key','host_known_hosts'):
+                path=self.cfg['paths'][name]
+                self.assertNotIn(path,self.old['binding']['input_hashes'])
+                self.assertEqual(hashes[path],io.sha(Path(path)))
+            key=Path(self.cfg['paths']['host_device_key']);key.unlink()
+            with self.assertRaises(FileNotFoundError):component_inputs.binding(self.cfg,site)
 
     def test_first_anchor_later_success_and_rollback_use_existing_readonly_classifier(self):
         _, member, raw = initial.inspect(self.cfg)

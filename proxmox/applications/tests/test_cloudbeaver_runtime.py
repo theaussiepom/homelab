@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import runpy
 import stat
 import sys
@@ -21,7 +22,7 @@ r=importlib.util.module_from_spec(spec);spec.loader.exec_module(r)
 class RuntimeTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
-        self.root=Path(self.temp.name);self.root.chmod(0o700)
+        self.root=Path(self.temp.name).resolve();self.root.chmod(0o700)
         self.ws=self.root/'workspace';self.custody=self.root/'custody';self.pg=self.root/'pgadmin'
         self.owner={'node':'fixture-pve','vmid':808,'hostname':'tools'}
         self.config={'workspace':str(self.ws),'project':'homelab-db-tools',
@@ -31,18 +32,28 @@ class RuntimeTests(unittest.TestCase):
               'mariadb':{'name':'MariaDB','driver':'mariadb','host':'198.18.32.24','port':3306,'database':''}}}
         for name,value in [('WORKSPACE',self.ws),('CUSTODY',self.custody),('PGADMIN',self.pg),('PERMISSIONS',self.root/'permissions.json')]:
             p=patch.object(r,name,value);p.start();self.addCleanup(p.stop)
-        original=Path.lstat
-        def lstat(path,*a,**kw):
-            value=original(path,*a,**kw);rows=list(value)
-            rows[4]=8978 if path==self.ws or self.ws in path.parents or path==r.PERMISSIONS else 5050 if path==self.pg else 0
-            rows[5]=rows[4]
-            return os.stat_result(rows)
-        p=patch.object(Path,'lstat',lstat);p.start();self.addCleanup(p.stop)
-        p=patch.object(r.os,'chown');self.chown=p.start();self.addCleanup(p.stop)
-        p=patch.object(r.os,'fchown');p.start();self.addCleanup(p.stop)
+        # Preserve real anchored traversal; virtualize only numeric ownership.
+        self.owners={};self.real_stat=os.stat;self.real_lstat=os.lstat;self.real_fstat=os.fstat;self.real_open=os.open
+        def metadata(row):
+            fields={name:getattr(row,name) for name in dir(row) if name.startswith('st_')}
+            uid,gid=self.owners.get((row.st_dev,row.st_ino),(0,0));fields.update(st_uid=uid,st_gid=gid)
+            return SimpleNamespace(**fields)
+        def chown(path,uid,gid):
+            row=self.real_lstat(path);self.owners[(row.st_dev,row.st_ino)]=(uid,gid)
+        def fchown(fd,uid,gid):
+            row=self.real_fstat(fd);self.owners[(row.st_dev,row.st_ino)]=(uid,gid)
+        def open_file(path,flags,*args,**kwargs):
+            fd=self.real_open(path,flags,*args,**kwargs)
+            if flags & os.O_CREAT and flags & os.O_EXCL:fchown(fd,0,0)
+            return fd
+        for name,target in [('stat',lambda *a,**kw:metadata(self.real_stat(*a,**kw))),
+                ('lstat',lambda *a,**kw:metadata(self.real_lstat(*a,**kw))),
+                ('fstat',lambda fd:metadata(self.real_fstat(fd))),('open',open_file),('fchown',fchown)]:
+            p=patch.object(r.os,name,target);p.start();self.addCleanup(p.stop)
+        p=patch.object(r.os,'chown',side_effect=chown);self.chown=p.start();self.addCleanup(p.stop)
         r.create(r.PERMISSIONS,{name:['user'] for name in self.config['connections']},uid=8978,mode=0o400)
 
-    def own(self):return r.workspace(self.owner)
+    def own(self):return r.workspace(self.owner,self.config)
 
     def seed_metadata(self):
         import cloudbeaver
@@ -58,7 +69,7 @@ class RuntimeTests(unittest.TestCase):
         p.chmod(0o644)
         with self.assertRaises(ValueError):r.private(p)
         p.unlink();p.symlink_to(self.custody/'workspace.json')
-        with self.assertRaises(ValueError):r.private(p)
+        with self.assertRaises(OSError):r.private(p)
         p.unlink();p.write_bytes(b'x'*(1024*1024+1));p.chmod(0o600)
         with self.assertRaises(ValueError):r.private(p)
 
@@ -81,7 +92,7 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.own()
 
     def container(self):
-        self.own();self.pg.mkdir();(self.pg/'retained.sqlite').write_bytes(b'identity-and-state')
+        self.own();self.pg.mkdir();r.os.chown(self.pg,5050,5050);(self.pg/'retained.sqlite').write_bytes(b'identity-and-state')
         return {'Id':'f'*64,'Config':{'Image':self.config['retained_pgadmin_image'],
             'Labels':{'com.docker.compose.project':'homelab-db-tools','com.docker.compose.service':'pgadmin'}},
             'Mounts':[{'Destination':'/var/lib/pgadmin','Type':'bind','Source':str(self.pg)}],
@@ -120,7 +131,8 @@ class RuntimeTests(unittest.TestCase):
 
     def health_boundary(self, rows_as_lines=False, change=None):
         names=['cloudbeaver','auth_gateway'];rows=[{'Service':n,'ID':n} for n in names]
-        docs={n:{'Config':{'User':'8978:8978' if n=='cloudbeaver' else '65532:65532'},
+        docs={n:{'Config':{'User':'8978:8978' if n=='cloudbeaver' else '65532:65532',
+            'Labels':{'com.docker.compose.project':self.config['project'],'com.docker.compose.service':n}},
           'HostConfig':{'PortBindings':{} if n=='cloudbeaver' else {'4180/tcp':[{'HostIp':self.config['bind_address'],'HostPort':'80'}]},
                         'NetworkMode':'homelab-db-tools_database_tools'},
           'NetworkSettings':{'Networks':{'homelab-db-tools_database_tools':{}}},

@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 from urllib.parse import urlsplit
 
-from private_io import read_json, require
+from private_io import decode_json, require
 
 RUNTIME = "/opt/homelab-app/runtime/winet-options.json"
 FIELDS = {"configuration_file", "inverter_address", "mqtt_server", "mqtt_prefix"}
@@ -16,14 +16,9 @@ OPTIONS = {
 }
 
 
-def validate(cfg):
-    selected = cfg.get("winet")
-    if selected is None:
-        require("winet" not in cfg.get("services", {}), "Declare WiNet settings with its service")
-        return None
-    require(cfg.get("kind") == "zigbee2mqtt" and isinstance(selected, dict)
-            and set(selected) == FIELDS and "winet" in cfg.get("services", {}),
-            "WiNet belongs beside Zigbee with its closed options contract")
+def validate_settings(selected):
+    """Pure declared inverter/MQTT metadata; independent of guest placement."""
+    require(isinstance(selected, dict) and set(selected) == FIELDS, "Use the closed WiNet settings contract")
     path = selected["configuration_file"]
     require(isinstance(path, str) and Path(path).is_absolute() and ".." not in Path(path).parts,
             "Select one absolute private WiNet options file")
@@ -37,21 +32,14 @@ def validate(cfg):
     require(isinstance(selected["mqtt_prefix"], str)
             and re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9/_-]{0,127}", selected["mqtt_prefix"]),
             "Preserve the bounded MQTT discovery prefix")
-    service = cfg["services"]["winet"]
-    require(not any(service.get(k) for k in ("environment", "extra_mounts"))
-            and not any(k in service for k in ("command", "entrypoint", "user")),
-            "Use the upstream WiNet entrypoint and private options without overrides")
     return selected
 
 
-def source_files(cfg):
-    selected = validate(cfg)
-    return [] if selected is None else [selected["configuration_file"]]
 
 
-def options(cfg):
-    selected = validate(cfg)
-    value = read_json(Path(selected["configuration_file"]), private=True)
+
+
+def _options(value, selected):
     require(isinstance(value, dict) and not value.keys() - OPTIONS,
             "Use upstream WiNet JSON options without custom certificate fields")
     require(value.get("winet_host") == selected["inverter_address"]
@@ -72,23 +60,17 @@ def options(cfg):
     return value
 
 
-def files(cfg):
-    # Validate options before publishing any rendered file; never log their values.
-    return [{"path": "winet-options.json", "uid": 0, "gid": 0, "mode": "0600",
-             "content": json.dumps(options(cfg), sort_keys=True) + "\n"}]
+def options_bytes(raw, selected):
+    """Parse only supplied private bytes through the existing options checks."""
+    validate_settings(selected)
+    require(isinstance(raw, bytes), "Use selected options bytes")
+    return _options(decode_json(raw), selected)
 
 
-def configure(cfg, document):
-    if validate(cfg) is None:
-        return document
-    service = document["services"]["winet"]
-    service["volumes"] = [{"type": "bind", "source": RUNTIME, "target": "/data/options.json",
-                           "read_only": True, "bind": {"create_host_path": False}}]
-    service["healthcheck"] = {
-        "test": ["CMD", "node", "-e", HEALTH],
-        "interval": "30s", "timeout": "15s", "retries": 3, "start_period": "30s",
-    }
-    return document
+
+
+
+
 
 
 # Read retained availability through the broker, never open another inverter session.

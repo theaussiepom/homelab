@@ -1,15 +1,11 @@
 """Closed clean Zabbix stack and active-only native agent configuration."""
 
 import hashlib
-import ipaddress
 import json
-import math
 from pathlib import Path
 import re
 import ssl
 from urllib.parse import urlsplit
-from private_io import regular
-from container_policy import restart_policy
 
 ROOT = Path(__file__).with_name("monitoring")
 VERSIONS = json.loads((ROOT / "versions.json").read_text())
@@ -61,86 +57,6 @@ def saml_settings(value):
             "idp": {"x509certMulti": {"signing": [cert]}}}
 
 
-def validate(cfg):
-    require(
-        set(cfg) <= {"kind", "guest_memory_mib", "timezone", "services", "monitoring"}
-        and cfg["kind"] == "monitoring",
-        "Use the closed clean monitoring configuration",
-    )
-    m = cfg["monitoring"]
-    require(
-        set(m) - {"saml"}
-        == {
-            "version",
-            "bind_address",
-            "postgresql_host",
-            "postgresql_database",
-            "postgresql_user",
-            "secret_files",
-        }
-        and m["version"] == VERSIONS["version"],
-        "Select the tested matching Zabbix release",
-    )
-    if "saml" in m:
-        saml_settings(m["saml"])
-    address = ipaddress.IPv4Address(m["bind_address"])
-    require(
-        not (
-            address.is_unspecified
-            or address.is_loopback
-            or address.is_multicast
-            or address.is_link_local
-        ),
-        "Bind monitoring only to its selected guest backend address",
-    )
-    require(
-        re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9.-]*", text(m["postgresql_host"])),
-        "Invalid database host",
-    )
-    for key in ("postgresql_user", "postgresql_database"):
-        require(
-            re.fullmatch(r"[a-z][a-z0-9_]{0,62}", text(m[key])),
-            "Use a dedicated database and owner",
-        )
-        require(
-            m[key] not in {"postgres", "template0", "template1"},
-            "Do not use a cluster administrator or system database",
-        )
-    require(
-        set(m["secret_files"]) == {"database_password", "proxmox_ca"},
-        "Supply only the two selected runtime files",
-    )
-    for path in m["secret_files"].values():
-        require(
-            Path(text(path)).is_absolute(),
-            "Runtime inputs must use absolute private paths",
-        )
-    require(
-        set(cfg["services"]) == {"zabbix_server", "zabbix_web"},
-        "Select only the server and frontend",
-    )
-    memory = 256
-    for name, service in cfg["services"].items():
-        require(
-            set(service) - {"restart"} == {"image", "memory_mib", "cpus", "pids_limit"}
-            and service["image"] == VERSIONS[name],
-            "Use matching pinned official images and bounded resources",
-        )
-        restart_policy(service)
-        for key in ("memory_mib", "cpus", "pids_limit"):
-            value = service[key]
-            require(
-                type(value) in (int, float) and math.isfinite(value) and value > 0,
-                "Invalid resource limit",
-            )
-        memory += service["memory_mib"]
-    require(
-        type(cfg["guest_memory_mib"]) is int and memory <= cfg["guest_memory_mib"],
-        "Reserve 256 MiB for the guest OS",
-    )
-    text(cfg.get("timezone", "Etc/UTC"))
-    check_templates()
-    return m
 
 
 def check_templates():
@@ -152,59 +68,15 @@ def check_templates():
         )
 
 
-def source_files(cfg):
-    return list(validate(cfg)["secret_files"].values())
 
 
-def files(cfg):
-    m = validate(cfg)
-    result = []
-    for key, filename in [
-        ("database_password", "database-password"),
-        ("proxmox_ca", "proxmox-ca.pem"),
-    ]:
-        value = regular(
-            Path(m["secret_files"][key]),
-            private=key == "database_password",
-            limit=65536,
-            modes=(0o400, 0o600),
-        ).decode()
-        require(
-            bool(value.strip())
-            and "\x00" not in value
-            and len(value.encode()) <= 65536,
-            "Invalid runtime file",
-        )
-        if key == "database_password":
-            text(value.rstrip("\n"))
-        else:
-            require(
-                value.count("-----BEGIN CERTIFICATE-----") == 1
-                and value.count("-----END CERTIFICATE-----") == 1,
-                "Supply the single trusted Proxmox root CA certificate",
-            )
-        result.append(
-            {
-                "path": filename,
-                "content": value,
-                "uid": 1997,
-                "gid": 1995,
-                "mode": "0400",
-            }
-        )
-    if m.get("saml", {}).get("default_login") == "saml":
-        result.append({
-            "path": "saml-login.php",
-            "content": (ROOT / "saml-login.php").read_text(),
-            "uid": 1997,
-            "gid": 1995,
-            "mode": "0400",
-        })
-    return result
 
 
-def compose(cfg):
-    m = validate(cfg)
+def service_configuration(m, services, *, mount, timezone='Etc/UTC',
+                          server_service='zabbix_server', server_ports=None, web_ports=None):
+    """Pure protocol/service transformation; no private runtime file reads."""
+    require(isinstance(server_service, str) and re.fullmatch('[a-z0-9][a-z0-9_-]{0,127}', server_service),
+            'Use the exact owned monitoring server service name')
     database = {
         "DB_SERVER_HOST": m["postgresql_host"],
         "DB_SERVER_PORT": "5432",
@@ -212,53 +84,22 @@ def compose(cfg):
         "POSTGRES_DB": m["postgresql_database"],
         "POSTGRES_PASSWORD_FILE": "/run/secrets/database-password",
         "ZBX_DBTLSCONNECT": "required",
-        "TZ": cfg.get("timezone", "Etc/UTC").replace("$", "$$"),
+        "TZ": timezone.replace("$", "$$"),
     }
-    result = {"name": "homelab-monitoring", "services": {}}
-    for name, value in cfg["services"].items():
-        service = {
-            "image": value["image"],
-            "pull_policy": "missing",
-            "restart": restart_policy(value),
-            "mem_limit": str(value["memory_mib"]) + "m",
-            "cpus": value["cpus"],
-            "pids_limit": value["pids_limit"],
-            "stop_grace_period": "60s",
-            "logging": {
-                "driver": "json-file",
-                "options": {"max-size": "10m", "max-file": "3"},
-            },
-            "environment": dict(database),
-            "volumes": [
-                {
-                    "type": "bind",
-                    "source": "/opt/homelab-app/runtime/database-password",
-                    "target": "/run/secrets/database-password",
-                    "read_only": True,
-                    "bind": {"create_host_path": False},
-                }
-            ],
-        }
-        result["services"][name] = service
-    server, web = result["services"]["zabbix_server"], result["services"]["zabbix_web"]
+    for service in services.values():
+        service['environment'] = dict(database)
+        service['volumes'] = [mount('database-password', '/run/secrets/database-password')]
+    server, web = services["zabbix_server"], services["zabbix_web"]
     server["environment"].update(
         {"ZBX_STARTREPORTWRITERS": "0", "ZBX_STARTBROWSERPOLLERS": "0"}
     )
-    server["volumes"].append(
-        {
-            "type": "bind",
-            "source": "/opt/homelab-app/runtime/proxmox-ca.pem",
-            "target": "/var/lib/zabbix/ssl/ssl_ca/proxmox-ca.pem",
-            "read_only": True,
-            "bind": {"create_host_path": False},
-        }
-    )
-    server["ports"] = [m["bind_address"] + ":10051:10051"]
+    server['volumes'].append(mount('proxmox-ca.pem', '/var/lib/zabbix/ssl/ssl_ca/proxmox-ca.pem'))
+    server["ports"] = server_ports if server_ports is not None else [m["bind_address"] + ":10051:10051"]
     web["environment"].update(
         {
-            "ZBX_SERVER_HOST": "zabbix_server",
+            "ZBX_SERVER_HOST": server_service,
             "ZBX_SERVER_PORT": "10051",
-            "PHP_TZ": cfg.get("timezone", "Etc/UTC"),
+            "PHP_TZ": timezone,
             "ZBX_DB_ENCRYPTION": "true",
         }
     )
@@ -266,16 +107,12 @@ def compose(cfg):
         web["environment"]["ZBX_SSO_SETTINGS"] = json.dumps(
             saml_settings(m["saml"]), sort_keys=True, separators=(",", ":"))
         if m["saml"].get("default_login") == "saml":
-            web["volumes"].append({
-                "type": "bind",
-                "source": "/opt/homelab-app/runtime/saml-login.php",
-                "target": "/usr/share/zabbix/local/app/views/general.login.php",
-                "read_only": True,
-                "bind": {"create_host_path": False},
-            })
-    web["ports"] = [m["bind_address"] + ":8080:8080", "127.0.0.1:8081:8080"]
-    web["depends_on"] = {"zabbix_server": {"condition": "service_started"}}
-    return result
+            web['volumes'].append(mount('saml-login.php', '/usr/share/zabbix/local/app/views/general.login.php'))
+    web["ports"] = web_ports if web_ports is not None else [m["bind_address"] + ":8080:8080", "127.0.0.1:8081:8080"]
+    web["depends_on"] = {server_service: {"condition": "service_started"}}
+    return services
+
+
 
 
 def agent_config(value):

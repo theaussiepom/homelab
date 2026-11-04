@@ -33,22 +33,17 @@ def source_path(path):
     return path
 
 
-def _logical(root, stem, optional):
+def _logical(root, stem):
     paths = [Path(root) / (stem + suffix) for suffix in SUFFIXES]
     present = [p for p in paths if p.exists() or p.is_symlink()]
-    if optional and not present:
-        return None
     require(len(present) == 1)
     return source_path(present[0])
 
 
 def site_path(root):
-    return _logical(root, 'site', False)
+    return _logical(root, 'site')
 
 
-def profile_path(stack, guest, optional=False):
-    require(isinstance(guest, str) and re.fullmatch(r'[a-z][a-z0-9-]*', guest))
-    return _logical(Path(stack) / 'guests' / guest, 'profile', optional)
 
 
 class Loader(yaml.SafeLoader):
@@ -116,6 +111,19 @@ def _identity(info):
     return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
+def parse(raw, suffix):
+    """Parse a previously bounded source snapshot with the same safe reader."""
+    try:
+        require(isinstance(raw, bytes) and len(raw) <= MAX_BYTES and suffix in SUFFIXES)
+        text = raw.decode('utf-8')
+        value = (json.loads(text, object_pairs_hook=_unique, parse_constant=lambda _: require(False))
+                 if suffix == '.json' else yaml.load(text, Loader=Loader))
+        _shape(value)
+        return value
+    except (ValueError, RecursionError, yaml.YAMLError):
+        raise ValueError(ERROR) from None
+
+
 def read(path):
     """Return JSON-compatible values; never expose parser/source diagnostics."""
     try:
@@ -127,10 +135,6 @@ def read(path):
             raw = stream.read(MAX_BYTES + 1)
             require(len(raw) <= MAX_BYTES and _identity(os.fstat(stream.fileno())) == _identity(before)
                     and _identity(path.lstat()) == _identity(before))
-        text = raw.decode('utf-8')
-        value = (json.loads(text, object_pairs_hook=_unique, parse_constant=lambda _: require(False))
-                 if path.suffix == '.json' else yaml.load(text, Loader=Loader))
-        _shape(value)
-        return value
+        return parse(raw, path.suffix)
     except (OSError, ValueError, RecursionError, yaml.YAMLError):
         raise ValueError(ERROR) from None

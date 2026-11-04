@@ -12,33 +12,86 @@ import yaml
 
 import private_workflows as p
 import workflows
+from test_component_plan import library, site
 
 CI_JOBS = 'jobs:\n  source:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo synthetic\n'
+
+
+def composition():
+    """Actual typed source/Plan fixture; initialized native data is not exercised."""
+    spec, source = library(), site()
+    spec['app_profiles'] = {'resolver': {
+        'adapter': 'pihole', 'display_name': 'Pi-hole',
+        'interfaces': {role: {'required': True, 'accepts': ['guest-interface']}
+                       for role in ('service', 'upstream')},
+        'listeners': {name: {'service': 'pihole', 'namespace': 'host', 'interface': 'service',
+                            'bind': 'wildcard', 'protocol': protocol, 'port': port}
+                      for name, protocol, port in (('udp', 'udp', 53), ('tcp', 'tcp', 53), ('web', 'tcp', 80))},
+        'endpoints': {'dns': {'listener': 'udp', 'protocol': 'udp', 'via': 'service'}},
+        'storage': {'config': {'target': '/etc/pihole', 'kind': 'directory',
+                               'required': True, 'read_only': False}},
+        'connections': {'upstream': {'type': 'dns', 'required': True, 'readiness': ['start']}},
+        'software': ['resolver'], 'runtime': ['resolver']}}
+    spec['software'] = {'resolver': {'images': {'pihole': 'pihole'}}}
+    spec['runtime_profiles'] = {'resolver': {'containers': {'pihole': {
+        'memory_mib': 128, 'cpu_limit': 1, 'pids_limit': 128}}}}
+    base = source['guests'].pop('resolver'); source['apps'] = {}
+    for index, (name, title) in enumerate((('database', 'Database'), ('web', 'Web'))):
+        guest = copy.deepcopy(base); guest['display_name'] = title
+        guest['identity'].update(vmid=610 + index, hostname='example-' + name)
+        for slot, nic in enumerate(guest['interfaces'].values()):
+            nic['mac'] = '02:00:00:' + str(20 + slot) + ':00:' + str(10 + index)
+            nic['address']['value'] = '198.18.' + str(20 + slot) + '.' + str(10 + index)
+        guest['volumes'] = {'data': {'storage': 'local', 'slot': 0,
+                                     'path': '/srv/example/data', 'size_gib': 2}}
+        source['guests'][name] = guest
+        source['apps'][name + '_dns'] = {'guest': name, 'profile': 'resolver', 'lifecycle': 'fresh',
+            'interfaces': {'service': {'interface': 'management'}, 'upstream': {'interface': 'management'}},
+            'storage': {'config': {'volume': 'data', 'subpath': 'pihole'}}}
+    source['connections'] = {
+        'database_upstream': {'consumer': {'app': 'database_dns', 'connection': 'upstream'},
+            'target': {'external': 'dns'}, 'source_interface': 'upstream'},
+        'web_upstream': {'consumer': {'app': 'web_dns', 'connection': 'upstream'},
+            'target': {'app': 'database_dns', 'endpoint': 'dns'}, 'source_interface': 'upstream',
+            'readiness': 'start'}}
+    # These finite grants are source intent in this synthetic fixture. The actual
+    # resolver checks both sides; a connection never installs a policy itself.
+    source['policies'] = {'network': {
+        'dns_out': {'rules': [{'direction': 'out', 'proto': protocol, 'port': '53',
+            'source': {'interface': 'local'}, 'destination': {'endpoint': 'peer'},
+            'interface': 'local', 'comment': 'Selected DNS egress'} for protocol in ('tcp', 'udp')]},
+        'dns_in': {'rules': [{'direction': 'in', 'proto': protocol, 'port': '53',
+            'source': {'interface': 'client'}, 'destination': {'interface': 'local'},
+            'interface': 'local', 'comment': 'Selected DNS ingress'} for protocol in ('tcp', 'udp')]}}}
+    source['guests']['database']['network_policy'] = [
+        {'policy': 'dns_out', 'interfaces': {'local': 'management'}, 'endpoints': {'peer': {'external': 'dns'}}},
+        {'policy': 'dns_in', 'interfaces': {'local': 'management', 'client': {'app': 'web_dns', 'interface': 'upstream'}}}]
+    source['guests']['web']['network_policy'] = [
+        {'policy': 'dns_out', 'interfaces': {'local': 'management'},
+         'endpoints': {'peer': {'app': 'database_dns', 'endpoint': 'dns'}}}]
+    return spec, source
 
 
 class PrivateWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.stack, self.site = self.root/'stack', self.root/'site'
         for root in (self.stack, self.site):
             (root/'.github/workflows').mkdir(parents=True)
-        self.catalogue = {name: {'name': title, 'applications': ['service'], 'application_names': {'service': title}}
-                          for name, title in [('database','Database'),('web','Web')]}
-        self.spec = {'schema':'homelab-stack-v2','routes':{},'values':{},'guests':{
-            'database':{'depends_on':[],'prerequisites':[]},'web':{'depends_on':['database'],'prerequisites':[]}}}
+        self.spec, self.source = composition()
         self.env = {'HOMELAB_STACK_SOURCE':'owner/stack/.github/workflows/deploy.yml@'+'a'*40,
                     'HOMELAB_ENVIRONMENT_PREFIX':'private-apps','HOMELAB_RUNNER_LABELS':'["self-hosted","linux"]',
                     'HOMELAB_REPOSITORY':'owner/site'}
         (self.stack/'.github/workflows/phase.yml').write_text('jobs:\n  run:\n    uses: owner/framework/.github/workflows/guest-phase.yml@'+'b'*40+'\n')
-        (self.site/'site.json').write_text('{}')
+        (self.site/'site.json').write_text(json.dumps(self.source))
+        (self.stack/'images.json').write_text(json.dumps({'pihole': {
+            'repository': 'example/pihole', 'tag': '1', 'digest': 'sha256:' + 'a' * 64}}))
         (self.site/'.github/workflows/ci.yml').write_text('on:\n  workflow_call:\n' + CI_JOBS)
         (self.stack/'stack.json').write_text(json.dumps(self.spec))
         subprocess.run(['git', 'init', '-q', str(self.stack)], check=True)
         self.freeze_stack()
-        mock = patch.object(workflows.compiler,'CATALOGUE',self.catalogue)
-        mock.start();self.addCleanup(mock.stop)
 
     def freeze_stack(self):
         """Commit each synthetic revision before declaring it as runtime source."""
@@ -54,7 +107,7 @@ class PrivateWorkflowTests(unittest.TestCase):
         (self.site/'.github/workflows/deploy.yml').write_text(yaml.safe_dump({'env':self.env},sort_keys=False))
 
     def test_native_jobs_use_only_guest_names_and_preserve_operations(self):
-        value=p.model(self.stack,self.site);public=workflows.models(self.stack)
+        value=p.model(self.stack,self.site);public=workflows.models(self.stack, site_source=self.site / 'site.json')
         self.assertEqual(set(value['jobs']),{'validate','selection','database','web'})
         self.assertEqual(value['concurrency'],{'group':'homelab-private-deployment','cancel-in-progress':False,'queue':'max'})
         for guest,title in [('database','Database'),('web','Web')]:
@@ -72,11 +125,11 @@ class PrivateWorkflowTests(unittest.TestCase):
 
     def test_yaml_site_uses_the_same_generator_and_ambiguous_sources_refuse(self):
         expected=p.model(self.stack,self.site)
-        original=self.site/'site.json';original.unlink()
+        original=self.site/'site.json';raw=original.read_bytes();document=json.loads(raw);original.unlink()
         for suffix in ('.yaml','.yml'):
-            path=self.site/('site'+suffix);path.write_text('{}\n')
+            path=self.site/('site'+suffix);path.write_text(yaml.safe_dump(document,sort_keys=False))
             self.assertEqual(p.model(self.stack,self.site),expected)
-            original.write_text('{}')
+            original.write_bytes(raw)
             with self.assertRaises(ValueError):p.model(self.stack,self.site)
             original.unlink();path.unlink()
 
@@ -166,21 +219,11 @@ class PrivateWorkflowTests(unittest.TestCase):
     def test_disabled_defaults_and_valid_leaf_exclusion_are_literal(self):
         self.env['HOMELAB_DISABLED']='["web"]';self.write()
         value=p.model(self.stack,self.site)
-        self.assertIn("fromJSON('[\"web\"]')",value['jobs']['web']['if'])
-        self.assertTrue(any(s.get('with',{}).get('disabled')=='["web"]' for s in value['jobs']['web']['steps']))
+        self.assertNotIn('web',value['jobs'])
+        self.assertIn("fromJSON('[\"web\"]')",value['jobs']['database']['if'])
+        self.assertTrue(any(s.get('with',{}).get('disabled')=='["web"]' for s in value['jobs']['database']['steps']))
         self.env['HOMELAB_DISABLED']='';self.write();p.model(self.stack,self.site)
         self.env['HOMELAB_DISABLED']='["database"]';self.write()
-        with self.assertRaises(ValueError):p.model(self.stack,self.site)
-
-    def test_optional_server_absent_adds_no_box_and_present_is_coherent(self):
-        self.catalogue['monitoring']={'name':'Zabbix','applications':['service'],'application_names':{'service':'Zabbix'}}
-        self.spec['guests']['monitoring']={'depends_on':['database'],'prerequisites':[]}
-        (self.stack/'stack.json').write_text(json.dumps(self.spec))
-        self.freeze_stack()
-        self.assertNotIn('monitoring',p.model(self.stack,self.site)['jobs'])
-        (self.site/'site.json').write_text('{"zabbix":null}')
-        self.assertEqual(p.model(self.stack,self.site)['jobs']['monitoring']['name'],'Zabbix')
-        self.env['HOMELAB_DISABLED']='["monitoring"]';self.write()
         with self.assertRaises(ValueError):p.model(self.stack,self.site)
 
     def test_literal_settings_refuse_unknown_keys_expressions_unsafe_scope_and_runner_changes(self):

@@ -35,21 +35,21 @@ class ReviewedDriftTests(unittest.TestCase):
         value, reviewed = failure_plan()
         original = copy.deepcopy(value)
         with self.assertRaises(ValueError):
-            plan_policy.check_plan(value, 'pve-lab', 6100, existing=True)
-        plan_policy.check_plan(value, 'pve-lab', 6100, existing=True, reviewed_drift=reviewed)
+            plan_policy.check_plan(value, 'pve-lab', 6100, existing=True, protected_guests=[9900,9914,9915,9920])
+        plan_policy.check_plan(value, 'pve-lab', 6100, existing=True, reviewed_drift=reviewed, protected_guests=[9900,9914,9915,9920])
         self.assertEqual(value, original)
         fresh = copy.deepcopy(value)
         for row in fresh['resource_changes']:
             row['change'].update(actions=['create'], before=None)
         with self.assertRaises(ValueError):
-            plan_policy.check_plan(fresh, 'pve-lab', 6100, existing=False, reviewed_drift=reviewed)
+            plan_policy.check_plan(fresh, 'pve-lab', 6100, existing=False, reviewed_drift=reviewed, protected_guests=[9900,9914,9915,9920])
         for change in ('destroy', 'disk', 'foreign-resource'):
             bad = copy.deepcopy(value)
             if change == 'destroy': bad['resource_changes'][0]['change']['actions'] = ['delete', 'create']
             if change == 'disk': bad['resource_changes'][0]['change']['after']['disk'][0]['size'] = 16
             if change == 'foreign-resource': bad['resource_changes'][1]['change']['after']['container_id'] = 6101
             with self.subTest(change=change), self.assertRaises(ValueError):
-                plan_policy.check_plan(bad, 'pve-lab', 6100, existing=True, reviewed_drift=reviewed)
+                plan_policy.check_plan(bad, 'pve-lab', 6100, existing=True, reviewed_drift=reviewed, protected_guests=[9900,9914,9915,9920])
 
     def test_unrelated_unknown_and_unpinned_drift_always_refuses(self):
         changes = [
@@ -77,7 +77,7 @@ class ReviewedDriftTests(unittest.TestCase):
             value, reviewed = failure_plan()
             change(value, reviewed)
             with self.subTest(index=index), self.assertRaises(ValueError):
-                plan_policy.check_plan(value, 'pve-lab', 6100, existing=True, reviewed_drift=reviewed)
+                plan_policy.check_plan(value, 'pve-lab', 6100, existing=True, reviewed_drift=reviewed, protected_guests=[9900,9914,9915,9920])
 
     def test_saved_plan_executor_enforces_the_pair_before_any_apply(self):
         for valid in (True, False):

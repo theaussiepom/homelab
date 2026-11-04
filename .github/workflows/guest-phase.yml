@@ -23,17 +23,31 @@ on:
         required: true
       PROXMOX_APP_TOKEN:
         required: true
-      AUTOMATION_NODE_RED_API_TOKEN:
+      authentik_postgresql_password:
         required: false
-      FOUNDATION_AUTHENTIK_POSTGRES_PASSWORD:
+      authentik_secret_key:
         required: false
-      FOUNDATION_AUTHENTIK_SECRET_KEY:
+      authentik_smtp_password:
         required: false
-      FOUNDATION_AUTHENTIK_SMTP_PASSWORD:
+      bitwarden_runtime_environment:
         required: false
-      FOUNDATION_PGADMIN_OAUTH_SECRET:
+      cloudbeaver_client_secret:
         required: false
-      FOUNDATION_CLOUDFLARE_DNS_TOKEN:
+      mqtt_explorer_broker_password:
+        required: false
+      mqtt_probe:
+        required: false
+      node_red_api_token:
+        required: false
+      pegaprox_database_key:
+        required: false
+      traefik_cloudflare_dns_token:
+        required: false
+      traefik_proxmox_token:
+        required: false
+      winet_options:
+        required: false
+      zabbix_database_password:
         required: false
 permissions:
   contents: read
@@ -139,10 +153,22 @@ jobs:
         env:
           GUEST: ${{ inputs.guest }}
           PHASE: ${{ inputs.phase }}
-          NODE_RED_API_TOKEN: ${{ inputs.guest == 'automation' && secrets.AUTOMATION_NODE_RED_API_TOKEN || '' }}
-          AUTHENTIK_SECRET_KEY: ${{ inputs.guest == 'identity' && secrets.FOUNDATION_AUTHENTIK_SECRET_KEY || '' }}
-          AUTHENTIK_POSTGRES_PASSWORD: ${{ inputs.guest == 'identity' && secrets.FOUNDATION_AUTHENTIK_POSTGRES_PASSWORD || '' }}
-          AUTHENTIK_SMTP_PASSWORD: ${{ inputs.guest == 'identity' && secrets.FOUNDATION_AUTHENTIK_SMTP_PASSWORD || '' }}
-          PGADMIN_OAUTH_SECRET: ${{ inputs.guest == 'db-tools' && secrets.FOUNDATION_PGADMIN_OAUTH_SECRET || '' }}
-          CLOUDFLARE_DNS_TOKEN: ${{ inputs.guest == 'ingress' && secrets.FOUNDATION_CLOUDFLARE_DNS_TOKEN || '' }}
-        run: python3 framework-source/proxmox/applications/deploy.py --phase "$PHASE" --packet "$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json"
+          HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD: ${{ secrets.authentik_postgresql_password }}
+          HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY: ${{ secrets.authentik_secret_key }}
+          HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD: ${{ secrets.authentik_smtp_password }}
+          HOMELAB_APP_SECRET_BITWARDEN_RUNTIME_ENVIRONMENT: ${{ secrets.bitwarden_runtime_environment }}
+          HOMELAB_APP_SECRET_CLOUDBEAVER_CLIENT_SECRET: ${{ secrets.cloudbeaver_client_secret }}
+          HOMELAB_APP_SECRET_MQTT_EXPLORER_BROKER_PASSWORD: ${{ secrets.mqtt_explorer_broker_password }}
+          HOMELAB_APP_SECRET_MQTT_PROBE: ${{ secrets.mqtt_probe }}
+          HOMELAB_APP_SECRET_NODE_RED_API_TOKEN: ${{ secrets.node_red_api_token }}
+          HOMELAB_APP_SECRET_PEGAPROX_DATABASE_KEY: ${{ secrets.pegaprox_database_key }}
+          HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_DNS_TOKEN: ${{ secrets.traefik_cloudflare_dns_token }}
+          HOMELAB_APP_SECRET_TRAEFIK_PROXMOX_TOKEN: ${{ secrets.traefik_proxmox_token }}
+          HOMELAB_APP_SECRET_WINET_OPTIONS: ${{ secrets.winet_options }}
+          HOMELAB_APP_SECRET_ZABBIX_DATABASE_PASSWORD: ${{ secrets.zabbix_database_password }}
+        run: |
+          # Elide only absent optional action defaults; preserve every supplied value.
+          for app_secret_slot in HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD HOMELAB_APP_SECRET_BITWARDEN_RUNTIME_ENVIRONMENT HOMELAB_APP_SECRET_CLOUDBEAVER_CLIENT_SECRET HOMELAB_APP_SECRET_MQTT_EXPLORER_BROKER_PASSWORD HOMELAB_APP_SECRET_MQTT_PROBE HOMELAB_APP_SECRET_NODE_RED_API_TOKEN HOMELAB_APP_SECRET_PEGAPROX_DATABASE_KEY HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_DNS_TOKEN HOMELAB_APP_SECRET_TRAEFIK_PROXMOX_TOKEN HOMELAB_APP_SECRET_WINET_OPTIONS HOMELAB_APP_SECRET_ZABBIX_DATABASE_PASSWORD; do
+            if [ -z "${!app_secret_slot}" ]; then unset "$app_secret_slot"; fi
+          done
+          exec python3 framework-source/proxmox/applications/deploy.py --phase "$PHASE" --packet "$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json"

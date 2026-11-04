@@ -1,0 +1,49 @@
+---
+- name: Confirm the selected component guest
+  ansible.builtin.assert:
+    that:
+      - groups['application'] | length == 1
+      - app.hostname == ansible_facts.hostname
+      - app.address in ansible_facts.all_ipv4_addresses
+      - app.mac | lower in (ansible_facts.interfaces | map('extract', ansible_facts) | selectattr('macaddress', 'defined') | map(attribute='macaddress') | map('lower') | list)
+      - ansible_facts.virtualization_type == 'lxc'
+      - ansible_facts.distribution == 'Debian'
+      - ansible_facts.distribution_major_version == '13'
+      - ansible_facts.architecture == 'x86_64'
+      - app.capture is not defined
+
+- name: Install bounded fresh-directory preparation
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../component-data.py"
+    dest: /usr/local/bin/homelab-component-data.py
+    owner: root
+    group: root
+    mode: '0700'
+  when: component_fresh_directories is defined and component_fresh_directories.directories | length > 0
+
+- name: Prepare only selected fresh-owned directories
+  ansible.builtin.command:
+    argv: [python3, /usr/local/bin/homelab-component-data.py]
+    stdin: "{{ component_fresh_directories | to_json }}"
+  register: component_directory_prepare
+  changed_when: (component_directory_prepare.stdout | from_json).initialized | int > 0
+  no_log: true
+  when: component_fresh_directories is defined and component_fresh_directories.directories | length > 0
+
+- name: Inspect the selected application paths
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+  loop: "{{ app.required_paths | default([]) }}"
+  register: component_required_paths
+
+- name: Preserve existing application storage
+  ansible.builtin.assert:
+    that:
+      - not item.stat.islnk | default(false)
+      - (item.stat.isdir | default(false)) if item.item.type == 'directory' else (item.stat.isreg | default(false))
+  loop: "{{ component_required_paths.results }}"
+
+- name: Verify declared source routing
+  ansible.builtin.import_tasks: frontend-ready.yml
+  when: app.frontend_routing is defined

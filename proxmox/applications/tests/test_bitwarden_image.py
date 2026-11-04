@@ -12,23 +12,25 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import render
-import test_bitwarden_runtime as runtime_cases
+from test_component_edges import descriptor,guest
+import component_runtime
 
 
 class RetainedImageTests(unittest.TestCase):
     def stack(self):
-        case = runtime_cases.RuntimeTests(); case.setUp()
-        self.addCleanup(case.doCleanups)
-        return copy.deepcopy(case.stack)
+        selected=descriptor('bitwarden')
+        selected['settings']['settings']['image_id']='sha256:'+'1'*64
+        return {'schema':component_runtime.SCHEMA,'guest':guest('bitwarden'),
+                'applications':{'vault':selected}}
 
     def test_mutable_source_reference_renders_only_the_expected_retained_id(self):
         stack = self.stack(); original = copy.deepcopy(stack)
-        self.assertEqual(render.compose(stack)["services"]["bitwarden"]["image"], stack["bitwarden"]["image_id"])
+        self.assertEqual(render.compose(stack)["services"]["bitwarden"]["image"], stack["applications"]["vault"]["settings"]["settings"]["image_id"])
         self.assertEqual(stack, original)
-        for reference in ("ghcr.io/bitwarden/lite@sha256:" + "a" * 64, stack["bitwarden"]["image_id"]):
-            stack["services"]["bitwarden"]["image"] = reference
+        for reference in ("ghcr.io/bitwarden/lite@sha256:" + "a" * 64, stack["applications"]["vault"]["settings"]["settings"]["image_id"]):
+            stack["applications"]["vault"]["software_selection"]["images"]["bitwarden"]["image"] = reference
             if reference.startswith("sha256:"):
-                stack["services"]["bitwarden"].update(archive="/fixture/image.tar", archive_sha256="b" * 64)
+                stack["applications"]["vault"]["software_selection"]["images"]["bitwarden"].update(archive="/fixture/image.tar", archive_sha256="b" * 64)
             self.assertEqual(render.compose(stack)["services"]["bitwarden"]["image"], reference)
 
     def execute(self, stack, *, available=True, mismatch=False):
@@ -51,12 +53,13 @@ if args[2] == expected and os.environ['FIXTURE_AVAILABLE'] != 'true':
 print('sha256:' + '2' * 64 if args[2].endswith(':latest') or os.environ['FIXTURE_MISMATCH'] == 'true' else expected)
 """)
         docker.chmod(0o700)
-        tasks = yaml.safe_load((Path(__file__).resolve().parents[1] / "ansible/tasks/bitwarden.yml").read_text())[:2]
+        tasks = yaml.safe_load((Path(__file__).resolve().parents[1] / "ansible/tasks/component-bitwarden-ready.yml").read_text())[:2]
         checkpoint = root / "checkpoint"
         tasks.append({"name": "Synthetic checkpoint after the image guard", "ansible.builtin.copy": {"content": "passed", "dest": str(checkpoint)}})
         playbook = root / "fixture.yml"
         playbook.write_text(yaml.safe_dump([{"hosts": "localhost", "gather_facts": False,
-            "vars": {"stack": stack, "ansible_python_interpreter": sys.executable},
+            "vars": {"component_bitwarden": {"settings":stack["applications"]["vault"]["settings"]["settings"],
+              "image":stack["applications"]["vault"]["software_selection"]["images"]["bitwarden"]["image"]}, "ansible_python_interpreter": sys.executable},
             "environment": {"PATH": str(binary) + os.pathsep + os.environ["PATH"],
                 "FIXTURE_CALLS": str(root / "calls.jsonl"), "FIXTURE_AVAILABLE": str(available).lower(),
                 "FIXTURE_MISMATCH": str(mismatch).lower()}, "tasks": tasks}], sort_keys=False))
@@ -71,7 +74,7 @@ print('sha256:' + '2' * 64 if args[2].endswith(':latest') or os.environ['FIXTURE
         result, calls, checkpoint = self.execute(stack)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(checkpoint)
-        self.assertEqual([c[:3] for c in calls], [["image", "inspect", stack["bitwarden"]["image_id"]]])
+        self.assertEqual([c[:3] for c in calls], [["image", "inspect", stack["applications"]["vault"]["settings"]["settings"]["image_id"]]])
 
     def test_missing_or_wrong_retained_image_stops_before_any_start_or_pull(self):
         for available, mismatch in ((False, False), (True, True)):
@@ -83,8 +86,8 @@ print('sha256:' + '2' * 64 if args[2].endswith(':latest') or os.environ['FIXTURE
 
     def test_pinned_registry_and_archived_paths_keep_their_existing_selection(self):
         stack = self.stack()
-        for reference in ("ghcr.io/bitwarden/lite@sha256:" + "a" * 64, stack["bitwarden"]["image_id"]):
-            stack["services"]["bitwarden"]["image"] = reference
+        for reference in ("ghcr.io/bitwarden/lite@sha256:" + "a" * 64, stack["applications"]["vault"]["settings"]["settings"]["image_id"]):
+            stack["applications"]["vault"]["software_selection"]["images"]["bitwarden"]["image"] = reference
             result, calls, checkpoint = self.execute(stack)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(checkpoint)

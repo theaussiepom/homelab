@@ -1,0 +1,341 @@
+{
+  "identity": {
+    "name": "homelab-identity",
+    "services": {
+      "server": {
+        "image": "ghcr.io/goauthentik/server@sha256:dc07e81b4462a1dad9c6720f4c73993e37d7cb2d2f94a306187318704d112e71",
+        "pull_policy": "missing",
+        "restart": "always",
+        "mem_limit": "768m",
+        "cpus": 1,
+        "pids_limit": 128,
+        "stop_grace_period": "60s",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-size": "10m",
+            "max-file": "3"
+          }
+        },
+        "environment": {
+          "AUTHENTIK_EMAIL__HOST": "smtp.example.invalid",
+          "AUTHENTIK_EMAIL__FROM": "sso@example.invalid",
+          "AUTHENTIK_EMAIL__USE_TLS": "true",
+          "TZ": "Etc/UTC",
+          "AUTHENTIK_SECRET_KEY": "file:///run/secrets/authentik-secret-key",
+          "AUTHENTIK_POSTGRESQL__HOST": "postgres",
+          "AUTHENTIK_POSTGRESQL__USER": "authentik",
+          "AUTHENTIK_POSTGRESQL__NAME": "authentik",
+          "AUTHENTIK_POSTGRESQL__PASSWORD": "file:///run/secrets/postgresql-password",
+          "AUTHENTIK_REDIS__HOST": "redis",
+          "AUTHENTIK_EMAIL__PASSWORD": "file:///run/secrets/smtp-password"
+        },
+        "volumes": [
+          "/srv/homelab/data/authentik/media:/media",
+          "/srv/homelab/data/authentik/templates:/templates",
+          {
+            "type": "bind",
+            "source": "/opt/homelab-app/runtime/authentik-secret-key",
+            "target": "/run/secrets/authentik-secret-key",
+            "read_only": true,
+            "bind": {
+              "create_host_path": false
+            }
+          },
+          {
+            "type": "bind",
+            "source": "/opt/homelab-app/runtime/postgresql-password",
+            "target": "/run/secrets/postgresql-password",
+            "read_only": true,
+            "bind": {
+              "create_host_path": false
+            }
+          },
+          {
+            "type": "bind",
+            "source": "/opt/homelab-app/runtime/smtp-password",
+            "target": "/run/secrets/smtp-password",
+            "read_only": true,
+            "bind": {
+              "create_host_path": false
+            }
+          }
+        ],
+        "user": "1000:1000",
+        "command": "server",
+        "depends_on": {
+          "redis": {
+            "condition": "service_healthy"
+          }
+        },
+        "ports": [
+          "198.18.30.20:9000:9000"
+        ]
+      },
+      "worker": {
+        "image": "ghcr.io/goauthentik/server@sha256:dc07e81b4462a1dad9c6720f4c73993e37d7cb2d2f94a306187318704d112e71",
+        "pull_policy": "missing",
+        "restart": "always",
+        "mem_limit": "768m",
+        "cpus": 1,
+        "pids_limit": 128,
+        "stop_grace_period": "60s",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-size": "10m",
+            "max-file": "3"
+          }
+        },
+        "environment": {
+          "AUTHENTIK_EMAIL__HOST": "smtp.example.invalid",
+          "AUTHENTIK_EMAIL__FROM": "sso@example.invalid",
+          "AUTHENTIK_EMAIL__USE_TLS": "true",
+          "TZ": "Etc/UTC",
+          "AUTHENTIK_SECRET_KEY": "file:///run/secrets/authentik-secret-key",
+          "AUTHENTIK_POSTGRESQL__HOST": "postgres",
+          "AUTHENTIK_POSTGRESQL__USER": "authentik",
+          "AUTHENTIK_POSTGRESQL__NAME": "authentik",
+          "AUTHENTIK_POSTGRESQL__PASSWORD": "file:///run/secrets/postgresql-password",
+          "AUTHENTIK_REDIS__HOST": "redis",
+          "AUTHENTIK_EMAIL__PASSWORD": "file:///run/secrets/smtp-password"
+        },
+        "volumes": [
+          "/srv/homelab/data/authentik/media:/media",
+          "/srv/homelab/data/authentik/templates:/templates",
+          "/srv/homelab/data/authentik/certs:/certs",
+          {
+            "type": "bind",
+            "source": "/opt/homelab-app/runtime/authentik-secret-key",
+            "target": "/run/secrets/authentik-secret-key",
+            "read_only": true,
+            "bind": {
+              "create_host_path": false
+            }
+          },
+          {
+            "type": "bind",
+            "source": "/opt/homelab-app/runtime/postgresql-password",
+            "target": "/run/secrets/postgresql-password",
+            "read_only": true,
+            "bind": {
+              "create_host_path": false
+            }
+          },
+          {
+            "type": "bind",
+            "source": "/opt/homelab-app/runtime/smtp-password",
+            "target": "/run/secrets/smtp-password",
+            "read_only": true,
+            "bind": {
+              "create_host_path": false
+            }
+          }
+        ],
+        "user": "1000:1000",
+        "command": "worker",
+        "depends_on": {
+          "redis": {
+            "condition": "service_healthy"
+          }
+        }
+      },
+      "redis": {
+        "image": "redis@sha256:6cbef353e480a8a6e7f10ec545f13d7d3fa85a212cdcc5ffaf5a1c818b9d3798",
+        "pull_policy": "missing",
+        "restart": "always",
+        "mem_limit": "128m",
+        "cpus": 1,
+        "pids_limit": 128,
+        "stop_grace_period": "60s",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-size": "10m",
+            "max-file": "3"
+          }
+        },
+        "environment": {
+          "TZ": "Etc/UTC"
+        },
+        "volumes": [
+          "/srv/homelab/data/redis:/data"
+        ],
+        "command": [
+          "redis-server",
+          "--appendonly",
+          "yes"
+        ],
+        "healthcheck": {
+          "test": [
+            "CMD-SHELL",
+            "redis-cli ping | grep -qx PONG"
+          ],
+          "start_period": "20s",
+          "interval": "30s",
+          "retries": 5,
+          "timeout": "3s"
+        }
+      }
+    }
+  },
+  "identity_files": [
+    {
+      "path": "authentik-secret-key",
+      "content": "synthetic-$secret_key",
+      "uid": 1000,
+      "gid": 1000,
+      "mode": "0400"
+    },
+    {
+      "path": "postgresql-password",
+      "content": "synthetic-$postgresql_password",
+      "uid": 1000,
+      "gid": 1000,
+      "mode": "0400"
+    },
+    {
+      "path": "smtp-password",
+      "content": "synthetic-$smtp_password",
+      "uid": 1000,
+      "gid": 1000,
+      "mode": "0400"
+    }
+  ],
+  "dns": {
+    "name": "homelab-dns",
+    "services": {
+      "pihole": {
+        "image": "pihole/pihole@sha256:70a9c11171ded2eee735d88c127996da209284a329d50f5ae59c06b861d401b3",
+        "pull_policy": "missing",
+        "restart": "always",
+        "mem_limit": "256m",
+        "cpus": 1,
+        "pids_limit": 128,
+        "stop_grace_period": "60s",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-size": "10m",
+            "max-file": "3"
+          }
+        },
+        "environment": {
+          "TZ": "Etc/UTC",
+          "FTLCONF_dhcp_active": "false",
+          "FTLCONF_dns_upstreams": "127.0.0.1#5335"
+        },
+        "volumes": [
+          "/srv/homelab/data/pihole:/etc/pihole"
+        ],
+        "network_mode": "host"
+      },
+      "unbound": {
+        "image": "pihole/pihole@sha256:70a9c11171ded2eee735d88c127996da209284a329d50f5ae59c06b861d401b3",
+        "pull_policy": "missing",
+        "restart": "always",
+        "mem_limit": "256m",
+        "cpus": 1,
+        "pids_limit": 128,
+        "stop_grace_period": "60s",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-size": "10m",
+            "max-file": "3"
+          }
+        },
+        "environment": {
+          "TZ": "Etc/UTC"
+        },
+        "volumes": [
+          "/srv/homelab/data/unbound:/opt/unbound/etc/unbound"
+        ],
+        "ports": [
+          "127.0.0.1:5335:53/tcp",
+          "127.0.0.1:5335:53/udp"
+        ]
+      }
+    }
+  },
+  "zigbee_health": {
+    "test": [
+      "CMD",
+      "node",
+      "-e",
+      "const h=require('http');const q=h.get('http://127.0.0.1:8099/',r=>process.exit(r.statusCode===200?0:1));q.setTimeout(3000,()=>{q.destroy();process.exit(1)});q.on('error',()=>process.exit(1))"
+    ],
+    "start_period": "30s",
+    "interval": "5s",
+    "retries": 30,
+    "timeout": "4s"
+  },
+  "zigbee_service_with_selected_image": {
+    "image": "koenkk/zigbee2mqtt@sha256:fef0de769dcd04c27b3a6d277b61046eb96284bdd4198dcb1687c3a01b3020f3",
+    "pull_policy": "missing",
+    "restart": "always",
+    "mem_limit": "256m",
+    "cpus": 1,
+    "pids_limit": 128,
+    "stop_grace_period": "60s",
+    "logging": {
+      "driver": "json-file",
+      "options": {
+        "max-size": "10m",
+        "max-file": "3"
+      }
+    },
+    "environment": {
+      "TZ": "Etc/UTC"
+    },
+    "volumes": [
+      {
+        "type": "bind",
+        "source": "/srv/homelab/data/zigbee2mqtt",
+        "target": "/app/data",
+        "bind": {
+          "create_host_path": false
+        }
+      },
+      {
+        "type": "bind",
+        "source": "/dev/serial/by-id/usb-fixture",
+        "target": "/dev/ttyACM0",
+        "read_only": false,
+        "bind": {
+          "create_host_path": false
+        }
+      }
+    ],
+    "devices": [
+      "/dev/serial/by-id/usb-fixture:/dev/serial/by-id/usb-fixture:rw"
+    ],
+    "ports": [
+      "198.18.30.22:8099:8099/tcp"
+    ],
+    "healthcheck": {
+      "test": [
+        "CMD",
+        "node",
+        "-e",
+        "const h=require('http');const q=h.get('http://127.0.0.1:8099/',r=>process.exit(r.statusCode===200?0:1));q.setTimeout(3000,()=>{q.destroy();process.exit(1)});q.on('error',()=>process.exit(1))"
+      ],
+      "start_period": "30s",
+      "interval": "5s",
+      "retries": 30,
+      "timeout": "4s"
+    }
+  },
+  "framework_commit": "f28725b1e8334a0baba26dfc2fa623cb3a63cdf5",
+  "old_source_pins": {
+    "proxmox/applications/render.py": "5e548c67229ad0d8c21b71ff63ad4a8bc484206cb906f0fdc94980255d5b39a9",
+    "proxmox/applications/foundation.py": "5141e46c8cd9890903844366d0e2a9345e59be434e598fe9234d841972d2fc71",
+    "proxmox/applications/tests/test_foundation.py": "07f4a61b81dc6f0870a5fe55a00288426902ed9301a6187e6f1f4a8b20296ace",
+    "proxmox/applications/tests/test_render.py": "292e6d37d7cfa2ce0480140f457281a1da764a27de491fe5bd505ad104de5b68"
+  },
+  "protected_shapes": {
+    "identity_fixture.py": "726ad5bc842e9d6ef4d71f392507877fcf41c5168110eb08d2192bffbe4e3ec0",
+    "dns_records_fixture.py": "2e6b953750c3e7d06b91f745e0a9e0c0f53e155d465279af4caaf8f2616d870f",
+    "zigbee_health_fixture.py": "f147bcca738d0af9f500fab3a66bf840f16fe86a42d51dff36f526a367d34ad1"
+  }
+}

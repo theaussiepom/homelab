@@ -8,7 +8,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import deploy
-import test_deployment as cases
+import test_component_lifecycle as cases
 
 
 def request(vmid, schema='homelab-postgresql-cutover-v1'):
@@ -20,13 +20,13 @@ def request(vmid, schema='homelab-postgresql-cutover-v1'):
 
 class CoordinatedCustodyTests(unittest.TestCase):
     def fixture(self):
-        case = cases.LifecycleTests()
+        case = cases.ComponentLifecycleTests()
         case.setUp()
         self.addCleanup(case.doCleanups)
         return case
 
     def records(self, case, value, *, namespace='database-network-cutover-', claim=True):
-        folder = case.root / (namespace + 'synthetic')
+        folder = case.work.parent / (namespace + 'synthetic')
         folder.mkdir(mode=0o700)
         raw = (json.dumps(value, indent=2) + '\n').encode()
         (folder / 'request.json').write_bytes(raw); (folder / 'request.json').chmod(0o600)
@@ -39,7 +39,7 @@ class CoordinatedCustodyTests(unittest.TestCase):
         folder, raw = self.records(case, request(case.cfg['guest']['vmid']))
         backend = (case.work / 'terraform.tfstate').read_bytes()
         with self.assertRaisesRegex(ValueError, 'coordinated maintenance'):
-            deploy.run('infrastructure', case.site)
+            case.phase('infrastructure')
         case.infra.assert_not_called(); case.app.assert_not_called()
         self.assertEqual((folder / 'request.json').read_bytes(), raw)
         self.assertEqual((folder / 'claim.json').read_bytes(), raw)
@@ -57,25 +57,25 @@ class CoordinatedCustodyTests(unittest.TestCase):
             folder, raw = self.records(case, request(case.cfg['guest']['vmid'], schema), namespace=namespace, claim=claim)
             if completed: (folder / 'complete.json').write_text('{"status":"passed"}\n')
             with self.subTest(namespace=namespace, claim=claim, completed=completed), self.assertRaisesRegex(ValueError, 'coordinated maintenance'):
-                deploy.run('infrastructure', case.site)
+                case.phase('infrastructure')
             case.infra.assert_not_called()
             self.assertEqual((folder / 'request.json').read_bytes(), raw)
 
     def test_recognized_custody_for_other_members_preserves_unrelated_guest_path(self):
         case = self.fixture()
         folder, raw = self.records(case, request(880))
-        deploy.run('infrastructure', case.site)
+        case.phase('infrastructure')
         case.infra.assert_called_once()
         self.assertEqual((folder / 'request.json').read_bytes(), raw)
         self.assertEqual((folder / 'claim.json').read_bytes(), raw)
 
     def test_custody_appearing_before_a_phase_preserves_existing_ordinary_marker(self):
         case = self.fixture()
-        deploy.run('infrastructure', case.site)
+        case.phase('infrastructure')
         held = (case.work / 'ORDINARY-HOLD.json').read_bytes()
         folder, raw = self.records(case, request(case.cfg['guest']['vmid']))
         with self.assertRaisesRegex(ValueError, 'coordinated maintenance'):
-            deploy.run('preparation', case.site)
+            case.phase('preparation')
         case.app.assert_not_called()
         self.assertEqual((case.work / 'ORDINARY-HOLD.json').read_bytes(), held)
         self.assertEqual((folder / 'claim.json').read_bytes(), raw)
@@ -114,15 +114,16 @@ class CoordinatedCustodyTests(unittest.TestCase):
                 folder.rename(case.root / 'retained-custody'); folder.write_text('preserve unexpected record')
             backend = (case.work / 'terraform.tfstate').read_bytes()
             with self.subTest(variant=variant), self.assertRaises((OSError, ValueError)):
-                deploy.run('infrastructure', case.site)
+                case.phase('infrastructure')
             case.infra.assert_not_called(); case.app.assert_not_called()
             self.assertEqual((case.work / 'terraform.tfstate').read_bytes(), backend)
 
     def test_foreign_ordinary_hold_still_refuses_infrastructure_replay(self):
         case = self.fixture()
+        case.expected  # This control starts from a complete immutable static publication.
         held = b'{"operation":"foreign"}\n'
         (case.work / 'ORDINARY-HOLD.json').write_bytes(held)
         with self.assertRaisesRegex(ValueError, 'existing attempt requires review'):
-            deploy.run('infrastructure', case.site)
+            case.phase('infrastructure')
         case.infra.assert_not_called()
         self.assertEqual((case.work / 'ORDINARY-HOLD.json').read_bytes(), held)

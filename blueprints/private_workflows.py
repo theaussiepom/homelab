@@ -87,11 +87,8 @@ def model(stack, site):
         ['git', '-C', str(stack), 'status', '--porcelain', '--untracked-files=all'], text=True).strip(),
         'Use clean pinned stack source for private workflow generation')
     disabled = env.get('HOMELAB_DISABLED', '[]')
-    overlay = compiler.read(compiler.site_path(site))
-    spec = compiler.zabbix.selected(compiler.manifest(stack), overlay)
-    selected = compiler.selection(spec, compiler.parse_disabled(disabled))
-    compiler.zabbix.selection(overlay, selected)
-    source = workflows.models(stack, monitored=compiler.zabbix.enabled(overlay))
+    disabled_rows = compiler.workflow_disabled((site / '.github/workflows/deploy.yml').read_text())
+    source = workflows.models(stack, site_source=compiler.site_path(site), disabled=disabled_rows)
     repository = 'github.repository == ' + repr(env['HOMELAB_REPOSITORY'])
     condition = repository + ' && ' + workflows.PRIVATE_MAIN
     result = {'name': 'Deploy', 'on': {'push': {'branches': ['main']}},
@@ -102,7 +99,9 @@ def model(stack, site):
     selector = bind(copy.deepcopy(source['deploy.yml']['jobs']['selection']), disabled)
     selector.update(needs=['validate'], **{'if': condition})
     result['jobs']['selection'] = selector
-    for guest in spec['guests']:
+    for guest in source['deploy.yml']['jobs']:
+        if guest == 'selection':
+            continue
         caller = source['deploy.yml']['jobs'][guest]
         job = bind(copy.deepcopy(source['guest-' + guest + '.yml']['jobs']['deploy']), disabled)
         job.update(name=caller['name'], needs=copy.deepcopy(caller['needs']),
@@ -112,7 +111,7 @@ def model(stack, site):
         compiler.require(not WORKFLOW_INPUTS.search(text) and 'secrets: inherit' not in text,
                          'Materialize only closed guest workflow inputs')
         names = set(re.findall(r'\bsecrets\.([A-Za-z0-9_]+)', text))
-        compiler.require(names <= workflows.secret_declarations(guest).keys(),
+        compiler.require(names <= source['guest-' + guest + '.yml']['on']['workflow_call']['secrets'].keys(),
                          'Preserve each guest secret subset')
         result['jobs'][guest] = job
     return result

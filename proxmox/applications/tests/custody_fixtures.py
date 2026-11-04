@@ -166,6 +166,3 @@ class CompletedGroup:
 
     def files(self):
         return {'catalogue.json': self.catalogue_raw.decode(), 'acceptance.json': self.acceptance_raw.decode()}
-
-    def resolved(self):
-        return {r: (cfg, None, self.files()) for r, cfg in self.cfgs.items()}

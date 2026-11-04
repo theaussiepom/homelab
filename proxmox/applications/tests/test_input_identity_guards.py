@@ -16,75 +16,32 @@ import test_guest_identity as identity_cases
 
 class InputBindingTests(unittest.TestCase):
     def test_binding_tracks_all_external_authorities_and_source_bytes(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source = root / "applications"
-            source.mkdir()
-            (root / "common").mkdir()
-            (source / "helper.py").write_text("first source")
-            ignored = source / "__pycache__"
-            ignored.mkdir()
-            (ignored / "noise").write_bytes(b"ignored")
-            paths = {}
-            for name in (
-                "site",
-                "ca",
-                "stack",
-                "runtime",
-                "key",
-                "repository",
-                "database",
-                "foundation",
-            ):
-                paths[name] = str(root / name)
-                Path(paths[name]).write_text("{}" if name == "stack" else name)
-            cfg = {
-                "guest": {"vmid": 6101},
-                "paths": {"ca_file": paths["ca"]},
-                "app": {
-                    "kind": "bitwarden",
-                    "stack_config": paths["stack"],
-                    "bitwarden": {"runtime_env_file": paths["runtime"]},
-                    "repositories": [{"key_path": paths["repository"]}],
-                    "database": {"config_files": [{"source": paths["database"]}]},
-                },
-            }
-            with (
-                patch.object(inputs, "SOURCE", source),
-                patch.object(
-                    inputs.foundation,
-                    "source_files",
-                    return_value=[paths["foundation"]],
-                ),
-            ):
-                before = inputs.binding(cfg, Path(paths["site"]))
-                self.assertEqual(
-                    set(before["input_hashes"]),
-                    {
-                        paths[n]
-                        for n in (
-                            "ca",
-                            "stack",
-                            "runtime",
-                            "repository",
-                            "database",
-                            "foundation",
-                        )
-                    },
-                )
-                (ignored / "noise").write_bytes(b"changed but not executable source")
-                self.assertEqual(inputs.binding(cfg, Path(paths["site"])), before)
-                (source / "helper.py").write_text("changed source")
-                self.assertNotEqual(
-                    inputs.binding(cfg, Path(paths["site"]))["source_sha256"],
-                    before["source_sha256"],
-                )
-                Path(paths["runtime"]).write_text("changed private runtime")
-                self.assertNotEqual(inputs.input_hashes(cfg), before["input_hashes"])
-                cfg["app"]["kind"] = "pegaprox"
-                cfg["app"]["pegaprox"] = {"key_source": paths["key"]}
-                self.assertIn(paths["key"], inputs.input_hashes(cfg))
-                self.assertNotIn(paths["runtime"], inputs.input_hashes(cfg))
+        import component_inputs
+        import component_payload
+        import component_process_fixtures as fixtures
+        from private_io import write_new
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary).resolve();fixtures.initialize(root)
+            source=root/'applications';source.mkdir();(root/'common').mkdir()
+            (source/'helper.py').write_text('first source')
+            for name in ('__pycache__','.terraform','.work'):
+                (source/name).mkdir();(source/name/'noise').write_text('ignored')
+            cfg,site=component_inputs.prepare(root/'packet.json',root/'inputs',create=True)
+            with patch.object(inputs,'SOURCE',source):
+                before=inputs.binding(cfg,site)
+                self.assertEqual(set(before['input_hashes']),{
+                    str(path)for path in site.parent.iterdir()if path.is_file()and path.name!='component-prepared.json'}|{str(root/'ca')})
+                for name in ('__pycache__','.terraform','.work'):(source/name/'noise').write_text('changed excluded bytes')
+                self.assertEqual(inputs.binding(cfg,site),before)
+                (source/'helper.py').write_text('changed source')
+                self.assertNotEqual(inputs.binding(cfg,site)['source_sha256'],before['source_sha256'])
+                current=inputs.binding(cfg,site)
+                folder=component_inputs.app_directory(cfg,create=True)
+                selected=component_payload.prepare(folder,cfg['deployment']['input_identity'],'database',{'private-input':b'only selected app'})
+                self.assertEqual(inputs.binding(cfg,site),current)
+                (selected.directory/'private-input').write_bytes(b'changed app input')
+                with self.assertRaises(ValueError):selected.check()
+                self.assertEqual(inputs.binding(cfg,site),current)
 
     def test_guest_identity_refusals_never_write_trust_or_completion(self):
         for scenario in (

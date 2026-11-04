@@ -8,8 +8,7 @@ import private_io as files
 import bitwarden
 
 
-def environment(cfg, stack):
-    selected = cfg["app"]["bitwarden"]
+def _selection(selected):
     files.require(
         set(selected)
         == {
@@ -23,7 +22,12 @@ def environment(cfg, stack):
         and Path(selected["runtime_env_file"]).is_absolute(),
         "Use the retained Bitwarden runtime contract",
     )
-    raw = files.regular(Path(selected["runtime_env_file"]), private=True)
+
+
+def environment_bytes(raw, selected, settings):
+    """Validate the exact retained bytes without reading its reference path."""
+    _selection(selected)
+    files.require(isinstance(raw, bytes), "Use selected runtime bytes")
     files.require(
         hashlib.sha256(raw).hexdigest() == selected["environment_sha256"],
         "Retained Bitwarden runtime input differs",
@@ -40,7 +44,7 @@ def environment(cfg, stack):
         ),
         "Keep the existing runtime strings in the private file",
     )
-    settings = stack["bitwarden"]
+    bitwarden.validate_settings(settings)
     files.require(
         value.get("BW_DB_PROVIDER") == "mysql"
         and value.get("BW_DB_SERVER") == settings["database_server"]
@@ -60,37 +64,4 @@ def environment(cfg, stack):
         ),
         "Retain the commissioned endpoint, account and installation identity without conversion",
     )
-    bitwarden.validate(stack)
     return value
-
-
-def validate(cfg, stack):
-    expected = environment(cfg, stack)
-    files.require(
-        stack["services"]["bitwarden"]["environment"] == expected,
-        "Runtime settings differ from their retained private authority",
-    )
-    files.require(
-        cfg["app"]["exclusive_writer_confirmed"] is True
-        and "capture" not in cfg["app"],
-        "Ordinary deployment requires separately prepared data and a retired old writer",
-    )
-    origin = urlsplit(cfg["app"]["bitwarden"]["public_origin"])
-    files.require(
-        origin.scheme == "https"
-        and origin.hostname
-        and not origin.username
-        and not origin.password
-        and origin.path == ""
-        and not origin.query
-        and not origin.fragment,
-        "Retain the HTTPS origin",
-    )
-    files.require(
-        any(
-            route["host"] == origin.hostname
-            and route["url"] == "http://" + stack["bitwarden"]["bind_address"] + ":8080"
-            for route in cfg["routes"].values()
-        ),
-        "Retain the selected route",
-    )

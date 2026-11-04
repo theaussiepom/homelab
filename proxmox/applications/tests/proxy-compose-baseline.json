@@ -1,0 +1,437 @@
+{
+  "cloudbeaver": {
+    "name": "homelab-db-tools",
+    "services": {
+      "auth_gateway": {
+        "cap_drop": [
+          "ALL"
+        ],
+        "command": [
+          "--config=/etc/oauth2-proxy/oauth2.cfg",
+          "--alpha-config=/etc/oauth2-proxy/alpha.json"
+        ],
+        "cpus": 1,
+        "depends_on": {
+          "cloudbeaver": {
+            "condition": "service_healthy"
+          }
+        },
+        "environment": {
+          "GOMEMLIMIT": "96MiB"
+        },
+        "image": "quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:0d989b27d90d5e527fb2b045d864c4001c3104bdd763b3211b7e9ba2110380ea",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "128m",
+        "networks": [
+          "database_tools"
+        ],
+        "pids_limit": 128,
+        "ports": [
+          "198.18.30.32:80:4180"
+        ],
+        "pull_policy": "missing",
+        "read_only": true,
+        "restart": "always",
+        "security_opt": [
+          "no-new-privileges:true"
+        ],
+        "stop_grace_period": "60s",
+        "user": "65532:65532",
+        "volumes": [
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/oauth2-alpha.json",
+            "target": "/etc/oauth2-proxy/alpha.json",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/oauth2.cfg",
+            "target": "/etc/oauth2-proxy/oauth2.cfg",
+            "type": "bind"
+          }
+        ]
+      },
+      "cloudbeaver": {
+        "cap_drop": [
+          "ALL"
+        ],
+        "cpus": 1,
+        "environment": {
+          "JAVA_OPTS": "-Xms128m -Xmx1024m -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=64m"
+        },
+        "healthcheck": {
+          "interval": "10s",
+          "retries": 18,
+          "start_period": "60s",
+          "test": [
+            "CMD",
+            "/opt/java/openjdk/bin/java",
+            "-Xms8m",
+            "-Xmx64m",
+            "-Xss512k",
+            "-XX:MaxMetaspaceSize=64m",
+            "-XX:ReservedCodeCacheSize=16m",
+            "-XX:ActiveProcessorCount=1",
+            "-XX:CICompilerCount=2",
+            "-XX:+UseSerialGC",
+            "/opt/cloudbeaver/conf/CloudBeaverHealth.java",
+            "--postgresql",
+            "3.5.11",
+            "42604178b9e57ec08ee0035079961516f086e455d0141f0b22c6eff29fb2fff4",
+            "mariadb-java-client-3.5.10.jar"
+          ],
+          "timeout": "8s"
+        },
+        "image": "dbeaver/cloudbeaver:26.2.3@sha256:a537c60a7ca98d8d791c11c01172c1354e8dedfe222d04a54795ceeb32f12bbc",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "1536m",
+        "networks": [
+          "database_tools"
+        ],
+        "pids_limit": 512,
+        "pull_policy": "missing",
+        "restart": "always",
+        "security_opt": [
+          "no-new-privileges:true"
+        ],
+        "stop_grace_period": "60s",
+        "user": "8978:8978",
+        "volumes": [
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "source": "/srv/homelab/data/cloudbeaver",
+            "target": "/opt/cloudbeaver/workspace",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/cloudbeaver.conf",
+            "target": "/opt/cloudbeaver/conf/cloudbeaver.conf",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/cloudbeaver.auto.conf",
+            "target": "/opt/cloudbeaver/conf/.cloudbeaver.auto.conf",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/cloudbeaver-connections.json",
+            "target": "/opt/cloudbeaver/conf/initial-data-sources.conf",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/CloudBeaverHealth.java",
+            "target": "/opt/cloudbeaver/conf/CloudBeaverHealth.java",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/CloudBeaverDatabaseHealth.java",
+            "target": "/opt/cloudbeaver/conf/CloudBeaverDatabaseHealth.java",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/mariadb-java-client-3.5.11.jar",
+            "target": "/opt/cloudbeaver/drivers/mariadb/mariadb-java-client-3.5.10.jar",
+            "type": "bind"
+          }
+        ]
+      }
+    },
+    "networks": {
+      "database_tools": {}
+    }
+  },
+  "mqtt_explorer": {
+    "name": "homelab-mqtt",
+    "services": {
+      "explorer_gateway": {
+        "cap_drop": [
+          "ALL"
+        ],
+        "command": [
+          "--configFile=/etc/traefik/traefik.json"
+        ],
+        "cpus": 1,
+        "depends_on": {
+          "mqtt_explorer": {
+            "condition": "service_healthy"
+          }
+        },
+        "environment": {},
+        "healthcheck": {
+          "interval": "5s",
+          "retries": 24,
+          "start_period": "10s",
+          "test": [
+            "CMD",
+            "traefik",
+            "healthcheck",
+            "--configFile=/etc/traefik/traefik.json"
+          ],
+          "timeout": "4s"
+        },
+        "image": "traefik@sha256:1336e85aaed293bd63d005086e0dd013b04078b26aaeb1c18b26a2f928af7e65",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "128m",
+        "networks": [
+          "explorer"
+        ],
+        "pids_limit": 128,
+        "ports": [
+          "198.18.30.37:80:4180"
+        ],
+        "pull_policy": "missing",
+        "read_only": true,
+        "restart": "always",
+        "security_opt": [
+          "no-new-privileges:true"
+        ],
+        "stop_grace_period": "60s",
+        "user": "65532:65532",
+        "volumes": [
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/explorer-traefik.json",
+            "target": "/etc/traefik/traefik.json",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/explorer-routes.yml",
+            "target": "/etc/traefik/explorer.yml",
+            "type": "bind"
+          }
+        ]
+      },
+      "mqtt_explorer": {
+        "cap_drop": [
+          "ALL"
+        ],
+        "command": [
+          "node",
+          "-e",
+          "process.umask(0o077);for(const level of ['log','info','debug','dir','table','trace'])console[level]=()=>{};console.warn=()=>process.stderr.write('MQTT Explorer warning\\n');console.error=()=>process.stderr.write('MQTT Explorer error\\n');require('./dist/src/server.js')"
+        ],
+        "cpus": 1,
+        "environment": {
+          "ALLOWED_ORIGINS": "https://mqtt-ui-a.example.invalid",
+          "MQTT_EXPLORER_SKIP_AUTH": "true",
+          "NODE_ENV": "production",
+          "NODE_OPTIONS": "--max-old-space-size=128",
+          "PORT": "3000",
+          "UPGRADE_INSECURE_REQUESTS": "true",
+          "X_FRAME_OPTIONS": "true"
+        },
+        "extra_hosts": {
+          "broker.mqtt": "198.18.30.37"
+        },
+        "healthcheck": {
+          "interval": "5s",
+          "retries": 24,
+          "start_period": "20s",
+          "test": [
+            "CMD",
+            "node",
+            "-e",
+            "const h=require('http');const r=h.get('http://127.0.0.1:3000/',s=>process.exit(s.statusCode===200?0:1));r.setTimeout(3000,()=>r.destroy());r.on('error',()=>process.exit(1))"
+          ],
+          "timeout": "4s"
+        },
+        "image": "ghcr.io/thomasnordquist/mqtt-explorer@sha256:fa2ff4300d867f1f3e131af6b6ccff54bc9d2905815e28e3aa5de6de5240f0fc",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "256m",
+        "networks": [
+          "explorer"
+        ],
+        "pids_limit": 128,
+        "pull_policy": "missing",
+        "read_only": true,
+        "restart": "always",
+        "security_opt": [
+          "no-new-privileges:true"
+        ],
+        "stop_grace_period": "60s",
+        "user": "1001:1001",
+        "volumes": [
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "source": "/srv/homelab/data/mqtt-explorer",
+            "target": "/app/data",
+            "type": "bind"
+          }
+        ]
+      }
+    },
+    "networks": {
+      "explorer": {}
+    }
+  },
+  "zabbix": {
+    "name": "homelab-monitoring",
+    "services": {
+      "zabbix_server": {
+        "cpus": 1,
+        "environment": {
+          "DB_SERVER_HOST": "198.18.31.23",
+          "DB_SERVER_PORT": "5432",
+          "POSTGRES_DB": "zabbix",
+          "POSTGRES_PASSWORD_FILE": "/run/secrets/database-password",
+          "POSTGRES_USER": "zabbix",
+          "TZ": "Australia/Brisbane",
+          "ZBX_DBTLSCONNECT": "required",
+          "ZBX_STARTBROWSERPOLLERS": "0",
+          "ZBX_STARTREPORTWRITERS": "0"
+        },
+        "image": "zabbix/zabbix-server-pgsql:ubuntu-7.0.32@sha256:bc0505eff209ab5ca9cfb6c7363f061b03b1a31ed529102274413febae54f002",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "768m",
+        "pids_limit": 256,
+        "ports": [
+          "198.18.25.36:10051:10051"
+        ],
+        "pull_policy": "missing",
+        "restart": "always",
+        "stop_grace_period": "60s",
+        "volumes": [
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/database-password",
+            "target": "/run/secrets/database-password",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/proxmox-ca.pem",
+            "target": "/var/lib/zabbix/ssl/ssl_ca/proxmox-ca.pem",
+            "type": "bind"
+          }
+        ]
+      },
+      "zabbix_web": {
+        "cpus": 1,
+        "depends_on": {
+          "zabbix_server": {
+            "condition": "service_started"
+          }
+        },
+        "environment": {
+          "DB_SERVER_HOST": "198.18.31.23",
+          "DB_SERVER_PORT": "5432",
+          "PHP_TZ": "Australia/Brisbane",
+          "POSTGRES_DB": "zabbix",
+          "POSTGRES_PASSWORD_FILE": "/run/secrets/database-password",
+          "POSTGRES_USER": "zabbix",
+          "TZ": "Australia/Brisbane",
+          "ZBX_DBTLSCONNECT": "required",
+          "ZBX_DB_ENCRYPTION": "true",
+          "ZBX_SERVER_HOST": "zabbix_server",
+          "ZBX_SERVER_PORT": "10051"
+        },
+        "image": "zabbix/zabbix-web-nginx-pgsql:ubuntu-7.0.32@sha256:562b70986134a6083ba503ed5189afeda98b9b69c1960a5f0fb2faa13dfd5151",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "512m",
+        "pids_limit": 256,
+        "ports": [
+          "198.18.25.36:8080:8080",
+          "127.0.0.1:8081:8080"
+        ],
+        "pull_policy": "missing",
+        "restart": "always",
+        "stop_grace_period": "60s",
+        "volumes": [
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/database-password",
+            "target": "/run/secrets/database-password",
+            "type": "bind"
+          }
+        ]
+      }
+    }
+  }
+}

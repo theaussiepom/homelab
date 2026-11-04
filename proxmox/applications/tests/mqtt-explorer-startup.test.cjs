@@ -10,8 +10,10 @@ test('the exact generated startup hides RPC payloads and retains fixed errors an
   const root = path.resolve(__dirname, '../../..');
   const rendered = spawnSync('python3', ['-c',
     "import sys,json;sys.path.insert(0,'proxmox/applications/tests');" +
-    'from test_mqtt_explorer import configuration;import render;' +
-    "print(json.dumps(render.compose(configuration())['services']['mqtt_explorer']['command']))"],
+    'from test_component_proxies import descriptor,guest;import component_runtime as runtime;' +
+    "app=descriptor('mqtt_explorer');" +
+    "cfg={'schema':runtime.SCHEMA,'guest':guest('mqtt_explorer'),'applications':{'selected':app}};" +
+    "print(json.dumps(runtime.compositions(cfg)[app['project_name']]['services']['mqtt_explorer']['command']))"],
   {cwd: root, encoding: 'utf8', timeout: 15000});
   assert.equal(rendered.status, 0, rendered.stderr);
   const command = JSON.parse(rendered.stdout);

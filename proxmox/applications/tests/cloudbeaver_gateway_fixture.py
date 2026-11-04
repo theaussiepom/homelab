@@ -386,22 +386,16 @@ def start_community(module, selected, value):
     global ce_id, network_id
     sys.modules['cloudbeaver'] = module
     sys.path.insert(0, str(FRAMEWORK/'proxmox/applications/tests'))
-    import render
-    from test_cloudbeaver import fixture
-    cfg = fixture()
-    cfg['foundation'] = dict(selected, version=1,
-                             secret_files={'oauth_client_secret': '/synthetic/oauth-secret'})
-    cfg['cloudbeaver'].update(value, recovery_admin='local-recovery')
-    cfg['services']['cloudbeaver']['image'] = CE_IMAGE
-    cfg['services']['auth_gateway']['image'] = IMAGE
-    rows = module.files(cfg, provider.client_secret.encode())
+    import protocol_component_fixtures as component_fixtures
+    app = component_fixtures.cloudbeaver_app(selected, value, image=CE_IMAGE, gateway_image=IMAGE)
+    rows = component_fixtures.cloudbeaver_files(app, provider.client_secret.encode())
     for row in rows:
         write(ROOT/row['path'], row['content'], 0o444)
     workspace = ROOT/'workspace'; workspace.mkdir(mode=0o777); workspace.chmod(0o777)
     destination = workspace/'GlobalConfiguration/.dbeaver'
     destination.mkdir(parents=True); destination.parent.chmod(0o777); destination.chmod(0o777)
     write(destination/'data-sources-permissions.json', (ROOT/'cloudbeaver-permissions.json').read_bytes(), 0o444)
-    compose = render.compose(cfg); service = compose['services']['cloudbeaver']
+    compose = component_fixtures.document(app); service = compose['services']['cloudbeaver']
     write(ROOT/'generated-compose.json', json.dumps(compose, sort_keys=True))
     network_id = docker('network', 'create', '--label', 'org.homelab.fixture.owner='+run_id, network_name).stdout.strip()
     # Compose preserves the exact generated CMD-form healthcheck, including its
@@ -455,7 +449,7 @@ def start_community(module, selected, value):
     argv = []
     for item in elements[index+1:]:
         if isinstance(item, ast.Starred) and isinstance(item.value, ast.Name) and item.value.id == 'extra':
-            artifact = module.jdbc(cfg['cloudbeaver'])
+            artifact = module.jdbc(app['settings'])
             argv.extend([artifact['version'], artifact['sha256'], artifact['image_filename']] if artifact else [])
         else:
             argv.append(ast.literal_eval(item))
@@ -471,7 +465,7 @@ def start_community(module, selected, value):
            and data.get('anonymousAccessEnabled') is False
            and data.get('forceHttps') is True
            and set(data.get('enabledAuthProviders', [])) == {'local', 'reverseProxy'})
-    return cfg
+    return app
 
 
 def query_error_projection(errors):
@@ -521,7 +515,7 @@ def combined_checks(cfg):
         record(name+'_forgery_requires_signin', status == 302, status=status)
     query = ('{activeUser{userId authRole teams{teamId}} sessionPermissions userConnections{id name} '
              'serverConfig{configurationMode anonymousAccessEnabled forceHttps}}')
-    for username in ['fixture-user', cfg['cloudbeaver']['recovery_admin']]:
+    for username in ['fixture-user', cfg['settings']['recovery_admin']]:
         jar, status, _, statuses = login(username=username)
         record('signed_pkce_login_for_'+username, status == 200, statuses=statuses)
         headers = forged | {name.replace('-', '_'): value for name, value in forged.items()}

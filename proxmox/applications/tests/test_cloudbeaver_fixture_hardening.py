@@ -70,7 +70,7 @@ class FixtureHardeningTests(unittest.TestCase):
                       record=lambda *args,**kwargs:records.append(args),result=state,
                       write=lambda path,raw:path.write_text(raw))
             with self.assertRaisesRegex(RuntimeError,'Community query rejected declared read-only fields'):
-                ns['combined_checks']({'cloudbeaver':{'recovery_admin':'fixture-recovery'}})
+                ns['combined_checks']({'settings':{'recovery_admin':'fixture-recovery'}})
             self.assertEqual(len(records),4)
             self.assertEqual(json.loads((root/'ce-query-errors.json').read_text()),error)
             self.assertNotIn(secret,json.dumps(state))

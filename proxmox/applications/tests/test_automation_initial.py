@@ -9,51 +9,21 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import deploy
-import guest_contract
+import component_guest
 import initial_ordinary as initial
 import private_io as io
 import test_initial_ordinary as original_cases
 from custody_fixtures import save, legacy_canonical, legacy_immutable
-from test_render import fixture as stack_fixture
 
 
 class AutomationInitialTests(unittest.TestCase):
     def setUp(self):
-        case = original_cases.InitialOrdinaryTests(); case.setUp()
-        self.addCleanup(case.doCleanups); self.case = case
-        self.cfg, self.work = case.cfg, case.work
-        selected = self.cfg.pop("initial_ordinary")
-        self.cfg["guest"]["memory_mib"] = self.cfg["app"]["memory_mib"] = 4096
-        self.cfg["deployment"]["capabilities"] = ["linux", "docker"]
-        self.cfg["app"].pop("database")
-        self.cfg["app"].update(kind="automation", node_red_authentication="authentik-oidc",
-            exclusive_writer_confirmed=True, required_paths=guest_contract.BLUEPRINTS["automation"]["required_paths"],
-            service_health_checks={name: [{"name": name, "argv": ["true"]}] for name in ("mqtt", "homeassistant", "node_red")})
-        self.cfg["app"]["required_paths"] = guest_contract.required_paths(self.cfg)
-        self.stack = stack_fixture("automation")
-        self.stack["services"]["homeassistant"]["environment"].pop("HOMELAB_HA_IPV4", None)
-        stack_path = case.root / "stack.json"; save(stack_path, self.stack)
-        self.cfg["app"]["stack_config"] = str(stack_path)
-        site_hash = save(case.installed, self.cfg)
-        old = copy.deepcopy(case.old)
-        old["binding"]["site_sha256"] = site_hash
-        old["binding"]["input_hashes"][str(stack_path)] = io.sha(stack_path)
-        selected.update(schema=initial.AUTOMATION_SCHEMA, installed_site_sha256=site_hash,
-                        incomplete_operations=["ordinary-70-1", "ordinary-80-1", "ordinary-90-1"])
-        selected["receipt"]["immutable_sha256"] = save(case.immutable, legacy_immutable(old))
-        selected["receipt"]["sha256"] = save(case.canonical, legacy_canonical(old))
-        self.cfg["initial_ordinary"] = selected
-        (self.work / "ordinary-90-1/complete.json").unlink()
-        for name in selected["incomplete_operations"]:
-            save(self.work / name / "failure.log", b"retained failed attempt evidence\n")
-        # Cached source is not an operation-control marker scope or an executor.
-        save(self.work / "ordinary-80-1/cache/tests/HOLD.json", b"cached test fixture, not a live hold")
-        save(self.work / "ordinary-80-1/cache/never-run.py", b"raise AssertionError('never execute cached controllers')")
-        save(case.site, self.cfg)
+        case=original_cases.InitialOrdinaryTests();case.role='automation';case.setUp()
+        self.addCleanup(case.doCleanups);self.case=case
+        self.cfg,self.work=case.cfg,case.work
 
     def test_explicit_failed_history_stays_incomplete_through_modern_generations(self):
-        self.assertEqual(guest_contract.validate(self.cfg, self.stack), 808)
+        self.assertEqual(component_guest.validate(self.cfg), 808)
         original = {p: p.read_bytes() for name in self.cfg["initial_ordinary"]["incomplete_operations"]
                     for p in (self.work / name).rglob("*") if p.is_file()}
         infra, apps = self.case.runtime()
@@ -81,10 +51,10 @@ class AutomationInitialTests(unittest.TestCase):
         with patch.dict(os.environ, {"GITHUB_RUN_ID": "778", "GITHUB_RUN_NUMBER": "778",
                                      "GITHUB_SHA": self.case.revisions[1]}):
             for phase in ("infrastructure", "preparation", "mqtt"):
-                deploy.run(phase, self.case.site)
+                self.case.phase(phase)
             apps.side_effect = RuntimeError("synthetic localhost readiness refusal")
             with self.assertRaises(RuntimeError):
-                deploy.run("homeassistant", self.case.site)
+                self.case.phase("homeassistant")
             apps.side_effect = None
         operation = self.work / "ordinary-778-1"
         hold = (self.work / "ORDINARY-HOLD.json").read_bytes()
@@ -99,7 +69,7 @@ class AutomationInitialTests(unittest.TestCase):
         with patch.dict(os.environ, {"GITHUB_RUN_ID": "779", "GITHUB_RUN_NUMBER": "779",
                                      "GITHUB_SHA": self.case.revisions[1]}):
             with self.assertRaises((ValueError, OSError)):
-                deploy.run("infrastructure", self.case.site)
+                self.case.phase("infrastructure")
             # Only the separately reviewed operator preserves the active hold.
             (self.work / "ORDINARY-HOLD.json").rename(operation / "preserved-failed-hold.json")
             originals = {p: p.read_bytes() for p in (operation / "preserved-failed-hold.json",
@@ -125,7 +95,7 @@ class AutomationInitialTests(unittest.TestCase):
                     save(log.parent / ".pending-HOLD.json", {})
                 before = infra.call_count
                 with self.subTest(change=change), self.assertRaises((ValueError, OSError)):
-                    deploy.run("infrastructure", self.case.site)
+                    self.case.phase("infrastructure")
                 self.assertEqual(infra.call_count, before)
                 self.assertFalse((self.work / "ordinary-779-1").exists())
                 for path, raw in originals.items():
@@ -183,10 +153,10 @@ class AutomationInitialTests(unittest.TestCase):
         for name in ("ordinary-60-1", "ordinary-999-1"):
             path = self.work / name; path.mkdir(mode=0o700)
             with self.subTest(operation=name), self.assertRaises((ValueError, OSError)):
-                deploy.run("infrastructure", self.case.site)
+                self.case.phase("infrastructure")
             path.rmdir()
         with patch.dict(os.environ, {"GITHUB_RUN_ID": "70"}), self.assertRaises(ValueError):
-            deploy.run("infrastructure", self.case.site)
+            self.case.phase("infrastructure")
         infra.assert_not_called(); apps.assert_not_called()
 
     def test_missing_or_symlinked_selected_history_is_not_silently_accepted(self):

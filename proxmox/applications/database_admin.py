@@ -5,10 +5,9 @@ from pathlib import Path
 import re
 
 import managed_credentials
-from private_io import encoded, read_json, require
+from private_io import encoded, require
 
 KINDS = {'postgresql': 5432, 'mariadb': 3306}
-RAW_ACCOUNT = {'username', 'source_guest', 'credential_id', 'credential_file', 'access', 'transport'}
 RAW_CONNECTION = {'name', 'driver', 'database', 'account_id'}
 RESOLVED_CONNECTION = {'host', 'port', 'username', 'credential_id', 'credential_file', 'transport', 'owner'}
 
@@ -46,34 +45,9 @@ def credential_path(value):
             'Bind the fixed immutable account credential input')
 
 
-def accounts(cfg, *, compiled=False):
-    app = cfg['app']
-    if 'database_administrators' not in app:
-        return {}
-    values = app['database_administrators']
-    require(app['kind'] in KINDS and isinstance(values, dict) and 1 <= len(values) <= 8,
-            'Declare finite native database server-administrator accounts')
-    for key, value in values.items():
-        name(key)
-        require(isinstance(value, dict) and set(value) == RAW_ACCOUNT | ({'owner'} if compiled else set())
-                and value['access'] == 'server-administration' and value['transport'] == 'tls',
-                'Use the closed TLS server-administration account configuration')
-        name(value['username']); name(value['source_guest']); credential_path(value)
-        require(app['kind'] != 'postgresql' or (value['username'] not in {'all', 'public', 'none'}
-                and not value['username'].startswith('pg_')),
-                'Use a literal non-reserved PostgreSQL administrator role name')
-        if compiled:
-            actual = owner(value['owner'])
-            require(actual['engine'] == app['kind'] and actual['database_vmid'] == cfg['guest']['vmid']
-                    and actual['node'] == cfg['site']['node'] and actual['username'] == value['username'],
-                    'Preserve this database account owner')
-    require(len({v['username'] for v in values.values()}) == len(values)
-            and len({v['credential_id'] for v in values.values()}) == len(values),
-            'Use independent credentials for distinct database accounts')
-    return values
 
 
-def connections(value, *, compiled=False):
+def connections(value):
     if 'managed_connections' not in value:
         return {}
     values = value['managed_connections']
@@ -82,57 +56,33 @@ def connections(value, *, compiled=False):
             'Keep new owned administrator connections separate from retained metadata')
     for key, item in values.items():
         name(key)
-        require(isinstance(item, dict) and set(item) == RAW_CONNECTION | (RESOLVED_CONNECTION if compiled else set())
+        require(isinstance(item, dict) and set(item) == RAW_CONNECTION | RESOLVED_CONNECTION
                 and isinstance(item['driver'], str) and item['driver'] in KINDS
                 and isinstance(item['name'], str) and 1 <= len(item['name']) <= 100
                 and isinstance(item['database'], str) and len(item['database']) <= 128
                 and not any(c in item['name']+item['database'] for c in '\r\n\x00'),
                 'Use a named supported administrator datasource')
         name(item['account_id'])
-        if compiled:
-            credential_path(item)
-            actual = owner(item['owner'])
-            require(item['host'] == actual['server_address'] and item['port'] == KINDS[item['driver']]
-                    and item['username'] == actual['username'] and item['driver'] == actual['engine']
-                    and item['transport'] == 'tls', 'Bind the datasource to its dedicated TLS account')
+        credential_path(item)
+        actual = owner(item['owner'])
+        require(item['host'] == actual['server_address'] and item['port'] == KINDS[item['driver']]
+                and item['username'] == actual['username'] and item['driver'] == actual['engine']
+                and item['transport'] == 'tls', 'Bind the datasource to its dedicated TLS account')
     return values
 
 
-def prepare(cfg, stack, destination):
-    selected = list(accounts(cfg, compiled=True).values())
-    if stack is not None and stack.get('variant') == 'cloudbeaver':
-        selected += list(connections(stack['cloudbeaver'], compiled=True).values())
+
+
+
+
+def document_from_records(value, records):
+    """Render prepared records without private reads or credential generation."""
+    selected = connections(value)
+    require(isinstance(records, dict) and set(records) == {item['credential_id'] for item in selected.values()},
+            'Supply exactly the selected owned administrator records')
     result = {}
-    for item in selected:
-        expected, payload = managed_credentials.payload(cfg['paths']['state_root'], item['credential_id'], item['owner'], destination)
-        require(item['credential_file'] == expected and not result.keys() & payload.keys(),
-                'Bind one immutable input per independent administrator account')
-        result.update(payload)
-    return result
-
-
-def hba(cfg, files):
-    values = accounts(cfg, compiled=True)
-    if cfg['app']['kind'] != 'postgresql' or not values:
-        return
-    selections = [row for row in cfg['app']['database']['config_files'] if row['destination'].endswith('/pg_hba.conf')]
-    require(len(selections) == 1 and selections[0]['source'].startswith('${inputs}/'),
-            'Keep one declared PostgreSQL HBA source')
-    filename = Path(selections[0]['source']).name
-    require(filename in files and '# homelab managed administrator accounts' not in files[filename],
-            'Preserve the original HBA source outside the owned account prefix')
-    rows = ['# homelab managed administrator accounts']
-    for key, item in sorted(values.items()):
-        user, source = item['username'], item['owner']['source_address']
-        rows.extend([f'hostssl all,replication {user} {source}/32 scram-sha-256', f'local all,replication {user} reject',
-                     f'host all,replication {user} 0.0.0.0/0 reject', f'host all,replication {user} ::/0 reject'])
-    files[filename] = '\n'.join(rows)+'\n'+files[filename]
-
-
-def document(value):
-    result = {}
-    for key, item in connections(value, compiled=True).items():
-        record = read_json(Path(item['credential_file']), private=True)
+    for key, item in selected.items():
+        record = records[item['credential_id']]
         require(isinstance(record, dict) and set(record) == {'schema', 'owner', 'password'}
                 and record['schema'] == 'homelab-application-account-v1' and record['owner'] == item['owner']
                 and isinstance(record['password'], str) and re.fullmatch('[0-9a-f]{64}', record['password']),

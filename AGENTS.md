@@ -1,26 +1,21 @@
 # Working agreement
 
-- Own reusable schemas, blueprints, compilation and OpenTofu/Ansible
-  capabilities. Treat these contracts as a public API.
-- Keep site allocations and policy out of reusable definitions and code:
-  IPs, subnets, VLAN IDs, bridge names, VMIDs, MACs, hostnames, domains,
-  storage endpoints, credential references and access allowlists.
-- Accept concrete site settings through validated inputs. Do not infer them,
-  supply local fallback values or encode one site's topology as a requirement.
-- Keep public examples and fixtures explicitly synthetic and separate from
-  reusable definitions. Protocol constants and public vendor endpoints are
-  permitted; actual site identities and private repository references are not.
-- Follow the existing architecture. Implement reusable capabilities here;
-  do not require consumers to duplicate compilation or deployment engines.
-- Manage desired state through protected CD: OpenTofu owns infrastructure
-  and state; Ansible owns guest configuration and services.
-- Do not add migration or cutover executors, one-off site repair scripts,
-  or site-specific operating histories and deployment receipts.
-- Preserve data, identities, genuine state, locks, holds and failure evidence.
-  Removing obsolete source does not authorize changing runtime custody.
-- Keep dependency, version and hash selections in their declared authoritative
-  manifests or workflow references. Preserve declared image policies.
-- Maintain automated ownership and public-boundary checks. Test reusable
-  contracts with distinct synthetic site settings.
-- Preserve validation, coverage, security and review gates. Distinguish source
-  checks from integration, deployment and service acceptance.
+- Own reusable component contracts, validation, compilation and deployment
+  capabilities. Treat them as a public API.
+- Keep site allocations, credentials, local policy and private repository
+  details out of code and reusable definitions.
+- Reuse existing components. Add a component only when an existing contract
+  cannot express the requirement.
+- New components need a closed schema, useful diagnostics, explicit references,
+  compiler integration and documentation. Avoid generic configuration bags.
+- Test component behavior directly with successful and extensive failure cases.
+  App and guest units mock component contracts. Compiler integration exercises
+  real components; deployment end-to-end tests verify actual services.
+- Preserve data, stable identities, credential ownership, locks and holds.
+- OpenTofu owns infrastructure/state; Ansible owns configuration/services.
+  Maintain through protected CD.
+- Retire superseded code, duplicate tests and stale documentation after proving
+  replacements. Keep required regressions and historical evidence.
+- Preserve coverage, security, signing and review gates. Report source,
+  integration, deployment and service verification separately.
+- Read docs/components.md for use and extension; docs/testing.md for checks.

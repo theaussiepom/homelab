@@ -20,10 +20,22 @@ class AccountTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('mqtt_explorer_account_test', CODE)
         self.m = importlib.util.module_from_spec(spec); spec.loader.exec_module(self.m)
         temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(temporary.name).resolve()
         self.m.CONFIG = self.root/'config'; self.m.CONFIG.mkdir()
         self.m.CUSTODY = self.root/'custody'; self.m.CUSTODY.mkdir(mode=0o700)
         self.m.DATA = self.root/'data'; self.m.DATA.mkdir(mode=0o700)
+        # Context validation has separate component units. App tests supply its
+        # resolved descriptor while exercising the real anchored state operations.
+        state_spec=importlib.util.spec_from_file_location('account_fixture_state',CODE.with_name('mqtt_explorer_state.py'))
+        state=importlib.util.module_from_spec(state_spec);state_spec.loader.exec_module(state)
+        self.m.state=state
+        state.DATA=str(self.m.DATA);state.CUSTODY=str(self.m.CUSTODY)
+        selected={'project':state.PROJECT,'services':dict(state.SERVICES),
+            'data_path':str(self.m.DATA),'runtime_directory':state.RUNTIME,
+            'runtime_id':'mqtt_explorer','custody':str(self.m.CUSTODY)}
+        self.add_patch(state,'context',lambda value=None:dict(selected))
+        broker={'project':state.PROJECT,'service':'mqtt','config_path':str(self.m.CONFIG)}
+        self.add_patch(state,'broker_context',lambda value=None:dict(broker))
         self.owner = {'node': 'fixture-node', 'vmid': 901, 'hostname': 'fixture-broker'}
         self.write(self.m.CUSTODY/'workspace.json', self.owner)
         self.username = 'fixture_gui'; self.password = 'c'*64
@@ -39,6 +51,7 @@ class AccountTests(unittest.TestCase):
         self.before = self.path.read_bytes()
         self.owners = {}
         self.real_lstat, self.real_fstat, self.real_open = Path.lstat, os.fstat, os.open
+        real_stat = os.stat
         self.own(self.m.DATA, 1001, 1001); self.own(self.path, 1883, 1883)
         def opened(path, flags, mode=0o600, **kwargs):
             fd = self.real_open(path, flags, mode, **kwargs)
@@ -48,6 +61,7 @@ class AccountTests(unittest.TestCase):
             return fd
         self.add_patch(Path, 'lstat', lambda path, *a, **kw: self.overlay(self.real_lstat(path, *a, **kw)))
         self.add_patch(os, 'fstat', lambda fd: self.overlay(self.real_fstat(fd)))
+        self.add_patch(os, 'stat', lambda path, *a, **kw: self.overlay(real_stat(path, *a, **kw)))
         self.add_patch(os, 'open', opened)
         self.add_patch(os, 'chown', lambda path, uid, gid: self.own(path, uid, gid))
         self.add_patch(os, 'fchown', lambda fd, uid, gid: self.owners.__setitem__(self.key(self.real_fstat(fd)), (uid, gid)))
@@ -56,9 +70,11 @@ class AccountTests(unittest.TestCase):
         # the portable fixture models only this unavailable kernel boundary.
         if not hasattr(os, 'listxattr'):
             attrs = {}
-            self.add_patch(os, 'listxattr', lambda path: list(attrs.get(self.key(self.real_lstat(path)), {})), create=True)
-            self.add_patch(os, 'getxattr', lambda path, name: attrs[self.key(self.real_lstat(path))][name], create=True)
-            self.add_patch(os, 'setxattr', lambda path, name, value: attrs.setdefault(self.key(self.real_lstat(path)), {}).__setitem__(name, value), create=True)
+            def attr_key(path):
+                return self.key(self.real_fstat(path) if isinstance(path,int) else self.real_lstat(path))
+            self.add_patch(os, 'listxattr', lambda path: list(attrs.get(attr_key(path), {})), create=True)
+            self.add_patch(os, 'getxattr', lambda path, name: attrs[attr_key(path)][name], create=True)
+            self.add_patch(os, 'setxattr', lambda path, name, value: attrs.setdefault(attr_key(path), {}).__setitem__(name, value), create=True)
         self.cid = 'b'*64; self.docker_calls = []; self.hash_hook = None
         self.row = {'Id': self.cid, 'State': {'Running': True}, 'Config': {'Image': self.value['image'],
             'Labels': {'com.docker.compose.project': 'homelab-mqtt', 'com.docker.compose.service': 'mqtt'},

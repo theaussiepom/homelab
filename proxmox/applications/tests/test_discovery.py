@@ -9,8 +9,6 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import discovery as d
-import foundation
-from test_foundation import fixture
 
 
 def route():
@@ -135,12 +133,12 @@ class RoutingTests(unittest.TestCase):
             "*.example.invalid",
             "bad..invalid",
             "a" * 254 + ".invalid",
-            "UPPER.invalid",
             "a\n.invalid",
         ]:
             with self.subTest(host=host), self.assertRaises(ValueError):
                 d.hostname(host)
         self.assertEqual(d.validate_routes({"a": route()}), {"app.example.invalid"})
+        self.assertEqual(d.hostname("UPPER.invalid"),"UPPER.invalid")  # Typed DNS preserves authored case; collision keys casefold upstream.
 
     def test_middlewares_are_extensible_and_https_verification_cannot_be_disabled(self):
         settings = {
@@ -224,42 +222,6 @@ class RoutingTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 d.shared(bad)
 
-    def test_foundation_stages_only_public_ca_certificates_and_mounts_them_read_only(
-        self,
-    ):
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg = fixture(tmp, "ingress")
-            ca = cfg["foundation"]["pve_ca_file"]
-            cfg["routing"] = {
-                "transports": {
-                    "pve": {"ca_file": ca},
-                    "system": {"server_name": "example.invalid"},
-                },
-                "routes": {
-                    "nas": dict(
-                        route(), url="https://198.18.30.20:443", transport="pve"
-                    )
-                },
-            }
-            self.assertIn(ca, foundation.source_files(cfg))
-            artifacts = {row["path"]: row for row in foundation.files(cfg)}
-            self.assertEqual(
-                artifacts["route-pve.pem"]["content"], Path(ca).read_text()
-            )
-            self.assertEqual(artifacts["route-pve.pem"]["mode"], "0400")
-            compose = foundation.configure_compose(
-                cfg, {"services": {"traefik": {"environment": {}}}}
-            )
-            mount = next(
-                v
-                for v in compose["services"]["traefik"]["volumes"]
-                if v["target"] == d.ca_path("pve")
-            )
-            self.assertTrue(mount["read_only"])
-            self.assertFalse(mount["bind"]["create_host_path"])
-            self.assertIn(
-                "nas", json.loads(artifacts["shared.yml"]["content"])["http"]["routers"]
-            )
 
     def test_pegaprox_http_backend_keeps_automatic_browser_https(self):
         selected = {'host':'pega.example.invalid', 'url':'http://198.18.25.34:5000'}

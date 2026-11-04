@@ -24,7 +24,7 @@ def require(condition, message):
 
 def name(value):
     require(
-        isinstance(value, str) and re.fullmatch(r"[a-z][a-z0-9-]{0,62}", value),
+        isinstance(value, str) and re.fullmatch(r"[a-z][a-z0-9_-]{0,62}", value),
         "Use a literal routing name",
     )
     return value
@@ -36,7 +36,7 @@ def hostname(value):
         and len(value) <= 253
         and "." in value
         and all(
-            re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", part)
+            re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", part)
             for part in value.split(".")
         ),
         "Use a literal fully qualified route hostname",
@@ -77,7 +77,7 @@ def validate_routes(routes, addresses=None):
     require(
         isinstance(routes, dict) and len(routes) <= 64, "Use a bounded named routes map"
     )
-    hosts = set()
+    hosts, published = set(), set()
     for key, route in routes.items():
         name(key)
         require(
@@ -93,11 +93,13 @@ def validate_routes(routes, addresses=None):
             "Use a bounded hostname aliases list",
         )
         selected = [hostname(value) for value in [route["host"], *aliases]]
+        folded = {host.lower() for host in selected}
         require(
-            len(set(selected)) == len(selected) and not hosts.intersection(selected),
+            len(folded) == len(selected) and not hosts.intersection(folded),
             "Route hostnames must be globally unique",
         )
-        hosts.update(selected)
+        hosts.update(folded)
+        published.update(selected)
         if 'service' in route:
             require(route['service'] == 'api@internal' and addresses is None
                     and 'authentik_forward_auth' in route and 'transport' not in route,
@@ -123,7 +125,7 @@ def validate_routes(routes, addresses=None):
             require(
                 backend.scheme == "https", "A TLS transport requires an HTTPS backend"
             )
-    return hosts
+    return published
 
 
 def callback_name(key):
