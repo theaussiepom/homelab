@@ -28,10 +28,10 @@ variable "ssh_public_keys" {
 }
 
 module "guest" {
-  source          = "./guest"
-  node            = var.site.node
-  guest           = var.guest
-  ssh_public_keys = var.ssh_public_keys
+  source           = "./guest"
+  node             = var.site.node
+  guest            = var.guest
+  ssh_public_keys  = var.ssh_public_keys
   protected_guests = var.protected_guests
 }
 

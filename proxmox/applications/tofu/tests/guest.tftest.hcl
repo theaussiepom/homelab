@@ -62,8 +62,9 @@ variables {
     node         = "practice-pve"
     api_endpoint = "https://pve.example.invalid:8006/"
   }
-  ssh_public_keys = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"]
-  guest           = jsondecode(file("tests/base-guest.json"))
+  protected_guests = [900]
+  ssh_public_keys  = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"]
+  guest            = jsondecode(file("tests/base-guest.json"))
 }
 
 run "one_unprivileged_guest_and_drop_firewall" {

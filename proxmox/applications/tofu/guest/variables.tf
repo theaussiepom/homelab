@@ -3,7 +3,7 @@ variable "ssh_public_keys" { type = list(string) }
 variable "protected_guests" {
   type = list(number)
   validation {
-    condition = length(distinct(var.protected_guests)) == length(var.protected_guests) && alltrue([for vmid in var.protected_guests : vmid >= 1 && floor(vmid) == vmid])
+    condition     = length(distinct(var.protected_guests)) == length(var.protected_guests) && alltrue([for vmid in var.protected_guests : vmid >= 1 && floor(vmid) == vmid])
     error_message = "Declare unique positive protected guest identities in the execution context."
   }
 }
@@ -18,7 +18,7 @@ variable "guest" {
       bridge  = string, vlan = optional(number), mac = string, ipv4 = string,
       gateway = optional(string), ipv6 = optional(string)
     })),
-    volumes = map(object({ path = string, size_gib = number })),
+    volumes      = map(object({ path = string, size_gib = number })),
     volume_order = optional(list(string)),
     rules = list(object({
       direction = string, proto = string, port = optional(string),
