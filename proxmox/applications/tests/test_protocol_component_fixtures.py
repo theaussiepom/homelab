@@ -38,46 +38,13 @@ def cloud(authentication=None, settings=None):
 def protected_shape(path):
     """Hash every fixture instruction except the bounded construction replaced here.
 
-    The exceptions below are only top-level statements in the three constructor
+    The exceptions below are only top-level statements in the two constructor
     functions. Protocol, Docker, cleanup, args and image declarations are retained.
     """
     tree = ast.parse(path.read_text())
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        if path.name == 'cloudbeaver_gateway_fixture.py':
-            if node.name == 'start_community':
-                remaining = []
-                for row in node.body:
-                    text = ast.unparse(row)
-                    if (isinstance(row, (ast.Import, ast.ImportFrom))
-                            and any(name in text for name in ('render', 'test_cloudbeaver', 'protocol_component_fixtures'))):
-                        continue
-                    if isinstance(row, ast.Assign) and any(isinstance(target, ast.Name)
-                            and target.id in ('cfg', 'app', 'rows', 'compose') for target in row.targets):
-                        continue
-                    if text.startswith(("cfg['foundation'] =", "cfg['services']", "cfg['cloudbeaver'].update")):
-                        continue
-                    remaining.append(row)
-                node.body = remaining
-                class OldNames(ast.NodeTransformer):
-                    def visit_Subscript(self, item):
-                        if (isinstance(item.value, ast.Name) and item.value.id == 'app'
-                                and isinstance(item.slice, ast.Constant) and item.slice.value == 'settings'):
-                            item.slice.value = 'cloudbeaver'
-                        return self.generic_visit(item)
-                    def visit_Name(self, item):
-                        if item.id == 'app': item.id = 'cfg'
-                        return item
-                OldNames().visit(node)
-            if node.name == 'combined_checks':
-                class OldSettings(ast.NodeTransformer):
-                    def visit_Subscript(self, item):
-                        if (isinstance(item.value, ast.Name) and item.value.id == 'cfg'
-                                and isinstance(item.slice, ast.Constant) and item.slice.value == 'settings'):
-                            item.slice.value = 'cloudbeaver'
-                        return self.generic_visit(item)
-                OldSettings().visit(node)
         if path.name in ('bitwarden_runtime_fixture.py', 'monitoring_fixture.py') and node.name == 'main':
             class RemoveConstruction(ast.NodeTransformer):
                 def visit_ImportFrom(self, row):
@@ -218,6 +185,33 @@ class FixtureCallSiteControls(NoNative):
     def test_protocol_assertions_args_images_docker_limits_and_cleanup_are_unchanged(self):
         for name, expected in BASELINE['protected_fixture_shapes'].items():
             with self.subTest(fixture=name): self.assertEqual(protected_shape(HERE/name), expected)
+
+    def test_current_runtime_health_extraction_preserves_frozen_argv_and_selected_service(self):
+        tree=ast.parse((HERE/'cloudbeaver_gateway_fixture.py').read_text())
+        function=next(node for node in tree.body if isinstance(node,ast.FunctionDef)and node.name=='start_community')
+        start=next(i for i,node in enumerate(function.body)if isinstance(node,ast.Assign)and any(
+            isinstance(target,ast.Name)and target.id=='health'for target in node.targets))
+        stop=next(i for i,node in enumerate(function.body)if isinstance(node,ast.Assign)and any(
+            isinstance(target,ast.Name)and target.id=='reply'for target in node.targets))
+        code=compile(ast.Module(body=function.body[start:stop],type_ignores=[]),'<actual-health-extraction>','exec')
+        runtime=(F/'proxmox/applications/cloudbeaver-runtime.py').read_bytes()
+        # Frozen from the immutable f287 runtime health command after its service.
+        expected=['/opt/java/openjdk/bin/java','-Xms8m','-Xmx64m','-Xss512k',
+            '-XX:MaxMetaspaceSize=64m','-XX:ReservedCodeCacheSize=16m','-XX:ActiveProcessorCount=1',
+            '-XX:CICompilerCount=2','-XX:+UseSerialGC','/opt/cloudbeaver/conf/CloudBeaverHealth.java','--configuration']
+        def extract(raw,artifact=None):
+            module=mock.Mock();module.jdbc.return_value=artifact
+            scope={'ast':ast,'runtime':raw,'app':{'settings':{}},'module':module}
+            exec(code,scope);return scope['argv']
+        self.assertEqual(extract(runtime),expected)
+        artifact={'version':'3.5.11','sha256':'a'*64,'image_filename':'mariadb-java-client-3.5.11.jar'}
+        self.assertEqual(extract(runtime,artifact),expected+[artifact[key]for key in ('version','sha256','image_filename')])
+        for before,after in [(b"'exec', '-T'",b"'foreign-exec', '-T'"),
+            (b"'exec', '-T'",b"'exec', '--foreign'"),
+            (b"ctx.services['cloudbeaver']",b"ctx.services['peer']")]:
+            with self.subTest(selector=after):
+                changed=runtime.replace(before,after);self.assertNotEqual(changed,runtime)
+                with self.assertRaises((AssertionError,StopIteration)):extract(changed)
 
     def test_cloud_callsite_passes_actual_selected_value_images_and_secret(self):
         tree = ast.parse((HERE/'cloudbeaver_gateway_fixture.py').read_text())

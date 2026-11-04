@@ -445,7 +445,8 @@ def start_community(module, selected, value):
                 and node.args and isinstance(node.args[0], ast.List)
                 and any(isinstance(item, ast.Constant) and item.value == 'exec' for item in node.args[0].elts))
     elements = call.args[0].elts
-    index = next(i for i, item in enumerate(elements) if isinstance(item, ast.Constant) and item.value == 'cloudbeaver')
+    index = next(i for i, item in enumerate(elements) if isinstance(item, ast.Constant) and item.value == 'exec') + 2
+    assert ast.unparse(elements[index-1]) == "'-T'" and ast.unparse(elements[index]) == "ctx.services['cloudbeaver']", 'Use the selected owned runtime health service'
     argv = []
     for item in elements[index+1:]:
         if isinstance(item, ast.Starred) and isinstance(item.value, ast.Name) and item.value.id == 'extra':

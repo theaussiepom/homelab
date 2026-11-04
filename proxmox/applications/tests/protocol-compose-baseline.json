@@ -331,7 +331,6 @@
   },
   "protected_fixture_shapes": {
     "bitwarden_runtime_fixture.py": "da91c51401d38c5de5aa8b0957c3b2de0f742ae6643d4f849e2006b905683b2d",
-    "cloudbeaver_gateway_fixture.py": "f618299617aa4af69a641e8a22dce3aa150a711841496772f2c0966f6d7b67df",
     "monitoring_fixture.py": "0811a407ee7ad6b0df1351b41afb4f464d0809a5684ffd5033ea04e411d22672"
   }
 }

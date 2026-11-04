@@ -224,4 +224,23 @@ class CloudRuntimeComponentTests(unittest.TestCase):
         fresh=self.config();self.r.workspace(self.owner,fresh);child=Path(fresh['custody_directory'])/'workspace.json';child_original=child.read_bytes()
         self.r.workspace(self.owner,retained);self.assertEqual(receipt.read_bytes(),original);self.assertEqual(child.read_bytes(),child_original)
 
+class WorkspaceFixtureContractTests(unittest.TestCase):
+    def test_linux_workspace_fixture_supplies_the_actual_retained_context(self):
+        import ast
+        runtime=load()
+        tree=ast.parse((D/'tests/cloudbeaver_workspace_fixture.py').read_text())
+        row=next(node for node in tree.body if isinstance(node,ast.Assign)and any(
+            isinstance(target,ast.Name)and target.id=='config'for target in node.targets))
+        values={}
+        exec(compile(ast.Module(body=[row],type_ignores=[]),'<workspace-fixture-context>','exec'),{'r':runtime},values)
+        with patch.object(Path,'open',side_effect=AssertionError('No input read')),patch.object(runtime.subprocess,'Popen',side_effect=AssertionError('No process')):
+            context=runtime.context(values['config'])
+            with self.assertRaises(ValueError):runtime.context({'connections':{'postgresql':{}}})
+        self.assertEqual(context.workspace,runtime.WORKSPACE)
+        self.assertEqual(context.custody,runtime.CUSTODY)
+        self.assertEqual(context.permissions,runtime.PERMISSIONS)
+        self.assertEqual((context.project,context.lifecycle),('homelab-db-tools','retained'))
+        self.assertEqual(values['config']['connections'],{'postgresql':{}})
+
+
 if __name__=='__main__':unittest.main()
