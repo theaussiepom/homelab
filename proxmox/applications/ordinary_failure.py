@@ -228,10 +228,13 @@ def _prefix(attempt, path, row, held, raw, ready):
     require(markers == {'infrastructure-complete.json',
                        *(name+suffix for name in prefix for suffix in ('-started.json', '-complete.json'))},
             'Preserve exactly the old prefix marker inventory')
+    logs = {'infrastructure.log'}
+    if old['guest'].get('serial_device'):
+        logs.update(('host-device-check.log', 'host-device-attach.log'))
     require(not set(remaining) & set(inventory[1])
             and all(not stat.S_ISDIR(info[2]) or name in {'tofu', *prefix}
                 for name, info in inventory[1].items())
-            and all(not name.endswith('.log') or name == 'infrastructure.log' for name in inventory[1]),
+            and all(not name.endswith('.log') or name in logs for name in inventory[1]),
             'A selected, later or unknown phase has a work or log directory')
     applications = Path(held['binding']['app_inputs_directory'])
     payload_inventory = _inventory(applications)

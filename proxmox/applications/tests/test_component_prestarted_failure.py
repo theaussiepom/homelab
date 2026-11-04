@@ -7,6 +7,7 @@ real. HOLD preservation below is an explicit test-operator action, never CD.
 import copy
 import ast
 from contextlib import ExitStack
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,8 @@ import component_inputs
 import component_payload
 import coordinated_generation
 import deploy
+import host_devices
+import host_device_helper
 import initial_ordinary
 import ordinary_failure
 import private_io as io
@@ -31,11 +34,11 @@ from test_component_historical_transition import HistoricalCase
 
 
 class PrestartedFailureTests(unittest.TestCase):
-    def fixture(self, *, preparation_failure=False):
+    def fixture(self, *, preparation_failure=False, role='zigbee2mqtt'):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name).resolve()
-        case = HistoricalCase(self, root, 'zigbee2mqtt', phase='radio')
+        case = HistoricalCase(self, root, role, phase='radio')
         contexts = ExitStack()
         self.addCleanup(contexts.close)
         case.bind(contexts)
@@ -116,6 +119,105 @@ class PrestartedFailureTests(unittest.TestCase):
         return SimpleNamespace(cfg=cfg, binding=value.old_binding, work=value.case.work,
             receipt=value.case.work/'ordinary-complete.json', operation=value.operation,
             workflow=held['workflow'], run_number=held['run_number'], site_revision=held['site_revision'])
+
+    def host_logs(self, value):
+        """Use the installed client/writer; replace only its remote transport."""
+        context = self.historical(value)
+        calls = []
+        def transport(argv, environment, log, **kwargs):
+            action = argv[-1]
+            self.assertIn(action, ('check', 'attach'))
+            selected = host_devices.policy(context.cfg)
+            self.assertEqual(kwargs['input_bytes'], host_device_helper.encoded(selected))
+            self.assertEqual(kwargs['timeout'], 180)
+            answer = {'schema': host_device_helper.SCHEMA, 'vmid': selected['vmid'], 'changed': False,
+                'policy_sha256': hashlib.sha256(host_device_helper.encoded(selected)).hexdigest(),
+                'helper_sha256': host_device_helper.implementation_digest()}
+            io.write_new(log, io.encoded(answer))
+            calls.append((action, log.name))
+        with patch.object(host_devices, 'quiet', side_effect=transport), \
+             patch('subprocess.Popen', side_effect=AssertionError('No native transport')), \
+             patch('socket.create_connection', side_effect=AssertionError('No target')):
+            host_devices.check(context.cfg, value.operation)
+            self.assertFalse(host_devices.attach(context.cfg, value.operation))
+        return calls
+
+    def test_real_serial_client_logs_precede_infrastructure_completion_and_are_read_only_evidence(self):
+        value = self.fixture()
+        self.assertEqual(self.host_logs(value), [('check', 'host-device-check.log'),
+                                                ('attach', 'host-device-attach.log')])
+        self.assertTrue((value.operation/'host-device.json').is_file())
+        for name in ('host-device-check.log', 'host-device-attach.log'):
+            self.assertEqual((value.operation/name).stat().st_mode & 0o777, 0o600)
+            self.assertEqual((value.operation/name).stat().st_nlink, 1)
+        module = ast.parse(Path(proxmox_guest.__file__).read_text())
+        writer = next(node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == 'infrastructure')
+        def position(name):
+            return next(node.lineno for node in ast.walk(writer) if isinstance(node, ast.Call)
+                        and ast.unparse(node.func) == name)
+        self.assertLess(position('host_devices.check'), position('shutil.copytree'))
+        self.assertLess(position('shutil.copytree'), position('host_devices.attach'))
+        self.assertIsInstance(writer.body[-1], ast.Return)
+        self.assertLess(position('host_devices.attach'), writer.body[-1].lineno)
+        outer = ast.parse(Path(deploy.__file__).read_text())
+        native = next(node for node in ast.walk(outer) if isinstance(node, ast.Call)
+                      and ast.unparse(node.func) == 'proxmox_guest.infrastructure')
+        complete = next(node for node in ast.walk(outer) if isinstance(node, ast.Call)
+                        and ast.unparse(node.func) == 'attempt.infrastructure_complete')
+        self.assertLess(native.lineno, complete.lineno)
+        before = self.files(value)
+        with patch('private_io.private_writer', side_effect=AssertionError('No reader writer')), \
+             patch('component_payload.prepare', side_effect=AssertionError('No payload writer')):
+            historical = ordinary_failure.inspect_historical(self.historical(value), value.member,
+                value.binding_key, value.row, value.raw)
+            current = self.inspect(value)
+        self.assertEqual(historical['identity'], current['identity'])
+        self.assertEqual(before, self.files(value))
+        self.assertEqual(value.hold.read_bytes(), value.raw)
+        self.assertFalse((value.operation/'complete.json').exists())
+
+    def test_nonserial_source_does_not_own_either_native_helper_log_name(self):
+        value = self.fixture(role='automation')
+        self.assertNotIn('serial_device', self.historical(value).cfg['guest'])
+        self.assertEqual(self.host_logs(value), [])
+        self.inspect(value)
+        for name in ('host-device-check.log', 'host-device-attach.log'):
+            path = value.operation/name
+            io.write_new(path, b'synthetic unbound helper log\n')
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, 'work or log directory'):
+                self.inspect(value)
+            path.unlink()
+        self.inspect(value)
+
+    def test_serial_helper_logs_do_not_admit_unknown_logs_directories_or_unsafe_leaves(self):
+        value = self.fixture()
+        self.host_logs(value)
+        for name in ('host-device-other.log', 'host-device-check-extra.log', 'telemetry.log', 'zabbix-agent.log'):
+            path = value.operation/name
+            io.write_new(path, b'synthetic unknown log\n')
+            with self.subTest(name=name), self.assertRaises(ValueError): self.inspect(value)
+            path.unlink()
+        directory = value.operation/'host-device'
+        directory.mkdir(mode=0o700)
+        with self.assertRaises(ValueError): self.inspect(value)
+        directory.rmdir()
+        path = value.operation/'host-device-check.log'
+        saved = value.operation/'saved-host-device-check'
+        path.rename(saved)
+        for kind in ('symlink', 'hardlink', 'directory'):
+            if kind == 'symlink': path.symlink_to(saved)
+            elif kind == 'hardlink': os.link(saved, path)
+            else: path.mkdir(mode=0o700)
+            with self.subTest(kind=kind), self.assertRaises(ValueError): self.inspect(value)
+            if kind == 'directory': path.rmdir()
+            else: path.unlink()
+        saved.rename(path)
+        for suffix in ('-started.json', '-complete.json'):
+            path = value.operation/(value.row['phase']+suffix)
+            io.write_new(path, b'{}')
+            with self.subTest(suffix=suffix), self.assertRaises(ValueError): self.inspect(value)
+            path.unlink()
+        self.inspect(value)
 
     def test_supplied_exact_hold_reader_is_read_only_and_default_reader_has_no_active_fallback(self):
         value = self.fixture()
