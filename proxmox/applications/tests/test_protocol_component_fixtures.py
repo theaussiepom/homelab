@@ -100,7 +100,9 @@ def protected_shape(path):
             RemoveConstruction().visit(node)
     tree.body = [node for node in tree.body if not (isinstance(node, ast.Import)
                  and any(name.name in ('render', 'protocol_component_fixtures') for name in node.names))]
-    return hashlib.sha256(ast.dump(tree, include_attributes=False).encode()).hexdigest()
+    # Python 3.13 omits empty lists by default; retain the recorded tree shape.
+    options = {'show_empty': True} if sys.version_info >= (3, 13) else {}
+    return hashlib.sha256(ast.dump(tree, include_attributes=False, **options).encode()).hexdigest()
 
 
 class NoNative(unittest.TestCase):

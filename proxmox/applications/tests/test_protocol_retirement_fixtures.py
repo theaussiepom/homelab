@@ -57,7 +57,9 @@ def protected_shape(path):
                 return None
             return self.generic_visit(row)
     ConstructorOnly().visit(tree)
-    return hashlib.sha256(ast.dump(tree, include_attributes=False).encode()).hexdigest()
+    # Python 3.13 omits empty lists by default; retain the recorded tree shape.
+    options = {'show_empty': True} if sys.version_info >= (3, 13) else {}
+    return hashlib.sha256(ast.dump(tree, include_attributes=False, **options).encode()).hexdigest()
 
 
 class Offline(unittest.TestCase):
