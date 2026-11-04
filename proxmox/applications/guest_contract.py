@@ -349,11 +349,22 @@ def validate(cfg, stack=None):
             helper_services = set()
             if app['kind'] == 'mqtt':
                 import mqtt_explorer
-                explorer = mqtt_explorer.validate(stack)
+                explorer = mqtt_explorer.validate(stack, compiled=True)
                 require((explorer is not None) == ('mqtt_explorer' in applications(cfg)),
                         'Bind the optional Explorer application to its explicit stack configuration')
                 if explorer is not None:
                     require(explorer['bind_address'] in addresses, 'Bind Explorer to an assigned backend interface')
+                    require(('broker_address' in explorer) == ('broker_connection' in explorer),
+                            'Resolve the saved Explorer connection before deployment admission')
+                    if 'broker_address' in explorer:
+                        binding = app.get('service_connections', {}).get('mqtt_explorer', {})
+                        endpoint = app.get('published_services', {}).get('mqtt', {})
+                        require(binding.get('service') == 'mqtt.mqtt'
+                                and explorer['broker_connection']['hostname'] == endpoint.get('hostname')
+                                and endpoint.get('port') == 1883
+                                and explorer['broker_address'] == endpoint.get('addresses', {}).get(binding.get('address'))
+                                and explorer['broker_address'] in addresses,
+                                'Bind the derived Explorer alias to its owning declared broker endpoint')
                     helper_services = {'explorer_gateway'}
             require(set(stack["services"]) == set(applications(cfg)) | helper_services,
                     "Declare every selected service and its health contract")

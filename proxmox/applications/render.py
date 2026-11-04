@@ -113,7 +113,7 @@ def compose(cfg):
     winet.validate(cfg)
     music_assistant.validate(cfg)
     mqtt_runtime.validate(cfg)
-    mqtt_explorer.validate(cfg)
+    mqtt_explorer.validate(cfg, compiled=True)
     if kind == "bitwarden":
         bitwarden.validate(cfg)
     if kind in {"identity", "ingress", "db-tools"} and "foundation" not in cfg:

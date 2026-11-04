@@ -101,6 +101,30 @@ class MqttExplorerRuntimeTest(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.patches = Patches(self)
         self.fixture = fixture(Path(temporary.name), self.patches)
+
+    def test_health_binds_only_the_compiled_saved_hostname_to_its_selected_backend(self):
+        f=self.fixture;m=f.m;config,rows,_docker=healthy(f,self.patches)
+        config.update(broker_connection={'hostname':'broker.example.invalid'},broker_address='198.18.31.19')
+        app=rows['mqtt_explorer']['HostConfig'];gateway=rows['explorer_gateway']['HostConfig']
+        expected=['broker.example.invalid:198.18.31.19'];app['ExtraHosts']=expected
+        assert m.health(config)['mqtt_explorer']=='passed'
+        for value in (None,[],False,['broker.example.invalid:198.18.41.9'],expected+['foreign.example.invalid:198.18.31.20']):
+            with self.subTest(value=value):
+                app['ExtraHosts']=value
+                with self.assertRaises(ValueError):m.health(config)
+        app['ExtraHosts']=expected
+        gateway['ExtraHosts']=expected
+        with self.assertRaises(ValueError):m.health(config)
+        gateway['ExtraHosts']=[]
+        assert m.health(config)['mqtt_explorer']=='passed'
+        for key in ('broker_address','broker_connection'):
+            changed=dict(config);changed.pop(key)
+            with self.subTest(missing=key),self.assertRaises(ValueError):m.health(changed)
+        config.pop('broker_connection');config.pop('broker_address')
+        app['ExtraHosts']=[]
+        assert m.health(config)['mqtt_explorer']=='passed'
+        app['ExtraHosts']=None
+        assert m.health(config)['mqtt_explorer']=='passed'
     def test_workspace_create_once_preserves_real_bytes_modes_and_owned_rerun(self):
         fixture = self.fixture
         monkeypatch = self.patches

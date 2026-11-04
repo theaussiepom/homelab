@@ -15,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import mqtt_explorer as m
 import render
 import guest_contract
+import ansible_guest
+import deployment_inputs
 sys.path.append(str(Path(__file__).resolve().parents[3]/'blueprints'))
 import service_bindings
 from test_render import fixture
@@ -50,8 +52,8 @@ class ExplorerTests(unittest.TestCase):
     def test_same_guest_saved_connection_is_validated_but_has_no_external_network_edge(self):
         with tempfile.TemporaryDirectory() as directory:
             value=self.mqtt_composition(Path(directory));cfg,stack,_=value
-            self.assertEqual(guest_contract.validate(cfg,stack),cfg['guest']['vmid'])
             endpoints=service_bindings.bind({'mqtt':value})
+            self.assertEqual(guest_contract.validate(cfg,stack),cfg['guest']['vmid'])
             self.assertEqual(set(endpoints),{'mqtt.mqtt'})
             self.assertEqual(list(service_bindings.connections_for({'mqtt':cfg})),[])
             self.assertEqual(stack['mqtt_explorer']['broker_connection']['hostname'],'broker.example.invalid')
@@ -66,6 +68,83 @@ class ExplorerTests(unittest.TestCase):
             stack['mqtt_explorer']['broker_connection'].update(credential_id='fixture-postgresql',credential_file='${inputs}/managed-fixture-postgresql.json')
             resolved['mqtt']=(cfg,stack,files)
             with self.assertRaisesRegex(ValueError,'independent credentials'):service_bindings.bind(resolved)
+
+    def test_derived_broker_alias_follows_selected_address_without_gui_or_dns_coupling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cfg,stack,files=self.mqtt_composition(Path(directory))
+            for suffix,address in enumerate(('198.18.41.9','198.18.31.19','198.18.32.23'),1):
+                cfg['guest']['interfaces'].append({'ipv4':address+'/24','mac':f'02:00:00:00:01:{suffix:02x}'})
+            endpoint=cfg['app']['published_services']['mqtt']
+            endpoint.update(addresses={'frontend':'198.18.41.9','backend':'198.18.31.19','alternate':'198.18.32.23'},dns_address='frontend')
+            cfg['app']['service_connections']['mqtt_explorer']['address']='backend'
+            before=copy.deepcopy(stack);original_profile=copy.deepcopy(stack['mqtt_explorer']['broker_connection'])
+            credential={'schema':'homelab-application-account-v1','owner':{'purpose':'mqtt-explorer','username':original_profile['username']},'password':'a'*64}
+            with patch.object(m,'read_json',return_value=credential):
+                before_account=next(row for row in m.files(stack) if row['path']=='mqtt-explorer-account.json')
+                service_bindings.bind({'mqtt':(cfg,stack,files)})
+                rows=m.files(stack)
+            self.assertEqual(stack['mqtt_explorer']['broker_connection'],original_profile)
+            self.assertEqual(next(row for row in rows if row['path']=='mqtt-explorer-account.json'),before_account)
+            self.assertEqual(endpoint['addresses'][endpoint['dns_address']],'198.18.41.9')
+            self.assertEqual(stack['mqtt_explorer']['bind_address'],'198.18.30.37')
+            self.assertEqual(stack['mqtt_explorer']['broker_address'],'198.18.31.19')
+            self.assertEqual(guest_contract.validate(cfg,stack),cfg['guest']['vmid'])
+            doc=render.compose(stack)
+            self.assertEqual(doc['services']['mqtt_explorer']['extra_hosts'],{'broker.example.invalid':'198.18.31.19'})
+            self.assertNotIn('extra_hosts',doc['services']['explorer_gateway'])
+            self.assertEqual(doc['services']['mqtt'],render.compose(before)['services']['mqtt'])
+            self.assertEqual(json.loads(next(row['content'] for row in rows if row['path']=='mqtt-explorer-public.json'))['broker_address'],'198.18.31.19')
+            with self.assertRaises(ValueError):m.validate(stack)
+            alternate=copy.deepcopy(before);cfg['app']['service_connections']['mqtt_explorer']['address']='alternate'
+            service_bindings.bind({'mqtt':(cfg,alternate,files)})
+            changed=render.compose(alternate);expected=copy.deepcopy(doc)
+            expected['services']['mqtt_explorer']['extra_hosts']={'broker.example.invalid':'198.18.32.23'}
+            self.assertEqual(changed,expected)
+            self.assertEqual(guest_contract.validate(cfg,alternate),cfg['guest']['vmid'])
+            for mutate in (lambda:alternate['mqtt_explorer'].update(broker_address='198.18.41.9'),
+                           lambda:cfg['app']['service_connections']['mqtt_explorer'].update(service='foreign.mqtt'),
+                           lambda:cfg['app']['service_connections']['mqtt_explorer'].update(address='missing')):
+                with self.subTest(mutate=mutate):
+                    old_stack,old_cfg=copy.deepcopy(alternate),copy.deepcopy(cfg);mutate()
+                    with self.assertRaises(ValueError):guest_contract.validate(cfg,alternate)
+                    alternate,cfg=old_stack,old_cfg
+
+    def test_broker_address_is_not_a_raw_knob_or_arbitrary_service_alias(self):
+        base=configuration();base['mqtt_explorer']['broker_address']='198.18.31.19'
+        with self.assertRaises(ValueError):m.validate(base,compiled=True)
+        with tempfile.TemporaryDirectory() as directory:
+            cfg,stack,files=self.mqtt_composition(Path(directory))
+            with self.assertRaisesRegex(ValueError,'Resolve the saved'):guest_contract.validate(cfg,stack)
+            for value in ('198.18.31.19','8.8.8.8','127.0.0.1','0.0.0.0','169.254.1.1',[],None):
+                changed=copy.deepcopy(stack);changed['mqtt_explorer']['broker_address']=value
+                with self.subTest(value=value),self.assertRaises(ValueError):m.validate(changed)
+                if value!='198.18.31.19':
+                    with self.assertRaises(ValueError):m.validate(changed,compiled=True)
+            stack['mqtt_explorer']['broker_address']='198.18.31.19'
+            with self.assertRaises(ValueError):service_bindings.bind({'mqtt':(cfg,stack,files)})
+            stack['mqtt_explorer'].pop('broker_address');stack['services']['mqtt_explorer']['extra_hosts']={'broker.example.invalid':'198.18.30.37'}
+            with self.assertRaises(ValueError):render.compose(stack)
+
+    def test_broker_and_explorer_phases_retain_the_same_compiled_alias_and_own_health(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);cfg,stack,files=self.mqtt_composition(root)
+            service_bindings.bind({'mqtt':(cfg,stack,files)})
+            Path(cfg['app']['stack_config']).write_text(json.dumps(stack))
+            Path(cfg['app']['stack_config']).chmod(0o600)
+            operation=root/'operation';operation.mkdir(mode=0o700)
+            def quiet(argv,environment,log):log.write_text('ok=1 changed=0 failed=0')
+            with patch.object(deployment_inputs,'binding',return_value='expected'), \
+                 patch.object(ansible_guest.proxmox_guest,'guest_trust'), \
+                 patch.object(ansible_guest.proxmox_guest,'dhcp_admission'), \
+                 patch.object(ansible_guest,'required_network_interfaces',return_value=[]), \
+                 patch.object(ansible_guest,'quiet',side_effect=quiet):
+                for phase in ('mqtt','mqtt_explorer'):
+                    ansible_guest.run_phase(cfg,root/'site.json',root,operation,'expected',phase)
+                    value=json.loads((operation/phase/'variables.json').read_text())
+                    self.assertEqual(value['application_service'],phase)
+                    self.assertEqual(value['app']['health_checks'],cfg['app']['service_health_checks'][phase])
+                    self.assertEqual(value['mqtt_explorer_owner']['vmid'],cfg['guest']['vmid'])
+                    self.assertEqual(json.loads(Path(value['app']['stack_config']).read_text())['mqtt_explorer']['broker_address'],'198.18.30.37')
 
     def test_legacy_dedicated_mqtt_omission_keeps_single_application_contract(self):
         with tempfile.TemporaryDirectory() as directory:

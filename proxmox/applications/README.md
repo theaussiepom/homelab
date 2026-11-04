@@ -66,6 +66,10 @@ An optional `mqtt_explorer.broker_connection` declares `name`, `hostname`, `port
 resolve to this guest's existing MQTT publication on port 1883. CD creates one
 independent credential and appends only its absent account to the selected
 parent-mounted password file, preserving old bytes, ownership, modes and xattrs.
+Compilation derives `broker_address` from that selected publication; it is not
+a raw profile field. Only Explorer receives the saved hostname's runtime alias
+to that address. The GUI listener address, public DNS, saved connection and
+credential records remain independent. Health verifies the exact alias.
 Unexpected ACL/include/per-listener authentication refuses this finite path.
 An atomic replacement and HUP reload preserve the existing broker container;
 GUI-only reconciliation targets only the two GUI services. Interrupted account

@@ -15,13 +15,13 @@ SERVICES = {'mqtt_explorer', 'explorer_gateway'}
 RUNTIME = '/opt/homelab-app/runtime/'
 
 
-def validate(cfg):
+def validate(cfg, *, compiled=False):
     value = cfg.get('mqtt_explorer')
     require(cfg.get('kind') == 'mqtt' or 'mqtt_explorer' not in cfg,
             'MQTT Explorer belongs to the selected broker guest')
     if 'mqtt_explorer' not in cfg:
         return None
-    require(isinstance(value, dict) and set(value) - {'broker_connection'} == {
+    require(isinstance(value, dict) and set(value) - ({'broker_connection', 'broker_address'} if compiled else {'broker_connection'}) == {
         'public_url', 'bind_address', 'authentik_outpost_url', 'data_path'},
         'Use the closed MQTT Explorer configuration')
     require(value['data_path'] == DATA, 'Keep Explorer data separate from retained broker data')
@@ -66,11 +66,17 @@ def validate(cfg):
                 and re.fullmatch('/mosquitto/config/[A-Za-z0-9_.-]{1,100}', broker['password_file'])
                 and Path(broker['password_file']).name not in {'.', '..'},
                 'Bind fixed private account input and selected broker password file')
+    if 'broker_address' in value:
+        require('broker_connection' in value and isinstance(value['broker_address'], str),
+                'Derive the broker address only for its saved connection')
+        address = ipaddress.IPv4Address(value['broker_address'])
+        require(address.is_private and not (address.is_loopback or address.is_link_local
+                or address.is_multicast or address.is_unspecified), 'Use the derived private broker listener')
     return value
 
 
 def prepare(cfg, stack, destination):
-    value = validate(stack)
+    value = validate(stack, compiled=True)
     if value is None or 'broker_connection' not in value:
         return {}
     broker = value['broker_connection']
@@ -82,7 +88,7 @@ def prepare(cfg, stack, destination):
 
 
 def source_files(cfg):
-    value = validate(cfg)
+    value = validate(cfg, compiled=True)
     return [value['broker_connection']['credential_file']] if value is not None and 'broker_connection' in value else []
 
 
@@ -113,7 +119,7 @@ def configuration(value):
 
 
 def files(cfg):
-    value = validate(cfg)
+    value = validate(cfg, compiled=True)
     if value is None:
         return []
     static, dynamic = configuration(value)
@@ -140,7 +146,7 @@ def files(cfg):
 
 
 def configure(cfg, document):
-    value = validate(cfg)
+    value = validate(cfg, compiled=True)
     if value is None:
         return document
     document['networks'] = {'explorer': {}}
@@ -149,6 +155,8 @@ def configure(cfg, document):
         service.pop('network_mode')
         service.update(networks=['explorer'], cap_drop=['ALL'], security_opt=['no-new-privileges:true'], read_only=True)
     app = document['services']['mqtt_explorer']
+    if 'broker_address' in value:
+        app['extra_hosts'] = {value['broker_connection']['hostname']: value['broker_address']}
     app['user'] = '1001:1001'
     app['environment'] = {'NODE_ENV': 'production', 'PORT': '3000', 'NODE_OPTIONS': '--max-old-space-size=128',
         'MQTT_EXPLORER_SKIP_AUTH': 'true', 'ALLOWED_ORIGINS': 'https://'+urlsplit(value['public_url']).hostname,

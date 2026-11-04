@@ -122,6 +122,7 @@ def bind(resolved, route_records=None):
                 connections.require(selected == guest+'.mqtt' and endpoint['port'] == 1883
                                     and value['hostname'] == endpoint['hostname'] and value['port'] == 1883,
                                     'Keep the Explorer account on its owning broker listener')
+                stack['mqtt_explorer']['broker_address'] = address
             if stack is not None and stack["kind"] == "zigbee2mqtt":
                 connections.require(
                     endpoint["port"] == 1883, "Select the preserved MQTT listener"

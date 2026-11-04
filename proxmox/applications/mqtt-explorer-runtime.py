@@ -77,7 +77,8 @@ def health(config):
     need(os.geteuid() == 0)
     need(isinstance(config, dict) and config.get('data_path') == str(DATA)
          and set(config.get('images', {})) == SERVICES
-         and set(config.get('runtime_sha256', {})) == {'explorer-traefik.json', 'explorer-routes.yml'})
+         and set(config.get('runtime_sha256', {})) == {'explorer-traefik.json', 'explorer-routes.yml'}
+         and ('broker_address' in config) == ('broker_connection' in config))
     owner = json.loads(read(CUSTODY/'workspace.json')); owner_check(owner)
     info = DATA.lstat()
     need(stat.S_ISDIR(info.st_mode) and info.st_uid == info.st_gid == 1001 and stat.S_IMODE(info.st_mode) == 0o700)
@@ -100,6 +101,11 @@ def health(config):
              and row['HostConfig']['NetworkMode'] not in ('host', 'bridge', 'default', 'none'))
         rows[name] = row
     app, gateway = rows['mqtt_explorer'], rows['explorer_gateway']
+    aliases = ([config['broker_connection']['hostname'] + ':' + config['broker_address']]
+               if 'broker_address' in config else [])
+    actual_aliases = app['HostConfig'].get('ExtraHosts')
+    need((actual_aliases == aliases or not aliases and actual_aliases is None)
+         and gateway['HostConfig'].get('ExtraHosts') in (None, []))
     data_mounts = [m for m in app['Mounts'] if m.get('Destination') == '/app/data'
                    or m.get('Destination', '').startswith('/app/data/')]
     need(app['Config']['User'] == '1001:1001' and gateway['Config']['User'] == '65532:65532'
