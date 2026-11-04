@@ -46,6 +46,7 @@ def variables(cfg, phase, *, payload=None, previously_owned=False):
             selected = runtime['applications'][app_id]
             result['component_native_applications'].append({
                 'kind':selected['adapter'], 'database':row['identity']})
+        result['component_preparation_app']=result.pop('app')
         return result
     if phase==component_guest.AGENT_PHASE:
         import monitoring_agent
@@ -166,7 +167,8 @@ def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, prev
     phase_work=operation/phase
     private_directory(phase_work,create=True)
     selected=variables(cfg,phase,payload=payload,previously_owned=previously_owned)
-    selected['app']['render_dir']=str(phase_work/'rendered')
+    phase_app=selected['component_preparation_app'] if phase=='preparation' else selected['app']
+    phase_app['render_dir']=str(phase_work/'rendered')
     write(phase_work/'variables.json',selected)
     write(phase_work/'inventory.json',{'application':{'hosts':{cfg['app']['hostname']:{
         'ansible_host':cfg['app']['address'],'ansible_user':'root'}}}})

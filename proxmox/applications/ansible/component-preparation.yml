@@ -4,6 +4,8 @@
   become: true
   gather_facts: true
   any_errors_fatal: true
+  vars:
+    app: "{{ component_preparation_app }}"
   tasks:
     - name: Check guest identity
       ansible.builtin.import_tasks: tasks/component-ready.yml

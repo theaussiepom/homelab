@@ -33,7 +33,7 @@ def bind(resolver):
             context = resolver.site['contexts'][guest['context']]
             paths = {key: context['paths'][key] for key in
                      ('state_root', 'backup_mount', 'backup_directory', 'backup_source')}
-            cfg = {'site': {'node': context['node']},
+            cfg = {'schema': 'homelab-component-guest-v1', 'site': {'node': context['node']},
                    'guest': {'vmid': guest['identity']['vmid']},
                    'app': {'vmid': guest['identity']['vmid']}, 'paths': paths}
             role = None

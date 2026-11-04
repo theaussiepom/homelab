@@ -82,7 +82,7 @@ def _legacy_site(attempt, receipt):
                   if Path(path).name == 'stack.json'}
     selection = getattr(attempt, 'initial_selection', None)
     if selection is not None:
-        candidates.add(selection['installed_site'])
+        candidates.add(attempt.cfg['initial_ordinary']['installed_site'])
     custody = getattr(attempt, 'custody', None)
     if custody is not None:
         candidates.add(custody['members'][attempt.cfg['app']['kind']]['installed_site'])

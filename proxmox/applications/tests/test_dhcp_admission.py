@@ -156,7 +156,7 @@ class DhcpAdmissionTests(unittest.TestCase):
                 binding=component_inputs.binding(cfg,site)
                 payload=None if phase=='preparation'else current_inputs.payload(cfg)
                 with patch.object(pve, "api_get", side_effect=fetch),patch.object(pve,"guest_trust",side_effect=lambda *_:events.append("trust")), \
-                        patch.object(ansible_guest,"variables",return_value={'app':copy.deepcopy(cfg['app']),'network_ready_interfaces':['eth0']}), \
+                        patch.object(ansible_guest,"variables",return_value={('component_preparation_app' if phase=='preparation' else 'app'):copy.deepcopy(cfg['app']),'network_ready_interfaces':['eth0']}), \
                         patch.object(ansible_guest,"quiet",side_effect=quiet):
                     self.assertFalse(REAL_RUN_PHASE(cfg,site,root,root,binding,phase,payload=payload)["changed"])
                 self.assertEqual(events, ["config", "interfaces", "trust", "ssh"])

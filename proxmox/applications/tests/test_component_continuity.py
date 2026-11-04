@@ -130,7 +130,9 @@ class LegacyPrivateProofTests(unittest.TestCase):
             if role in values:old[section]={key:bound(role,values[role])}
         cfg=copy.deepcopy(self.attempt.cfg);cfg['app']=old
         installed=directory/'site.json';write_new(installed,encoded(cfg))
-        self.attempt.initial_selection={'installed_site':str(installed)}
+        self.attempt.cfg['initial_ordinary']={'installed_site':str(installed)}
+        self.attempt.initial_selection={'vmid':610,'node':'example-node',
+            'initial_state_sha256':'a'*64,'initial_ordinary':{},'incomplete_operations':[]}
         receipt={'status':'passed','binding':{'vmid':610,'site_sha256':sha(installed),
             'source_sha256':'b'*64,'blueprint_sha256':'c'*64,'input_hashes':hashes}}
         return receipt
@@ -242,7 +244,7 @@ class LegacyPrivateProofTests(unittest.TestCase):
     def test_ordinary_and_coordinated_legacy_site_locators_use_only_existing_hash_bound_copies(self):
         receipt=self.legacy(self.selected,{'api_token':b'original-material'},
             {'services':{'node_red':{'environment':{'NODE_RED_API_TOKEN':'original-material'}}}})
-        site=self.attempt.initial_selection['installed_site']
+        site=self.attempt.cfg['initial_ordinary']['installed_site']
         self.attempt.initial_selection=None
         self.assertEqual(set(continuity.legacy(self.attempt,receipt,self.selected)),{'api_token'})
         self.attempt.cfg['app']={'kind':'identity'}

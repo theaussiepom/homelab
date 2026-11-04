@@ -5,7 +5,9 @@ must first preserve the exact own failed hold inside its immutable operation.
 Every unselected or changed failure continues to refuse ordinary deployment.
 """
 from pathlib import Path
+import os
 import re
+import stat
 from coordinated_contract import fingerprint, shape
 from custody_records import decode, no_markers, read_existing
 from private_io import digest, private_directory, require, encoded
@@ -86,26 +88,44 @@ def infrastructure_review(attempt, member, path, held, ready, row):
                       "after": guest_attributes(previous_folder)}
 
 
+def _row(cfg, row):
+    """The finite row union, independent of a future source selection."""
+    before = isinstance(row, dict) and row.get('boundary') == 'before-started'
+    fields = {"operation", "phase", "hold_sha256", "infrastructure_sha256",
+              "previous_ordinary_sha256", "state_sha256"}
+    shape(row, fields | ({'boundary', 'preceding_completions_sha256'} if before else {'log_sha256'}))
+    name = row["operation"]
+    require(isinstance(name, str) and re.fullmatch(r"ordinary-[1-9][0-9]*-[1-9][0-9]*", name),
+            "Select each exact failed ordinary operation once")
+    require(isinstance(row["phase"], str)
+            and (re.fullmatch(r"[a-z][a-z0-9_-]{0,62}" if cfg.get('schema')=='homelab-component-guest-v1'
+                              else r"[a-z][a-z0-9_]{0,31}", row["phase"])
+                 or row["phase"] == "zabbix-agent"),
+            "Select a fixed failed application phase")
+    if before:
+        prefix = row['preceding_completions_sha256']
+        require(cfg.get('schema') == 'homelab-component-guest-v1'
+                and row['phase'] not in {'infrastructure', 'preparation', 'zabbix-agent'}
+                and isinstance(prefix, dict) and 0 < len(prefix) <= 128
+                and 'preparation' in prefix and row['phase'] not in prefix
+                and all(isinstance(name, str) and re.fullmatch('[a-z][a-z0-9_-]{0,62}', name)
+                        for name in prefix), 'Select only the closed component pre-started app boundary')
+        for value in prefix.values():
+            fingerprint(value)
+    for key in row.keys() - {"operation", "phase", 'boundary', 'preceding_completions_sha256'}:
+        fingerprint(row[key])
+
+
 def selection(cfg):
     rows = cfg.get("reviewed_ordinary_failures", [])
     require(isinstance(rows, list) and len(rows) <= 16, "Use bounded reviewed ordinary failures")
     require(not rows or "coordinated_custody" in cfg or "initial_ordinary" in cfg,
             "Reviewed failures require selected ordinary custody")
-    seen = set()
+    names = set()
     for row in rows:
-        shape(row, {"operation", "phase", "hold_sha256", "infrastructure_sha256", "log_sha256",
-                    "previous_ordinary_sha256", "state_sha256"})
-        name = row["operation"]
-        require(isinstance(name, str) and re.fullmatch(r"ordinary-[1-9][0-9]*-[1-9][0-9]*", name)
-                and name not in seen, "Select each exact failed ordinary operation once")
-        seen.add(name)
-        require(isinstance(row["phase"], str)
-                and (re.fullmatch(r"[a-z][a-z0-9_-]{0,62}" if cfg.get('schema')=='homelab-component-guest-v1'
-                                  else r"[a-z][a-z0-9_]{0,31}", row["phase"])
-                     or row["phase"] == "zabbix-agent"),
-                "Select a fixed failed application phase")
-        for key in row.keys() - {"operation", "phase"}:
-            fingerprint(row[key])
+        _row(cfg, row)
+        require(row['operation'] not in names, "Select each exact failed ordinary operation once")
+        names.add(row['operation'])
     return rows
 
 
@@ -148,44 +168,240 @@ def phase_start(attempt,path,row,held,raw):
             'Preserve the failed phase selected app owner')
 
 
+def _sealed_component(binding):
+    """Read the existing immutable publication, never construct another packet."""
+    import component_inputs
+    from component_payload import _directory, _read
+    from coordinated_generation import component_binding
+    component_binding(binding)
+    directory = Path(binding['app_inputs_directory']).parent
+    with _directory(directory) as descriptor:
+        site = _read(descriptor, 'site.json')
+        runtime = _read(descriptor, 'component-runtime.json')
+    require(digest(site) == binding['site_sha256'], 'Preserve the failed boundary static source')
+    cfg = decode(site)
+    hashes = component_inputs.inspect(cfg, directory/'site.json')
+    require(all(binding['input_hashes'].get(path) == value for path, value in hashes.items())
+            and binding['input_hashes'].get(str(directory/'component-runtime.json')) == digest(runtime)
+            and cfg['deployment']['input_identity'] == binding['input_identity']
+            and binding['app_inputs_directory'] == str(directory/'applications')
+            and cfg['guest']['vmid'] == binding['vmid'], 'Preserve every sealed component source input')
+    value = decode(runtime)
+    require(isinstance(value, dict) and value.get('schema') == 'homelab-component-runtime-v1'
+            and isinstance(value.get('applications'), dict)
+            and set(value['applications']) == {row['id'] for row in cfg['deployment']['applications'].values()},
+            'Preserve the sealed runtime application set')
+    return cfg, value
+
+
+def _inventory(path):
+    """Bound descriptor-relative names and identities without reading leaf contents."""
+    from component_payload import _directory, _identity
+    with _directory(path) as directory:
+        names = os.listdir(directory)
+        require(len(names) <= 4096, 'Bound the failed operation inventory')
+        entries = {name: os.stat(name, dir_fd=directory, follow_symlinks=False) for name in names}
+        require(all((stat.S_ISREG(info.st_mode) and info.st_nlink == 1 or stat.S_ISDIR(info.st_mode))
+                    and info.st_uid == os.getuid() for info in entries.values()),
+                'Preserve failed boundary file and directory identities')
+        return _identity(os.fstat(directory)), {name: _identity(info) for name, info in entries.items()}
+
+
+def _prefix(attempt, path, row, held, raw, ready):
+    """Immutable old source and whole pre-STARTED prefix; no current-state pin."""
+    import component_guest
+    from component_payload import AppPayload, _directory, _read
+    old, runtime = _sealed_component(held['binding'])
+    phases = component_guest.phases(old)
+    phase = row['phase']
+    require(phase in old['deployment']['applications']
+            and runtime['applications'][old['deployment']['payload_phases'][phase]]['lifecycle'] == 'retained',
+            'Select only an old retained application boundary')
+    require(ready.get('binding') == held['binding'] and ready.get('state_sha256') == row['state_sha256']
+            and isinstance(ready.get('state_identity'), dict),
+            'Preserve the immutable failed infrastructure checkpoint')
+    prefix, remaining = phases[:phases.index(phase)], phases[phases.index(phase):]
+    require(set(row['preceding_completions_sha256']) == set(prefix),
+            'Preserve the complete ordered old phase prefix')
+    inventory = _inventory(path)
+    markers = {name for name in inventory[1] if name.endswith(('-started.json', '-complete.json'))}
+    require(markers == {'infrastructure-complete.json',
+                       *(name+suffix for name in prefix for suffix in ('-started.json', '-complete.json'))},
+            'Preserve exactly the old prefix marker inventory')
+    require(not set(remaining) & set(inventory[1])
+            and all(not stat.S_ISDIR(info[2]) or name in {'tofu', *prefix}
+                for name, info in inventory[1].items())
+            and all(not name.endswith('.log') or name == 'infrastructure.log' for name in inventory[1]),
+            'A selected, later or unknown phase has a work or log directory')
+    applications = Path(held['binding']['app_inputs_directory'])
+    payload_inventory = _inventory(applications)
+    require(set(payload_inventory[1]) == {old['deployment']['payload_phases'][name]
+                for name in prefix if name != 'preparation'},
+            'Selected, later and unknown app or agent payloads must be absent')
+    for name in prefix:
+        phase_start(attempt, path, {'phase': name}, held, raw)
+        complete_raw = read_existing(path/(name+'-complete.json'))
+        require(digest(complete_raw) == row['preceding_completions_sha256'][name],
+                'Preserve the exact completed prefix bytes')
+        complete = decode(complete_raw)
+        started = decode(read_existing(path/(name+'-started.json')))
+        proof = None if name == 'preparation' else started['phase_inputs']
+        shape(complete, {'binding', 'result'} | ({'phase_inputs'} if proof is not None else set()))
+        require(complete_raw == encoded(complete) and complete['binding'] == held['binding']
+                and isinstance(complete['result'], dict) and complete['result'].get('status') == 'passed'
+                and type(complete['result'].get('changed')) is bool
+                and (proof is None or complete['phase_inputs'] == proof),
+                'Preserve the successful prefix completion and selected proof')
+        if proof is not None:
+            payload = AppPayload.load(applications/proof['app'], proof)
+            with _directory(payload.directory) as directory:
+                app = decode(_read(directory, 'application.json'))
+            require(app == runtime['applications'][old['deployment']['payload_phases'][name]],
+                    'Preserve the prefix payload application from its sealed runtime')
+        work = path/name
+        if work.exists():
+            private_directory(work)
+            no_markers(work)
+    require(inventory == _inventory(path) and payload_inventory == _inventory(applications),
+            'Failed boundary inventory changed while reading')
+    return old, runtime, ready['state_identity']
+
+
+def before_started(attempt, member, path, row, held, raw, ready):
+    """Future admission retains current ownership and ancestry, not old state hashes."""
+    import commands
+    from component_ownership import identity
+    old, runtime, backend_identity = _prefix(attempt, path, row, held, raw, ready)
+    current, current_runtime = _sealed_component(attempt.binding)
+    require(current == attempt.cfg and held['binding']['schema'] == attempt.binding['schema'],
+            'Preserve the current sealed source for failed-boundary admission')
+    phase = row['phase']
+    require(phase in current['deployment']['applications'],
+            'Select the same retained application phase from the old and current source')
+    selected = runtime['applications'][old['deployment']['payload_phases'][phase]]
+    now = current_runtime['applications'][current['deployment']['payload_phases'][phase]]
+    require(now['lifecycle'] == 'retained' and selected['adapter'] == now['adapter']
+            and runtime['guest']['id'] == current_runtime['guest']['id']
+            and identity(old, selected) == identity(current, now),
+            'Preserve the retained failed app and every persistent runtime owner')
+    fingerprint(held['site_revision'], 40)
+    require(commands.is_ancestor(attempt.workspace, held['site_revision'], attempt.site_revision),
+            'Preserve failed-source workflow ancestry')
+    return backend_identity
+
+
+def _record(path, row, hold_raw):
+    """The same exact historical bytes for normal and operator read-only callers."""
+    infrastructure = row['phase'] == 'infrastructure'
+    before = row.get('boundary') == 'before-started'
+    private_directory(path)
+    no_markers(path)
+    if not before:
+        private_directory(path / row['phase'])
+        no_markers(path / row['phase'])
+    require(not any((path / name).exists() or (path / name).is_symlink()
+                    for name in ('complete.json', row['phase'] + '-complete.json')),
+            'A failed checkpoint cannot replace a completed operation')
+    names = {'hold_sha256': 'preserved-failed-hold.json',
+             'infrastructure_sha256': ('infrastructure/review.json' if infrastructure else 'infrastructure-complete.json'),
+             **({} if before else {'log_sha256': ('infrastructure.log' if infrastructure else row['phase'] + '/application.log')})}
+    raw = {key: (hold_raw if key == 'hold_sha256' else read_existing(path / name))
+           for key, name in names.items()}
+    require(all(digest(value) == row[key] for key, value in raw.items()),
+            'Preserve exact reviewed failed operation bytes')
+    held, ready = decode(raw['hold_sha256']), decode(raw['infrastructure_sha256'])
+    require(isinstance(held, dict) and isinstance(ready, dict), 'Preserve typed failed operation records')
+    return held, ready
+
+
+def inspect_historical(context, member, binding_key, row, hold_raw):
+    """Read original failed context before an operator preserves its exact HOLD.
+
+    This validates no future run/source selection and grants no release. Mutable
+    canonical/backend pins belong only here, not repeated ordinary admission.
+    """
+    import initial_ordinary
+    import coordinated_contract
+    from coordinated_generation import backend
+    _row(context.cfg, row)
+    path = Path(context.cfg['paths']['state_root'])/str(context.cfg['guest']['vmid'])/row['operation']
+    require(context.cfg.get('schema') == 'homelab-component-guest-v1' and row['phase'] != 'infrastructure'
+            and context.work == path.parent and context.operation == path
+            and context.receipt == path.parent/'ordinary-complete.json',
+            'Bind only the original component failed-operation context')
+    held, ready = _record(path, row, hold_raw)
+    old, _ = _sealed_component(held['binding'])
+    require(old == context.cfg and held['binding'] == context.binding,
+            'Preserve the exact original sealed failed source and binding')
+    initial = initial_ordinary.selection(old)
+    selected = initial if initial is not None else coordinated_contract.selection(old)['members'][old['app']['kind']]
+    key = initial_ordinary.BINDING if initial is not None else 'coordinated_custody_sha256'
+    custody = initial_ordinary.selection_digest(old) if initial is not None else coordinated_contract.selection_digest(old)
+    require(member == selected and binding_key == key and context.binding.get(key) == custody,
+            'Preserve the original selected historical guest custody')
+    shape(held, {'binding', 'operation', 'automatic_retry', 'workflow', 'run_number', 'site_revision',
+                 'previous_ordinary_sha256'})
+    fingerprint(held['site_revision'], 40)
+    require(hold_raw == encoded(held) and held['operation'] == str(path) and held['automatic_retry'] is False
+            and held['workflow'] == context.workflow and held['run_number'] == context.run_number
+            and type(held['run_number']) is int and held['run_number'] > 0
+            and held['site_revision'] == context.site_revision
+            and held['previous_ordinary_sha256'] == row['previous_ordinary_sha256'],
+            'Preserve the exact original failed workflow and prior success')
+    if row.get('boundary') == 'before-started':
+        _, _, identity = _prefix(context, path, row, held, hold_raw, ready)
+    else:
+        phase_start(context, path, row, held, hold_raw)
+        require(ready.get('binding') == context.binding and ready.get('state_sha256') == row['state_sha256']
+                and isinstance(ready.get('state_identity'), dict),
+                'Preserve the original failed infrastructure checkpoint')
+        identity = ready['state_identity']
+    state_hash, current_identity = backend(context.work, member)
+    require(digest(read_existing(context.receipt)) == row['previous_ordinary_sha256']
+            and state_hash == row['state_sha256'] and current_identity == identity,
+            'Preserve the exact pre-preservation canonical success and current backend')
+    return dict(row, identity=identity)
+
+
+def inspect_record(attempt, member, binding_key, row, hold_raw):
+    """Validate one selected failed record from supplied exact HOLD bytes, read only.
+
+    This entrypoint retains future source selection and run-order policy. Normal
+    admission supplies only the fixed preserved file; original operator context
+    uses inspect_historical instead. Neither entrypoint grants a release.
+    """
+    require(row in selection(attempt.cfg), 'Inspect only an exact selected failed operation row')
+    path = attempt.work / row["operation"]
+    infrastructure = row["phase"] == "infrastructure"
+    before = row.get('boundary') == 'before-started'
+    require(path != attempt.operation and (infrastructure or row["phase"] in attempt.phases),
+            "A reviewed failure cannot replay as the current operation")
+    held, ready = _record(path, row, hold_raw)
+    binding = held.get("binding", {})
+    require(isinstance(binding, dict) and binding.get("vmid") == member["vmid"]
+            and binding.get(binding_key) == attempt.binding[binding_key]
+            and held.get("operation") == str(path) and held.get("workflow") == attempt.workflow
+            and type(held.get("run_number")) is int and 0 < held["run_number"] < attempt.run_number
+            and held.get("automatic_retry") is False
+            and held.get("previous_ordinary_sha256") == row["previous_ordinary_sha256"],
+            "Preserve the exact own failed workflow and prior success")
+    if before:
+        identity = before_started(attempt, member, path, row, held, hold_raw, ready)
+    elif infrastructure:
+        identity, reviewed_drift = infrastructure_review(attempt, member, path, held, ready, row)
+    else:
+        phase_start(attempt,path,row,held,hold_raw)
+        require(ready.get("binding") == binding and ready.get("state_sha256") == row["state_sha256"]
+                and isinstance(ready.get("state_identity"), dict),
+                "Bind only the failed attempt's completed infrastructure checkpoint")
+        identity = ready["state_identity"]
+    return dict(row, identity=identity,
+                **({"reviewed_drift": reviewed_drift} if infrastructure else {}))
+
+
 def inspect(attempt, member, binding_key):
     found = {}
     for row in selection(attempt.cfg):
-        path = attempt.work / row["operation"]
-        infrastructure = row["phase"] == "infrastructure"
-        require(path != attempt.operation and (infrastructure or row["phase"] in attempt.phases),
-                "A reviewed failure cannot replay as the current operation")
-        private_directory(path)
-        no_markers(path)
-        private_directory(path / row["phase"])
-        no_markers(path / row["phase"])
-        require(not any((path / name).exists() or (path / name).is_symlink()
-                        for name in ("complete.json", row["phase"] + "-complete.json")),
-                "A failed checkpoint cannot replace a completed operation")
-        names = {"hold_sha256": "preserved-failed-hold.json",
-                 "infrastructure_sha256": ("infrastructure/review.json" if infrastructure else "infrastructure-complete.json"),
-                 "log_sha256": ("infrastructure.log" if infrastructure else row["phase"] + "/application.log")}
-        raw = {key: read_existing(path / name) for key, name in names.items()}
-        require(all(digest(value) == row[key] for key, value in raw.items()),
-                "Preserve exact reviewed failed operation bytes")
-        held, ready = decode(raw["hold_sha256"]), decode(raw["infrastructure_sha256"])
-        require(isinstance(held, dict) and isinstance(ready, dict), "Preserve typed failed operation records")
-        binding = held.get("binding", {})
-        require(isinstance(binding, dict) and binding.get("vmid") == member["vmid"]
-                and binding.get(binding_key) == attempt.binding[binding_key]
-                and held.get("operation") == str(path) and held.get("workflow") == attempt.workflow
-                and type(held.get("run_number")) is int and 0 < held["run_number"] < attempt.run_number
-                and held.get("automatic_retry") is False
-                and held.get("previous_ordinary_sha256") == row["previous_ordinary_sha256"],
-                "Preserve the exact own failed workflow and prior success")
-        if infrastructure:
-            identity, reviewed_drift = infrastructure_review(attempt, member, path, held, ready, row)
-        else:
-            phase_start(attempt,path,row,held,raw['hold_sha256'])
-            require(ready.get("binding") == binding and ready.get("state_sha256") == row["state_sha256"]
-                    and isinstance(ready.get("state_identity"), dict),
-                    "Bind only the failed attempt's completed infrastructure checkpoint")
-            identity = ready["state_identity"]
-        found[row["operation"]] = dict(row, identity=identity,
-                                      **({"reviewed_drift": reviewed_drift} if infrastructure else {}))
+        path = attempt.work / row['operation'] / 'preserved-failed-hold.json'
+        found[row['operation']] = inspect_record(attempt, member, binding_key, row, read_existing(path))
     return found
