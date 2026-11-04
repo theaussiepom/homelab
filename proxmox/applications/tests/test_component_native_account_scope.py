@@ -35,8 +35,8 @@ class NativeAccountScopeTests(CallerCase):
 
     def setUp(self):
         super().setUp()
-        for target in ('subprocess.Popen','socket.create_connection','socket.socket.connect',
-                       'ansible.executor.task_executor.TaskExecutor.run'):
+        for target in ('ansible.executor.task_executor.TaskExecutor.run',
+                       'subprocess.Popen','socket.create_connection','socket.socket.connect'):
             boundary=patch(target,side_effect=AssertionError('No native/action/connection execution'))
             boundary.start();self.addCleanup(boundary.stop)
 
