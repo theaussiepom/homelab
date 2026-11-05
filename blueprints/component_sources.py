@@ -22,7 +22,8 @@ LIBRARY_MAPS = ('guest_templates', 'app_profiles', 'software', 'runtime_profiles
 SITE_MAPS = ('contexts', 'networks', 'storage', 'guests', 'apps', 'domains',
              'external_endpoints', 'identity_providers', 'secret_sources', 'accounts',
              'devices', 'evidence', 'connections', 'exposures', 'images', 'host_aliases', 'address_groups')
-SITE_DEFINITIONS = {'guests': 'guest', 'apps': 'app'}
+SITE_DEFINITIONS = {'guests': 'guest', 'apps': 'app',
+                    'connections': 'connection', 'exposures': 'exposure'}
 KINDS = {'guest_templates': 'guest-template', 'app_profiles': 'app-profile',
          'software': 'software', 'runtime_profiles': 'runtime-profile',
          'health_profiles': 'health-profile', 'authentication_profiles': 'authentication-profile',

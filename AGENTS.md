@@ -18,4 +18,5 @@
   replacements. Keep required regressions and historical evidence.
 - Preserve coverage, security, signing and review gates. Report source,
   integration, deployment and service verification separately.
-- Read docs/components.md for use and extension; docs/testing.md for checks.
+- Read docs/README.md for the canonical guides and reference. Keep public
+  contracts, documentation, complete examples and tests in sync.
