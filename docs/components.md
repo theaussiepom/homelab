@@ -145,7 +145,7 @@ address_groups:
       - {address_group: vpn_clients}
 ```
 
-An HTTP `ip-allow-list` uses `ranges: {address_group: home_and_vpn}`. A network
+An HTTP `ip-allow-list` uses `ranges: [{address_group: home_and_vpn}]`. A network
 policy's source or destination can use `{address_group: clients}`; the guest's
 policy binding explicitly maps `address_groups: {clients: home_and_vpn}`.
 Unused or missing bindings refuse.
