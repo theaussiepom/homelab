@@ -79,10 +79,12 @@ Normal form requires repository, tag and digest. Repository matches
 [a-z0-9][a-z0-9./_-]*, tag null or [A-Za-z0-9_.-]+, digest
 sha256: followed by64lowercasehex. It renders literal repository[:tag]@digest.
 
-The only unpinned-latest records accepted are exact repository/tag/digest forms
+The catalogue parser accepts unpinned-latest records only as exact repository/tag/digest forms
 for ghcr.io/bitwarden/lite and ghcr.io/music-assistant/server with tag latest
-and digest null. Choosing one deliberately follows that policy; it is not
-equivalent to an immutable reference.
+and digest null. Catalogue acceptance is structural, not adapter support:
+the current Bitwarden adapter requires an official immutable digest reference
+and refuses latest. Music Assistant supports its declared latest selection;
+that floating policy is not equivalent to an immutable reference.
 
 Custom archive form requires local_id (sha256:64hex), archive (absolute path),
 archive_sha256 (64lowercasehex). It is a genuine versioned artifact capability,

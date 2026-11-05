@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -86,6 +87,33 @@ class DocumentationContracts(unittest.TestCase):
         self.assertEqual(after.resolved['apps']['recursive_a']['display_name'], 'Example recursive resolver')
         self.assertEqual(after.resolved['apps']['recursive_a']['identity'],
                          before.resolved['apps']['recursive_a']['identity'])
+
+    def test_documented_shell_temp_path_is_physical_before_confined_compilation(self):
+        # Exercise the actual bounded setup lines, without pip, venv or targets.
+        # A symlinked TMPDIR reproduces macOS /var even on Linux.
+        physical = self.root / 'scratch'
+        physical.mkdir()
+        alias = self.root / 'temporary-alias'
+        alias.symlink_to(physical, target_is_directory=True)
+        text = (ROOT / 'docs/guides/first-configuration.md').read_text()
+        setup = re.findall(r'```sh\n(.*?)\n```', text, re.S)[0].splitlines()
+        for corrected in (False, True):
+            prefix = setup[:3] if corrected else setup[:2]
+            command = '\n'.join([*prefix,
+                'cp -R "$FRAMEWORK/docs/examples/first-configuration" "$WORK/config"',
+                'printf "%s\\n" "$WORK"'])
+            result = subprocess.run(['/bin/sh', '-eu', '-c', command], cwd=ROOT,
+                env={'PATH': '/usr/bin:/bin', 'TMPDIR': str(alias) + '/'},
+                capture_output=True, text=True, timeout=10, check=True)
+            work = Path(result.stdout.strip())
+            if corrected:
+                self.assertEqual(work, work.resolve())
+                packets = compiler.compile_site(work / 'config', work / 'config/site.yaml')
+                self.assertEqual(set(packets), {'resolver'})
+            else:
+                self.assertNotEqual(work, work.resolve())
+                with self.assertRaises(ComponentError):
+                    compiler.compile_site(work / 'config', work / 'config/site.yaml')
 
     def test_public_literal_field_inventory_is_reachable_in_reference(self):
         # This is a completeness tripwire, not a second validator: actual example

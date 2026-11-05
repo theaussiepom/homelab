@@ -13,6 +13,7 @@ are complete maintained files under [examples/first-configuration](../examples/f
 ```sh
 FRAMEWORK="$(pwd -P)"
 WORK="$(mktemp -d)"
+WORK="$(cd "$WORK" && pwd -P)"
 python3 -m venv "$WORK/venv"
 . "$WORK/venv/bin/activate"
 python -m pip install --require-hashes -r "$FRAMEWORK/requirements.lock.txt"
@@ -21,7 +22,8 @@ cp -R "$FRAMEWORK/docs/examples/first-configuration" "$WORK/config"
 
 The commands assume this working directory contains `blueprints/compile.py`.
 `WORK` is disposable local storage. Keep it private if you later compile real
-site packets.
+site packets. Resolving its physical path avoids a symlinked temporary ancestor
+on systems such as macOS; the confined source reader still rejects symlink paths.
 
 ## Read the three inputs
 
