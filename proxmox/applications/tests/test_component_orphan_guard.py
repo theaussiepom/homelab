@@ -90,6 +90,7 @@ class CurrentOrphanGuardTests(unittest.TestCase):
         binary=folder/'docker';binary.write_text('#!'+sys.executable+'\n'+DOCKER);binary.chmod(0o700)
         trace=folder/'trace.jsonl';play=folder/'play.yml'
         variables={'component_preflight':self.selection,'component_services':self.selection['services'],
+            'component_application':self.values['component_application'],
             'component_compose_argv':['docker','compose','-f','/fixture/compose.yml'],
             'component_runtime_install':{'changed':False},'component_environment_install':{'changed':False},
             'component_driver_install':{'changed':False},'ansible_python_interpreter':sys.executable}
