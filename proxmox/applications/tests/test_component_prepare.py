@@ -155,7 +155,6 @@ class SelectedPreparationTests(unittest.TestCase):
         app,raw,_=vault();source=self.root/'vault-environment.json';write_new(source,raw)
         app.update(id='vault',identity={'services':{'bitwarden':'vault'}},project_file='compose.yml',
                    input_sources={'runtime_environment':{'type':'file','path':str(source)}})
-        app['settings']['runtime']['runtime_env_file']=str(source)
         self.save({'vault':app});write_new(self.inputs/'compose.yml',encoded({'services':{'vault':{'environment':{}}}}))
         selected=prepare.prepare(self.cfg,'vault',{},attempt=object())
         self.assertEqual((selected.directory/'bitwarden-environment.json').read_bytes(),raw)

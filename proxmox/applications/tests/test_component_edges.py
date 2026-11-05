@@ -35,11 +35,11 @@ def descriptor(adapter):
          'containers':{adapter:{'memory_mib':int(service['mem_limit'][:-1]),'cpu_limit':service['cpus'],'pids_limit':service['pids_limit']}},
          'software_selection':{'images':{adapter:{'image':service['image']}}},'role_addresses':{},'settings':{},'properties':{},'storage_paths':{}}
     if adapter=='bitwarden':
-        app['software_selection']['images']['bitwarden']={'image':'ghcr.io/bitwarden/lite:latest'}
-        app['settings']={'settings':{'schema':'homelab-bitwarden-runtime-v1',
-            'image_id':service['image'],'bind_address':'198.18.30.35',
+        app['software_selection']['images']['bitwarden']={'image':'ghcr.io/bitwarden/lite@sha256:'+'b'*64}
+        app['settings']={'settings':{'schema':'homelab-bitwarden-runtime-v2',
+            'bind_address':'198.18.30.35',
             'database_server':'198.18.32.35','database_provider':'mysql','database_name':'vault',
-            'data_uid':1000,'data_gid':1000},'runtime':{'environment_sha256':'a'*64}}
+            'data_uid':1000,'data_gid':1000},'runtime':{'schema':'homelab-bitwarden-runtime-v2','public_origin':'https://vault.example.invalid','issuer':'http://localhost'}}
         app['storage_paths']={name:{'source':'/srv/homelab/data/bitwarden/'+name,'target':target,'kind':'directory','read_only':False} for name,target in [('data','/etc/bitwarden'),('logs','/var/log/bitwarden')]}
         app['listeners']={'web':listener('bitwarden',8080,'198.18.30.35')}
     elif adapter=='pegaprox':
@@ -73,11 +73,11 @@ def units(app):
 
 
 class BitwardenTests(unittest.TestCase):
-    def test_preview_has_no_invented_timezone_user_or_process_and_uses_observed_image(self):
+    def test_preview_has_no_invented_timezone_user_or_process_and_uses_declared_image(self):
         app=descriptor('bitwarden')
         with units(app):result=core._bitwarden(app,guest('bitwarden'))['bitwarden']
         self.assertEqual(result['environment'],{})
-        self.assertEqual(result['image'],app['settings']['settings']['image_id'])
+        self.assertEqual(result['image'],app['software_selection']['images']['bitwarden']['image'])
         self.assertNotIn('user',result);self.assertNotIn('command',result)
         self.assertEqual(result['healthcheck'],BASELINE['bitwarden']['services']['bitwarden']['healthcheck'])
         self.assertEqual(result['volumes'],BASELINE['bitwarden']['services']['bitwarden']['volumes'])
@@ -92,7 +92,7 @@ class BitwardenTests(unittest.TestCase):
         with units(app):self.assertNotIn('TZ',core._bitwarden(app,guest('bitwarden'))['bitwarden']['environment'])
 
     def test_image_selection_and_state_process_environment_fail_closed(self):
-        changes=[lambda a:a.update(lifecycle='fresh'),lambda a:a['settings']['settings'].update(image_id='latest'),
+        changes=[lambda a:a.update(lifecycle='fresh'),lambda a:a['software_selection']['images']['bitwarden'].update(image='ghcr.io/bitwarden/lite:latest'),
             lambda a:a['software_selection']['images']['bitwarden'].update(image='example/foreign@sha256:'+'a'*64),
             lambda a:a['containers']['bitwarden'].update(user='1000'),lambda a:a['storage_paths'].pop('logs'),
             lambda a:a['storage_paths']['data'].update(read_only=True),lambda a:a.update(private_environment={}),
@@ -102,12 +102,16 @@ class BitwardenTests(unittest.TestCase):
             app=descriptor('bitwarden');change(app)
             with self.subTest(change=change),units(app),self.assertRaises(ValueError):core._bitwarden(app,guest('bitwarden'))
 
-    def test_immutable_official_and_retained_archive_selections_are_not_rewritten(self):
-        for selected in ({'image':'ghcr.io/bitwarden/lite@sha256:'+'b'*64},
-                         {'image':'sha256:'+'0'*64,'archive':'/run/synthetic/lite.tar','archive_sha256':'c'*64}):
-            app=descriptor('bitwarden');app['software_selection']['images']['bitwarden']=selected
+    def test_only_immutable_official_selections_are_literal_and_archives_refuse(self):
+        for image in ('ghcr.io/bitwarden/lite@sha256:'+'b'*64,
+                      'ghcr.io/bitwarden/lite:declared@sha256:'+'c'*64):
+            app=descriptor('bitwarden');app['software_selection']['images']['bitwarden']={'image':image}
             with units(app):result=core._bitwarden(app,guest('bitwarden'))['bitwarden']
-            self.assertEqual(result['image'],selected['image'])
+            self.assertEqual(result['image'],image)
+        for selected in ({'image':'sha256:'+'0'*64,'archive':'/run/synthetic/lite.tar','archive_sha256':'c'*64},
+                         {'image':'ghcr.io/bitwarden/lite@sha256:'+'b'*64,'archive':'/run/synthetic/lite.tar'}):
+            app=descriptor('bitwarden');app['software_selection']['images']['bitwarden']=selected
+            with self.subTest(selected=selected),units(app),self.assertRaises(ValueError):core._bitwarden(app,guest('bitwarden'))
 
 
 class PegaProxTests(unittest.TestCase):
@@ -173,6 +177,8 @@ class BaselineIntegrationTests(unittest.TestCase):
     def test_each_real_handler_and_common_helpers_match_complete_preserved_service(self):
         for adapter,expected in BASELINE.items():
             app=descriptor(adapter);cfg={'schema':'homelab-component-runtime-v1','guest':guest(adapter),'applications':{'a':app}}
+            expected=copy.deepcopy(expected)
+            if adapter=='bitwarden':expected['services']['bitwarden'].update(image=app['software_selection']['images']['bitwarden']['image'],pull_policy='missing')
             with self.subTest(adapter=adapter):self.assertEqual(next(iter(core.compositions(cfg).values())),expected)
 
     def test_relabel_and_declared_data_rebinding_change_only_owned_sources(self):

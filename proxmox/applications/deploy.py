@@ -38,9 +38,7 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
         if phase == 'infrastructure':
             attempt.begin_infrastructure()
             result=proxmox_guest.infrastructure(cfg,site,attempt.work,attempt.operation,expected,
-                **({'state_identity':attempt.custody_identity} if attempt.custody_identity is not None else {}),
-                **({'reviewed_drift':attempt.reviewed_infrastructure_drift}
-                    if getattr(attempt,'reviewed_infrastructure_drift',None) is not None else {}))
+                **({'state_identity':attempt.custody_identity} if attempt.custody_identity is not None else {}))
             attempt.infrastructure_complete(result)
         else:
             attempt.phase_ready(phase)

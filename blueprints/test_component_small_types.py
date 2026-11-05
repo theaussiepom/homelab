@@ -145,9 +145,7 @@ class DirectSmallTypesTests(unittest.TestCase):
  def test_health_success_and_closed_readiness_source_role_structure(self):
   types.health({'type':'adapter','check':'readiness'});types.health({'type':'adapter','check':'readiness','source_interface':'management'})
   self.bad(types.health,[{}, {'type':'adapter'},{'type':'shell','check':'readiness'},{'type':'adapter','check':'command'},{'type':'adapter','check':'readiness','source_interface':'bad!'},{'type':'adapter','check':'readiness','argv':['DO_NOT_ECHO']}])
- def test_admission_and_policy_references_are_closed_not_proof_reconstructed(self):
-  value={'initial_ordinary':{'evidence':'anchor'},'coordinated_custody':{'evidence':'group','member':'postgresql'},'reviewed_ordinary_failures':{'evidence':'failures'},'assets':{'catalogue':'catalogue','acceptance':'acceptance'},'source_assertions':{'evidence':'assertions'}};types.admission(value)
-  self.bad(types.admission,[{'unknown':{}},{'coordinated_custody':{'evidence':'group'}},{'initial_ordinary':{'evidence':'anchor','inline':{}}},{'assets':{'other':'foreign'}},{'source_assertions':{'evidence':'bad!'}}])
+ def test_policy_references_are_closed_without_free_configuration(self):
   types.policy_binding('common');types.policy_binding({'policy':'access','interfaces':{'local':'control','remote':{'app':'peer','interface':'service'}},'networks':{'lan':'management'},'endpoints':{'database':{'app':'database','endpoint':'service'}}})
   self.bad(types.policy_binding,['bad!',{'policy':'access','extra':True},{'policy':'access','interfaces':{'remote':{'app':'peer','interface':'bad!'}}},{'policy':'access','endpoints':{'database':{'app':'database'}}}])
  def test_role_and_rule_address_references_have_no_free_configuration_bag(self):
@@ -185,7 +183,7 @@ class DeviceRequirementUnitTests(unittest.TestCase):
 class GuestWiringUnitTests(unittest.TestCase):
  def guards(self):
   stack=ExitStack();mocks={}
-  for name in ('resource','startup','security','strings','endpoint','interface','volume','root_path','storage_layout','policy_binding','admission','timezone'):
+  for name in ('resource','startup','security','strings','endpoint','interface','volume','root_path','storage_layout','policy_binding','timezone'):
    mocks[name]=stack.enter_context(patch.object(types,name,Mock()))
   mocks['monitoring']=stack.enter_context(patch.object(component_monitoring,'reference',Mock()))
   return stack,mocks
@@ -195,12 +193,12 @@ class GuestWiringUnitTests(unittest.TestCase):
   return mocks
  def test_minimal_guest_wires_components_once_without_validating_their_internals(self):
   value=guest();before=copy.deepcopy(value);mocks=self.run_guest(value)
-  mocks['interface'].assert_called_once_with(value['interfaces']['control']);mocks['storage_layout'].assert_called_once_with({},{});mocks['admission'].assert_called_once_with({});self.assertEqual(value,before)
+  mocks['interface'].assert_called_once_with(value['interfaces']['control']);mocks['storage_layout'].assert_called_once_with({},{});self.assertEqual(value,before)
  def test_guest_partial_resources_startup_security_and_named_ref_collaborators_are_forwarded(self):
-  value=guest();value.update(resources={'memory_mib':512},startup={'boot_order':4},security={'keyctl':False},ssh_public_keys=['synthetic-key'],dns_servers=[{'app':'resolver','endpoint':'dns'}],volumes={'data':{'storage':'pool','slot':0,'path':'/srv/example','size_gib':4}},root_paths={'config':{'path':'/srv/root-config'}},network_policy=[{'policy':'common'}],admission={'source_assertions':{'evidence':'facts'}},timezone='Etc/UTC',monitoring={'profile':'linux'},readiness=[{'stage':'preparation','target':{'app':'resolver','endpoint':'dns'}}])
+  value=guest();value.update(resources={'memory_mib':512},startup={'boot_order':4},security={'keyctl':False},ssh_public_keys=['synthetic-key'],dns_servers=[{'app':'resolver','endpoint':'dns'}],volumes={'data':{'storage':'pool','slot':0,'path':'/srv/example','size_gib':4}},root_paths={'config':{'path':'/srv/root-config'}},network_policy=[{'policy':'common'}],timezone='Etc/UTC',monitoring={'profile':'linux'},readiness=[{'stage':'preparation','target':{'app':'resolver','endpoint':'dns'}}])
   mocks=self.run_guest(value)
   for name in ('resource','startup','security'):mocks[name].assert_called_once_with(value[name if name!='resource'else'resources'],partial=True)
-  mocks['volume'].assert_called_once_with(value['volumes']['data']);mocks['root_path'].assert_called_once_with(value['root_paths']['config']);mocks['policy_binding'].assert_called_once_with(value['network_policy'][0]);mocks['admission'].assert_called_once_with(value['admission']);mocks['timezone'].assert_called_once_with('Etc/UTC');mocks['monitoring'].assert_called_once_with(value['monitoring']);self.assertEqual(mocks['endpoint'].call_count,2)
+  mocks['volume'].assert_called_once_with(value['volumes']['data']);mocks['root_path'].assert_called_once_with(value['root_paths']['config']);mocks['policy_binding'].assert_called_once_with(value['network_policy'][0]);mocks['timezone'].assert_called_once_with('Etc/UTC');mocks['monitoring'].assert_called_once_with(value['monitoring']);self.assertEqual(mocks['endpoint'].call_count,2)
  def test_required_guest_fields_unknowns_identity_and_selection_syntax_fail_at_guest_boundary(self):
   value=guest()
   for key in value:

@@ -16,7 +16,7 @@ from component_errors import ComponentError
 
 def metadata():
     return {'server_name': 'Database tools', 'recovery_admin': 'local-recovery', 'heap_mib': 1024,
-            'auth_headers': {'user': 'X-User', 'team': 'X-Team'}, 'retained_pgadmin_image': 'old-client',
+            'auth_headers': {'user': 'X-User', 'team': 'X-Team'},
             'connections': {'postgresql': {'name': 'Postgres', 'database': 'postgres', 'sslmode': 'prefer'},
                             'mariadb': {'name': 'Maria', 'database': ''},
                             'postgresql-admin': {'name': 'Postgres administrator', 'database': 'postgres'},
@@ -39,8 +39,8 @@ def fixture():
                                       'postgresql-admin': connection('postgresql', '198.18.31.23', 5432, True),
                                       'mariadb-admin': connection('mariadb', '198.18.32.24', 3306, True)}}
     bitwarden = {'id': 'vault', 'adapter': 'bitwarden', 'lifecycle': 'retained',
-        'properties': {'runtime_env_sha256': 'b'*64, 'issuer': {'protocol': 'https', 'domain': 'vault-issuer'},
-                       'image_id': 'sha256:'+'c'*64, 'database_name': 'retained_vault', 'data_uid': 1000, 'data_gid': 1000},
+        'properties': {'issuer': {'protocol': 'https', 'domain': 'vault-issuer'},
+                       'database_name': 'retained_vault', 'data_uid': 1000, 'data_gid': 1000},
         'origin_url': 'https://vault.example.invalid', 'role_addresses': {'web': '198.18.30.34'},
         'secrets': {'runtime_environment': 'old_vault_environment'},
         'resolved_connections': {'database': connection('mariadb', '198.18.32.24', 3306)}}
@@ -138,15 +138,16 @@ class ValidationUnitTests(unittest.TestCase):
 class BindingUnitTests(unittest.TestCase):
     def test_fresh_cloud_never_requires_or_looks_up_a_legacy_image(self):
         r = fixture();r.apps['cloud']['lifecycle'] = 'fresh'
-        del r.apps['cloud']['properties']['retained_pgadmin_image']
         r.image_values = lambda: self.fail('Fresh Cloud must not look up any legacy image')
         self.assertNotIn('retained_pgadmin_image', properties.bind(r)['cloud'])
 
-    def test_retained_cloud_missing_legacy_identity_and_fresh_forbidden_identity_refuse(self):
-        r = fixture();del r.apps['cloud']['properties']['retained_pgadmin_image']
-        with self.assertRaises(ComponentError):properties.bind(r)
-        r = fixture();r.apps['cloud']['lifecycle'] = 'fresh'
-        with self.assertRaises(ComponentError):properties.bind(r)
+    def test_all_cloud_lifecycles_refuse_the_retired_image_setting(self):
+        for lifecycle in ('fresh','retained'):
+            r=fixture();r.apps['cloud']['lifecycle']=lifecycle
+            r.image_values=lambda:self.fail('No retirement catalogue lookup')
+            self.assertNotIn('retained_pgadmin_image',properties.bind(r)['cloud'])
+            r.apps['cloud']['properties']['retained_pgadmin_image']='old-client'
+            with self.subTest(lifecycle=lifecycle),self.assertRaises(ComponentError):properties.bind(r)
 
     def test_nonempty_managed_only_source_is_valid_without_inventing_legacy_metadata(self):
         r = fixture()
@@ -179,11 +180,11 @@ class BindingUnitTests(unittest.TestCase):
                 r = fixture();mutate(r.apps['cloud'])
                 with self.assertRaises(ComponentError):properties.bind(r)
 
-    def test_cloud_retained_image_must_exist_and_resolve_to_pinned_identity(self):
-        for catalogue in ({}, {'old-client': {'image': 'registry.example.invalid/old-client:latest'}}):
-            with self.subTest(catalogue=catalogue):
-                r = fixture();r.image_values = lambda: catalogue
-                with self.assertRaises(ComponentError):properties.bind(r)
+    def test_cloud_retired_image_property_refuses_without_any_catalogue_lookup(self):
+        r=fixture();r.image_values=lambda: self.fail('No retired image catalogue lookup')
+        properties.bind(r)
+        r.apps['cloud']['properties']['retained_pgadmin_image']='old-client'
+        with self.assertRaises(ComponentError):properties.bind(r)
 
     def test_cloud_artifact_is_present_exactly_when_managed_mariadb_needs_it(self):
         r = fixture();del r.apps['cloud']['properties']['mariadb_jdbc']
@@ -195,11 +196,12 @@ class BindingUnitTests(unittest.TestCase):
         r = fixture();value = properties.bind(r)['vault']
         self.assertEqual(value['runtime']['public_origin'], 'https://vault.example.invalid')
         self.assertEqual(value['runtime']['issuer'], 'https://retained-issuer.example.invalid')
-        self.assertEqual(value['runtime']['runtime_env_file'], '/declared/controller/vault-environment.json')
-        self.assertEqual(value['runtime']['environment_sha256'], 'b'*64)
+        self.assertEqual(set(value['runtime']), {'schema', 'public_origin', 'issuer'})
+        self.assertEqual(value['runtime']['schema'], 'homelab-bitwarden-runtime-v2')
         self.assertEqual(value['settings']['database_server'], '198.18.32.24')
         self.assertEqual(value['settings']['data_uid'], 1000)
-        self.assertEqual(value['settings']['image_id'], 'sha256:'+'c'*64)
+        self.assertNotIn('image_id', value['settings'])
+        self.assertEqual(value['settings']['schema'], 'homelab-bitwarden-runtime-v2')
 
     def test_bitwarden_observed_http_issuer_is_metadata_not_a_new_route_or_transport(self):
         r = fixture();r.apps['vault']['properties']['issuer']['protocol'] = 'http'

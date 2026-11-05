@@ -30,10 +30,10 @@ class DeploymentResilienceTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
-        self.cfg = fixtures.initialize(self.root)
+        self.source, self.revisions = github_source(self.root)
+        self.cfg = fixtures.initialize(self.root,workspace=self.source,revision=self.revisions[0])
         self.work = self.root / "state/808"
         self.phases = contract.phases(self.cfg)
-        self.source, self.revisions = github_source(self.root)
         context = patch.dict(
             os.environ,
             {"GITHUB_SHA": self.revisions[0], "GITHUB_WORKSPACE": str(self.source)},
@@ -82,24 +82,8 @@ class DeploymentResilienceTests(unittest.TestCase):
                     with tempfile.TemporaryDirectory() as directory:
                         previous_root = self.root
                         self.root = Path(directory).resolve()
-                        fixtures.initialize(self.root)
+                        fixtures.initialize(self.root,workspace=self.source,revision=self.revisions[0])
                         work = self.root / "state/808"
-                        io.write_new(
-                            work / "ordinary-complete.json",
-                            io.encoded(
-                                {
-                                    "status": "passed",
-                                    "binding": {"old": True},
-                                    "run_number": 1,
-                                    "site_revision": self.revisions[0],
-                                    "workflow": [
-                                        "example/private-site",
-                                        "example/private-site/.github/workflows/deploy.yml",
-                                    ],
-                                    "operation": str(work / "ordinary-1-1"),
-                                }
-                            ),
-                        )
                         old = (work / "ordinary-complete.json").read_bytes()
                         try:
                             sequence = ["infrastructure", "preparation", "mariadb"]
@@ -119,7 +103,7 @@ class DeploymentResilienceTests(unittest.TestCase):
                             )
                             self.assertEqual(
                                 (work / "terraform.tfstate").read_bytes(),
-                                b"authoritative backend",
+                                fixtures.backend_bytes(),
                             )
                             self.assertFalse(
                                 (
@@ -139,8 +123,9 @@ class DeploymentResilienceTests(unittest.TestCase):
                                 self.assertEqual(started['phase_inputs']['app'], 'database')
                                 self.assertEqual(started['phase_inputs']['identity'], 'a' * 64)
                             for run_id in ("777", "778"):
+                                expected_failure="FileNotFoundError" if phase=="infrastructure" and run_id=="777" else "ValueError"
                                 self.assertIn(
-                                    "ValueError",
+                                    expected_failure,
                                     self.finish(self.child(phase, run_id=run_id), 2),
                                 )
                             self.assertEqual(
@@ -166,11 +151,7 @@ class DeploymentResilienceTests(unittest.TestCase):
 
     def test_actual_source_nonancestor_refuses_before_guest_work_and_matching_history_advances(self):
         receipt = self.work / "ordinary-complete.json"
-        old = io.encoded({"status": "passed", "binding": {"old": True}, "run_number": 1,
-            "site_revision": self.revisions[1], "workflow": ["example/private-site",
-            "example/private-site/.github/workflows/deploy.yml"],
-            "operation": str(self.work / "ordinary-1-1")})
-        io.write_new(receipt, old)
+        old=fixtures.seed(self.root,self.source,self.revisions[1],run_id='2',identity='f'*64)
         # The current checked-out ancestor cannot consume a receipt from its
         # future descendant. Both revisions belong to this real disposable Git.
         self.assertIn("ValueError", self.finish(self.child(), 2))
@@ -250,25 +231,12 @@ class DeploymentResilienceTests(unittest.TestCase):
                 tempfile.TemporaryDirectory() as directory,
             ):
                 root = Path(directory).resolve()
-                fixtures.initialize(root)
+                fixtures.initialize(root,workspace=self.source,revision=self.revisions[0])
                 with patch('deployment_inputs.source_hash', return_value='b' * 64):
                     cfg, binding = fixtures.prepare(root)
                 work = root / "state/808"
                 receipt = work / "ordinary-complete.json"
-                old = io.encoded(
-                    {
-                        "status": "passed",
-                        "binding": {"old": True},
-                        "run_number": 1,
-                        "site_revision": self.revisions[0],
-                        "workflow": [
-                            "example/private-site",
-                            "example/private-site/.github/workflows/deploy.yml",
-                        ],
-                        "operation": str(work / "ordinary-1-1"),
-                    }
-                )
-                io.write_new(receipt, old)
+                old=receipt.read_bytes()
                 with (
                     patch.dict(
                         os.environ,
@@ -282,6 +250,7 @@ class DeploymentResilienceTests(unittest.TestCase):
                     ),
                     state.DeploymentAttempt(cfg, binding, self.phases) as attempt,
                 ):
+                    self.assertFalse(attempt.completed(commands.is_ancestor))
                     attempt.begin_infrastructure()
                     attempt.infrastructure_complete(
                         {
@@ -403,7 +372,8 @@ class DeploymentResilienceTests(unittest.TestCase):
                             "HOMELAB_DEPLOYMENT_WORKFLOW": "example/private-site/.github/workflows/deploy.yml@refs/heads/main",
                         },
                     ),
-                    self.assertRaisesRegex(ValueError, "pending custody|existing attempt"),
+                    self.assertRaisesRegex(ValueError, "exact current run hold ownership"
+                        if failure == "directory-fsync" else "pending custody"),
                 ):
                     # A retained .pending now refuses at admission; a completed
                     # rename with a hold still refuses before any new attempt.

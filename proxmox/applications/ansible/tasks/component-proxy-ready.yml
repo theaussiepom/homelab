@@ -27,13 +27,6 @@
   no_log: true
   when: component_proxy_lifecycle.adapter == 'cloudbeaver'
 
-- name: Retire only the declared retained pgAdmin container
-  ansible.builtin.command:
-    argv: [python3, /opt/homelab-app/cloudbeaver-runtime.py, prepare, --config, "{{ component_proxy_lifecycle.config }}"]
-  changed_when: false
-  no_log: true
-  when: component_proxy_lifecycle.adapter == 'cloudbeaver'
-
 - name: Preserve declared managed administrator datasources
   ansible.builtin.command:
     argv: [python3, /opt/homelab-app/cloudbeaver-runtime.py, managed, --config, "{{ component_proxy_lifecycle.config }}"]

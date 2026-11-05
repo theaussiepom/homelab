@@ -14,6 +14,9 @@ import component_monitoring_inputs
 import component_app_hooks
 import component_continuity
 import component_private_material
+import component_generation
+import component_ownership
+import dns_records
 from application_contract import runtime_files,SIDECAR_FILES
 import managed_credentials
 from private_io import encoded, read_json, regular, require
@@ -97,6 +100,34 @@ def overlay(app, environment):
         name: value.replace('$', '$$') for name, value in environment.items()}}}})
 
 
+def dns_document(cfg, app, attempt):
+    """Derive prior DNS names from the genuine same-app sealed ordinary payload."""
+    previous = {}
+    owned = component_generation.previous(attempt)
+    if owned is not None and app['id'] in owned[2]:
+        receipt, old_cfg, applications = owned
+        old = applications[app['id']]
+        require(old['adapter'] == app['adapter'] == 'pihole'
+                and component_ownership.identity(old_cfg, old) == component_ownership.identity(cfg, app),
+                'Preserve the exact prior DNS application owner')
+        selected = read_json(Path(receipt['binding']['app_inputs_directory']) / app['id'] / 'dns-records.json',
+                             private=True)
+        require(isinstance(selected,dict),'Preserve a sealed DNS sidecar map')
+        # Only a hash-bound historical sidecar may use the former flat shape.
+        previous = dns_records.selection(selected)[0] if 'schema' in selected else dns_records.validate(selected)
+        require(previous == old['settings']['dns_records'], 'Preserve the prior sealed DNS selection')
+        if receipt['binding']['input_identity'] == cfg['deployment']['input_identity']:
+            require('schema' in selected and previous == app['settings']['dns_records'],
+                    'Preserve this exact immutable DNS input generation')
+            # Reuse this generation's already sealed predecessor map. Computing
+            # it again from the latest success would change immutable payload
+            # bytes on an otherwise unchanged ordinary repeat.
+            return selected
+    else:
+        require(app['lifecycle'] == 'fresh', 'Retained DNS requires its genuine prior app payload')
+    return dns_records.document(app['settings']['dns_records'], previous)
+
+
 def prepare(cfg, app_id, environment=None, *, attempt):
     runtime = read_json(Path(cfg['deployment']['runtime_file']), private=True)
     require(app_id in runtime['applications'], 'Select this guest owned application')
@@ -168,7 +199,7 @@ def prepare(cfg, app_id, environment=None, *, attempt):
     else:
         require(not values, 'This adapter has no selected scalar or external file inputs')
     if app['adapter'] == 'pihole':
-        install.append(sidecar(app,'dns-records.json',encoded(app['settings']['dns_records']),payload))
+        install.append(sidecar(app,'dns-records.json',encoded(dns_document(cfg,app,attempt)),payload))
     for account in app.get('database_administrators', {}).values():
         expected, files = managed_credentials.payload(cfg['paths']['state_root'], account['credential_id'],
             account['owner'], parent/app_id)

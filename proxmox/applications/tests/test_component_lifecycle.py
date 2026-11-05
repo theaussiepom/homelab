@@ -32,10 +32,10 @@ class ComponentLifecycleTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
-        self.cfg = fixtures.initialize(self.root)
+        self.source, self.revisions = github_source(self.root)
+        self.cfg = fixtures.initialize(self.root,workspace=self.source,revision=self.revisions[0])
         self.work = self.root/'state/808'
         self.site = self.root/'packet.json'
-        self.source, self.revisions = github_source(self.root)
         context = patch.dict(os.environ, {
             'GITHUB_RUN_ID':'777', 'GITHUB_RUN_ATTEMPT':'1', 'GITHUB_RUN_NUMBER':'777',
             'GITHUB_SHA':self.revisions[0], 'GITHUB_WORKSPACE':str(self.source),
@@ -52,6 +52,12 @@ class ComponentLifecycleTests(unittest.TestCase):
         self.infra = context.start(); self.addCleanup(context.stop)
         context = patch.object(component_ansible, 'run_phase', side_effect=self.application)
         self.app = context.start(); self.addCleanup(context.stop)
+
+    def fresh(self):
+        temporary=tempfile.TemporaryDirectory();self.addCleanup(temporary.cleanup)
+        self.root=Path(temporary.name).resolve()
+        self.cfg=fixtures.initialize(self.root,fresh=True)
+        self.work=self.root/'state/808';self.site=self.root/'packet.json'
 
     def publish(self):
         packet = io.read_json(self.site, private=True)
@@ -76,7 +82,8 @@ class ComponentLifecycleTests(unittest.TestCase):
         self.assertEqual(environment, {})
         return component_payload.prepare(component_inputs.app_directory(cfg, create=True),
             cfg['deployment']['input_identity'], 'agent',
-            {'application.json':io.encoded({'id':'agent', 'adapter':'zabbix-agent'})})
+            {'application.json':io.encoded({'schema':'homelab-component-agent-input-v1',
+                'monitoring':cfg['app']['monitoring']})})
 
     def application(self, cfg, site, work, operation, binding, phase, *, payload, previously_owned):
         self.assertEqual(binding['schema'], component_payload.BINDING_SCHEMA)
@@ -133,13 +140,16 @@ class ComponentLifecycleTests(unittest.TestCase):
         context.start(); self.addCleanup(context.stop)
         self.publish()
         self.assertEqual(contract.phases(self.cfg), ['preparation', 'mariadb', 'zabbix-agent'])
+        previous=self.work/'ordinary-complete.json'
+        previous_bytes,previous_inode=previous.read_bytes(),previous.stat().st_ino
         self.phase('infrastructure')
         self.phase('preparation')
         with self.assertRaises((ValueError, FileNotFoundError)):
             self.phase('zabbix-agent')
         self.phase('mariadb')
         self.assertTrue((self.work/'ORDINARY-HOLD.json').exists())
-        self.assertFalse((self.work/'ordinary-complete.json').exists())
+        self.assertEqual(previous.read_bytes(),previous_bytes)
+        self.assertEqual(previous.stat().st_ino,previous_inode)
         self.phase('zabbix-agent')
         self.assertFalse((self.work/'ORDINARY-HOLD.json').exists())
         self.assertEqual([call.args[-1] for call in self.app.call_args_list],
@@ -156,7 +166,7 @@ class ComponentLifecycleTests(unittest.TestCase):
         self.infra.side_effect = ValueError("native failure")
         with self.assertRaises(ValueError):
             self.phase("infrastructure")
-        with self.assertRaises(ValueError):
+        with self.assertRaises((ValueError, FileNotFoundError)):
             self.phase("infrastructure")
         self.assertEqual(self.infra.call_count, 1)
         self.app.assert_not_called()
@@ -260,6 +270,7 @@ class ComponentLifecycleTests(unittest.TestCase):
         self.assertEqual(target.read_text(), "unrelated backend")
 
     def test_missing_backend_preserves_each_kind_of_prior_custody(self):
+        self.fresh()
         (self.work / "terraform.tfstate").unlink()
         for name in [
             "ordinary-complete.json",
@@ -286,6 +297,7 @@ class ComponentLifecycleTests(unittest.TestCase):
     def test_empty_guest_custody_allows_first_creation_but_directory_backend_refuses(
         self,
     ):
+        self.fresh()
         backend = self.work / "terraform.tfstate"
         backend.unlink()
         with state.DeploymentAttempt(self.cfg, self.expected, []):
@@ -315,14 +327,16 @@ class ComponentLifecycleTests(unittest.TestCase):
     ):
         install = self.work / "rollout-complete.json"
         install.write_text("original installation evidence")
+        install_inode=install.stat().st_ino
         self.run_all()
-        (self.work / "terraform.tfstate").write_text("changed state")
+        io.write_bytes(self.work / "terraform.tfstate", fixtures.backend_bytes(serial=3))
         with patch.dict(
             os.environ, {"GITHUB_RUN_ID": "778", "GITHUB_RUN_NUMBER": "778"}
-        ):
+        ), self.assertRaisesRegex(ValueError, "backend changed"):
             self.phase("infrastructure")
-        self.assertEqual(self.infra.call_count, 2)
+        self.assertEqual(self.infra.call_count, 1)
         self.assertEqual(install.read_text(), "original installation evidence")
+        self.assertEqual(install.stat().st_ino,install_inode)
 
     def test_new_merges_reconcile_and_older_or_replayed_runs_cannot_roll_back(self):
         self.run_all()
@@ -379,8 +393,8 @@ class ComponentLifecycleTests(unittest.TestCase):
 
     def test_changed_backend_cannot_replay_a_completed_run(self):
         self.run_all()
-        (self.work / "terraform.tfstate").write_bytes(b"changed outside this run")
-        with self.assertRaisesRegex(ValueError, "existing attempt"):
+        io.write_bytes(self.work / "terraform.tfstate", fixtures.backend_bytes(serial=3))
+        with self.assertRaisesRegex(ValueError, "backend changed"):
             self.phase("infrastructure")
         self.assertEqual(self.infra.call_count, 1)
         self.assertFalse((self.work / "ORDINARY-HOLD.json").exists())

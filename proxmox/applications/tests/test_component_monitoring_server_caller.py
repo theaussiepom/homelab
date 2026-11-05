@@ -59,7 +59,7 @@ class MonitoringServerCallerTests(unittest.TestCase):
       'runtime_id':'observer','project':self.app['project_name'],'compose_file':self.app['project_file'],
       'services':['metrics-server','metrics-web']}},'payload_phases':{self.phase:self.app_id,'zabbix-agent':'agent'},
     'phases':['preparation',self.phase,'zabbix-agent']},
-   'app':{'hostname':'metrics-host','address':'198.18.25.36','memory_mib':2048,'exclusive_writer_confirmed':True,
+   'app':{'hostname':'metrics-host','address':'198.18.25.36','memory_mib':2048,
     'health_checks':[{'name':'UI readiness','argv':['true']}],
     'service_health_checks':{self.phase:[{'name':'UI readiness','argv':['true']}]},
     'monitoring':{'hostname':'synthetic-node-91003','psk_identity':'synthetic-node-91003',

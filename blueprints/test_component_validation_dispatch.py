@@ -28,7 +28,7 @@ ROOTS=((types,'template'),(types,'profile'),(types,'software'),(types,'runtime')
        (component_monitoring,'profile'),(types,'context'),(types,'network'),(types,'guest'),
        (types,'app'),(types,'network_policy'),(component_secrets,'source'),(types,'device'))
 CHILDREN=('resource','startup','security','interface','volume','root_path','storage_layout',
-          'policy_binding','admission','timezone','role','storage_role','allocation')
+          'policy_binding','timezone','role','storage_role','allocation')
 
 
 def resolver():
@@ -314,15 +314,6 @@ class CompilerValidationDispatchTests(unittest.TestCase):
             ('fragment-reference',lambda v:v['network_policy'][0].update(policy='bad!PRIVATE_SENTINEL')),
             ('endpoint-reference',lambda v:v['network_policy'][0]['endpoints'].update(db={'external':'bad!PRIVATE_SENTINEL'}))])
 
-    def test_admission_reference_validator_dispatch_is_structural_not_historical_proof_acceptance(self):
-        value=small.guest();value['admission']={'initial_ordinary':{'evidence':'anchor'},
-            'source_assertions':{'evidence':'intent'},'assets':{'catalogue':'catalogue','acceptance':'acceptance'}}
-        spec=case('guests','worker',value,(types.__name__,'guest'),child=(types.__name__,'admission'))
-        self.matrix(spec,[('unknown',lambda v:v['admission'].update(override='PRIVATE_SENTINEL')),
-            ('type',lambda v:v.update(admission=[])),
-            ('missing-evidence',lambda v:v['admission'].update(initial_ordinary={})),
-            ('source-reference',lambda v:v['admission']['source_assertions'].update(evidence='bad!PRIVATE_SENTINEL')),
-            ('asset-reference',lambda v:v['admission']['assets'].update(catalogue='bad!PRIVATE_SENTINEL'))])
 
 
 if __name__=='__main__':unittest.main()

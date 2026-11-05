@@ -73,18 +73,20 @@ class SourcesTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             source.Sources(self.root).asset(dict(declaration, sha256='0' * 64))
 
-    def test_evidence_types_and_source_forms_remain_distinct(self):
-        proof = {'schema': 'synthetic-proof', 'members': {'postgresql': {'vmid': 612}}}
+    def test_ongoing_callback_evidence_source_and_inline_forms_are_closed(self):
+        proof = [{'exact': 'public synthetic callback record'}]
         path = self.write('proof.json', proof)
-        evidence = {'type': 'coordinated-custody', 'source': 'proof.json',
+        evidence = {'type': 'identity-callbacks', 'source': 'proof.json',
                     'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
         authority = source.Sources(self.root)
         self.assertEqual(authority.evidence(evidence)['document'], proof)
-        self.assertEqual(authority.evidence({'type': 'initial-ordinary', 'document': proof})['document'], proof)
-        self.assertEqual(authority.evidence({'type': 'reviewed-ordinary-failures', 'document': []})['document'], [])
+        self.assertEqual(authority.evidence({'type': 'identity-callbacks', 'document': proof})['document'], proof)
+        self.assertEqual(authority.evidence({'type': 'identity-callbacks', 'document': []})['document'], [])
         for invalid in (dict(evidence, document=proof),
-                        {'type': 'initial-ordinary', 'document': []},
-                        {'type': 'reviewed-ordinary-failures', 'document': {}},
+                        {'type': 'identity-callbacks', 'document': {}},
+                        {'type': 'identity-callbacks', 'document': None},
+                        {'type': 'identity-callbacks', 'source': False, 'sha256': 'a'*64},
+                        {'type': 'identity-callbacks', 'source': 'proof.yaml', 'sha256': 'a'*64},
                         {'type': 'accepted-release', 'document': proof}):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 authority.evidence(invalid)
@@ -137,11 +139,11 @@ class SourcesTests(unittest.TestCase):
     def test_site_root_zabbix_and_evidence_do_not_mutate_inputs(self):
         value = dict(schema=source.SCHEMA, kind='site', contexts={}, networks={},
                      storage={}, guests={}, apps={}, zabbix=None,
-                     evidence={'initial': {'type': 'initial-ordinary', 'document': {'exact': '  literal\n'}}})
+                     evidence={'callbacks': {'type': 'identity-callbacks', 'document': [{'exact': '  literal\n'}]}})
         path = self.write('site.json', value)
         site, _ = source.site(path)
         self.assertIsNone(site['zabbix'])
-        self.assertEqual(site['evidence']['initial']['document']['exact'], '  literal\n')
+        self.assertEqual(site['evidence']['callbacks']['document'][0]['exact'], '  literal\n')
         value['zabbix'] = {'server': 'monitor'}
         self.assertEqual(source.site(self.write('site.json', value))[0]['zabbix'], {'server': 'monitor'})
         for invalid in (True, {}, {'server': 'monitor', 'enabled': True}):

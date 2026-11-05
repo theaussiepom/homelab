@@ -61,7 +61,14 @@ class DeploymentIntegrationTests(unittest.TestCase):
         self.assertEqual(cfg['deployment']['protected_guests'],[9900,9914,9915,9920])
         state=work/'terraform.tfstate'
         previous=read_json(state,private=True)['serial'] if state.exists() else 0
-        write_bytes(state,encoded({'serial':previous+1,'native_boundary':'fake'}))
+        from plan_policy import RESOURCES
+        resources=[]
+        for address,field in RESOURCES.items():
+            module,kind,name=address.rsplit('.',2)
+            resources.append({'module':module,'type':kind,'name':name,'mode':'managed','instances':[
+                {'attributes':{field:cfg['guest']['vmid'],'node_name':cfg['site']['node'],'id':'fixture-'+kind+'-'+name}}]})
+        write_bytes(state,encoded({'version':4,'lineage':'synthetic-owned-lineage','serial':previous+1,
+                                  'resources':resources,'native_boundary':'fake'}))
         self.infra.append(previous)
         return {'changed':True,'created':previous==0,'state_sha256':sha(state)}
 
@@ -160,7 +167,7 @@ class DeploymentIntegrationTests(unittest.TestCase):
         work=self.state/'610';work.mkdir(mode=0o700)
         write_new(work/'terraform.tfstate',b'{"foreign":true}')
         before=(work/'terraform.tfstate').read_bytes()
-        with self.assertRaises(FileNotFoundError):
+        with self.assertRaisesRegex(ValueError,'cannot adopt'):
             deploy.run('infrastructure',self.packet,inputs=self.inputs,environment={})
         self.assertEqual(self.infra,[]);self.assertEqual(self.calls,[])
         self.assertEqual((work/'terraform.tfstate').read_bytes(),before)

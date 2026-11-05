@@ -18,13 +18,12 @@ ENDPOINTS = ("/api/alive", "/api/config", "/identity/.well-known/openid-configur
 
 
 def validate_settings(settings):
-    """Pure existing image, database and numeric ownership contract."""
+    """Pure selected database and numeric ownership contract."""
     import re
 
     fields = {
         "schema",
         "bind_address",
-        "image_id",
         "database_server",
         "database_provider",
         "database_name",
@@ -33,12 +32,12 @@ def validate_settings(settings):
     }
     if (
         set(settings) != fields
+        or settings["schema"] != "homelab-bitwarden-runtime-v2"
         or settings["database_provider"] != "mysql"
         or any(
             type(settings.get(key)) is not int or not 1 <= settings[key] <= 2147483647
             for key in ("data_uid", "data_gid")
         )
-        or not re.fullmatch(r"sha256:[0-9a-f]{64}", settings.get("image_id", ""))
         or not re.fullmatch(r"[A-Za-z0-9_]+", settings.get("database_name", ""))
         or not all(
             isinstance(settings.get(key), str)
@@ -48,7 +47,7 @@ def validate_settings(settings):
         )
     ):
         raise ValueError(
-            "Select the observed image, mysql schema and retained numeric ownership"
+            "Select the mysql schema and retained numeric ownership"
         )
     address = ipaddress.IPv4Address(settings["bind_address"])
     database = ipaddress.IPv4Address(settings["database_server"])
@@ -72,10 +71,8 @@ def validate_settings(settings):
 
 
 
-def service_configuration(service, *, selected_image, observed_image, environment, ports, data_sources):
+def service_configuration(service, *, environment, ports, data_sources):
     """Pure renderer; the existing ordinary runtime parser owns private values."""
-    if selected_image == 'ghcr.io/bitwarden/lite:latest':
-        service['image'] = observed_image
     service.pop('network_mode', None)
     service['environment'] = {key: str(value).replace('$', '$$') for key, value in environment.items()}
     if 'TZ' in environment:

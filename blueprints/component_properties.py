@@ -15,18 +15,13 @@ from component_exposures import host
 ADAPTERS = {'cloudbeaver', 'bitwarden', 'pegaprox', 'winet', 'node_red'}
 FIELDS = {'cloudbeaver': ('server_name', 'recovery_admin', 'heap_mib', 'auth_headers',
                           'connections'),
-          'bitwarden': ('runtime_env_sha256', 'issuer', 'image_id', 'database_name', 'data_uid', 'data_gid'),
+          'bitwarden': ('issuer', 'database_name', 'data_uid', 'data_gid'),
           'pegaprox': ('trusted_proxy',), 'winet': ('mqtt_prefix',), 'node_red': ()}
 
 
 def _single(value, maximum=100, *, empty=False):
     require(isinstance(value, str) and (bool(value) or empty) and len(value) <= maximum
             and not any(c in value for c in '\r\n\x00'), 'component.properties')
-
-
-def _digest(value, image=False):
-    require(isinstance(value, str) and re.fullmatch(('sha256:' if image else '') + '[0-9a-f]{64}', value),
-            'component.properties')
 
 
 def _jdbc(value):
@@ -41,7 +36,7 @@ def _jdbc(value):
 def validate(adapter, properties, *, partial=False):
     require(isinstance(adapter, str) and adapter in ADAPTERS and type(partial) is bool,
             'component.properties')
-    optional = ('mariadb_jdbc', 'retained_pgadmin_image') if adapter == 'cloudbeaver' else ()
+    optional = ('mariadb_jdbc',) if adapter == 'cloudbeaver' else ()
     fields = FIELDS[adapter]
     closed(properties, () if partial else fields, (*fields, *optional) if partial else optional)
     if adapter == 'cloudbeaver':
@@ -58,8 +53,6 @@ def validate(adapter, properties, *, partial=False):
                         for v in headers.values()) and len({v.lower() for v in headers.values()}) == 2
                     and not {v.lower() for v in headers.values()} & {'x-forwarded-for', 'x-forwarded-proto',
                         'x-forwarded-host', 'x-forwarded-port', 'x-real-ip'}, 'component.properties')
-        if 'retained_pgadmin_image' in properties:
-            require(identifier(properties['retained_pgadmin_image']), 'component.reference')
         if 'connections' in properties:
             values = named(properties['connections'])
             require(1 <= len(values) <= 24, 'component.properties')
@@ -72,14 +65,10 @@ def validate(adapter, properties, *, partial=False):
         if 'mariadb_jdbc' in properties:
             _jdbc(properties['mariadb_jdbc'])
     elif adapter == 'bitwarden':
-        if 'runtime_env_sha256' in properties:
-            _digest(properties['runtime_env_sha256'])
         if 'issuer' in properties:
             closed(properties['issuer'], ('protocol', 'domain'))
             require(identifier(properties['issuer']['domain']), 'component.reference')
             require(properties['issuer']['protocol'] in ('http', 'https'), 'component.properties')
-        if 'image_id' in properties:
-            _digest(properties['image_id'], image=True)
         if 'database_name' in properties:
             require(isinstance(properties['database_name'], str) and
                     re.fullmatch('[A-Za-z0-9_]+', properties['database_name']), 'component.properties')
@@ -125,21 +114,10 @@ def _origin(app):
 
 def _cloudbeaver(resolver, app, value):
     require(app['lifecycle'] in ('retained', 'fresh'), 'component.lifecycle')
-    require(('retained_pgadmin_image' in value) == (app['lifecycle'] == 'retained'),
-            'component.properties')
     result = {key: copy.deepcopy(value[key]) for key in
               ('server_name', 'recovery_admin', 'heap_mib', 'auth_headers')}
     result.update(bind_address=resolver.role_address(app, 'web'), public_url=_origin(app),
                   connections={}, managed_connections={})
-    if app['lifecycle'] == 'retained':
-        catalogue = resolver.image_values()
-        reference = value['retained_pgadmin_image']
-        require(reference in catalogue, 'component.reference')
-        selected_image = catalogue[reference]['image']
-        require(isinstance(selected_image, str) and
-                re.fullmatch(r'(?:[A-Za-z0-9._:/-]+@)?sha256:[0-9a-f]{64}', selected_image),
-                'component.properties')
-        result['retained_pgadmin_image'] = selected_image
     for role, metadata in value['connections'].items():
         require(role in app['resolved_connections'], 'component.reference')
         connection = app['resolved_connections'][role]
@@ -169,17 +147,16 @@ def _cloudbeaver(resolver, app, value):
 
 def _bitwarden(resolver, app, value):
     require(app['lifecycle'] == 'retained', 'component.lifecycle')
+    _file(resolver, app, 'runtime_environment')
     database = _connection(app, 'database', 'mariadb')
     require(database['target']['port'] == 3306, 'component.properties')
     domain = value['issuer']['domain']
     require(domain in resolver.site['domains'], 'component.reference')
     issuer = value['issuer']['protocol'] + '://' + host(resolver.site['domains'][domain])
     public = _origin(app)
-    runtime = {'schema': 'homelab-bitwarden-runtime-v1', 'public_origin': public, 'issuer': issuer,
-               'environment_sha256': value['runtime_env_sha256'],
-               'runtime_env_file': _file(resolver, app, 'runtime_environment')}
-    settings = {'schema': 'homelab-bitwarden-runtime-v1',
-        'bind_address': resolver.role_address(app, 'web'), 'image_id': value['image_id'],
+    runtime = {'schema': 'homelab-bitwarden-runtime-v2', 'public_origin': public, 'issuer': issuer}
+    settings = {'schema': 'homelab-bitwarden-runtime-v2',
+        'bind_address': resolver.role_address(app, 'web'),
         'database_server': database['target']['address'], 'database_provider': 'mysql',
         'database_name': value['database_name'], 'data_uid': value['data_uid'], 'data_gid': value['data_gid']}
     return {'runtime': runtime, 'settings': settings}

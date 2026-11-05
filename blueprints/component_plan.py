@@ -6,6 +6,7 @@ observations, generated credentials, grants, acceptance records or target calls.
 import copy
 import hashlib
 import ipaddress
+import itertools
 import json
 from pathlib import Path
 import sys
@@ -25,8 +26,9 @@ import component_properties
 import component_identity
 import component_traffic
 import component_monitoring
-import component_evidence
+import component_admission
 import component_accounts
+import component_addresses
 from component_adapters import adapter
 from component_errors import at, checked
 
@@ -73,6 +75,8 @@ class Resolver:
                 checked(check, value, collection, name)
         for name, value in self.policy['network'].items():
             checked(types.network_policy, value, 'policies', 'network', name)
+        for name, value in self.site.get('address_groups', {}).items():
+            checked(component_addresses.group, value, 'address_groups', name)
         for name,value in self.site['storage'].items():
             with at('storage',name):
                 sources.closed(value, ('context', 'pool'))
@@ -95,7 +99,7 @@ class Resolver:
         catalogue = sources.named(self.library_sources.document('images.json'))
         require(references <= set(catalogue) and set(self.site['images']) <= set(catalogue),
                 'component.image-binding')
-        # Reuse the existing declared digest/latest/retained-archive contract;
+        # Reuse the existing declared digest/latest/versioned-archive contract;
         # the component path adds no image version or publishing mechanism.
         from image_selection import image
         result = {}
@@ -426,12 +430,14 @@ class Resolver:
         for value in guest.get('network_policy', []):
             binding = {'policy': value} if isinstance(value, str) else value
             require(binding['policy'] in self.policy['network'])
-            used = {'interfaces': set(), 'networks': set(), 'endpoints': set()}
+            used = {'interfaces': set(), 'networks': set(), 'endpoints': set(), 'address_groups': set()}
 
             def resolve(kind, role):
                 used[kind].add(role)
                 require(role in binding.get(kind, {}))
                 selected = binding[kind][role]
+                if kind == 'address_groups':
+                    return component_addresses.selected(selected, self.address_groups)
                 if kind == 'endpoints':
                     return self.endpoint(selected)
                 if kind == 'interfaces':
@@ -452,6 +458,7 @@ class Resolver:
 
             for authored in self.policy['network'][binding['policy']]['rules']:
                 row = copy.deepcopy(authored)
+                expansion = {}
                 if 'interface' in row:
                     role = row['interface']
                     require(isinstance(binding.get('interfaces', {}).get(role), str))
@@ -460,7 +467,10 @@ class Resolver:
                 for field in ('source', 'destination', 'port'):
                     if isinstance(row.get(field), dict):
                         ref_kind, role = next(iter(row[field].items()))
-                        if ref_kind == 'endpoint':
+                        if ref_kind == 'address_group':
+                            require(field in ('source', 'destination'))
+                            expansion[field] = resolve('address_groups', role)
+                        elif ref_kind == 'endpoint':
                             selected = resolve('endpoints', role)
                             if field == 'port':
                                 require('port' in selected and 'protocol' in selected and
@@ -474,36 +484,19 @@ class Resolver:
                             selected = resolve('networks' if ref_kind == 'network' else 'interfaces', role)
                             require(selected is not None)
                             row[field] = selected if ref_kind == 'network' else selected + '/32'
-                require(not (row['direction'] == 'in' and row.get('source') == '0.0.0.0/0'))
-                result.append(row)
+                source_values = expansion.get('source', [row.get('source')])
+                destination_values = expansion.get('destination', [row.get('destination')])
+                require(len(source_values) * len(destination_values)
+                        <= component_addresses.MAX_MEMBERS - len(result), 'component.address-group-size')
+                for source, destination in itertools.product(source_values, destination_values):
+                    selected = copy.deepcopy(row)
+                    for field, value in (('source', source), ('destination', destination)):
+                        if field in expansion:
+                            selected[field] = value
+                    require(not (selected['direction'] == 'in' and selected.get('source') == '0.0.0.0/0'))
+                    result.append(selected)
             require(all(set(binding.get(kind, {})) == refs for kind, refs in used.items()))
         return result
-
-    def admission_values(self):
-        for guest_id, guest in self.guests.items():
-            assertions = None
-            subjects = [guest] + [app for app in self.apps.values() if app['guest'] == guest_id]
-            for subject in subjects:
-                admission = subject.get('admission', {})
-                for field, reference in admission.items():
-                    if field == 'assets':
-                        for evidence_id in reference.values():
-                            require(evidence_id in self.site['evidence'] and
-                                    self.site['evidence'][evidence_id]['type'] == 'raw-utf8')
-                        continue
-                    require(reference['evidence'] in self.site['evidence'])
-                    evidence = self.site['evidence'][reference['evidence']]
-                    require(evidence['type'] == {'initial_ordinary': 'initial-ordinary',
-                        'coordinated_custody': 'coordinated-custody',
-                        'reviewed_ordinary_failures': 'reviewed-ordinary-failures',
-                        'source_assertions': 'source-assertions'}[field])
-                    if field == 'source_assertions':
-                        value = evidence['document']
-                        require(value['guest'] == guest_id and (assertions is None or assertions == value))
-                        assertions = copy.deepcopy(value)
-            # Source assertion is deliberately separate from native proof. No
-            # true flag is inferred from lifecycle or from a successful parse.
-            guest['source_assertions'] = assertions
 
     def execution_values(self, images):
         """Resolve declared software/security; never merge arbitrary Compose bags."""
@@ -616,6 +609,7 @@ class Resolver:
 
     def resolve(self, disabled=None, *, admit=False):
         self.validate()
+        self.address_groups = component_addresses.resolve(self.site.get('address_groups', {}), self.site['networks'])
         images = self.image_values()
         self.external_values()
         self.guest_values()
@@ -633,7 +627,6 @@ class Resolver:
         contexts = self.context_values()
         for guest in self.guests.values():
             guest['rules'] = self.policy_values(guest)
-        self.admission_values()
         self.execution_values(images)
         component_foundations.bind(self)
         for app_id, settings in component_properties.bind(self).items():
@@ -642,7 +635,6 @@ class Resolver:
         component_identity.bind(self)
         monitoring = component_monitoring.bind(self, exposure)
         component_traffic.bind(self, exposure)
-        self.evidence = component_evidence.bind(self)
         require(disabled is None or isinstance(disabled, list), 'component.disabled')
         disabled = [] if disabled is None else disabled
         require(all(isinstance(key, str) and key in self.guests for key in disabled)
@@ -654,11 +646,13 @@ class Resolver:
                 'component.monitoring-selection')
         require(type(admit) is bool, 'component.admission')
         if admit:
-            component_evidence.admit(self, enabled)
+            component_admission.admit(self, enabled)
         resolved = {'contexts': contexts, 'guests': self.guests, 'apps': self.apps,
                     'endpoints': {'/'.join(key): value for key, value in self.endpoints.items()},
                     'images': images}
-        resolved.update(enabled=enabled, evidence=self.evidence)
+        resolved.update(enabled=enabled)
+        if self.address_groups:
+            resolved['address_groups'] = copy.deepcopy(self.address_groups)
         if monitoring is not None:
             resolved['monitoring'] = monitoring
         resolved.update(exposures)

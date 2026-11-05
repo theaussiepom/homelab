@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Own only the CloudBeaver workspace and exact managed pgAdmin retirement."""
+"""Own only the CloudBeaver workspace and selected managed connections."""
 import argparse
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -13,7 +13,6 @@ import subprocess
 
 WORKSPACE = Path('/srv/homelab/data/cloudbeaver')
 CUSTODY = Path('/var/lib/homelab-db-tools')
-PGADMIN = Path('/srv/homelab/data/pgadmin')
 COMPOSE = '/opt/homelab-app/compose.yml'
 PERMISSIONS = Path('/opt/homelab-app/runtime/cloudbeaver-permissions.json')
 MANAGED = Path('/opt/homelab-app/runtime/cloudbeaver-admin-connections.json')
@@ -87,9 +86,7 @@ def context(config=None):
     need(isinstance(config, dict) and isinstance(config.get('project'), str)
          and re.fullmatch('[a-z0-9][a-z0-9_-]{0,127}', config['project']))
     lifecycle = config.get('lifecycle', 'retained')
-    need(lifecycle in ('fresh', 'retained') and
-         (isinstance(config.get('retained_pgadmin_image'), str) if lifecycle == 'retained'
-          else 'retained_pgadmin_image' not in config))
+    need(lifecycle in ('fresh', 'retained') and 'retained_pgadmin_image' not in config)
     services = config.get('services', {'cloudbeaver': 'cloudbeaver', 'auth_gateway': 'auth_gateway'})
     need(isinstance(services, dict) and set(services) == {'cloudbeaver', 'auth_gateway'}
          and all(isinstance(value, str) and re.fullmatch('[a-z0-9][a-z0-9_-]{0,127}', value) for value in services.values())
@@ -175,43 +172,6 @@ def workspace(owner, config=None):
 def docker(args, *, input=None, timeout=90):
     return subprocess.run(['docker', *args], input=input, text=True, capture_output=True,
                           check=True, timeout=timeout).stdout
-
-
-def retirement(config):
-    """Gracefully retire one exact Compose service, preserving its bind and evidence."""
-    ctx = context(config)
-    if ctx.lifecycle == 'fresh':
-        return {'pgadmin': 'not_selected'}
-    need(ctx.project == 'homelab-db-tools')
-    ids = docker(['ps', '--all', '--quiet', '--filter', 'label=com.docker.compose.project=homelab-db-tools',
-                  '--filter', 'label=com.docker.compose.service=pgadmin']).split()
-    need(len(ids) <= 1)
-    if not ids:
-        return {'pgadmin': 'absent'}
-    container = json.loads(docker(['inspect', ids[0]]))[0]
-    mounts = [m for m in container['Mounts'] if m['Destination'] == '/var/lib/pgadmin']
-    need(container['Id'].startswith(ids[0]) and container['Config']['Image'] == config['retained_pgadmin_image']
-         and container['Config']['Labels'].get('com.docker.compose.project') == 'homelab-db-tools'
-         and container['Config']['Labels'].get('com.docker.compose.service') == 'pgadmin'
-         and len(mounts) == 1 and mounts[0]['Type'] == 'bind'
-         and mounts[0]['Source'] == str(PGADMIN))
-    source = PGADMIN
-    metadata = source.lstat()
-    need(stat.S_ISDIR(metadata.st_mode) and metadata.st_uid == 5050)
-    proof = {'container': container['Id'], 'image': config['retained_pgadmin_image'],
-             'source': str(source), 'device': metadata.st_dev, 'inode': metadata.st_ino}
-    receipt = ctx.custody / 'pgadmin-retirement.json'
-    if receipt.exists() or receipt.is_symlink():
-        need(private(receipt) == proof)
-    else:
-        create(receipt, proof)
-    docker(['stop', '--time', '60', container['Id']])
-    stopped = json.loads(docker(['inspect', container['Id']]))[0]
-    need(stopped['Id'] == container['Id'] and stopped['State']['Running'] is False)
-    docker(['rm', container['Id']])
-    after = source.lstat()
-    need(after.st_dev == metadata.st_dev and after.st_ino == metadata.st_ino and stat.S_ISDIR(after.st_mode))
-    return {'pgadmin': 'retired', 'data': 'preserved'}
 
 
 def templates(config, seed=True):
@@ -322,13 +282,6 @@ def managed(config, seed=True):
     return {'managed_connections': 'verified', 'private_native_file': True}
 
 
-def prepare(config):
-    ctx = context(config)
-    need(config['workspace'] == str(ctx.workspace))
-    workspace(workspace_owner(config), config)
-    return retirement(config)
-
-
 def metadata(config):
     """Check only our template IDs; custom connections and per-user workspaces stay owned by the application."""
     ctx = context(config)
@@ -403,8 +356,6 @@ def health(config):
     metadata(config)
     prepare_owner = workspace_owner(config)
     workspace(prepare_owner, config)
-    need(ctx.lifecycle == 'fresh' or not docker(['ps', '--all', '--quiet', '--filter', 'label=com.docker.compose.project=homelab-db-tools',
-                     '--filter', 'label=com.docker.compose.service=pgadmin']).strip())
     raw = docker(['compose', '-f', ctx.compose, 'ps', '--all', '--format', 'json'])
     containers = json.loads(raw) if raw.lstrip().startswith('[') else [json.loads(line) for line in raw.splitlines()]
     need(isinstance(containers, list) and len(containers) == 2
@@ -445,7 +396,7 @@ def health(config):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('workspace', 'templates', 'managed', 'prepare', 'health'))
+    parser.add_argument('action', choices=('workspace', 'templates', 'managed', 'health'))
     parser.add_argument('--config', type=Path)
     parser.add_argument('--owner')
     args = parser.parse_args()
@@ -453,7 +404,7 @@ def main():
         result = workspace(json.loads(args.owner), private(args.config) if args.config is not None else None)
     else:
         value = private(args.config)
-        result = {'prepare': prepare, 'health': health, 'templates': templates, 'managed': managed}[args.action](value)
+        result = {'health': health, 'templates': templates, 'managed': managed}[args.action](value)
     print(json.dumps(result, sort_keys=True))
 
 

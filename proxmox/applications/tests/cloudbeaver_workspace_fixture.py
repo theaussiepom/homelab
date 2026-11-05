@@ -18,7 +18,6 @@ r.workspace(owner);assert receipt.read_bytes()==before
 r.PERMISSIONS.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
 r.create(r.PERMISSIONS,{'postgresql':['user']},uid=8978,mode=0o400)
 config={'workspace':str(r.WORKSPACE),'project':'homelab-db-tools',
-        'retained_pgadmin_image':'dpage/pgadmin4@sha256:'+'a'*64,
         'connections':{'postgresql':{}}};r.templates(config)
 permissions=r.WORKSPACE/'GlobalConfiguration/.dbeaver/data-sources-permissions.json'
 assert(permissions.stat().st_uid,permissions.stat().st_gid,stat.S_IMODE(permissions.stat().st_mode))==(8978,8978,0o400)

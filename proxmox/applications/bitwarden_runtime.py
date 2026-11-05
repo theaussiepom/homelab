@@ -1,8 +1,6 @@
 """Ordinary Bitwarden runtime admission; migration receipts are not CD inputs."""
 
-import hashlib
 import json
-from pathlib import Path
 from urllib.parse import urlsplit
 import private_io as files
 import bitwarden
@@ -15,23 +13,16 @@ def _selection(selected):
             "schema",
             "public_origin",
             "issuer",
-            "environment_sha256",
-            "runtime_env_file",
         }
-        and selected["schema"] == "homelab-bitwarden-runtime-v1"
-        and Path(selected["runtime_env_file"]).is_absolute(),
-        "Use the retained Bitwarden runtime contract",
+        and selected["schema"] == "homelab-bitwarden-runtime-v2",
+        "Use the selected Bitwarden runtime contract",
     )
 
 
 def environment_bytes(raw, selected, settings):
-    """Validate the exact retained bytes without reading its reference path."""
+    """Validate supplied bytes; the protected app payload owns role continuity."""
     _selection(selected)
     files.require(isinstance(raw, bytes), "Use selected runtime bytes")
-    files.require(
-        hashlib.sha256(raw).hexdigest() == selected["environment_sha256"],
-        "Retained Bitwarden runtime input differs",
-    )
     value = json.loads(raw)
     files.require(
         isinstance(value, dict)

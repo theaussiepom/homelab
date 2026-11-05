@@ -35,7 +35,7 @@ class CloudRuntimeComponentTests(unittest.TestCase):
             return fd
         for target,value in [('open',opening),('stat',lambda *a,**kw:virtual(self.original_stat(*a,**kw))),('lstat',lambda *a,**kw:virtual(self.original_lstat(*a,**kw))),('fstat',lambda fd:virtual(self.original_fstat(fd))),('chown',chown),('fchown',fchown),('geteuid',lambda:0)]:
             context=patch.object(self.r.os,target,value);context.start();self.addCleanup(context.stop)
-        for name,value in [('WORKSPACE',self.root/'legacy-workspace'),('CUSTODY',self.root/'custody'),('PGADMIN',self.root/'pgadmin'),('RUNTIME',self.root/'runtime'),('COMPOSE',str(self.root/'application/compose.yml'))]:
+        for name,value in [('WORKSPACE',self.root/'legacy-workspace'),('CUSTODY',self.root/'custody'),('RUNTIME',self.root/'runtime'),('COMPOSE',str(self.root/'application/compose.yml'))]:
             setattr(self.r,name,value)
         self.r.PERMISSIONS=self.r.RUNTIME/'cloudbeaver-permissions.json';self.r.MANAGED=self.r.RUNTIME/'cloudbeaver-admin-connections.json'
         self.r.CUSTODY.mkdir(mode=0o700);self.r.RUNTIME.mkdir(mode=0o700);Path(self.r.COMPOSE).parent.mkdir(mode=0o700)
@@ -83,11 +83,10 @@ class CloudRuntimeComponentTests(unittest.TestCase):
             'project_file':'compose-'+suffix+'.yml','services':{'cloudbeaver':'server-'+suffix,'auth_gateway':'gateway-'+suffix},
             'runtime_directory':str(self.r.RUNTIME/suffix),'custody_directory':str(self.r.CUSTODY/suffix),
             'runtime_id':'cloud-'+suffix,'lifecycle':'fresh'if fresh else'retained','bind_address':'198.18.30.32','connections':{}}
-        if not fresh:value['retained_pgadmin_image']='dpage/pgadmin4@sha256:'+'a'*64
         Path(value['runtime_directory']).mkdir(mode=0o700)
         return value
     def legacy(self):
-        return {'workspace':str(self.r.WORKSPACE),'project':'homelab-db-tools','retained_pgadmin_image':'dpage/pgadmin4@sha256:'+'a'*64,'bind_address':'198.18.30.32','connections':{}}
+        return {'workspace':str(self.r.WORKSPACE),'project':'homelab-db-tools','bind_address':'198.18.30.32','connections':{}}
     def test_retained_default_context_preserves_all_old_paths_and_service_ids(self):
         ctx=self.r.context(self.legacy());self.assertEqual((ctx.workspace,ctx.custody,ctx.runtime,ctx.compose),(self.r.WORKSPACE,self.r.CUSTODY,self.r.RUNTIME,self.r.COMPOSE));self.assertEqual(ctx.services,{'cloudbeaver':'cloudbeaver','auth_gateway':'auth_gateway'})
     def test_dynamic_context_uses_only_selected_services_runtime_compose_and_custody(self):
@@ -99,10 +98,18 @@ class CloudRuntimeComponentTests(unittest.TestCase):
         for mutate in mutations:
             bad=copy.deepcopy(value);mutate(bad)
             with self.subTest(case=mutations.index(mutate)),self.assertRaises(ValueError):self.r.context(bad)
-    def test_fresh_prepare_never_discovers_or_stops_legacy_pgadmin(self):
+    def test_fresh_workspace_uses_no_retired_container_api(self):
         value=self.config();self.r.workspace(self.owner,value)
         with patch.object(self.r,'docker',side_effect=AssertionError('No pgAdmin lookup')):
-            self.assertEqual(self.r.prepare(value),{'pgadmin':'not_selected'})
+            self.assertEqual(self.r.workspace(self.owner,value),{'workspace':'owned'})
+        self.assertFalse(hasattr(self.r,'prepare'));self.assertFalse(hasattr(self.r,'retirement'))
+    def test_historical_retirement_receipt_is_opaque_and_preserved(self):
+        value=self.legacy();self.r.workspace(self.owner,value)
+        receipt=self.r.CUSTODY/'pgadmin-retirement.json';receipt.write_bytes(b'opaque historical retirement evidence\n');receipt.chmod(0o600)
+        before=(receipt.stat().st_ino,receipt.read_bytes())
+        with patch.object(self.r,'docker',side_effect=AssertionError('No retired container discovery')):
+            self.assertEqual(self.r.workspace(self.owner,value),{'workspace':'owned'})
+        self.assertEqual((receipt.stat().st_ino,receipt.read_bytes()),before)
     def test_retained_workspace_owner_receipt_bytes_are_not_rewritten(self):
         value=self.legacy();self.r.workspace(self.owner,value);receipt=self.r.CUSTODY/'workspace.json';raw=receipt.read_bytes();self.assertEqual(json.loads(raw),self.owner)
         self.r.workspace(self.owner,value);self.assertEqual(receipt.read_bytes(),raw)
@@ -218,7 +225,7 @@ class CloudRuntimeComponentTests(unittest.TestCase):
         import ast
         source=ast.parse((D/'cloudbeaver-runtime.py').read_text())
         constants={node.value for node in ast.walk(source)if isinstance(node,ast.Constant)and isinstance(node.value,str)}
-        self.assertTrue({'MANAGED-CONNECTIONS-HOLD.json','workspace.json','managed-connections.json','pgadmin-retirement.json','data-sources-homelab-administrators.json','data-sources-permissions.json','permissions.homelab-managed.pending'}<=constants)
+        self.assertTrue({'MANAGED-CONNECTIONS-HOLD.json','workspace.json','managed-connections.json','data-sources-homelab-administrators.json','data-sources-permissions.json','permissions.homelab-managed.pending'}<=constants)
     def test_retained_root_and_fresh_child_preserve_each_others_direct_leaves(self):
         retained=self.legacy();self.r.workspace(self.owner,retained);receipt=self.r.CUSTODY/'workspace.json';original=receipt.read_bytes()
         fresh=self.config();self.r.workspace(self.owner,fresh);child=Path(fresh['custody_directory'])/'workspace.json';child_original=child.read_bytes()

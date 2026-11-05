@@ -65,7 +65,7 @@ class CallerCase(unittest.TestCase):
                       'known_hosts':str(root/'known_hosts'),'private_key':str(root/'key')},
              'app':{'hostname':'fixture','address':'198.18.20.10','service_health_checks':{
                  'selected':[{'name':'selected readiness','argv':['true'],'expect':''}]},
-                 'exclusive_writer_confirmed':True},
+                 },
              'deployment':{'contract':3,'capabilities':['linux','docker'] if roles else ['linux'],
                  'input_directory':str(directory),'runtime_file':str(directory/'component-runtime.json'),
                  'input_identity':'a'*64,'protected_guests':[9900],
@@ -231,8 +231,12 @@ class PreparationCallerTests(CallerCase):
                 cfg,app=self.case(adapter,extra,lifecycle='retained')
                 app['sidecar_files']=copy.deepcopy(contract.SIDECAR_FILES[adapter]);self.save()
                 hook={'zigbee_state':{'settings_file':{'content':'{"synthetic":"settings"}\n'}}}
-                with patch.object(prepare.component_app_hooks,'descriptors',return_value=hook) as builder:
+                dns={'schema':'homelab-component-dns-records-v2','records':{},'previous':{}}
+                with patch.object(prepare.component_app_hooks,'descriptors',return_value=hook) as builder, \
+                     patch.object(prepare,'dns_document',return_value=dns) as dns_builder:
                     proof=prepare.prepare(cfg,'selected',{},attempt=self.attempt)
+                if adapter=='pihole':dns_builder.assert_called_once_with(cfg,app,self.attempt)
+                else:dns_builder.assert_not_called()
                 self.assertEqual(read_json(proof.directory/'runtime-files.json',private=True),[
                     {'source':leaf,**contract.SIDECAR_FILES[adapter][leaf]}])
                 self.assertEqual(read_json(proof.directory/continuity.FILE,private=True)['roles'],{})
@@ -353,10 +357,6 @@ class StaticSourceBindingTests(CallerCase):
         with patch.object(inputs,'inspect',side_effect=lambda *args:static.copy()), \
              patch.object(inputs.discovery_scope,'scope_source_files',return_value=[str(scope)]) as discovery, \
              patch('deployment_inputs.source_hash',return_value='d'*64), \
-             patch.object(inputs.coordinated_evidence,'inspect',return_value=({},None,None)), \
-             patch.object(inputs.initial_ordinary,'inspect',return_value=({},None,None)), \
-             patch.object(inputs.coordinated_contract,'selection',return_value=None), \
-             patch.object(inputs.initial_ordinary,'selection',return_value=None), \
              patch.object(prepare.component_input_secrets,'selected',side_effect=AssertionError('No static app secret read')), \
              patch.object(managed_credentials,'credential',side_effect=AssertionError('No static credential read')):
             site=self.directory/'site.json';write_new(site,encoded(cfg))

@@ -55,11 +55,6 @@ def lower_guest(plan, guest_id, *, inputs=INPUTS):
     except component_native.NativeNamespaceError:
         raise ComponentError('component.native-namespace',('guests',guest_id,'native'))from None
     files = {name: raw.decode() for name, raw in artifacts.items()}
-    # Historical proof bytes are never interpolated or parsed/reserialized.
-    evidence = copy.deepcopy(plan.resolved['evidence'][guest_id])
-    proofs = evidence.pop('proof_files', {})
-    require(not set(proofs) & set(files), 'component.artifact-conflict')
-    files.update(proofs)
     software = guest['software_selection']
     repositories = []
     for row in software['repositories']:
@@ -103,21 +98,12 @@ def lower_guest(plan, guest_id, *, inputs=INPUTS):
             'protected_guests': copy.deepcopy(context['protected_guests']),
             'applications': applications, 'payload_phases': payload_phases,
             'phases': ['preparation', *checks]},
-        'app': {'kind': evidence['app']['kind'], 'vmid': guest['identity']['vmid'],
+        'app': {'vmid': guest['identity']['vmid'],
             'hostname': guest['identity']['hostname'], 'memory_mib': guest['resources']['memory_mib'],
             'address': guest['control']['address'], 'mac': guest['control']['mac'],
             'packages': copy.deepcopy(software['packages']), 'repositories': repositories,
             'required_paths': list(required.values()), 'service_health_checks': checks,
             'health_checks': [row for rows in checks.values() for row in rows]}}
-    for key in ('coordinated_custody', 'initial_ordinary', 'reviewed_ordinary_failures'):
-        if key in evidence:
-            cfg[key] = evidence[key]
-    if 'coordinated_custody' in evidence:
-        cfg['paths']['coordinated_custody_inputs'] = '${inputs}'
-    if 'source_assertions' in evidence:
-        cfg['app']['exclusive_writer_confirmed'] = evidence['source_assertions'].get(
-            'exclusive_writer_confirmed', False)
-        cfg['deployment']['prerequisites'] = evidence['source_assertions']['prerequisites']
     if 'frontend_routing' in guest:
         cfg['app']['frontend_routing'] = copy.deepcopy(guest['frontend_routing'])
     if 'monitoring' in guest:
@@ -136,8 +122,6 @@ def lower_guest(plan, guest_id, *, inputs=INPUTS):
     directory = Path(inputs) / guest_id / identity
     cfg['deployment'].update(input_identity=identity, input_directory=str(directory),
                              runtime_file=str(directory / 'component-runtime.json'))
-    if 'coordinated_custody' in evidence:
-        cfg['paths']['coordinated_custody_inputs'] = str(directory)
     for row in cfg['app']['repositories']:
         row['key_path'] = str(directory / ('repository-' + row['name'] + '.asc'))
     for key in ('credential_file', 'database_password_file', 'storage_password_file', 'server_file'):

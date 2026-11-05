@@ -11,8 +11,8 @@ import winet as legacy_winet
 
 def vault():
  values={'BW_DB_PROVIDER':'mysql','BW_DB_SERVER':'198.18.32.35','BW_DB_DATABASE':'vault','BW_DOMAIN':'vault.example.invalid','PUID':'1000','PGID':'1000','BW_DB_USERNAME':'fixture-user','BW_DB_PASSWORD':'fixture-value','BW_INSTALLATION_ID':'fixture-id','BW_INSTALLATION_KEY':'fixture-installation','globalSettings__identityServer__certificatePassword':'fixture-certificate'}
- raw=json.dumps(values).encode();runtime={'schema':'homelab-bitwarden-runtime-v1','public_origin':'https://vault.example.invalid','issuer':'http://localhost','environment_sha256':hashlib.sha256(raw).hexdigest(),'runtime_env_file':'/var/lib/example/vault.json'}
- settings={'schema':'homelab-bitwarden-runtime-v1','bind_address':'198.18.30.35','image_id':'sha256:'+'1'*64,'database_server':'198.18.32.35','database_provider':'mysql','database_name':'vault','data_uid':1000,'data_gid':1000}
+ raw=json.dumps(values).encode();runtime={'schema':'homelab-bitwarden-runtime-v2','public_origin':'https://vault.example.invalid','issuer':'http://localhost'}
+ settings={'schema':'homelab-bitwarden-runtime-v2','bind_address':'198.18.30.35','database_server':'198.18.32.35','database_provider':'mysql','database_name':'vault','data_uid':1000,'data_gid':1000}
  app={'adapter':'bitwarden','lifecycle':'retained','settings':{'runtime':runtime,'settings':settings}}
  return app,raw,values
 
@@ -77,25 +77,24 @@ class PrivateInputTests(unittest.TestCase):
   with patch.object(self.runtime.files,'regular',side_effect=AssertionError('No private read')):
    new=self.builder.bind(app,{'runtime_environment':raw})['environment']
   self.assertEqual(new,expected);self.assertNotIn('TZ',new)
- def test_bitwarden_hash_runtime_shape_and_path_guards_are_preserved(self):
-  for kind in ('hash','field','path'):
-   app,raw,_=vault()
-   if kind=='hash':raw+=b' '
-   elif kind=='field':app['settings']['runtime']['extra']=True
-   else:app['settings']['runtime']['runtime_env_file']='relative'
-   with self.subTest(kind=kind),self.assertRaises(ValueError):self.builder.bind(app,{'runtime_environment':raw})
+ def test_bitwarden_runtime_v2_is_closed_and_retired_duplicate_authorities_refuse(self):
+  for extra,value in [('environment_sha256','a'*64),('runtime_env_file','/var/lib/old'),('extra',True),('schema','homelab-bitwarden-runtime-v1')]:
+   app,raw,_=vault();app['settings']['runtime'][extra]=value
+   with self.subTest(extra=extra),self.assertRaises(ValueError):self.builder.bind(app,{'runtime_environment':raw})
+  app,raw,_=vault()
+  self.assertEqual(self.builder.bind(app,{'runtime_environment':raw+b' '})['environment'],vault()[2])
  def test_bitwarden_retains_database_numeric_owner_and_installation_value_relationships(self):
   changes={'BW_DB_PROVIDER':'postgres','BW_DB_SERVER':'198.18.32.99','BW_DB_DATABASE':'other','BW_DOMAIN':'other.example.invalid','PUID':'1001','PGID':'1001','BW_DB_USERNAME':'','BW_DB_PASSWORD':'','BW_INSTALLATION_ID':'','BW_INSTALLATION_KEY':'','globalSettings__identityServer__certificatePassword':''}
   for key,value in changes.items():
-   app,_,values=vault();values[key]=value;raw=json.dumps(values).encode();app['settings']['runtime']['environment_sha256']=hashlib.sha256(raw).hexdigest()
+   app,_,values=vault();values[key]=value;raw=json.dumps(values).encode()
    with self.subTest(key=key),self.assertRaises(ValueError):self.builder.bind(app,{'runtime_environment':raw})
  def test_bitwarden_private_settings_predicate_is_shared_not_dropped(self):
-  for key,value in [('data_uid',True),('data_gid',0),('image_id','unbound'),('database_name','invalid-name'),('database_server','8.8.8.8'),('bind_address','8.8.8.8')]:
+  for key,value in [('data_uid',True),('data_gid',0),('image_id','unbound'),('schema','homelab-bitwarden-runtime-v1'),('database_name','invalid-name'),('database_server','8.8.8.8'),('bind_address','8.8.8.8')]:
    app,raw,_=vault();app['settings']['settings'][key]=value
    with self.subTest(key=key),self.assertRaises(ValueError):self.builder.bind(app,{'runtime_environment':raw})
  def test_runtime_json_strings_and_secret_controls_remain_strict(self):
   for invalid in ({},[],{'x':1},{'x':'line\nbreak'}):
-   app,_,_=vault();raw=json.dumps(invalid).encode();app['settings']['runtime']['environment_sha256']=hashlib.sha256(raw).hexdigest()
+   app,_,_=vault();raw=json.dumps(invalid).encode()
    with self.subTest(invalid=type(invalid).__name__),self.assertRaises(ValueError):self.builder.bind(app,{'runtime_environment':raw})
  def test_winet_supplied_options_preserve_the_complete_fixed_private_row(self):
   app,raw,options=telemetry()

@@ -4,7 +4,7 @@ The current authored schema is `homelab-components-v1`. A reusable library selec
 framework contracts and declares templates, independent app profiles, software,
 runtime, health, monitoring and policy components. It has no fixed guest graph.
 A consuming site selects those definitions and owns concrete allocations, instance
-placement, reference bindings, admission evidence and execution policy.
+placement, reference bindings, private input sources and execution policy.
 
 Use [component configuration](components.md) for authoring/API and extension rules,
 and [testing](testing.md) for the test layers and complete gate commands. The
@@ -19,13 +19,13 @@ site source. Value references do not create deployment waits or firewall grants.
 Required traffic is checked against the declared source and destination guest
 rules; actual readiness edges and ordered grants remain separate declarations.
 
-Adoption uses exact immutable library/framework selections. Older pins retain the
-previous fixed-bundle authored API; this head rejects it. Compilation is not
-migration, native admission or deployment acceptance. Historical receipt schemas
-remain separately validated where consumed; their bytes and meaning are not
-reinterpreted as component success.
+Source versions use exact immutable library/framework selections. Older pins
+retain their previous APIs; this head rejects fixed bundles and one-time authored
+admission fields. Compilation is not native admission or deployment acceptance.
+Versioned component history remains read-only proof; unrelated older records are
+not reinterpreted as component success.
 
-[Coordinated custody](coordinated-custody.md) describes the retained proof boundary.
+[Ordinary ownership](components.md#ordinary-ownership) describes the retained proof boundary.
 State, data, credentials, resource identities and holds cannot be reset or adopted
 by choosing another lifecycle label. OpenTofu and Ansible remain the engines under
 protected CD.

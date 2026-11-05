@@ -15,39 +15,6 @@ from test_component_plan import library, site
 
 
 class PacketIntegrationTests(unittest.TestCase):
-    def test_before_started_failure_evidence_crosses_real_source_binder_lowerer_and_receiver(self):
-        import component_guest
-        self.native('influxdb')
-        del self.site['apps']['recursive_a']
-        self.site['apps']['influxdb']['lifecycle'] = 'retained'
-        self.site['apps']['influxdb']['identity'] = {'phase': 'influxdb', 'runtime_id': 'influxdb'}
-        self.site['guests']['resolver']['lifecycle'] = 'retained'
-        anchor = {'schema': 'homelab-influx-initial-ordinary-v1', 'vmid': 610, 'node': 'example-node',
-            'installed_site': '/example/installed/site.json', 'installed_site_sha256': 'a'*64,
-            'initial_state_sha256': 'b'*64, 'receipt': {'operation': 'ordinary-100-1',
-                'sha256': 'c'*64, 'immutable_sha256': 'd'*64, 'source_sha256': 'e'*64}}
-        row = {'operation': 'ordinary-101-1', 'phase': 'influxdb', 'boundary': 'before-started',
-            'hold_sha256': 'a'*64, 'infrastructure_sha256': 'b'*64,
-            'previous_ordinary_sha256': 'c'*64, 'state_sha256': 'd'*64,
-            'preceding_completions_sha256': {'preparation': 'e'*64}}
-        self.site['evidence'] = {'anchor': {'type': 'initial-ordinary', 'document': anchor},
-            'failed': {'type': 'reviewed-ordinary-failures', 'document': [row]}}
-        self.site['guests']['resolver']['admission'] = {'initial_ordinary': {'evidence': 'anchor'},
-            'reviewed_ordinary_failures': {'evidence': 'failed'}}
-        with patch('private_io.regular', side_effect=AssertionError('No protected input read')), \
-             patch('subprocess.run', side_effect=AssertionError('No process')), \
-             patch('socket.create_connection', side_effect=AssertionError('No target')):
-            plan = self.resolve()
-            packet = component_packet.lower_plan(plan)['resolver']
-            packet = json.loads(json.dumps(packet, sort_keys=True))
-            cfg, _ = component_guest.packet(packet, component_packet.INPUTS)
-        self.assertEqual(plan.resolved['evidence']['resolver']['schema'], component_guest.CONFIG_SCHEMA)
-        self.assertEqual(cfg['reviewed_ordinary_failures'], [row])
-        self.assertEqual(cfg['initial_ordinary'], anchor)
-        self.assertEqual(cfg['deployment']['phases'], ['preparation', 'influxdb'])
-        self.assertNotIn('log_sha256', cfg['reviewed_ordinary_failures'][0])
-        self.site['evidence']['failed']['document'][0]['boundary'] = 'unknown'
-        with self.assertRaises(ValueError): self.resolve()
 
     def native(self,adapter):
         settings={'postgresql':('postgresql-16=16.10-1.pgdg13+1',1792,'/var/lib/postgresql',5432),

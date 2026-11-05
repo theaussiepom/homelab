@@ -17,7 +17,6 @@ import component_payload
 import deployment_state
 import monitoring_agent
 import music_assistant
-import ordinary_failure
 from private_io import encoded, write_new
 from test_component_monitoring_agent import component
 from test_music_mqtt import settings
@@ -87,8 +86,8 @@ class HelperRefusalTests(unittest.TestCase):
                     os.fstat(fd)
 
 
-class HistoricalPhaseBytes(unittest.TestCase):
-    def test_legacy_current_binding_refuses_before_state_directory_or_lock_creation(self):
+class CurrentPhaseBoundaries(unittest.TestCase):
+    def test_unversioned_current_binding_refuses_before_state_directory_or_lock_creation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             cfg = {'schema': 'homelab-component-guest-v1', 'guest': {'vmid': 610},
@@ -105,33 +104,40 @@ class HistoricalPhaseBytes(unittest.TestCase):
             deployment_state.bootstrap_closed(root)
             self.assertFalse(root.exists())
 
-    def test_old_phase_start_keeps_exact_raw_equality(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary).resolve(); raw = b'{ "historical": true }\n'
-            write_new(path / 'service-started.json', raw)
-            held = {'binding': {'vmid': 610}}
-            ordinary_failure.phase_start(None, path, {'phase': 'service'}, held, raw)
-            with self.assertRaisesRegex(ValueError, 'completed infrastructure checkpoint'):
-                ordinary_failure.phase_start(None, path, {'phase': 'service'}, held, raw + b' ')
-            self.assertEqual((path / 'service-started.json').read_bytes(), raw)
 
-    def test_component_preparation_has_no_payload_and_keeps_exact_hold_bytes(self):
+    def test_current_preparation_requires_exact_started_bytes_and_no_payload(self):
         with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary).resolve()
-            binding = {'schema': component_payload.BINDING_SCHEMA, 'vmid': 610, 'site_sha256': 'a' * 64,
-                'source_sha256': 'b' * 64, 'input_identity': 'c' * 64,
-                'app_inputs_directory': str(path / 'applications'), 'input_hashes': {}}
-            held = {'binding': binding, 'operation': str(path), 'automatic_retry': False,
-                'workflow': ['example/site', 'example/site/.github/workflows/deploy.yml'],
-                'run_number': 1, 'site_revision': 'd' * 40, 'previous_ordinary_sha256': 'e' * 64}
-            raw = encoded(held); started = path / 'preparation-started.json'
-            write_new(started, raw)
-            with patch.object(component_payload.AppPayload, 'load') as payload:
-                ordinary_failure.phase_start(None, path, {'phase': 'preparation'}, held, raw)
+            root=Path(temporary).resolve();root.chmod(0o700)
+            operation=root/'ordinary-101-1';operation.mkdir(mode=0o700)
+            binding={'schema':component_payload.BINDING_SCHEMA,'vmid':610,'site_sha256':'a'*64,
+                'source_sha256':'b'*64,'input_identity':'c'*64,
+                'app_inputs_directory':str(root/'applications'),'input_hashes':{}}
+            marker={'binding':binding,'operation':str(operation),'automatic_retry':False,
+                'workflow':['example/site','example/site/.github/workflows/deploy.yml'],
+                'run_number':1,'site_revision':'d'*40,'previous_ordinary_sha256':None}
+            hold=root/'ORDINARY-HOLD.json';write_new(hold,encoded(marker))
+            state=root/'terraform.tfstate';write_new(state,b'synthetic existing state')
+            from private_io import sha
+            ready={'state_sha256':sha(state),'changed':False}
+            attempt=object.__new__(deployment_state.DeploymentAttempt)
+            attempt.work=root;attempt.operation=operation;attempt.hold=hold;attempt.binding=binding
+            attempt.marker=marker;attempt.phases=['preparation','worker']
+            attempt.cfg={'deployment':{'input_identity':'c'*64,'payload_phases':{'worker':'selected'}}}
+            started=operation/'preparation-started.json';write_new(started,encoded(marker))
+            for raw in (encoded(marker)+b' ',encoded(dict(marker,phase_inputs=None))):
+                started.write_bytes(raw)
+                with self.subTest(raw_size=len(raw)),self.assertRaisesRegex(ValueError,'payload changed'):
+                    attempt.phase_complete('preparation',{'changed':False},ready)
+                self.assertEqual(started.read_bytes(),raw)
+                self.assertEqual(hold.read_bytes(),encoded(marker))
+                self.assertFalse((operation/'preparation-complete.json').exists())
+            started.write_bytes(encoded(marker))
+            with patch.object(component_payload.AppPayload,'load') as payload:
+                self.assertFalse(attempt.phase_complete('preparation',{'changed':False},ready))
             payload.assert_not_called()
-            started.write_bytes(encoded(dict(held, phase_inputs=None)))
-            with self.assertRaisesRegex(ValueError, 'failed preparation input boundary'):
-                ordinary_failure.phase_start(None, path, {'phase': 'preparation'}, held, raw)
+            complete=json.loads((operation/'preparation-complete.json').read_bytes())
+            self.assertNotIn('phase_inputs',complete)
+            self.assertEqual(hold.read_bytes(),encoded(marker))
 
 
 if __name__ == '__main__':

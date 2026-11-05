@@ -7,10 +7,7 @@ import os
 from pathlib import Path
 import re
 import stat
-import coordinated_contract
-import coordinated_evidence
-import coordinated_generation
-import initial_ordinary
+import component_generation
 from custody_records import no_markers, read_existing
 from component_payload import AppPayload, BINDING_SCHEMA
 from private_io import (
@@ -35,38 +32,6 @@ HOLDS = {
 }
 
 
-def coordinated_members(directory):
-    """Read durable legacy ownership; completion never releases it implicitly."""
-    private_directory(directory)
-    raw = regular(directory / "request.json", private=True)
-
-    def unique(pairs):
-        result = dict(pairs)
-        require(len(result) == len(pairs), "Preserve duplicate coordinated custody fields")
-        return result
-
-    value = json.loads(raw, object_pairs_hook=unique)
-    require(isinstance(value, dict) and isinstance(value.get("members"), dict),
-            "Preserve unrecognized coordinated maintenance custody")
-    members = value["members"]
-    if value.get("schema") == "homelab-postgresql-cutover-v1":
-        require(set(members) == {"postgresql", "identity", "db-tools"},
-                "Preserve unrecognized coordinated member roles")
-    else:
-        require(value.get("schema") == "homelab-database-server-cutover-v1"
-                and len(members) == 1 and set(members) <= {"mariadb", "influxdb"},
-                "Preserve unrecognized coordinated member roles")
-    require(all(isinstance(member, dict) and type(member.get("vmid")) is int
-                and member["vmid"] >= 100 and member["vmid"] not in {900, 4914, 4915, 4920}
-                for member in members.values()), "Preserve unrecognized coordinated member identities")
-    ids = [member["vmid"] for member in members.values()]
-    require(len(ids) == len(set(ids)), "Preserve ambiguous coordinated member identities")
-    claim = directory / "claim.json"
-    if claim.exists() or claim.is_symlink():
-        require(regular(claim, private=True) == raw, "Preserve changed coordinated request/claim custody")
-    return set(ids)
-
-
 def bootstrap_closed(root=Path("/var/lib/homelab-bootstrap")):
     if root.exists() or root.is_symlink():
         require(root.is_dir() and not root.is_symlink(), "Preserve bootstrap maintenance custody")
@@ -78,11 +43,8 @@ class DeploymentAttempt:
 
     def __init__(self, cfg, binding, phases, *, prepare_inputs=None):
         self.cfg = cfg
-        self.custody = coordinated_contract.selection(cfg)
-        self.initial_selection = initial_ordinary.selection(cfg)
         self.custody_identity = None
-        self.initial_ordinary = None
-        self.receipt_checked = self.custody is None and self.initial_selection is None
+        self.receipt_checked = False
         self.vmid = cfg["guest"]["vmid"]
         self.root = Path(cfg["paths"]["state_root"])
         self.work = self.root / str(cfg["guest"]["vmid"])
@@ -100,7 +62,7 @@ class DeploymentAttempt:
         require(self.cfg.get('schema') == 'homelab-component-guest-v1',
                 'New attempts require the component guest contract')
         if self.prepare_inputs is None:
-            coordinated_generation.component_binding(self.binding)
+            component_generation.binding(self.binding)
         private_directory(self.root)
         private_directory(self.work, create=not self.work.exists())
         try:
@@ -114,6 +76,7 @@ class DeploymentAttempt:
                 fcntl.flock(
                     stream, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB
                 )
+            no_markers(self.root)
             coordinated = [*self.root.glob("database-network-cutover-*"),
                            *self.root.glob("database-server-cutover-*")]
             for directory in [self.work, *coordinated]:
@@ -145,42 +108,13 @@ class DeploymentAttempt:
                 not any(self.work.glob("database-*/*HOLD.json")),
                 "Preserve a nested database operation hold",
             )
-            matched = False
-            for directory in coordinated:
-                if self.vmid in coordinated_members(directory):
-                    require(self.custody is not None and directory.name == self.custody["directory"] and not matched,
-                            "This guest belongs to coordinated maintenance; preserve its custody before mutation")
-                    matched = True
             if self.prepare_inputs is not None:
                 # Existing ordinary custody is verification-only. No selected
                 # app secret/account inputs are accepted by this callback.
                 self.binding = self.prepare_inputs(not (self.hold.exists() or self.hold.is_symlink()))
-                coordinated_generation.component_binding(self.binding)
+                component_generation.binding(self.binding)
             self._require_backend()
-            if self.custody is not None:
-                require(matched, "The selected completed group is missing")
-                proofs, lineage, self.initial_ordinary = coordinated_evidence.inspect(self.cfg)
-                require(all(self.binding["input_hashes"].get(path) == value for path, value in proofs.items())
-                        and self.binding.get("coordinated_custody_sha256") == coordinated_contract.selection_digest(self.cfg),
-                        "Coordinated immutable evidence changed before admission")
-                from proxmox_guest import guest_trust
-                read_existing(Path(self.cfg["paths"]["known_hosts"]))
-                guest_trust(self.cfg, self.work, persist=False)
-                member = self.custody["members"][self.cfg["app"]["kind"]]
-                self.custody_identity = coordinated_generation.classify(self, member, lineage, self.initial_ordinary)
-            elif self.initial_selection is not None:
-                proofs, member, baseline = initial_ordinary.inspect(self.cfg)
-                require(all(self.binding["input_hashes"].get(path) == value for path, value in proofs.items())
-                        and self.binding.get(initial_ordinary.BINDING) == initial_ordinary.selection_digest(self.cfg),
-                        "Initial ordinary immutable evidence changed before admission")
-                from proxmox_guest import guest_trust
-                read_existing(Path(self.cfg["paths"]["known_hosts"]))
-                guest_trust(self.cfg, self.work, persist=False)
-                _, identity = coordinated_generation.backend(self.work, member)
-                # The exact initial state hash binds first-entry lineage. Later
-                # immutable receipts or same-run readiness bind its continuation.
-                self.custody_identity = coordinated_generation.classify(
-                    self, member, identity["lineage"], baseline, binding_key=initial_ordinary.BINDING)
+            self.custody_identity = component_generation.current(self)
             return self
         except BaseException:
             self.locks.close()
@@ -217,37 +151,14 @@ class DeploymentAttempt:
                 stat.S_ISREG(info.st_mode),
                 "Preserve a backend that is not a regular file",
             )
-            if self.cfg.get('schema') == 'homelab-component-guest-v1' and self.cfg['deployment']['lifecycle'] == 'fresh':
-                if self.hold.exists() or self.hold.is_symlink():
-                    self._select_run()
-                    require(regular(self.hold,private=True)==encoded(self.marker),
-                            'Fresh repeat requires this exact owned attempt')
-                    ready=json.loads(regular(self.operation/'infrastructure-complete.json',private=True))
-                    require(ready['binding']==self.binding and ready['state_sha256']==sha(self.work/'terraform.tfstate'),
-                            'Fresh phase requires its owned infrastructure checkpoint')
-                else:
-                    from coordinated_generation import component_success
-                    value=json.loads(regular(self.receipt,private=True))
-                    require(component_success(value,Path(value.get('operation',''))) and
-                            value['state_sha256']==sha(self.work/'terraform.tfstate'),
-                            'Fresh source cannot adopt an unowned existing backend')
 
     def completed(self, is_ancestor):
-        if self.initial_ordinary is not None and (self.receipt.exists() or self.receipt.is_symlink()):
-            if read_existing(self.receipt) == self.initial_ordinary:
-                self.receipt_checked = True
-                return False
         if self.receipt.exists() or self.receipt.is_symlink():
             self._select_run()
             old = json.loads(regular(self.receipt, private=True))
-            from coordinated_generation import component_success
-            old_binding=old.get('binding')
-            if old.get('schema') is not None or isinstance(old_binding,dict) and old_binding.get('schema') is not None:
-                component_success(old, Path(old.get('operation', '')))
-            require(not isinstance(old.get("binding"), dict)
-                    or initial_ordinary.BINDING not in old["binding"]
-                    or self.initial_selection is not None,
-                    "Keep the selected initial ordinary custody contract")
+            from component_generation import component_success
+            require(component_success(old, Path(old.get('operation', ''))),
+                    'Current ownership requires a genuine component ordinary success')
             require(
                 old.get("workflow") == self.workflow
                 and type(old.get("run_number")) is int
@@ -270,17 +181,18 @@ class DeploymentAttempt:
                 and old["site_revision"] == self.site_revision,
                 "A completed run cannot replay under another attempt",
             )
-            if (
+            require(
                 old.get("status") == "passed"
                 and old.get("binding") == self.binding
-                and old.get("state_sha256") == sha(self.work / "terraform.tfstate")
-            ):
-                require(
-                    not self.hold.exists() and not self.hold.is_symlink(),
-                    "Preserve an interrupted deployment",
-                )
-                self.receipt_checked = True
-                return True
+                and old.get("state_sha256") == sha(self.work / "terraform.tfstate"),
+                "A completed run changed its binding or backend; no replay",
+            )
+            require(
+                not self.hold.exists() and not self.hold.is_symlink(),
+                "Preserve an interrupted deployment",
+            )
+            self.receipt_checked = True
+            return True
         self.receipt_checked = True
         return False
 
@@ -341,13 +253,13 @@ class DeploymentAttempt:
         write_new(self.hold, encoded(self.marker))
 
     def infrastructure_complete(self, result):
-        if self.custody_identity is not None:
-            member = (self.initial_selection if self.custody is None
-                      else self.custody["members"][self.cfg["app"]["kind"]])
-            state_hash, identity = coordinated_generation.backend(self.work, member)
-            require(identity == self.custody_identity and result["state_sha256"] == state_hash,
-                    "The applied backend differs from its admitted identity")
-            result = dict(result, state_identity=identity)
+        state_hash, identity = component_generation.backend(self.work,
+            {'vmid':self.vmid,'node':self.cfg['site']['node']})
+        require((self.custody_identity is None or identity == self.custody_identity)
+                and result['state_sha256'] == state_hash,
+                'The applied backend differs from its owned identity')
+        self.custody_identity = identity
+        result = dict(result, state_identity=identity)
         write_new(
             self.operation / "infrastructure-complete.json",
             encoded({"binding": self.binding, **result}),
@@ -444,8 +356,7 @@ class DeploymentAttempt:
         receipt['phase_inputs'] = {p: json.loads(regular(
             self.operation / (p + '-complete.json'), private=True)).get('phase_inputs')
             for p in self.phases}
-        if self.custody_identity is not None:
-            receipt["state_identity"] = ready["state_identity"]
+        receipt["state_identity"] = ready["state_identity"]
         require(
             regular(self.hold, private=True) == encoded(self.marker),
             "Deployment hold ownership changed",

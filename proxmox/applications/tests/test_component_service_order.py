@@ -44,8 +44,7 @@ class ServiceOrderTests(unittest.TestCase):
                         applications={'owned':{'id':'selected','adapter':adapter,'lifecycle':'retained',
                             'runtime_id':'selected','project':'example-project',
                             'compose_file':'compose-example.yml','services':expected}})
-                    cfg['app'].update(exclusive_writer_confirmed=True,
-                        service_health_checks={'owned':[{'name':'owned','argv':['true'],'expect':''}]})
+                    cfg['app'].update(service_health_checks={'owned':[{'name':'owned','argv':['true'],'expect':''}]})
                     fixture.packet['files']={'site.json':encoded(cfg).decode(),
                         'component-runtime.json':encoded(runtime).decode(),
                         **{name:raw.decode() for name,raw in artifacts.items()}}

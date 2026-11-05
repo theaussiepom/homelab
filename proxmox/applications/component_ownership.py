@@ -2,7 +2,7 @@
 import json
 from pathlib import Path,PurePosixPath
 
-import coordinated_generation
+import component_generation
 from component_payload import AppPayload
 from private_io import read_json, require, sha
 from application_contract import adapter
@@ -49,14 +49,15 @@ def prior(attempt, app):
     """A fresh declaration cannot adopt an existing foreign namespace.
 
     A successful owned fresh app keeps the same lifecycle on ordinary repeats.
-    Existing historical receipt validators own the one-time retained transition;
-    old fixed-bundle authored source is never parsed or lowered here.
+    Genuine prior component receipts and sealed payloads own continuation;
+    historical authored source is never parsed as active configuration here.
     """
     if not attempt.receipt.exists() and not attempt.receipt.is_symlink():
+        require(app['lifecycle'] == 'fresh', 'Retained apps require a genuine prior component owner')
         return False
     receipt = read_json(attempt.receipt, private=True)
     operation = Path(receipt['operation']) if isinstance(receipt.get('operation'), str) else None
-    if operation is None or not coordinated_generation.component_success(receipt, operation):
+    if operation is None or not component_generation.component_success(receipt, operation):
         return False
     proofs=[proof for proof in receipt['phase_inputs'].values()if proof is not None and proof['app']!='agent']
     selected = [proof for proof in proofs if proof['app'] == app['id']]
@@ -70,7 +71,9 @@ def prior(attempt, app):
         peer=AppPayload.load(previous/proof['app'],proof)
         old=read_json(peer.directory/'application.json',private=True)
         require(not conflicts(old,app),'A prior app owns the selected persistent namespace')
-    if not selected:return False
+    if not selected:
+        require(app['lifecycle'] == 'fresh', 'Retained apps require their prior sealed application')
+        return False
     payload = AppPayload.load(previous/app['id'], selected[0])
     old_app = read_json(payload.directory/'application.json', private=True)
     require(identity(old_cfg, old_app) == identity(attempt.cfg, app),

@@ -172,26 +172,13 @@ def interface(value):
     require(address['mode'] == 'static' or not value.get('default_route', False))
 
 
-def admission(value):
-    closed(value, (), ('initial_ordinary', 'coordinated_custody', 'reviewed_ordinary_failures', 'assets', 'source_assertions'))
-    for kind, row in value.items():
-        if kind == 'assets':
-            closed(row, (), ('catalogue', 'acceptance'))
-            require(all(identifier(item) for item in row.values()))
-        else:
-            closed(row, ('evidence', 'member') if kind == 'coordinated_custody' else ('evidence',))
-            require(identifier(row['evidence']))
-            if 'member' in row:
-                text(row['member'])
-
-
 def policy_binding(value):
     if isinstance(value, str):
         require(identifier(value))
         return
-    closed(value, ('policy',), ('interfaces', 'networks', 'endpoints'))
+    closed(value, ('policy',), ('interfaces', 'networks', 'endpoints', 'address_groups'))
     require(identifier(value['policy']))
-    for field in ('interfaces', 'networks', 'endpoints'):
+    for field in ('interfaces', 'networks', 'endpoints', 'address_groups'):
         for item in named(value.get(field, {})).values():
             if field == 'endpoints':
                 endpoint(item)
@@ -251,7 +238,7 @@ def guest(value):
     closed(value, ('context', 'template', 'lifecycle', 'identity', 'template_file_id',
                    'root_storage', 'interfaces', 'control_interface'),
            ('display_name', 'resources', 'startup', 'security', 'ssh_public_keys', 'dns_servers',
-            'volumes', 'root_paths', 'compose_projects', 'software', 'runtime', 'network_policy', 'admission', 'timezone', 'readiness', 'source_policy_route', 'monitoring'))
+            'volumes', 'root_paths', 'compose_projects', 'software', 'runtime', 'network_policy', 'timezone', 'readiness', 'source_policy_route', 'monitoring'))
     require(all(identifier(value[key]) for key in ('context', 'template', 'root_storage', 'control_interface')))
     require(value['lifecycle'] in ('fresh', 'retained'))
     closed(value['identity'], ('vmid', 'hostname'))
@@ -310,7 +297,6 @@ def guest(value):
     require(isinstance(value.get('network_policy', []), list))
     for row in value.get('network_policy', []):
         policy_binding(row)
-    admission(value.get('admission', {}))
     if 'timezone' in value:
         timezone(value['timezone'])
     if 'monitoring' in value:
@@ -349,7 +335,7 @@ def allocation(value):
 def app(value):
     closed(value, ('profile', 'guest', 'lifecycle', 'interfaces'),
            ('display_name', 'identity', 'storage', 'properties', 'software', 'runtime',
-            'authentication', 'devices', 'admission', 'origin', 'secrets', 'resources'))
+            'authentication', 'devices', 'origin', 'secrets', 'resources'))
     require(identifier(value['profile']) and identifier(value['guest'])
             and value['lifecycle'] in ('fresh', 'retained'))
     if 'display_name' in value:
@@ -390,7 +376,6 @@ def app(value):
         require(identifier(selected), 'component.secret-source')
     for item in named(value.get('devices', {})).values():
         require(identifier(item))
-    admission(value.get('admission', {}))
 
 
 def health(value):
@@ -526,7 +511,7 @@ def rule_address(value):
             require(False)
     else:
         require(isinstance(value, dict) and len(value) == 1 and
-                set(value) <= {'network', 'interface', 'endpoint'} and
+                set(value) <= {'network', 'interface', 'endpoint', 'address_group'} and
                 all(identifier(item) for item in value.values()))
 
 

@@ -15,7 +15,7 @@ def resolver(*, guests=True, apps=False):
     r.library, r.site = library(), site()
     for key in ('software', 'runtime_profiles', 'health_profiles', 'monitoring_profiles', 'assets'):
         r.library.setdefault(key, {})
-    for key in ('devices', 'evidence', 'images', 'domains', 'exposures', 'accounts'):
+    for key in ('devices', 'evidence', 'images', 'domains', 'exposures', 'accounts', 'address_groups'):
         r.site.setdefault(key, {})
     r.policy = {kind: {} for kind in plan.sources.POLICIES}
     r.library['policies'] = copy.deepcopy(r.policy); r.site['policies'] = copy.deepcopy(r.policy)
@@ -222,23 +222,7 @@ class PlanSourceReferenceReview(unittest.TestCase):
         with self.assertRaises(ComponentError): r.policy_values(guest)
 
 
-class PlanAdmissionAndRuntimeReview(unittest.TestCase):
-    def test_raw_assets_and_assertions_are_subject_bound_without_inferred_writer_flag(self):
-        r = resolver(apps=True); r.site['evidence'] = {'text': {'type': 'raw-utf8', 'text': 'literal ${unchanged}'},
-            'writer': {'type': 'source-assertions', 'document': {'guest': 'resolver', 'exclusive_writer_confirmed': False}}}
-        value = {'assets': {'catalogue': 'text'}, 'source_assertions': {'evidence': 'writer'}}
-        r.guests['resolver']['admission'] = copy.deepcopy(value); r.apps['recursive_a']['admission'] = copy.deepcopy(value)
-        r.admission_values(); self.assertIs(r.guests['resolver']['source_assertions']['exclusive_writer_confirmed'], False)
-        for kind in ('asset-type', 'missing', 'wrong-subject', 'conflicting-assertions'):
-            bad = resolver(apps=True); bad.site['evidence'] = copy.deepcopy(r.site['evidence'])
-            bad.guests['resolver']['admission'] = copy.deepcopy(value)
-            if kind == 'asset-type': bad.site['evidence']['text']['type'] = 'initial-ordinary'
-            elif kind == 'missing': del bad.site['evidence']['writer']
-            elif kind == 'wrong-subject': bad.site['evidence']['writer']['document']['guest'] = 'foreign'
-            else:
-                bad.site['evidence']['different'] = {'type': 'source-assertions', 'document': {'guest': 'resolver', 'exclusive_writer_confirmed': True}}
-                bad.apps['recursive_a']['admission'] = {'source_assertions': {'evidence': 'different'}}
-            with self.subTest(kind=kind), self.assertRaises(ComponentError): bad.admission_values()
+class PlanRuntimeReview(unittest.TestCase):
 
     def runtime(self):
         r = resolver(apps=True)
@@ -338,10 +322,11 @@ class PlanCompilerWiringReview(unittest.TestCase):
         dependencies = {'guest_dependencies': {'resolver': ['backend'] if dependency else [], 'backend': []},
                         'app_dependencies': {'browser': []}, 'accounts': {}}
         with ExitStack() as stack:
+            stack.enter_context(patch.object(plan.component_addresses, 'resolve', return_value={}))
             for method, returned in {'validate': None, 'image_values': {}, 'external_values': None,
                 'guest_values': None, 'app_values': None, 'endpoint_values': None,
                 'context_values': {'lab': {'node': 'example-node'}}, 'policy_values': [],
-                'admission_values': None, 'execution_values': None}.items():
+                'execution_values': None}.items():
                 stack.enter_context(patch.object(r, method, return_value=returned))
             exposure = stack.enter_context(patch.object(plan.component_exposures, 'Exposures')).return_value
             exposure.bind.return_value = {'exposures': {}, 'dns_records': {}, 'routes': {}, 'middlewares': {}}
@@ -352,8 +337,7 @@ class PlanCompilerWiringReview(unittest.TestCase):
             stack.enter_context(patch.object(plan.component_properties, 'bind', return_value={'browser': settings}))
             stack.enter_context(patch.object(plan.component_accounts, 'bind', return_value={}))
             stack.enter_context(patch.object(plan.component_monitoring, 'bind', return_value={'guest': monitoring_guest}))
-            stack.enter_context(patch.object(plan.component_evidence, 'bind', return_value={}))
-            admission = stack.enter_context(patch.object(plan.component_evidence, 'admit'))
+            admission = stack.enter_context(patch.object(plan.component_admission, 'admit'))
             for owner in (plan.component_secrets, plan.component_foundations, plan.component_identity, plan.component_traffic):
                 stack.enter_context(patch.object(owner, 'bind'))
             result = r.resolve(disabled, admit=admit)

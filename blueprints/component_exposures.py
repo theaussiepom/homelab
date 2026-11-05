@@ -5,6 +5,7 @@ import re
 from component_errors import at
 from component_sources import closed, named, require, identifier
 import component_types as types
+import component_addresses
 
 
 def host(value):
@@ -64,10 +65,18 @@ class Exposures:
                     for row in value['ranges']:
                         types.rule_address(row)
                         if isinstance(row, dict):
+                            if 'address_group' in row:
+                                ranges.extend(component_addresses.selected(
+                                    row['address_group'], self.resolver.address_groups))
+                                require(len(ranges) <= component_addresses.MAX_MEMBERS,
+                                        'component.address-group-size')
+                                continue
                             closed(row, ('network',))
                             require(row['network'] in self.resolver.site['networks'], 'component.reference')
                             row = self.resolver.site['networks'][row['network']]['cidr']
                         ranges.append(row)
+                        require(len(ranges) <= component_addresses.MAX_MEMBERS,
+                                'component.address-group-size')
                     self.middlewares[name] = dict(value, ranges=ranges)
                 elif value.get('type') == 'canonical-home-redirect':
                     closed(value, ('type', 'app'))

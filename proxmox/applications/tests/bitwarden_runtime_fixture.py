@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import bitwarden
 import protocol_component_fixtures as component_fixtures
 
-IMAGE = 'ghcr.io/bitwarden/lite:latest'
+IMAGE = 'ghcr.io/bitwarden/lite@sha256:94484fe9382df51ad755151ea360663e922e60a32385500454dd1f38045bf6a6'
 DATABASE = 'mariadb@sha256:805c8e104bd563d5bfa24fadd3f31cd419ea859cb5277f32b5dbf2db714f9ed1'
 
 
@@ -54,13 +54,12 @@ def main():
     args = parser.parse_args()
     if args.inside:
         return inside()
-    # This source fixture observes its fetched image; rendering pins that local ID.
+    # Inspect only the declared immutable source fixture image.
     docker('image', 'inspect', '--format', '{{json .RepoDigests}}', IMAGE)
     project = 'homelab-bitwarden-fixture-' + uuid.uuid4().hex[:10]
     with tempfile.TemporaryDirectory(prefix=project) as temporary:
         root = Path(temporary)
-        image_id = subprocess.check_output(['docker', 'image', 'inspect', '--format', '{{.Id}}', IMAGE], text=True).strip()
-        app = component_fixtures.bitwarden_app(image_id, image=IMAGE)
+        app = component_fixtures.bitwarden_app(image=IMAGE)
         document = component_fixtures.document(app)
         document.pop('name')
         document['networks'] = {'default': {'internal': True}}
@@ -151,7 +150,7 @@ def main():
                    '--name', seed_name, '--network', 'none', '--read-only',
                    '--cap-drop', 'ALL', '--cpus', '0.5', '--memory', '128m', '--pids-limit', '32',
                    '-v', project + '_data:/data:ro', '--entrypoint', 'python3', args.tools_image, '-c', check)
-            print('Synthetic Lite latest / MariaDB startup, restart and recreation preserve the attachment fixture; no native migration acceptance.')
+            print('Synthetic selected Lite / MariaDB startup, restart and recreation preserve the attachment fixture; no native migration acceptance.')
         finally:
             # Only resources with this invocation's random project/name are removed.
             subprocess.run(['docker', 'rm', '-f', client_name, seed_name],

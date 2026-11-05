@@ -63,7 +63,7 @@
         "mode": "0400"
       },
       "cloudbeaver-public.json": {
-        "sha256": "0294c67e59bb3afebf3cf29561373b1942095f3df5600b43bb86e1729fddb20d",
+        "sha256": "5e898126c36659c7cb4545c6ff235de90116cc3805361096bda7bd61a717441c",
         "content_type": "str",
         "uid": 0,
         "gid": 0,

@@ -62,7 +62,7 @@ class BitwardenStartPolicyTests(unittest.TestCase):
         self.compose = self.included(include, COMPOSE)
         self.rows = list(tasks([self.compose]))
         self.start = self.one(self.rows, "Start only this application's owned services")
-        self.ready_include = self.one(self.rows, 'Preserve the retained vault image and database login')
+        self.ready_include = self.one(self.rows, 'Preserve the vault database login')
         self.ready = self.included(self.ready_include, ANSIBLE / 'tasks/component-bitwarden-ready.yml')
 
     def included(self, include, path):
@@ -98,42 +98,33 @@ class BitwardenStartPolicyTests(unittest.TestCase):
         values['component_compose_argv'] = self.template(fact, values).template(fact.args['component_compose_argv'])
         return self.template(self.start, values).template(self.start.args['argv'])
 
-    def test_retained_id_with_always_policy_has_an_explicit_never_start_override(self):
+    def test_normal_selected_digest_uses_common_pull_policy_without_start_override(self):
         app = descriptor('bitwarden')
         rendered = component_runtime._bitwarden(app, guest('bitwarden'))['bitwarden']
-        self.assertEqual(rendered['image'], app['settings']['settings']['image_id'])
-        self.assertEqual(rendered['pull_policy'], 'always')
+        self.assertEqual(rendered['image'], app['software_selection']['images']['bitwarden']['image'])
+        self.assertEqual(rendered['pull_policy'], 'missing')
         self.assertEqual(rendered['healthcheck'], {
             'test': ['CMD-SHELL', 'curl -fsSo /dev/null http://localhost:8080']})
         argv = self.argv(app['adapter'], services=['owned-vault'])
         self.assertEqual(argv, ['docker', 'compose', '-f', '/opt/homelab-app/owned-compose.yml',
             'up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false',
-            '--no-deps', '--pull', 'never', 'owned-vault'])
+            '--no-deps', 'owned-vault'])
         self.assertNotIn('peer', argv)
 
-    def test_actual_retained_image_identity_guard_precedes_start_and_rejects_drift(self):
+    def test_database_before_start_guard_remains_and_no_image_mapper_task_exists(self):
         self.assertLess(self.rows.index(self.ready_include), self.rows.index(self.start))
         self.assertEqual(self.ready_include.args['_raw_params'], 'component-bitwarden-ready.yml')
-        self.assertTrue(self.evaluate(self.ready_include, self.ready_include.when[0], {
-            'component_bitwarden': {}}))
+        self.assertTrue(self.evaluate(self.ready_include, self.ready_include.when[0], {'component_bitwarden': {}}))
         self.assertFalse(self.evaluate(self.ready_include, self.ready_include.when[0], {}))
-        rows = list(tasks([self.ready]))
-        check = self.one(rows, 'Verify the observed vault image before startup')
-        fetch = self.one(rows, 'Fetch only the selected immutable official vault image')
-        image_id = descriptor('bitwarden')['settings']['settings']['image_id']
-        for selected in ('ghcr.io/bitwarden/lite:latest', image_id):
-            with self.subTest(selected=selected):
-                values = {'component_bitwarden': {'image': selected, 'settings': {'image_id': image_id}}}
-                self.assertFalse(self.evaluate(fetch, fetch.when[0], values))
-                argv = self.template(check, values).template(check.args['argv'])
-                self.assertEqual(argv, ['docker', 'image', 'inspect', image_id, '--format', '{{.Id}}'])
-                for rc, observed, refused in ((0, image_id + '\n', False), (1, image_id, True),
-                                             (0, 'sha256:' + 'f' * 64, True)):
-                    with self.subTest(rc=rc, refused=refused):
-                        values['component_vault_image'] = {'rc': rc, 'stdout': observed}
-                        self.assertEqual(self.evaluate(check, check.failed_when, values), refused)
-        self.assertEqual(set(check.register), {'component_vault_image'})
-        self.assertIs(check.changed_when, False)
+        rows=list(tasks([self.ready]))
+        self.assertEqual([t.action for t in rows],['ansible.builtin.copy','ansible.builtin.include_tasks'])
+        check=self.one(rows,'Verify the retained vault database before startup')
+        self.assertEqual(check.args['_raw_params'],'bitwarden-database.yml')
+        settings={'schema':'homelab-bitwarden-runtime-v2'};environment={'only':'synthetic'}
+        values={'component_bitwarden':{'settings':settings,'environment':environment}}
+        self.assertEqual(self.template(check,values).template(check.vars['bitwarden_settings']),settings)
+        self.assertEqual(self.template(check,values).template(check.vars['bitwarden_environment']),environment)
+        self.assertTrue(all('image'not in str(t.args)for t in rows))
 
     def test_other_adapters_and_owned_service_recreation_argv_remain_exact(self):
         for adapter, overlay, flags in itertools.product(sorted(component_runtime.HANDLERS), (False, True),
@@ -148,8 +139,6 @@ class BitwardenStartPolicyTests(unittest.TestCase):
                 expected += ['up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false', '--no-deps']
                 if any(flags):
                     expected += ['--force-recreate']
-                if adapter == 'bitwarden':
-                    expected += ['--pull', 'never']
                 expected += ['owned-a', 'owned-b']
                 self.assertEqual(argv, expected)
                 self.assertNotIn('peer', argv)

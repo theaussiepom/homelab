@@ -291,19 +291,6 @@ class PlanTests(unittest.TestCase):
             with self.subTest(role=role), self.assertRaises(ValueError):
                 self.resolve(spec, value)
 
-    def test_source_assertions_keep_labels_and_truth_separate_from_lifecycle(self):
-        value = site()
-        original = {'guest': 'resolver', 'prerequisites': ['original-runtime', 'original-data'],
-                    'exclusive_writer_confirmed': True}
-        value['evidence'] = {'reviewed': {'type': 'source-assertions', 'document': original}}
-        value['guests']['resolver']['admission'] = {'source_assertions': {'evidence': 'reviewed'}}
-        plan = self.resolve(selected=value)
-        self.assertEqual(plan.resolved['guests']['resolver']['source_assertions'], original)
-        self.assertNotIn('schema', original)  # It is not recast as a native receipt.
-        self.assertIsNone(self.resolve().resolved['guests']['resolver']['source_assertions'])
-        value['evidence']['reviewed']['document']['guest'] = 'another_guest'
-        with self.assertRaises(ValueError):
-            self.resolve(selected=value)
 
     def test_address_reference_and_listener_port_transport_are_distinct(self):
         value = site()

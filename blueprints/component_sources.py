@@ -21,7 +21,8 @@ LIBRARY_MAPS = ('guest_templates', 'app_profiles', 'software', 'runtime_profiles
                 'assets', 'bundles')
 SITE_MAPS = ('contexts', 'networks', 'storage', 'guests', 'apps', 'domains',
              'external_endpoints', 'identity_providers', 'secret_sources', 'accounts',
-             'devices', 'evidence', 'connections', 'exposures', 'images', 'host_aliases')
+             'devices', 'evidence', 'connections', 'exposures', 'images', 'host_aliases', 'address_groups')
+SITE_DEFINITIONS = {'guests': 'guest', 'apps': 'app'}
 KINDS = {'guest_templates': 'guest-template', 'app_profiles': 'app-profile',
          'software': 'software', 'runtime_profiles': 'runtime-profile',
          'health_profiles': 'health-profile', 'authentication_profiles': 'authentication-profile',
@@ -154,8 +155,7 @@ class Sources:
         if isinstance(value, dict) and value.get('type') == 'raw-utf8':
             return self.asset(value)
         require(isinstance(value, dict) and value.get('type') in
-                ('initial-ordinary', 'coordinated-custody', 'reviewed-ordinary-failures', 'source-assertions',
-                 'identity-callbacks'))
+                ('identity-callbacks',))
         if 'document' in value:
             closed(value, ('type', 'document'))
             document = copy.deepcopy(value['document'])
@@ -165,12 +165,7 @@ class Sources:
             require(Path(value['source']).suffix == '.json')
             authored_config.source_path(self.path(value['source']))
             document = authored_config.parse(self.raw(value['source'], value['sha256']), '.json')
-        require(isinstance(document, list if value['type'] in ('reviewed-ordinary-failures', 'identity-callbacks') else dict))
-        if value['type'] == 'source-assertions':
-            closed(document, ('guest', 'prerequisites'), ('exclusive_writer_confirmed',))
-            require(identifier(document['guest']) and isinstance(document['prerequisites'], list)
-                    and all(isinstance(item, str) and item and len(item) <= 160 for item in document['prerequisites']))
-            require('exclusive_writer_confirmed' not in document or document['exclusive_writer_confirmed'] is True)
+        require(isinstance(document, list))
         return {'type': value['type'], 'document': document}
 
 
@@ -208,7 +203,11 @@ def site(path):
     require(spec['schema'] == SCHEMA and spec['kind'] == 'site')
     result = {'schema': SCHEMA, 'kind': 'site'}
     for kind in SITE_MAPS:
-        result[kind] = copy.deepcopy(named(spec.get(kind, {})))
+        result[kind] = {}
+        for key, row in named(spec.get(kind, {})).items():
+            with at(kind, key):
+                result[kind][key] = (sources.definition(row, SITE_DEFINITIONS[kind])
+                                     if kind in SITE_DEFINITIONS else copy.deepcopy(row))
     for key, row in result['evidence'].items():
         with at('evidence', key):
             result['evidence'][key] = sources.evidence(row)

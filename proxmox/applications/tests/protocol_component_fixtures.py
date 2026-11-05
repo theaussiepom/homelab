@@ -62,8 +62,7 @@ def cloudbeaver_app(selected, value, *, image, gateway_image):
                                    'database': 'postgres', 'sslmode': 'prefer',
                                    'host': '198.18.31.23', 'port': 5432},
                     'mariadb': {'name': 'MariaDB', 'driver': 'mariadb', 'database': '',
-                                'host': '198.18.32.24', 'port': 3306}},
-                'retained_pgadmin_image': 'dpage/pgadmin4@sha256:' + 'a' * 64}
+                                'host': '198.18.32.24', 'port': 3306}}}
     settings.update(copy.deepcopy(value), recovery_admin='local-recovery')
     app['settings'] = settings
     app['authentication_resolved'] = dict(copy.deepcopy(selected), version=1)
@@ -81,13 +80,13 @@ def cloudbeaver_files(app, secret):
                                        records={}, public_ca=None)
 
 
-def bitwarden_app(image_id, *, image):
+def bitwarden_app(*, image):
     app = _app('bitwarden', 'homelab-bitwarden', {'bitwarden': 1536})
     app['containers']['bitwarden']['pids_limit'] = 256
     app['software_selection']['images']['bitwarden'] = {'image': image}
     app['settings'] = {'settings': {
-        'schema': 'homelab-bitwarden-runtime-v1', 'bind_address': '198.18.30.35',
-        'image_id': image_id, 'database_server': '198.18.32.24',
+        'schema': 'homelab-bitwarden-runtime-v2', 'bind_address': '198.18.30.35',
+        'database_server': '198.18.32.24',
         'database_provider': 'mysql', 'database_name': 'bitwarden_fixture',
         'data_uid': 1000, 'data_gid': 1000}}
     app['storage_paths'] = {name: _directory('/srv/homelab/data/bitwarden/' + name, target)

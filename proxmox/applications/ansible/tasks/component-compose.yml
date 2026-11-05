@@ -92,7 +92,7 @@
   ansible.builtin.include_tasks: component-proxy-ready.yml
   when: component_proxy_lifecycle is defined
 
-- name: Preserve the retained vault image and database login
+- name: Preserve the vault database login
   ansible.builtin.include_tasks: component-bitwarden-ready.yml
   when: component_bitwarden is defined
 
@@ -122,7 +122,7 @@
 
 - name: Start only this application's owned services
   ansible.builtin.command:
-    argv: "{{ component_compose_argv + ['up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false', '--no-deps'] + (['--force-recreate'] if component_runtime_install.changed | default(false) or component_environment_install.changed | default(false) or component_driver_install.changed | default(false) else []) + (['--pull', 'never'] if component_application.adapter == 'bitwarden' else []) + component_services }}"
+    argv: "{{ component_compose_argv + ['up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false', '--no-deps'] + (['--force-recreate'] if component_runtime_install.changed | default(false) or component_environment_install.changed | default(false) or component_driver_install.changed | default(false) else []) + component_services }}"
   register: component_start
   changed_when: "'Started' in component_start.stderr or 'Created' in component_start.stderr or 'Recreated' in component_start.stderr"
   no_log: true

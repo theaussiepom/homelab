@@ -31,7 +31,7 @@ def profile(adapter='traefik'):
 class TypeOptionalEdges(unittest.TestCase):
     def app_guards(self):
         stack=ExitStack();collaborators={}
-        for name in ('role','admission','allocation'):
+        for name in ('role','allocation'):
             collaborators[name]=stack.enter_context(patch.object(types,name))
         collaborators['directory']=stack.enter_context(patch.object(component_identity,'directory'))
         return stack,collaborators

@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import component_payload as payloads
 from deployment_state import DeploymentAttempt
+from component_generation_fixtures import backend
 from private_io import encoded, write_new
 
 
@@ -121,16 +122,21 @@ class AttemptPayloadIntegrationTests(PrivateInputsFixture):
             'GITHUB_SHA': 'c'*40, 'GITHUB_WORKSPACE': str(workspace)}
         context = patch.dict(os.environ, environment)
         context.start(); self.addCleanup(context.stop)
-        cfg = {'schema': 'homelab-component-guest-v1', 'guest': {'vmid': 180}, 'app': {'kind': 'synthetic'},
+        cfg = {'schema': 'homelab-component-guest-v1', 'site': {'node': 'fixture-pve'},
+            'guest': {'vmid': 180}, 'app': {},
             'paths': {'state_root': str(state)}, 'deployment': {
-                'input_identity': self.identity, 'payload_phases': {'worker': 'first'}}}
+                'input_identity': self.identity, 'payload_phases': {'worker': 'first'},
+                'lifecycle': 'fresh', 'applications': {'worker': {'id': 'first', 'adapter': 'unbound',
+                    'lifecycle': 'fresh', 'runtime_id': 'first', 'project': 'owned-first',
+                    'compose_file': 'compose-first.yml', 'services': ['first-unbound']}}}}
         binding = {'schema': payloads.BINDING_SCHEMA, 'source_sha256': 'd'*64,
             'site_sha256': 'e'*64, 'vmid':180, 'input_identity':self.identity,
             'app_inputs_directory':str(self.root), 'input_hashes':{}}
         attempt = DeploymentAttempt(cfg, binding, ['preparation', 'worker'])
         attempt.__enter__(); self.addCleanup(attempt.__exit__, None, None, None)
+        self.assertFalse(attempt.completed(lambda *_: self.fail('Fresh writer requested prior-source ancestry')))
         attempt.begin_infrastructure()
-        write_new(attempt.work/'terraform.tfstate', b'{}')
+        write_new(attempt.work/'terraform.tfstate', encoded(backend(180)))
         from private_io import sha
         attempt.infrastructure_complete({'state_sha256': sha(attempt.work/'terraform.tfstate'), 'changed': False})
         ready = attempt.begin_phase('preparation')

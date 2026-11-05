@@ -123,7 +123,7 @@ jobs:
         run: docker build --platform linux/amd64 -t homelab-app-test -f proxmox/bootstrap/docker/Dockerfile proxmox/bootstrap/docker
       - name: Fetch the selected synthetic runtime images
         run: |
-          docker pull --platform linux/amd64 ghcr.io/bitwarden/lite:latest
+          docker pull --platform linux/amd64 ghcr.io/bitwarden/lite@sha256:94484fe9382df51ad755151ea360663e922e60a32385500454dd1f38045bf6a6
           docker pull --platform linux/amd64 mariadb@sha256:805c8e104bd563d5bfa24fadd3f31cd419ea859cb5277f32b5dbf2db714f9ed1
       - name: Exercise current rendering, startup, restart and attachment preservation
         run: python3 proxmox/applications/tests/bitwarden_runtime_fixture.py

@@ -80,7 +80,7 @@ class DnsRecordTests(unittest.TestCase):
     def test_reconciliation_cli_reports_only_changed_status(self):
         with tempfile.TemporaryDirectory() as directory:
             records = Path(directory) / "records.json"
-            records.write_text('{"broker.mqtt":"198.18.40.21"}')
+            records.write_text(json.dumps(dns.document({'broker.mqtt':'198.18.40.21'},{})))
             with patch.object(
                 sys,
                 "argv",

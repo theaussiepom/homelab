@@ -23,14 +23,14 @@ class RuntimeTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name).resolve();self.root.chmod(0o700)
-        self.ws=self.root/'workspace';self.custody=self.root/'custody';self.pg=self.root/'pgadmin'
+        self.ws=self.root/'workspace';self.custody=self.root/'custody'
         self.owner={'node':'fixture-pve','vmid':808,'hostname':'tools'}
         self.config={'workspace':str(self.ws),'project':'homelab-db-tools',
-            'retained_pgadmin_image':'dpage/pgadmin4@sha256:'+'a'*64,'bind_address':'198.18.30.32',
+            'bind_address':'198.18.30.32',
             'connections':{'postgresql':{'name':'PostgreSQL','driver':'postgresql','host':'198.18.31.23',
               'port':5432,'database':'postgres','sslmode':'prefer'},
               'mariadb':{'name':'MariaDB','driver':'mariadb','host':'198.18.32.24','port':3306,'database':''}}}
-        for name,value in [('WORKSPACE',self.ws),('CUSTODY',self.custody),('PGADMIN',self.pg),('PERMISSIONS',self.root/'permissions.json')]:
+        for name,value in [('WORKSPACE',self.ws),('CUSTODY',self.custody),('PERMISSIONS',self.root/'permissions.json')]:
             p=patch.object(r,name,value);p.start();self.addCleanup(p.stop)
         # Preserve real anchored traversal; virtualize only numeric ownership.
         self.owners={};self.real_stat=os.stat;self.real_lstat=os.lstat;self.real_fstat=os.fstat;self.real_open=os.open
@@ -90,44 +90,6 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.own()
         self.ws.unlink();self.custody.chmod(0o755)
         with self.assertRaises(ValueError):self.own()
-
-    def container(self):
-        self.own();self.pg.mkdir();r.os.chown(self.pg,5050,5050);(self.pg/'retained.sqlite').write_bytes(b'identity-and-state')
-        return {'Id':'f'*64,'Config':{'Image':self.config['retained_pgadmin_image'],
-            'Labels':{'com.docker.compose.project':'homelab-db-tools','com.docker.compose.service':'pgadmin'}},
-            'Mounts':[{'Destination':'/var/lib/pgadmin','Type':'bind','Source':str(self.pg)}],
-            'State':{'Running':True}}
-
-    def test_retirement_binds_exact_managed_container_and_preserves_data(self):
-        obj=self.container();before=(self.pg/'retained.sqlite').read_bytes();calls=[]
-        def docker(args,**kw):
-            calls.append(args)
-            if args[0]=='ps':return 'f'*12+'\n'
-            if args[0]=='inspect':return json.dumps([dict(obj,State={'Running':False}) if len(calls)>3 else obj])
-            return ''
-        with patch.object(r,'docker',side_effect=docker):
-            self.assertEqual(r.prepare(self.config),{'pgadmin':'retired','data':'preserved'})
-        self.assertEqual(calls[-1],['rm','f'*64]);self.assertIn(['stop','--time','60','f'*64],calls)
-        self.assertFalse(any('--volumes' in a or '--force' in a for a in calls))
-        self.assertEqual((self.pg/'retained.sqlite').read_bytes(),before)
-        proof=r.private(self.custody/'pgadmin-retirement.json')
-        self.assertEqual(proof['container'],'f'*64)
-        with patch.object(r,'docker',side_effect=['f'*12,json.dumps([obj]),'',json.dumps([dict(obj,State={'Running':False})]),'']):
-            r.retirement(self.config)
-        with patch.object(r,'docker',return_value=''):self.assertEqual(r.retirement(self.config),{'pgadmin':'absent'})
-        with self.assertRaises(ValueError):r.prepare(dict(self.config,project='foreign'))
-
-    def test_retirement_rejects_foreign_identity_mount_image_running_or_changed_receipt(self):
-        obj=self.container()
-        for change in [lambda v:v['Config'].update(Image='other'),lambda v:v['Mounts'][0].update(Source='/unknown'),
-                       lambda v:v['Config']['Labels'].update({'com.docker.compose.service':'other'})]:
-            bad=copy.deepcopy(obj);change(bad)
-            with patch.object(r,'docker',side_effect=['f'*12,json.dumps([bad])]) as boundary,self.assertRaises(ValueError):r.retirement(self.config)
-            self.assertEqual(boundary.call_count,2)
-        with patch.object(r,'docker',return_value='a\nb'),self.assertRaises(ValueError):r.retirement(self.config)
-        with patch.object(r,'docker',side_effect=['f'*12,json.dumps([obj]),'',json.dumps([obj])]),self.assertRaises(ValueError):r.retirement(self.config)
-        proof=self.custody/'pgadmin-retirement.json';proof.write_text('{}');proof.chmod(0o600)
-        with patch.object(r,'docker',side_effect=['f'*12,json.dumps([obj])]),self.assertRaises(ValueError):r.retirement(self.config)
 
     def health_boundary(self, rows_as_lines=False, change=None):
         names=['cloudbeaver','auth_gateway'];rows=[{'Service':n,'ID':n} for n in names]
@@ -204,7 +166,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(r.docker(['inspect','fixture'],input='private'),'safe')
             self.assertTrue(run.call_args.kwargs['capture_output']);self.assertTrue(run.call_args.kwargs['check'])
         self.own();path=self.root/'public.json';r.create(path,self.config)
-        for action in ('workspace','templates','prepare','health'):
+        for action in ('workspace','templates','managed','health'):
             args=['tool',action,'--owner',json.dumps(self.owner)] if action=='workspace' else ['tool',action,'--config',str(path)]
             target='workspace' if action=='workspace' else action
             with patch.object(sys,'argv',args),patch.object(r,target,return_value={'safe':True}),patch('sys.stdout',new_callable=io.StringIO) as output:r.main()

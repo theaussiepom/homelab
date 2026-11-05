@@ -63,7 +63,7 @@ class ComponentCallbackTests(unittest.TestCase):
             payload_phases={'identity_a':'identity_a'},applications={'identity_a':{'id':'identity_a',
             'adapter':'authentik','lifecycle':'retained','runtime_id':'identity_a','project':'owned-project',
             'compose_file':'compose-owned.yml','services':contract.ordered_services(app)}})
-        cfg['app'].update(exclusive_writer_confirmed=True,service_health_checks={'identity_a':[{'name':'owned-ready','argv':['true'],'expect':''}]})
+        cfg['app'].update(service_health_checks={'identity_a':[{'name':'owned-ready','argv':['true'],'expect':''}]})
         fixture.packet['files']={'site.json':encoded(cfg).decode(),'component-runtime.json':encoded(runtime).decode(),
             **{name:raw.decode()for name,raw in artifacts.items()}}
         write_bytes(fixture.path,encoded(fixture.packet))

@@ -67,8 +67,7 @@ class ManagedFixture(unittest.TestCase):
         self.original_metadata = self.metadata_path.read_bytes()
         self.original_custom = self.custom_path.read_bytes()
         self.passwords = {name: secrets.token_hex(24) for name in ('postgresql-admin', 'mariadb-admin')}
-        self.context_config = {'workspace':str(self.workspace), 'project':'homelab-db-tools',
-            'retained_pgadmin_image':'dpage/pgadmin4@sha256:'+'a'*64}
+        self.context_config = {'workspace':str(self.workspace), 'project':'homelab-db-tools'}
         self.config = {**self.context_config, 'cloudbeaver_image': 'fixture@sha256:'+'1'*64, 'managed_connections': {name: {
             'owner': dict(self.owner, engine=engine, source_address=source), 'driver': engine,
             'host': host, 'username': 'fixture_admin',

@@ -5,9 +5,6 @@ from pathlib import Path
 
 import component_guest
 import component_payload
-import coordinated_contract
-import coordinated_evidence
-import initial_ordinary
 import monitoring_inputs
 import discovery_scope
 from private_io import encoded, digest, read_json, regular, require, sha, write_new
@@ -28,8 +25,8 @@ def _folder(parent, name, create):
         pass
 
 
-def inspect(cfg, site):
-    component_guest.validate(cfg)
+def static(cfg, site):
+    """Verify immutable static bytes, including a sealed historical component DTO."""
     directory = Path(cfg['deployment']['input_directory'])
     require(Path(site) == directory/'site.json', 'Bind the immutable component configuration file')
     with component_payload._directory(directory) as descriptor:
@@ -55,6 +52,11 @@ def inspect(cfg, site):
         with component_payload._directory(applications):
             pass
     return actual
+
+
+def inspect(cfg, site):
+    component_guest.validate(cfg)
+    return static(cfg,site)
 
 
 def prepare(packet_path, inputs, *, create):
@@ -106,22 +108,12 @@ def binding(cfg, site):
     if cfg['guest'].get('serial_device'):
         external += [cfg['paths']['host_device_key'], cfg['paths']['host_known_hosts']]
     hashes.update({path: sha(path) for path in external})
-    proofs, _, _ = coordinated_evidence.inspect(cfg)
-    hashes.update(proofs)
-    proofs, _, _ = initial_ordinary.inspect(cfg)
-    hashes.update(proofs)
     from deployment_inputs import source_hash
     result = {'schema': component_payload.BINDING_SCHEMA, 'vmid': cfg['guest']['vmid'],
         'site_sha256': sha(site), 'source_sha256': source_hash(),
         'input_identity': cfg['deployment']['input_identity'],
         'app_inputs_directory': str(Path(cfg['deployment']['input_directory'])/'applications'),
         'input_hashes': hashes}
-    if coordinated_contract.selection(cfg) is not None:
-        result['coordinated_custody_sha256'] = coordinated_contract.selection_digest(cfg)
-    if initial_ordinary.selection(cfg) is not None:
-        result[initial_ordinary.BINDING] = initial_ordinary.selection_digest(cfg)
-    require(not {'coordinated_custody_sha256', initial_ordinary.BINDING} <= set(result),
-            'Select one historical component admission contract')
     return result
 
 

@@ -83,14 +83,14 @@ class PiholeHookUnits(unittest.TestCase):
 
     def test_cli_forwards_optional_service_and_emits_only_changed_status(self):
         with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / 'records.json'; source.write_text('{}')
+            source = Path(directory) / 'records.json'; source.write_text(json.dumps(dns_records.document({},{})))
             for extra, selected in (([], 'pihole'), (['--service', 'resolver-a'], 'resolver-a')):
                 argv = ['dns_records.py', 'reconcile', '--records', str(source), '--compose', COMPOSE, *extra]
                 with self.subTest(service=selected), patch.object(sys, 'argv', argv), \
                      patch.object(dns_records, 'reconcile', return_value=False) as reconcile, \
                      patch('sys.stdout', new_callable=io.StringIO) as output:
                     dns_records.main()
-                reconcile.assert_called_once_with({}, Path(COMPOSE), service=selected)
+                reconcile.assert_called_once_with({}, Path(COMPOSE), service=selected, previous={})
                 self.assertEqual(output.getvalue(), '{"changed": false}\n')
 
 

@@ -98,32 +98,9 @@ def allowed_guest_drift(rows, node, vmid, serial_device):
     )
 
 
-def reviewed_guest_drift(rows, node, vmid, reviewed):
-    """One pinned denied-update refresh; every unrelated drift still refuses."""
-    if (not isinstance(reviewed, dict) or set(reviewed) != {"before", "after"}
-            or not all(isinstance(reviewed[k], dict) for k in ("before", "after"))
-            or not isinstance(rows, list) or len(rows) != 1):
-        return False
-    row = rows[0]
-    change = row.get("change", {}) if isinstance(row, dict) else {}
-    before, after = change.get("before"), change.get("after")
-    return (
-        isinstance(row, dict) and row.get("address") == GUEST_RESOURCE
-        and row.get("type") == "proxmox_virtual_environment_container"
-        and row.get("mode", "managed") == "managed" and row.get("previous_address") is None
-        and change.get("actions") in (["update"], ["no-op"])
-        and isinstance(before, dict) and isinstance(after, dict)
-        and not has_unknown(change.get("after_unknown", {}))
-        and all(side.get("vm_id") == vmid and side.get("node_name") == node
-                for side in (before, after))
-        and before.get("id") == after.get("id")
-        and all(before.get(k) == after.get(k) for k in IMMUTABLE_GUEST_FIELDS)
-        and refresh_values(before) == refresh_values(reviewed["before"])
-        and refresh_values(after) == refresh_values(reviewed["after"])
-    )
 
 
-def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=None, reviewed_drift=None):
+def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=None):
     """Validate the exact saved plan under an explicit backend custody decision."""
     require(type(existing) is bool, "Select creation or reconciliation explicitly")
     protected = protected_guests
@@ -139,8 +116,7 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
         and value.get("errored") is not True
         and value.get("complete") is not False
         and not value.get("deferred_changes")
-        and (allowed_guest_drift(value.get("resource_drift"), node, vmid, serial_device)
-             or existing and reviewed_guest_drift(value.get("resource_drift"), node, vmid, reviewed_drift)),
+        and allowed_guest_drift(value.get("resource_drift"), node, vmid, serial_device),
         "Review incomplete, deferred or drifted plans before deployment",
     )
     rows = value.get("resource_changes", [])

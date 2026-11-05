@@ -1,95 +1,93 @@
-"""Retained Bitwarden content identity; real local Ansible with an inert Docker CLI."""
-
+"""Normal immutable image and existing protocol/private-role boundaries, no Docker."""
+import contextlib
 import copy
+import importlib.util
+import io
 import json
-import os
 from pathlib import Path
-import subprocess
 import sys
-import tempfile
 import unittest
-import yaml
+from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import render
-from test_component_edges import descriptor,guest
+HERE=Path(__file__).resolve().parent
+sys.path[:0]=[str(HERE),str(HERE.parent)]
 import component_runtime
+import component_continuity
+import component_private_material
+import test_component_continuity as continuity_tests
+from test_component_edges import descriptor,guest
 
+IMAGE='ghcr.io/bitwarden/lite@sha256:94484fe9382df51ad755151ea360663e922e60a32385500454dd1f38045bf6a6'
 
-class RetainedImageTests(unittest.TestCase):
-    def stack(self):
-        selected=descriptor('bitwarden')
-        selected['settings']['settings']['image_id']='sha256:'+'1'*64
-        return {'schema':component_runtime.SCHEMA,'guest':guest('bitwarden'),
-                'applications':{'vault':selected}}
+class NormalImageTests(unittest.TestCase):
+ def render(self,image):
+  app=descriptor('bitwarden');app['software_selection']['images']['bitwarden']={'image':image}
+  return component_runtime._bitwarden(app,guest('bitwarden'))['bitwarden']
+ def test_selected_official_digest_is_literal_with_common_missing_policy_and_no_local_mapper(self):
+  for image in(IMAGE,'ghcr.io/bitwarden/lite:declared@sha256:'+'a'*64):
+   with self.subTest(image=image):
+    value=self.render(image);self.assertEqual(value['image'],image);self.assertEqual(value['pull_policy'],'missing')
+    self.assertEqual(value['environment'],{});self.assertNotIn('user',value);self.assertNotIn('command',value)
+ def test_mutable_bare_foreign_malformed_and_archive_selections_refuse(self):
+  for image in('ghcr.io/bitwarden/lite:latest','sha256:'+'a'*64,'foreign/lite@sha256:'+'a'*64,
+                'ghcr.io/bitwarden/lite@sha256:'+'a'*63,'ghcr.io/bitwarden/lite@sha256:'+'A'*64,
+                'ghcr.io/bitwarden/lite@sha256:'+'a'*64+'\n',None,1):
+   with self.subTest(image=image),self.assertRaises(ValueError):self.render(image)
+  app=descriptor('bitwarden');app['software_selection']['images']['bitwarden'].update(archive='/fixture/old.tar',archive_sha256='a'*64)
+  with self.assertRaises(ValueError):component_runtime._bitwarden(app,guest('bitwarden'))
+ def test_historical_v1_payload_material_remains_readable_by_v2_without_parsing_old_settings(self):
+  fixture=continuity_tests.PrivateContinuityUnits();fixture.setUp();self.addCleanup(fixture.doCleanups)
+  current=descriptor('bitwarden');current.update(id='selected',input_sources={'runtime_environment':{'type':'file','path':'/selected/unchanged.json'}})
+  old=copy.deepcopy(current);old['settings']={'settings':{'schema':'homelab-bitwarden-runtime-v1','image_id':'sha256:'+'b'*64},
+    'runtime':{'schema':'homelab-bitwarden-runtime-v1','runtime_env_file':'/historical/never-read.json','environment_sha256':'c'*64}}
+  raw=b'opaque exact private environment bytes\n';previous=fixture.previous(old,{'runtime_environment':raw})
+  before={p:(p.stat().st_ino,p.read_bytes())for p in fixture.root.rglob('*')if p.is_file()}
+  proof=lambda value:component_continuity.document(current,component_private_material.project(current,{'runtime_environment':value}))
+  with patch.object(component_continuity.component_generation,'component_success',return_value=True), \
+       patch('bitwarden_runtime.environment_bytes',side_effect=AssertionError('Historical DTO is not active runtime input')):
+   component_continuity.verify(fixture.attempt,current,proof(raw))
+   with self.assertRaisesRegex(ValueError,'cannot rotate'):component_continuity.verify(fixture.attempt,current,proof(raw+b' '))
+  self.assertEqual(before,{p:(p.stat().st_ino,p.read_bytes())for p in fixture.root.rglob('*')if p.is_file()})
 
-    def test_mutable_source_reference_renders_only_the_expected_retained_id(self):
-        stack = self.stack(); original = copy.deepcopy(stack)
-        self.assertEqual(render.compose(stack)["services"]["bitwarden"]["image"], stack["applications"]["vault"]["settings"]["settings"]["image_id"])
-        self.assertEqual(stack, original)
-        for reference in ("ghcr.io/bitwarden/lite@sha256:" + "a" * 64, stack["applications"]["vault"]["settings"]["settings"]["image_id"]):
-            stack["applications"]["vault"]["software_selection"]["images"]["bitwarden"]["image"] = reference
-            if reference.startswith("sha256:"):
-                stack["applications"]["vault"]["software_selection"]["images"]["bitwarden"].update(archive="/fixture/image.tar", archive_sha256="b" * 64)
-            self.assertEqual(render.compose(stack)["services"]["bitwarden"]["image"], reference)
+class FixtureProtocolTests(unittest.TestCase):
+ def fixture(self,owner='1000:1000'):
+  spec=importlib.util.spec_from_file_location('normal_bw_protocol_fixture',HERE/'bitwarden_runtime_fixture.py')
+  module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+  calls=[];cleanup=[];documents=[]
+  def docker(*argv,**kwargs):
+   calls.append((list(argv),kwargs))
+   if argv[0]=='compose'and'config'in argv:
+    documents.append(json.loads(Path(argv[argv.index('-f')+1]).read_text()))
+  def output(argv,**kwargs):
+   self.assertEqual(argv[0],'docker')
+   self.assertEqual(argv[-4:],['stat','-c','%u:%g','/etc/bitwarden']);self.assertEqual(kwargs,{'text':True,'timeout':15});return owner+'\n'
+  with patch.object(module,'docker',side_effect=docker),patch.object(module.subprocess,'check_output',side_effect=output), \
+       patch.object(module.subprocess,'run',side_effect=lambda *a,**k:cleanup.append((a,k))), \
+       patch('subprocess.Popen',side_effect=AssertionError('No native command')),patch('socket.create_connection',side_effect=AssertionError('No target')), \
+       patch.object(sys,'argv',['fixture']),contextlib.redirect_stdout(io.StringIO()):
+   error=None
+   try:module.main()
+   except ValueError as exc:error=exc
+  return module,calls,cleanup,documents,error
+ def test_actual_fixture_uses_same_declared_image_and_preserves_protocol_limits_and_cleanup(self):
+  module,calls,cleanup,documents,error=self.fixture();self.assertIsNone(error);self.assertEqual(module.IMAGE,IMAGE)
+  doc,=documents;service=doc['services']['bitwarden'];self.assertEqual(service['image'],IMAGE);self.assertEqual(service['pull_policy'],'missing')
+  self.assertEqual(doc['networks'],{'default':{'internal':True}});self.assertEqual(set(doc['volumes']),{'data','logs','database'})
+  self.assertNotIn('ports',service);self.assertEqual(service['depends_on'],{'database':{'condition':'service_healthy'}})
+  self.assertEqual(service['volumes'],['data:/etc/bitwarden','logs:/var/log/bitwarden'])
+  commands=[argv for argv,_ in calls];compose=[c[c.index('-f')+2:]for c in commands if c[0]=='compose']
+  self.assertEqual(compose,[['config','--quiet'],['up','-d','--pull','never'],['restart','bitwarden'],['up','-d','--pull','never','--no-deps','--force-recreate','bitwarden'],['down','--volumes','--remove-orphans','--timeout','10']])
+  # Fixture-only offline cached-image flags are not the production start policy.
+  clients=[c for c in commands if c[0]=='run'and c[-1]=='--inside'];self.assertEqual(len(clients),3)
+  for c in [c for c in commands if c[0]=='run']:
+   self.assertIn('--read-only',c);self.assertEqual(c[c.index('--cap-drop')+1],'ALL');self.assertEqual(c[c.index('--memory')+1],'128m');self.assertEqual(c[c.index('--pids-limit')+1],'32')
+  seeds=[c for c in commands if c[0]=='run'and'-c'in c];self.assertEqual(len(seeds),3)
+  for c in seeds:self.assertEqual(c[c.index('--network')+1],'none');self.assertEqual(c[c.index('--user')+1],'1000:1000')
+  self.assertEqual(sum('SYNTHETIC_ATTACHMENT_OK'in c[-1]for c in seeds),2)
+  self.assertEqual(len(cleanup),1);self.assertEqual(cleanup[0][0][0][:3],['docker','rm','-f']);self.assertEqual(cleanup[0][1]['timeout'],30)
+ def test_actual_fixture_invalid_numeric_owner_refuses_before_seed_restart_and_still_cleans_up(self):
+  _,calls,cleanup,_,error=self.fixture(owner='foreign:owner');self.assertIsInstance(error,ValueError)
+  commands=[argv for argv,_ in calls];self.assertFalse(any(c[0]=='run'and'-c'in c for c in commands));self.assertFalse(any('restart'in c for c in commands))
+  self.assertEqual(len(cleanup),1);self.assertEqual(commands[-1][-5:],['down','--volumes','--remove-orphans','--timeout','10'])
 
-    def execute(self, stack, *, available=True, mismatch=False):
-        td = tempfile.TemporaryDirectory(); self.addCleanup(td.cleanup)
-        root = Path(td.name); binary = root / "bin"; binary.mkdir()
-        docker = binary / "docker"
-        docker.write_text(r"""#!/usr/bin/env python3
-import json, os, sys
-from pathlib import Path
-args = sys.argv[1:]
-with Path(os.environ['FIXTURE_CALLS']).open('a') as log:
-    log.write(json.dumps(args) + '\n')
-if args[:2] == ['image', 'pull']:
-    raise SystemExit(0)
-if args[:2] != ['image', 'inspect']:
-    raise SystemExit(99)
-expected = 'sha256:' + '1' * 64
-if args[2] == expected and os.environ['FIXTURE_AVAILABLE'] != 'true':
-    raise SystemExit(1)
-print('sha256:' + '2' * 64 if args[2].endswith(':latest') or os.environ['FIXTURE_MISMATCH'] == 'true' else expected)
-""")
-        docker.chmod(0o700)
-        tasks = yaml.safe_load((Path(__file__).resolve().parents[1] / "ansible/tasks/component-bitwarden-ready.yml").read_text())[:2]
-        checkpoint = root / "checkpoint"
-        tasks.append({"name": "Synthetic checkpoint after the image guard", "ansible.builtin.copy": {"content": "passed", "dest": str(checkpoint)}})
-        playbook = root / "fixture.yml"
-        playbook.write_text(yaml.safe_dump([{"hosts": "localhost", "gather_facts": False,
-            "vars": {"component_bitwarden": {"settings":stack["applications"]["vault"]["settings"]["settings"],
-              "image":stack["applications"]["vault"]["software_selection"]["images"]["bitwarden"]["image"]}, "ansible_python_interpreter": sys.executable},
-            "environment": {"PATH": str(binary) + os.pathsep + os.environ["PATH"],
-                "FIXTURE_CALLS": str(root / "calls.jsonl"), "FIXTURE_AVAILABLE": str(available).lower(),
-                "FIXTURE_MISMATCH": str(mismatch).lower()}, "tasks": tasks}], sort_keys=False))
-        env = dict(os.environ, ANSIBLE_HOME=str(root / "ansible"), ANSIBLE_LOCAL_TEMP=str(root / "local"), ANSIBLE_REMOTE_TEMP=str(root / "remote"))
-        result = subprocess.run([sys.executable, "-m", "ansible.cli.playbook", "-i", "localhost,", "-c", "local", str(playbook)], env=env, capture_output=True, text=True, timeout=30)
-        self.assertTrue((root / "calls.jsonl").exists(), result.stdout + result.stderr)
-        calls = [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
-        return result, calls, checkpoint.exists()
-
-    def test_local_expected_image_survives_changed_latest_without_pull_or_retag(self):
-        stack = self.stack()
-        result, calls, checkpoint = self.execute(stack)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertTrue(checkpoint)
-        self.assertEqual([c[:3] for c in calls], [["image", "inspect", stack["applications"]["vault"]["settings"]["settings"]["image_id"]]])
-
-    def test_missing_or_wrong_retained_image_stops_before_any_start_or_pull(self):
-        for available, mismatch in ((False, False), (True, True)):
-            with self.subTest(available=available, mismatch=mismatch):
-                result, calls, checkpoint = self.execute(self.stack(), available=available, mismatch=mismatch)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertFalse(checkpoint)
-                self.assertTrue(all(c[:2] == ["image", "inspect"] for c in calls))
-
-    def test_pinned_registry_and_archived_paths_keep_their_existing_selection(self):
-        stack = self.stack()
-        for reference in ("ghcr.io/bitwarden/lite@sha256:" + "a" * 64, stack["applications"]["vault"]["settings"]["settings"]["image_id"]):
-            stack["applications"]["vault"]["software_selection"]["images"]["bitwarden"]["image"] = reference
-            result, calls, checkpoint = self.execute(stack)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertTrue(checkpoint)
-            self.assertEqual(calls[-1][2], reference)
-            self.assertEqual(any(c[:2] == ["image", "pull"] for c in calls), "@sha256:" in reference)
+if __name__=='__main__':unittest.main()

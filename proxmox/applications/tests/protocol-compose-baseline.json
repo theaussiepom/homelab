@@ -327,10 +327,9 @@
     "cloudbeaver-permissions.json": "67b1edcf41536993165d93a09dd383d2896f6453de33e0053cfe2e339df34858",
     "oauth2-alpha.json": "79405a2beb6a86d307cf7c20ae0985595cbeb1185beb6b60bfe8939321d5d191",
     "oauth2.cfg": "b0053c9a69680429d569537c8f10cc5605fe55e905962f36c102db9176f6574e",
-    "cloudbeaver-public.json": "65a9df51274838814ee3f04e5ff7721e1796dc485015013d538bc68e185dcbfb"
+    "cloudbeaver-public.json": "22bada50bf235d7a99d17ee52434b514fabdb3543311e5436b4ff77f0adee07a"
   },
   "protected_fixture_shapes": {
-    "bitwarden_runtime_fixture.py": "da91c51401d38c5de5aa8b0957c3b2de0f742ae6643d4f849e2006b905683b2d",
     "monitoring_fixture.py": "0811a407ee7ad6b0df1351b41afb4f464d0809a5684ffd5033ea04e411d22672"
   }
 }

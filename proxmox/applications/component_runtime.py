@@ -63,8 +63,8 @@ def _validate_mounts(service):
 
 def _image(selected, adapter):
     value = selected.get('image')
-    if value in {'ghcr.io/bitwarden/lite:latest', 'ghcr.io/music-assistant/server:latest'}:
-        require(adapter in {'bitwarden', 'music_assistant'}, 'Keep the declared latest image policy')
+    if value == 'ghcr.io/music-assistant/server:latest':
+        require(adapter == 'music_assistant', 'Keep the declared latest image policy')
         return value, 'always'
     if isinstance(value, str) and re.fullmatch('sha256:[0-9a-f]{64}', value):
         require(isinstance(selected.get('archive'), str) and selected['archive'].startswith('/')
@@ -526,11 +526,10 @@ def _bitwarden(app, guest):
             'Retain the Bitwarden image process and user defaults')
     selected = app['software_selection']['images']['bitwarden']
     image = selected['image']
-    require(isinstance(value['image_id'], str) and re.fullmatch('sha256:[0-9a-f]{64}', value['image_id'])
-            and (image == 'ghcr.io/bitwarden/lite:latest' or
-                 re.fullmatch(r'ghcr\.io/bitwarden/lite(?::[A-Za-z0-9_.-]+)?@sha256:[0-9a-f]{64}', image)
-                 or image == value['image_id'] and {'archive', 'archive_sha256'} <= set(selected)),
-            'Keep the official or retained Bitwarden image and observed identity')
+    require(isinstance(image, str) and
+            re.fullmatch(r'ghcr\.io/bitwarden/lite(?::[A-Za-z0-9_.-]+)?@sha256:[0-9a-f]{64}', image)
+            and not {'archive', 'archive_sha256'} & set(selected),
+            'Select the immutable official Bitwarden image')
     require(set(app.get('storage_paths', {})) == {'data', 'logs'}, 'Bind the retained vault data and logs')
     require(all(row['kind'] == 'directory' and row['read_only'] is False
                 for row in app['storage_paths'].values()), 'Keep the retained vault data directories writable')
@@ -546,8 +545,7 @@ def _bitwarden(app, guest):
                     and not any(c in item for c in '\r\n\x00') for key, item in environment.items()),
             'Use only the admitted internal Bitwarden runtime environment')
     service = _service(app, 'bitwarden', guest)
-    bitwarden.service_configuration(service, selected_image=image, observed_image=value['image_id'],
-        environment=environment, ports=ports,
+    bitwarden.service_configuration(service, environment=environment, ports=ports,
         data_sources={key: row['source'] for key, row in app['storage_paths'].items()})
     return {'bitwarden': service}
 

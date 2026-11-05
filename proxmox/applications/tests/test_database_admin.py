@@ -40,7 +40,7 @@ def source():
         for key in ('web','postgresql','mariadb')},role_addresses={'web':'198.18.30.32',
             'postgresql':'198.18.11.81','mariadb':'198.19.12.83'})
     cloud['properties']={'server_name':'Database Tools','recovery_admin':'local-recovery','heap_mib':1024,
-        'auth_headers':{'user':'X-User','team':'X-Team'},'retained_pgadmin_image':'old-client',
+        'auth_headers':{'user':'X-User','team':'X-Team'},
         'connections':{'postgresql':{'name':'PostgreSQL','database':'postgres','sslmode':'prefer'},
             'mariadb':{'name':'MariaDB','database':''},'postgresql-admin':{'name':'postgresql administrator','database':'postgres'},
             'mariadb-admin':{'name':'mariadb administrator','database':''}},

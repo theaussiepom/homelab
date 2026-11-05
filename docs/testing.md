@@ -64,3 +64,21 @@ Retire tests for removed APIs once useful guards have replacement tests at the
 right layer. Remove dead implementation and temporary candidate-loading
 scaffolding rather than retaining them to satisfy coverage. Historical failures
 and proof documents remain evidence; do not rewrite them as a successful run.
+
+For source splitting and address groups, compare inline/referenced documents,
+source-leaf drift, ordered duplicates and exact expanded policy rows through the
+real compiler. Test cycle/unknown/type/bound refusals directly; value references
+must not introduce dependencies or permissions.
+
+Normal ownership integration must use genuine controller receipts, static files,
+AppPayloads, local Git ancestry and backend generations, with only native bodies
+faked. Cover fresh creation, two updates and a later repeat, changed API/owner,
+state drift, pointer rollback, foreign/newer history, pending markers, exact own
+HOLD and private-material continuity. Historical old component fields remain
+sealed bytes; active new source must reject them. DNS retirement tests must cover
+exact previous-owner records, unrelated aliases/order, conflict refusal, no-prior
+fresh use, immutable same-source repeat and a later source generation.
+
+Platform-gated Linux metadata tests keep their native guards. A macOS mocked
+filesystem result does not qualify Linux ownership/xattrs; require the actual
+Linux hosted fixture before claiming that layer complete.

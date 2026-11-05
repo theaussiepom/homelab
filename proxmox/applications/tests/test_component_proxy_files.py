@@ -26,8 +26,7 @@ def cloud():
         'server_name':'Database Tools','recovery_admin':'recovery_admin','heap_mib':1024,
         'auth_headers':{'user':'X-User','team':'X-Team'},
         'connections':{'postgresql':{'name':'PostgreSQL','driver':'postgresql','database':'postgres',
-            'sslmode':'prefer','host':'198.18.31.23','port':5432}},
-        'retained_pgadmin_image':'dpage/pgadmin4@sha256:'+'a'*64}
+            'sslmode':'prefer','host':'198.18.31.23','port':5432}}}
     auth={'version':1,'oidc_issuer':'https://sso.example.invalid/application/o/database/',
         'oauth_client_id':'fixture-client','oauth_name':'Sign in','user_claim':'preferred_username',
         'secret_files':{'oauth_client_secret':'/never-read/oauth'}}
@@ -211,7 +210,17 @@ class ProxyFileTests(unittest.TestCase):
                 self.assertEqual([row['path']for row in rows],list(baseline['rows'][adapter]))
                 projected={row['path']:{'sha256':hashlib.sha256(row['content'].encode()if isinstance(row['content'],str)else row['content']).hexdigest(),
                     'content_type':type(row['content']).__name__,'uid':row['uid'],'gid':row['gid'],'mode':row['mode']}for row in rows}
-                self.assertEqual(projected,baseline['rows'][adapter])
+                expected=copy.deepcopy(baseline['rows'][adapter])
+                if adapter=='cloudbeaver':
+                    # Expected bytes derive from the immutable old public DTO
+                    # by removing only the retired image field.
+                    public=json.loads(next(row['content']for row in rows if row['path']=='cloudbeaver-public.json'))
+                    self.assertNotIn('retained_pgadmin_image',public)
+                    spec=importlib.util.spec_from_file_location('normal_proxy_context',FRAMEWORK/'proxmox/applications/cloudbeaver-runtime.py')
+                    helper=importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
+                    context=helper.context(public)
+                    self.assertEqual((context.workspace,context.project),(Path(c.WORKSPACE),'homelab-db-tools'))
+                self.assertEqual(projected,expected)
 
 
 if __name__=='__main__':unittest.main()

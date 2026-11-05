@@ -5,9 +5,6 @@ from pathlib import Path
 import re
 from urllib.parse import urlsplit
 
-import coordinated_contract
-import initial_ordinary
-import ordinary_failure
 import network_endpoints
 from application_contract import ADAPTERS,ordered_services
 from private_io import require
@@ -60,22 +57,20 @@ def phases(cfg):
             and all(cfg['app']['service_health_checks'].values()), 'Preserve each selected app health contract')
     require(not monitored or deployment['payload_phases'][AGENT_PHASE] == 'agent',
             'Bind the explicit monitoring agent payload')
-    require(not any(row['lifecycle']=='retained' and 'services' in row for row in applications.values())
-            or cfg['app'].get('exclusive_writer_confirmed') is True,
-            'Retained container applications require their explicit writer assertion')
     return selected[:]
 
 
 def validate(cfg):
     require(isinstance(cfg, dict) and cfg.get('schema') == CONFIG_SCHEMA
             and {'schema', 'site', 'guest', 'ssh_public_keys', 'paths', 'deployment', 'app'} <= set(cfg)
-            <= {'schema', 'site', 'guest', 'ssh_public_keys', 'paths', 'deployment', 'app', 'routes',
-                'coordinated_custody', 'initial_ordinary', 'reviewed_ordinary_failures'},
+            <= {'schema', 'site', 'guest', 'ssh_public_keys', 'paths', 'deployment', 'app', 'routes'},
             'Use an explicit versioned component guest configuration')
     deployment, app, guest = cfg['deployment'], cfg['app'], cfg['guest']
+    require('exclusive_writer_confirmed' not in app and 'coordinated_custody_inputs' not in cfg['paths'],
+            'Retire authored migration assertions; validate genuine ordinary ownership')
     require(isinstance(deployment, dict) and set(deployment) == {'contract', 'capabilities',
         'input_identity', 'input_directory', 'runtime_file', 'lifecycle', 'protected_guests',
-        'applications', 'payload_phases', 'phases'} | ({'prerequisites'} if 'prerequisites' in deployment else set()),
+        'applications', 'payload_phases', 'phases'},
         'Use only the component deployment contract fields')
     require(re.fullmatch('[0-9a-f]{64}', deployment['input_identity']) and
             deployment['lifecycle'] in ('fresh', 'retained') and
@@ -106,9 +101,6 @@ def validate(cfg):
     directory = path(deployment['input_directory'])
     require(path(deployment['runtime_file']) == directory/'component-runtime.json',
             'Bind the actual component runtime input file')
-    coordinated_contract.selection(cfg)
-    initial_ordinary.selection(cfg)
-    ordinary_failure.selection(cfg)
     phases(cfg)
     return vmid
 

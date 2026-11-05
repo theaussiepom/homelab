@@ -2,6 +2,7 @@
 import ast
 import copy
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -101,8 +102,7 @@ class ConstructorUnits(NoNative):
         before = copy.deepcopy((auth, data))
         app = fixtures.cloudbeaver_app(auth, data, image='test/ce@sha256:'+'2'*64,
                                       gateway_image='test/gateway@sha256:'+'3'*64)
-        self.assertEqual(app['settings'], dict(data, recovery_admin='local-recovery',
-            retained_pgadmin_image='dpage/pgadmin4@sha256:'+'a'*64))
+        self.assertEqual(app['settings'], dict(data, recovery_admin='local-recovery'))
         self.assertEqual(app['authentication_resolved'], dict(auth, version=1))
         self.assertEqual(app['listeners']['web']['publication_address'], data['bind_address'])
         self.assertEqual(app['software_selection']['images']['cloudbeaver']['image'], 'test/ce@sha256:'+'2'*64)
@@ -116,8 +116,9 @@ class ConstructorUnits(NoNative):
         call.assert_called_once_with(app, secrets={'client_secret': secret}, records={}, public_ca=None)
 
     def test_observed_bitwarden_image_and_fixed_original_database_are_explicit(self):
-        app = fixtures.bitwarden_app('sha256:'+'4'*64, image='ghcr.io/bitwarden/lite:latest')
-        self.assertEqual(app['settings']['settings']['image_id'], 'sha256:'+'4'*64)
+        app = fixtures.bitwarden_app(image='ghcr.io/bitwarden/lite@sha256:94484fe9382df51ad755151ea360663e922e60a32385500454dd1f38045bf6a6')
+        self.assertEqual(app['software_selection']['images']['bitwarden']['image'], 'ghcr.io/bitwarden/lite@sha256:94484fe9382df51ad755151ea360663e922e60a32385500454dd1f38045bf6a6')
+        self.assertNotIn('image_id',app['settings']['settings'])
         self.assertEqual(app['settings']['settings']['database_name'], 'bitwarden_fixture')
         self.assertEqual(app['settings']['settings']['database_server'], '198.18.32.24')
         self.assertEqual(app['containers']['bitwarden'], {'memory_mib': 1536, 'cpu_limit': 1, 'pids_limit': 256})
@@ -135,18 +136,27 @@ class ActualRendererControls(NoNative):
         self.assertEqual(fixtures.document(cloud()), BASELINE['documents']['cloudbeaver'])
 
     def test_bitwarden_services_exactly_match_frozen_original_render(self):
-        app = fixtures.bitwarden_app('sha256:'+'1'*64, image='ghcr.io/bitwarden/lite:latest')
-        self.assertEqual(fixtures.document(app), BASELINE['documents']['bitwarden'])
+        app = fixtures.bitwarden_app(image='ghcr.io/bitwarden/lite@sha256:94484fe9382df51ad755151ea360663e922e60a32385500454dd1f38045bf6a6')
+        expected=copy.deepcopy(BASELINE['documents']['bitwarden'])
+        expected['services']['bitwarden'].update(image='ghcr.io/bitwarden/lite@sha256:94484fe9382df51ad755151ea360663e922e60a32385500454dd1f38045bf6a6',pull_policy='missing')
+        self.assertEqual(fixtures.document(app), expected)
 
     def test_monitoring_services_exactly_match_frozen_original_render(self):
         app = fixtures.zabbix_app(database_host='postgres', images=monitoring.VERSIONS)
         self.assertEqual(fixtures.document(app), BASELINE['documents']['zabbix'])
 
-    def test_cloudbeaver_runtime_file_bytes_match_original_pure_builder(self):
-        rows = fixtures.cloudbeaver_files(cloud(), b'fixture-secret-entropy-not-production'*2)
-        self.assertEqual({row['path']: hashlib.sha256(row['content'].encode()).hexdigest() for row in rows},
-                         BASELINE['cloudbeaver_file_hashes'])
-        self.assertTrue(all(row['mode'] == '0400' and row['uid'] == row['gid'] for row in rows))
+    def test_cloud_runtime_keeps_unchanged_file_bytes_and_normal_public_context(self):
+        rows=fixtures.cloudbeaver_files(cloud(),b'fixture-secret-entropy-not-production'*2)
+        expected=copy.deepcopy(BASELINE['cloudbeaver_file_hashes'])
+        self.assertEqual({row['path']:hashlib.sha256(row['content'].encode()).hexdigest()for row in rows},expected)
+        self.assertTrue(all(row['mode']=='0400'and row['uid']==row['gid']for row in rows))
+        public=json.loads(next(row['content']for row in rows if row['path']=='cloudbeaver-public.json'))
+        self.assertNotIn('retained_pgadmin_image',public)
+        spec=importlib.util.spec_from_file_location('normal_protocol_context',F/'proxmox/applications/cloudbeaver-runtime.py')
+        helper=importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
+        context=helper.context(public)
+        self.assertEqual((context.workspace,context.project,context.services),(Path('/srv/homelab/data/cloudbeaver'),'homelab-db-tools',{'cloudbeaver':'cloudbeaver','auth_gateway':'auth_gateway'}))
+        self.assertEqual((public['public_url'],public['auth_headers'],public['server_name']),('https://cloud.fixture.test:9443',{'user':'X-User','team':'X-Team'},'Database Tools'))
 
     def test_discovery_and_explicit_oidc_inputs_reach_generated_files(self):
         for explicit in (False, True):
@@ -175,7 +185,7 @@ class ActualRendererControls(NoNative):
     def test_current_renderer_refusals_are_not_hidden_by_constructor(self):
         bad = cloud(); bad['settings']['heap_mib'] = 1536
         with self.assertRaises(ValueError): fixtures.document(bad)
-        bad = fixtures.bitwarden_app('not-observed', image='ghcr.io/bitwarden/lite:latest')
+        bad = fixtures.bitwarden_app(image='ghcr.io/bitwarden/lite:latest')
         with self.assertRaises(ValueError): fixtures.document(bad)
         bad = fixtures.zabbix_app(database_host='postgres', images=dict(monitoring.VERSIONS, zabbix_web='foreign'))
         with self.assertRaises(ValueError): fixtures.document(bad)
@@ -239,10 +249,10 @@ class FixtureCallSiteControls(NoNative):
                     and isinstance(node.value.func.value, ast.Name) and node.value.func.value.id == 'component_fixtures']
             rows.sort(key=lambda row: row.lineno)
             scope = {'component_fixtures': mock.Mock(), 'IMAGE': 'selected-image',
-                     'image_id': 'selected-observation', 'monitoring': monitoring}
+                     'monitoring': monitoring}
             exec(compile(ast.fix_missing_locations(ast.Module(body=rows, type_ignores=[])), '<actual-fixture-constructor>', 'exec'), scope)
             factory = getattr(scope['component_fixtures'], builder)
-            if builder == 'bitwarden_app': factory.assert_called_once_with('selected-observation', image='selected-image')
+            if builder == 'bitwarden_app': factory.assert_called_once_with(image='selected-image')
             else: factory.assert_called_once_with(database_host='postgres', images=monitoring.VERSIONS)
             scope['component_fixtures'].document.assert_called_once_with(scope['app'])
 

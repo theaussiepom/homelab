@@ -1,7 +1,7 @@
 """Packet boundary tests; validated component outputs stub unrelated adapters.
 
-The source plan fixture is real. Evidence/renderer/check outputs are explicit
-collaborator fixtures here; historical/native validity is tested by their owners.
+The source plan fixture is real. Renderer/check outputs are explicit
+collaborator fixtures here; native validity is tested by its owners.
 """
 from contextlib import ExitStack
 import copy
@@ -36,36 +36,19 @@ class PacketComponentBoundaryTests(unittest.TestCase):
     def lower(self):return packet.lower_guest(self.plan,'resolver',inputs=Path('/controller/inputs'))
     def config(self):return json.loads(self.lower()['files']['site.json'])
 
-    def test_repositories_and_opaque_admitted_evidence_keep_bytes_and_named_slots(self):
+    def test_repositories_preserve_public_asset_bytes_and_named_input_slots(self):
         guest=self.plan.resolved['guests']['resolver']
         text='-----BEGIN PGP PUBLIC KEY BLOCK-----\nsynthetic-public-key\n\n'
         self.plan.library['assets']['vendor']={'type':'raw-utf8','text':text,'sha256':hashlib.sha256(text.encode()).hexdigest()}
         guest['software_selection']['repositories']=[{'name':'vendor','source':'deb https://vendor.example.invalid stable main','key_asset':'vendor'}]
-        evidence=self.plan.resolved['evidence']['resolver']
-        evidence.update(proof_files={'catalogue.json':'{ "opaque": true }\n\n'},
-            coordinated_custody={'selected':'opaque-history'},
-            reviewed_ordinary_failures=[{'selected':'opaque-failure'}],
-            source_assertions={'exclusive_writer_confirmed':True,'prerequisites':['existing assertion']})
         guest['frontend_routing']={'address':'198.18.20.10','gateway':'198.18.20.1','interface':'eth0','table':100,'priority':100}
-        before=copy.deepcopy(evidence);result=self.lower();cfg=json.loads(result['files']['site.json'])
+        before=copy.deepcopy(self.plan.library['assets']);result=self.lower();cfg=json.loads(result['files']['site.json'])
         self.assertEqual(result['files']['repository-vendor.asc'],text)
-        self.assertEqual(result['files']['catalogue.json'],'{ "opaque": true }\n\n')
-        self.assertEqual(cfg['paths']['coordinated_custody_inputs'],cfg['deployment']['input_directory'])
         self.assertEqual(cfg['app']['repositories'][0]['key_path'],cfg['deployment']['input_directory']+'/repository-vendor.asc')
-        for key in ('coordinated_custody','reviewed_ordinary_failures'):self.assertEqual(cfg[key],before[key])
-        self.assertEqual(cfg['deployment']['prerequisites'],['existing assertion'])
-        self.assertTrue(cfg['app']['exclusive_writer_confirmed'])
         self.assertEqual(cfg['app']['frontend_routing'],guest['frontend_routing'])
-        self.assertEqual(evidence,before)
-        evidence.pop('coordinated_custody');evidence['initial_ordinary']={'selected':'opaque-initial'}
-        standalone=self.config()
-        self.assertEqual(standalone['initial_ordinary'],evidence['initial_ordinary'])
-        self.assertNotIn('coordinated_custody',standalone)
+        self.assertEqual(self.plan.library['assets'],before)
 
-    def test_artifact_custody_key_collisions_and_missing_health_refuse(self):
-        evidence=self.plan.resolved['evidence']['resolver'];evidence['proof_files']={'owned-config.txt':'cannot replace'}
-        with self.assertRaisesRegex(ComponentError,'component.artifact-conflict'):self.lower()
-        evidence.pop('proof_files')
+    def test_repository_asset_collisions_and_missing_health_refuse(self):
         self.plan.resolved['guests']['resolver']['software_selection']['repositories']=[{
             'name':'vendor','source':'fixed source','key_asset':'vendor'}]
         self.plan.library['assets']['vendor']={'type':'json','text':'not a raw key','sha256':'a'*64}

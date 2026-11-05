@@ -46,7 +46,7 @@ class StaticInputTests(unittest.TestCase):
                 'applications': {'resolver': {'id': 'resolver_a', 'adapter': 'unbound', 'lifecycle': 'fresh',
                     'runtime_id': 'resolver_a', 'project': 'example-resolver', 'compose_file': 'compose-resolver.yml',
                     'services': ['resolver_a_unbound']}}, 'payload_phases': {'resolver': 'resolver_a'}},
-            'app': {'kind': 'example', 'vmid': 610, 'hostname': 'example', 'memory_mib': 512,
+            'app': {'vmid': 610, 'hostname': 'example', 'memory_mib': 512,
                 'address': '198.18.20.10', 'mac': '02:00:00:20:00:10', 'packages': [],
                 'service_health_checks': {'resolver': [{'name':'ready','argv':['true'],'expect':''}]}}}
         self.packet = {'schema': component_guest.PACKET_SCHEMA, 'guest': 'example', 'enabled': True,
@@ -142,21 +142,21 @@ class StaticInputTests(unittest.TestCase):
         before=self.snapshot(self.inputs);original=hold.read_bytes();calls=[]
         def prepare(create):
             calls.append(create);cfg,site=self.prepare(create);return inputs.binding(cfg,site)
-        with DeploymentAttempt(self.cfg,None,['preparation','resolver'],prepare_inputs=prepare) as attempt:
-            with self.assertRaises(ValueError):
-                attempt.phase_ready('resolver')
+        with self.assertRaises(ValueError):
+            with DeploymentAttempt(self.cfg,None,['preparation','resolver'],prepare_inputs=prepare):
+                self.fail('Foreign hold entered a new ordinary attempt')
         self.assertEqual(calls,[False]);self.assertEqual(hold.read_bytes(),original)
         self.assertEqual(self.snapshot(self.inputs),before)
         self.assertFalse((work/'ordinary-101-1').exists())
 
-    def test_refused_historical_evidence_leaves_only_static_input_evidence(self):
+    def test_refused_current_ownership_leaves_only_static_input_evidence(self):
         def prepare(create):
             cfg,site=self.prepare(create)
             return inputs.binding(cfg,site)
-        with patch('coordinated_evidence.inspect', side_effect=ValueError('synthetic missing historical evidence')):
+        with patch('component_generation.current', side_effect=ValueError('synthetic refused current ownership')):
             with self.assertRaises(ValueError):
                 with DeploymentAttempt(self.cfg,None,['preparation','resolver'],prepare_inputs=prepare):
-                    self.fail('unqualified evidence was admitted')
+                    self.fail('unqualified ownership was admitted')
         work=self.root/'state/610'
         self.assertFalse((work/'ORDINARY-HOLD.json').exists())
         self.assertFalse((work/'terraform.tfstate').exists())
@@ -178,23 +178,22 @@ class StaticInputTests(unittest.TestCase):
             os.close(descriptor)
         self.assertFalse(self.inputs.exists())
 
-    def test_retained_container_writer_assertion_is_required_before_publication(self):
+    def test_retained_packet_rejects_obsolete_writer_assertion_and_keeps_normal_shape(self):
         value=copy.deepcopy(self.packet)
         cfg=json.loads(value['files']['site.json'])
         cfg['deployment']['applications']['resolver']['lifecycle']='retained'
         runtime=json.loads(value['files']['component-runtime.json'])
         runtime['applications']['resolver_a']['lifecycle']='retained'
         value['files']['component-runtime.json']=encoded(runtime).decode()
-        for asserted in (None,False):
-            if asserted is None:cfg['app'].pop('exclusive_writer_confirmed',None)
-            else:cfg['app']['exclusive_writer_confirmed']=asserted
+        for asserted in (False,True):
+            cfg['app']['exclusive_writer_confirmed']=asserted
             value['files']['site.json']=encoded(cfg).decode()
-            with self.subTest(asserted=asserted),self.assertRaisesRegex(ValueError,'writer assertion'):
+            with self.subTest(asserted=asserted),self.assertRaises(ValueError):
                 component_guest.packet(value,self.inputs)
-        self.assertFalse(self.inputs.exists())
-        cfg['app']['exclusive_writer_confirmed']=True
+        cfg['app'].pop('exclusive_writer_confirmed')
         value['files']['site.json']=encoded(cfg).decode()
         component_guest.packet(value,self.inputs)
+        self.assertFalse(self.inputs.exists())
 
 
 if __name__ == '__main__':
