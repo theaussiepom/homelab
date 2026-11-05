@@ -81,7 +81,7 @@ variable "guest" {
     condition = alltrue([for rule in var.guest.rules :
       contains(["in", "out"], rule.direction) && contains(["tcp", "udp", "icmp", "icmpv6", "igmp"], rule.proto) &&
       (rule.interface == null ? true : contains([for index, nic in var.guest.interfaces : "net${index}"], rule.interface)) &&
-      (rule.direction == "in" ? rule.source != null && !can(regex("/0$", rule.source)) : rule.destination != null) &&
+      (rule.direction == "in" ? rule.source != null && try(tonumber(split("/", rule.source)[1]) > 0, true) : rule.destination != null) &&
       alltrue([for address in [rule.source, rule.destination] : address == null ? true : (
         !strcontains(address, "%") && can(cidrhost(strcontains(address, "/") ? address : "${address}/${strcontains(address, ":") ? 128 : 32}", 0))
       )]) &&

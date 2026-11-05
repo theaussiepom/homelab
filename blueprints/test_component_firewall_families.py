@@ -2,6 +2,7 @@
 import copy
 import json
 from pathlib import Path
+import traceback
 import unittest
 from unittest.mock import patch
 
@@ -87,6 +88,8 @@ class FirewallValueTests(unittest.TestCase):
                  dict(rule('icmpv6'), destination='192.0.2.1', port='130'),
                  dict(rule(), direction='in', source='::/0'),
                  dict(rule(), direction='in', source='0.0.0.0/0', destination='192.0.2.1')]
+        cases += [dict(rule(), direction='in', source=value, destination=None) for value in (
+            '::/00', '2001:db8::/00', '::/000', '0.0.0.0/00', '192.0.2.1/00')]
         for value in cases:
             with self.subTest(value=value), self.assertRaises(ComponentError): types.rule_family(value)
         for value in (dict(rule(), source='fd00:1234::1'), dict(rule('icmpv6'), port='0'),
@@ -96,6 +99,35 @@ class FirewallValueTests(unittest.TestCase):
 
 
 class FirewallMatcherTests(unittest.TestCase):
+    def test_flow_families_and_protocols_refuse_impossible_packets_without_a_source_selector(self):
+        cases = [
+            (rule(), traffic.Flow('192.0.2.10', 'ff02::fb', 'udp', 5353)),
+            (dict(rule('igmp'), destination='224.0.0.22', port=None),
+             traffic.Flow('fd00:1234::10', '224.0.0.22', 'igmp', None)),
+            (dict(rule('icmpv6'), destination='192.0.2.11', port='130'),
+             traffic.Flow('192.0.2.10', '192.0.2.11', 'icmpv6', 130)),
+            (dict(rule('icmp'), port='3'), traffic.Flow('fe80::10', 'ff02::fb', 'icmp', 3)),
+            (dict(rule('igmp'), port=None), traffic.Flow('fe80::10', 'ff02::fb', 'igmp', None)),
+        ]
+        for selected, flow in cases:
+            with self.subTest(protocol=flow.protocol):
+                self.assertFalse(traffic.permits([selected], 'out', flow, 'net1'))
+
+    def test_invalid_flow_sources_are_sanitized_and_hostname_family_never_requires_dns(self):
+        for address in ('PRIVATE_SENTINEL', '', None, True, 42, [], b'192.0.2.10'):
+            with self.subTest(kind=type(address).__name__), self.assertRaises(ComponentError) as caught:
+                traffic.permits([rule()], 'out', traffic.Flow(address, 'ff02::fb', 'udp', 5353), 'net1')
+            self.assertNotIn('PRIVATE_SENTINEL', str(caught.exception))
+            rendered = ''.join(traceback.format_exception(caught.exception))
+            self.assertNotIn('PRIVATE_SENTINEL', rendered)
+        for address in (None, '', 42):
+            with self.subTest(target=address), self.assertRaises(ComponentError):
+                traffic.permits([rule()], 'out', traffic.Flow('192.0.2.10', address, 'udp', 5353), 'net1')
+        with patch('socket.getaddrinfo', side_effect=AssertionError('No DNS')):
+            flow = traffic.Flow('fd00:1234::10', 'service.example.invalid', 'udp', 5353)
+            self.assertTrue(traffic.permits([dict(rule(), destination='::/0')], 'out', flow, 'net1'))
+            self.assertFalse(traffic.permits([dict(rule(), destination='0.0.0.0/0')], 'out', flow, 'net1'))
+
     def test_ipv6_discovery_and_mld_match_only_selected_family_interface_type_and_peer(self):
         selected = dict(rule(), source='fe80::/64', interface='net1')
         flow = traffic.Flow('fe80::10', 'ff02::fb', 'udp', 5353)
@@ -113,7 +145,8 @@ class FirewallMatcherTests(unittest.TestCase):
             self.assertTrue(traffic.permits([value], 'out', traffic.Flow('fe80::10', 'ff02::fb', 'icmpv6', number), 'net1'))
             self.assertFalse(traffic.permits([value], 'out', traffic.Flow('fe80::10', 'ff02::fb', 'icmpv6', None), 'net1'))
         with self.assertRaises(ComponentError):
-            traffic.permits([dict(rule('igmp'), port='1')], 'out', traffic.Flow('192.0.2.10', 'ff02::fb', 'igmp', 1), 'net1')
+            traffic.permits([dict(rule('igmp'), port='1', destination='224.0.0.22')],
+                            'out', traffic.Flow('192.0.2.10', '224.0.0.22', 'igmp', 1), 'net1')
 
     def test_ipv6_rule_never_authorizes_ipv4_hostname_or_changes_literal_ipv4_matching(self):
         value = dict(rule('tcp'), destination='::/0', port='443')

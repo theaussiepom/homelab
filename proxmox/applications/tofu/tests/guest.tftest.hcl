@@ -111,6 +111,111 @@ run "scoped_literal_cannot_replace_interface_binding" {
   expect_failures = [var.guest]
 }
 
+run "ipv6_zero_prefix_spelling_refuses" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "in", proto = "udp", source = "::/00", port = "5353", comment = "No unrestricted source" }]
+    })
+  }
+  expect_failures = [var.guest]
+}
+
+run "ipv6_host_bits_with_zero_prefix_refuse" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "in", proto = "udp", source = "2001:db8::/00", port = "5353", comment = "No unrestricted source" }]
+    })
+  }
+  expect_failures = [var.guest]
+}
+
+run "ipv6_three_zero_prefix_spelling_refuses" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "in", proto = "udp", source = "::/000", port = "5353", comment = "No unrestricted source" }]
+    })
+  }
+  expect_failures = [var.guest]
+}
+
+run "ipv4_zero_prefix_spelling_refuses" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "in", proto = "udp", source = "0.0.0.0/00", port = "5353", comment = "No unrestricted source" }]
+    })
+  }
+  expect_failures = [var.guest]
+}
+
+run "ipv4_host_bits_with_zero_prefix_refuse" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "in", proto = "udp", source = "192.0.2.1/00", port = "5353", comment = "No unrestricted source" }]
+    })
+  }
+  expect_failures = [var.guest]
+}
+
+run "null_inbound_source_refuses_without_a_function_error" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "in", proto = "udp", source = null, port = "5353", comment = "Source required" }]
+    })
+  }
+  expect_failures = [var.guest]
+}
+
+run "invalid_inbound_source_refuses_without_a_function_error" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "in", proto = "udp", source = "not-an-address", port = "5353", comment = "Literal source required" }]
+    })
+  }
+  expect_failures = [var.guest]
+}
+
+run "bare_inbound_addresses_keep_host_scope" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [
+        { direction = "in", proto = "udp", source = "192.0.2.10", port = "5353", comment = "IPv4 host" },
+        { direction = "in", proto = "udp", source = "2001:db8::10", port = "5353", comment = "IPv6 host" }
+      ]
+    })
+  }
+  assert {
+    condition = (
+      proxmox_virtual_environment_firewall_rules.guest.rule[0].source == "192.0.2.10" &&
+      proxmox_virtual_environment_firewall_rules.guest.rule[1].source == "2001:db8::10"
+    )
+    error_message = "Bare literals remain single hosts and do not acquire a /0 permission."
+  }
+}
+
 run "interface_scoped_firewall_reaches_the_provider" {
   command = plan
   module { source = "./guest" }

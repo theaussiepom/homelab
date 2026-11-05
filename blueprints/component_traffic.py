@@ -7,7 +7,7 @@ rule; this module does not resolve DNS or infer an address allocation.
 from dataclasses import dataclass
 import ipaddress
 
-from component_errors import at
+from component_errors import ComponentError, at
 from component_sources import require
 from component_monitoring import source_address
 import component_types as types
@@ -23,6 +23,21 @@ class Flow:
 
 def permits(rules, direction, flow, interface):
     """The existing finite network/port matcher, using validated ACCEPT rows."""
+    require(isinstance(flow.source_address, str), 'component.traffic-source-address')
+    try:
+        family = ipaddress.ip_address(flow.source_address).version
+    except ValueError:
+        raise ComponentError('component.traffic-source-address') from None
+    require(isinstance(flow.target_address, str) and flow.target_address,
+            'component.traffic-target-address')
+    try:
+        target_family = ipaddress.ip_address(flow.target_address).version
+    except ValueError:
+        target_family = family # Existing hostname targets need an explicit /0 of this family.
+    if family != target_family or (flow.protocol in ('icmp', 'igmp') and family != 4) \
+            or (flow.protocol == 'icmpv6' and family != 6):
+        return False
+
     def network(value,address):
         if value is None:
             return True
@@ -30,7 +45,7 @@ def permits(rules, direction, flow, interface):
         try:
             target=ipaddress.ip_address(address)
         except ValueError:
-            return selected.prefixlen==0 and selected.version==ipaddress.ip_address(flow.source_address).version
+            return selected.prefixlen==0 and selected.version==family
         return target.version==selected.version and target in selected
 
     def port(value):
