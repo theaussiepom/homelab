@@ -6,11 +6,11 @@ rule; this module does not resolve DNS or infer an address allocation.
 """
 from dataclasses import dataclass
 import ipaddress
-import re
 
 from component_errors import at
 from component_sources import require
 from component_monitoring import source_address
+import component_types as types
 
 
 @dataclass(frozen=True)
@@ -18,7 +18,7 @@ class Flow:
     source_address: str
     target_address: str
     protocol: str
-    port: int
+    port: int | None
 
 
 def permits(rules, direction, flow, interface):
@@ -26,22 +26,20 @@ def permits(rules, direction, flow, interface):
     def network(value,address):
         if value is None:
             return True
-        selected=ipaddress.IPv4Network(value,strict=False)
+        selected=ipaddress.ip_network(value,strict=False)
         try:
-            target=ipaddress.IPv4Address(address)
-        except ipaddress.AddressValueError:
-            return selected.prefixlen==0
-        return target in selected
+            target=ipaddress.ip_address(address)
+        except ValueError:
+            return selected.prefixlen==0 and selected.version==ipaddress.ip_address(flow.source_address).version
+        return target.version==selected.version and target in selected
 
     def port(value):
         if value is None:
             return True
-        require(isinstance(value,str)and all(re.fullmatch(
-            r'[1-9][0-9]{0,4}(?::[1-9][0-9]{0,4})?',item)for item in value.split(',')),
-            'component.traffic-rule')
+        require(flow.protocol != 'igmp', 'component.traffic-rule')
+        types.rule_port(value, icmp=flow.protocol in ('icmp', 'icmpv6'))
         bounds=[tuple(map(int,item.split(':')))for item in value.split(',')]
-        require(all(1<=row[0]<=row[-1]<=65535 for row in bounds),'component.traffic-rule')
-        return any(row[0]<=flow.port<=row[-1]for row in bounds)
+        return flow.port is not None and any(row[0]<=flow.port<=row[-1]for row in bounds)
 
     return any(row['direction']==direction and row['proto']==flow.protocol
         and row.get('interface')in(None,interface)

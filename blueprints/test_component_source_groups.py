@@ -38,7 +38,7 @@ class AddressGroupTests(unittest.TestCase):
         members=[None,True,3,[],{}, {'network':'lan','address_group':'clients'},
             {'endpoint':'service'},{'interface':'management'},{'source':'arbitrary'},
             {'network':None},{'network':'../PRIVATE_SENTINEL'},{'address_group':'Bad'},
-            '', '::1/128','999.0.0.1','198.18.0.1/99','PRIVATE_SENTINEL']
+            '', '::g/128','999.0.0.1','198.18.0.1/99','PRIVATE_SENTINEL']
         values += [{'members':[v]}for v in members]
         for value in values:
             with self.subTest(value=value),self.assertRaises(ComponentError)as caught:addresses.group(value)

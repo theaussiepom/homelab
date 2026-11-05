@@ -13,17 +13,21 @@ Rows keep declared order and require `direction`, `proto`, `comment`.
 | Field | Type / default | Constraint |
 | --- | --- | --- |
 | direction | Required enum | `in` or `out` |
-| proto | Required enum | `tcp`, `udp`, `icmp`, `icmpv6` |
+| proto | Required enum | `tcp`, `udp`, `icmp`, `icmpv6`, `igmp` |
 | comment | Required text | Nonempty, at most 4096 characters |
-| port | Optional string, null or reference | Numeric comma-separated ports/ranges (colon syntax); or `{endpoint: local_role}` |
-| source / destination | Optional address value | IPv4/CIDR literal or one of `{interface: role}`, `{network: role}`, `{endpoint: role}`, `{address_group: role}` |
+| port | Optional string, null or reference | TCP/UDP: ports/ranges 1–65535 in ascending colon syntax, or `{endpoint: local_role}`. ICMP/ICMPv6: one decimal type 0–255. IGMP: omitted or null |
+| source / destination | Optional address value | IPv4 or IPv6 address/CIDR literal, or one of `{interface: role}`, `{network: role}`, `{endpoint: role}`, `{address_group: role}` |
 | interface | Optional role ID | Binds a declared guest NIC to provider iface `netN` |
 
-Traffic matching further requires ports/ranges in 1–65535 and ascending bounds.
-Inbound unrestricted `source: 0.0.0.0/0` refuses.
+Resolved source and destination must have the same address family. `icmp` and
+`igmp` are IPv4-only; `icmpv6` is IPv6-only. A scoped literal such as
+`fe80::1%eth0` refuses: select the physical interface through its role instead.
+Inbound unrestricted `source: 0.0.0.0/0` or `source: ::/0` refuses.
 The current provider receives explicit ACCEPT rows; there is no authored deny/
-priority/template-command language. IPv4 address allocation remains the
-supported network contract despite the finite protocol enum.
+priority/template-command language. Policy literals do not allocate an IPv6
+address, enable filtering globally, join a multicast group or add a route.
+Network, NIC and endpoint reference allocation retains its existing IPv4
+contract; literal IPv6 policy values can describe a separately managed link.
 
 ## Bindings
 
@@ -41,6 +45,29 @@ All used local roles must be bound and no unused binding is accepted.
 Group source/destination expansion is source-outer, destination-inner, with the
 total row bound checked before allocation. A policy does not derive missing
 access from a connection. Required traffic validates both managed sides.
+
+For example, this complete policy permits only an IPv6 MLDv2 membership report
+on a separately bound interface. PVE carries the ICMP type in its existing
+destination-port field; it is not a UDP port. Bind `link` to the actual local
+guest NIC. Select groups, query/report compatibility and discovery replies
+according to that link's declared policy; this row alone is not a complete
+multicast policy.
+
+```yaml
+rules:
+  - direction: out
+    proto: icmpv6
+    source: fe80::/64
+    destination: ff02::16/128
+    port: '143'
+    interface: link
+    comment: IPv6 multicast membership report on selected link
+```
+
+Changing the destination to `224.0.0.22/32` refuses the mixed family. IPv4 IGMP
+membership instead uses `proto: igmp` without `port`. mDNS/SSDP discovery and
+unicast replies are separate UDP permissions; accepting only a multicast
+destination does not admit arbitrary unicast responses.
 
 ## TLS and backend transport
 

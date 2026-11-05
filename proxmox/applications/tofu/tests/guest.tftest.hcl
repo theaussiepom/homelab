@@ -1,5 +1,116 @@
 mock_provider "proxmox" {}
 
+run "ipv6_discovery_mld_and_ipv4_membership_reach_the_pinned_provider" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [
+        { direction = "in", proto = "udp", source = "fe80::/64", destination = "ff02::fb/128", port = "5353", interface = "net0", comment = "Selected IPv6 mDNS" },
+        { direction = "in", proto = "icmpv6", source = "fe80::/64", destination = "ff02::1/128", port = "130", interface = "net0", comment = "Selected MLD query" },
+        { direction = "out", proto = "icmpv6", source = "fe80::1/128", destination = "ff02::16/128", port = "143", interface = "net0", comment = "Selected MLD report" },
+        { direction = "out", proto = "igmp", source = "198.18.100.20/32", destination = "224.0.0.22/32", interface = "net0", comment = "Selected IPv4 membership" }
+      ]
+    })
+  }
+  assert {
+    condition = (
+      proxmox_virtual_environment_firewall_rules.guest.rule[0].source == "fe80::/64" &&
+      proxmox_virtual_environment_firewall_rules.guest.rule[0].dest == "ff02::fb/128" &&
+      proxmox_virtual_environment_firewall_rules.guest.rule[0].dport == "5353" &&
+      proxmox_virtual_environment_firewall_rules.guest.rule[1].proto == "icmpv6" &&
+      proxmox_virtual_environment_firewall_rules.guest.rule[1].dport == "130" &&
+      proxmox_virtual_environment_firewall_rules.guest.rule[2].dport == "143" &&
+      proxmox_virtual_environment_firewall_rules.guest.rule[3].proto == "igmp" &&
+      alltrue([for row in proxmox_virtual_environment_firewall_rules.guest.rule : row.iface == "net0" && row.action == "ACCEPT"])
+    )
+    error_message = "Preserve family, group, ICMP type, interface and order at the actual provider boundary."
+  }
+  assert {
+    condition = (
+      proxmox_virtual_environment_firewall_options.guest.enabled &&
+      proxmox_virtual_environment_firewall_options.guest.ndp &&
+      !proxmox_virtual_environment_firewall_options.guest.radv &&
+      proxmox_virtual_environment_firewall_options.guest.input_policy == "DROP" &&
+      proxmox_virtual_environment_firewall_options.guest.output_policy == "DROP"
+    )
+    error_message = "Adding rule values must preserve the existing guest options; cluster enforcement is outside this module."
+  }
+}
+
+run "mixed_firewall_address_families_refuse" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "out", proto = "udp", source = "198.18.100.20/32", destination = "ff02::fb/128", port = "5353", comment = "Wrong family" }]
+    })
+  }
+  expect_failures = [var.guest]
+}
+
+run "ipv4_igmp_cannot_select_ipv6" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "out", proto = "igmp", destination = "ff02::16/128", comment = "Wrong protocol family" }]
+    })
+  }
+  expect_failures = [var.guest]
+}
+
+run "icmpv6_cannot_select_ipv4" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "out", proto = "icmpv6", destination = "224.0.0.22/32", port = "143", comment = "Wrong protocol family" }]
+    })
+  }
+  expect_failures = [var.guest]
+}
+
+run "igmp_cannot_have_transport_ports" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "out", proto = "igmp", destination = "224.0.0.22/32", port = "1900", comment = "No IGMP port" }]
+    })
+  }
+  expect_failures = [var.guest]
+}
+
+run "icmpv6_type_is_one_byte_not_a_port_range" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "out", proto = "icmpv6", destination = "ff02::16/128", port = "130:143", comment = "No ICMP range" }]
+    })
+  }
+  expect_failures = [var.guest]
+}
+
+run "scoped_literal_cannot_replace_interface_binding" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      rules = [{ direction = "out", proto = "udp", destination = "ff02::fb%eth0", port = "5353", comment = "Select interface explicitly" }]
+    })
+  }
+  expect_failures = [var.guest]
+}
+
 run "interface_scoped_firewall_reaches_the_provider" {
   command = plan
   module { source = "./guest" }

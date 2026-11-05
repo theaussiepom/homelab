@@ -66,8 +66,11 @@ class Exposures:
                         types.rule_address(row)
                         if isinstance(row, dict):
                             if 'address_group' in row:
-                                ranges.extend(component_addresses.selected(
-                                    row['address_group'], self.resolver.address_groups))
+                                selected = component_addresses.selected(
+                                    row['address_group'], self.resolver.address_groups)
+                                for address in selected:
+                                    types.rule_address(address)
+                                ranges.extend(selected)
                                 require(len(ranges) <= component_addresses.MAX_MEMBERS,
                                         'component.address-group-size')
                                 continue

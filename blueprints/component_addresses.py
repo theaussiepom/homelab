@@ -13,7 +13,7 @@ def group(value):
             'component.address-group-size')
     for member in members:
         if isinstance(member, str):
-            types.rule_address(member)
+            types.rule_address(member, ipv6=True)
         else:
             require(isinstance(member, dict) and len(member) == 1
                     and set(member) <= {'network', 'address_group'}

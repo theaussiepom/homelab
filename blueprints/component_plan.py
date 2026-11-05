@@ -493,7 +493,7 @@ class Resolver:
                     for field, value in (('source', source), ('destination', destination)):
                         if field in expansion:
                             selected[field] = value
-                    require(not (selected['direction'] == 'in' and selected.get('source') == '0.0.0.0/0'))
+                    types.rule_family(selected)
                     result.append(selected)
             require(all(set(binding.get(kind, {})) == refs for kind, refs in used.items()))
         return result

@@ -60,12 +60,15 @@ address_groups:
   clients: {members: [{network: primary}, {address_group: vpn}]}
 ```
 
-Each object contains only nonempty `members`, an ordered list of literal IPv4
-addresses/CIDRs, `{network: id}` or `{address_group: id}`.
+Each object contains only nonempty `members`, an ordered list of literal IPv4 or
+IPv6 addresses/CIDRs, `{network: id}` or `{address_group: id}`.
 Network members expand to the existing canonical CIDR. Group expansion
 preserves duplicates and order; unknown references and cycles refuse even for
 unused groups. No automatic subnet union or deduplication occurs.
 This fragment uses the `primary` network from the worked example below.
+IPv6 literals are policy values, not IPv6 allocations. Each expanded firewall
+row must keep one address family and a compatible protocol. HTTP IP allowlists
+retain their IPv4-only contract and refuse groups containing IPv6 values.
 
 Bounds: 256 authored members/group, 4096 expanded values/group, depth 64,
 65,536 aggregate expanded values, 4096 final policy rows/guest.

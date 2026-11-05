@@ -503,16 +503,39 @@ def runtime(value):
             require(all(re.fullmatch(r'/tmp:rw,nosuid,nodev,size=[1-9][0-9]*m', item) for item in row['tmpfs']))
 
 
-def rule_address(value):
+def rule_address(value, *, ipv6=False):
     if isinstance(value, str):
         try:
-            ipaddress.IPv4Network(value, strict=False)
-        except (ipaddress.AddressValueError, ipaddress.NetmaskValueError):
+            selected = ipaddress.ip_network(value, strict=False)
+        except ValueError:
             require(False)
+        require('%' not in value and (ipv6 or selected.version == 4))
     else:
         require(isinstance(value, dict) and len(value) == 1 and
                 set(value) <= {'network', 'interface', 'endpoint', 'address_group'} and
                 all(identifier(item) for item in value.values()))
+
+
+def rule_port(value, *, icmp=False):
+    """Literal transport ports, or one ICMP type carried by PVE's dport."""
+    require(isinstance(value, str))
+    if icmp:
+        require(re.fullmatch(r'0|[1-9][0-9]{0,2}', value) and int(value) <= 255)
+        return
+    require(re.fullmatch(r'[1-9][0-9]{0,4}(?::[1-9][0-9]{0,4})?'
+                         r'(?:,[1-9][0-9]{0,4}(?::[1-9][0-9]{0,4})?)*', value))
+    require(all(1 <= bounds[0] <= bounds[-1] <= 65535
+                for bounds in (list(map(int, item.split(':'))) for item in value.split(','))))
+
+
+def rule_family(row):
+    """Validate resolved selector families without adding grants or addresses."""
+    families = {ipaddress.ip_network(row[field], strict=False).version
+                for field in ('source', 'destination') if row.get(field) is not None}
+    require(len(families) <= 1 and not (row['proto'] in ('icmp', 'igmp') and 6 in families)
+            and not (row['proto'] == 'icmpv6' and 4 in families), 'component.policy-family')
+    require(not (row['direction'] == 'in' and row.get('source') is not None
+                 and ipaddress.ip_network(row['source'], strict=False).prefixlen == 0))
 
 
 def network_policy(value):
@@ -520,18 +543,18 @@ def network_policy(value):
     require(isinstance(value['rules'], list) and len(value['rules']) <= 4096)
     for row in value['rules']:
         closed(row, ('direction', 'proto', 'comment'), ('port', 'source', 'destination', 'interface'))
-        require(row['direction'] in ('in', 'out') and row['proto'] in ('tcp', 'udp', 'icmp', 'icmpv6'))
+        require(row['direction'] in ('in', 'out') and row['proto'] in ('tcp', 'udp', 'icmp', 'icmpv6', 'igmp'))
         text(row['comment'])
         require('interface' not in row or identifier(row['interface']))
         for field in ('source', 'destination'):
             if field in row:
-                rule_address(row[field])
+                rule_address(row[field], ipv6=True)
         if 'port' in row:
             if row['port'] is None:
                 continue
             if isinstance(row['port'], dict):
                 closed(row['port'], ('endpoint',))
-                require(identifier(row['port']['endpoint']))
+                require(row['proto'] in ('tcp', 'udp') and identifier(row['port']['endpoint']))
             else:
-                require(isinstance(row['port'], str) and
-                        re.fullmatch(r'[0-9]+(?::[0-9]+)?(?:,[0-9]+(?::[0-9]+)?)*', row['port']))
+                require(row['proto'] != 'igmp')
+                rule_port(row['port'], icmp=row['proto'] in ('icmp', 'icmpv6'))
