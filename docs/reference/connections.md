@@ -32,6 +32,13 @@ refuse. Without readiness the connection is value-only; it does not start peers.
 Required cross-guest communication must match explicit source and destination
 guest rules. Nothing here generates an access grant.
 
+Profile metadata can permit omission while an adapter's final health contract
+still requires a role. Current CloudBeaver and Music Assistant packets need a
+`public` HTTPS connection (IPv4 ingress port 443) and owned HTTPS origin for their
+public-route health checks. Music Assistant also binds that check to its physical
+web source. Resolve **and lower** the complete profile composition; a structurally
+optional declaration does not prove that omitting it yields an executable packet.
+
 ## Accounts
 
 Site `accounts.<id>` requires all of:
@@ -58,5 +65,55 @@ source extraction leaves those checks intact. Changing a target can change
 reachability and app configuration, so review policies, credentials and native
 service effect. The compiler provides no interruption-free or account-migration
 guarantee.
+
+## Worked connection and account combination
+
+This complete connection value binds an Explorer's broker role to a managed
+MQTT endpoint. It requires compatible `browser`/`broker` app profiles and physical
+role bindings, a `broker` domain, and the `client` account below. It is a worked
+relationship, not a complete site or a credential value.
+
+The complete tested [broker/browser/ingress composition](../examples/relationships/README.md)
+contains every prerequisite in its [site.yaml](../examples/relationships/site.yaml)
+and adjacent library/image indexes. In that source, `connections.broker`,
+`accounts.client` and `secret_sources.browser_password` have the exact values
+shown below; `apps.browser` and `apps.broker` bind their profile roles.
+
+<!-- example: connection-managed -->
+```yaml
+consumer: {app: browser, connection: broker}
+target: {app: broker, endpoint: backend}
+source_interface: broker
+hostname: {domain: broker}
+account: client
+```
+
+Declare the account as `accounts.client` and its generated source as
+`secret_sources.browser_password`. The producer/principal/credential owner is
+create-once; the connection does not supply a password inline.
+
+<!-- example: account-managed -->
+```yaml
+adapter: mqtt-client
+owner: browser
+target: {app: broker, endpoint: backend}
+principal: browser
+credential: browser_password
+access: read-write-all
+lifecycle: create-once
+```
+
+<!-- example: account-source -->
+```yaml
+type: generated
+credential_id: example-browser-password
+```
+
+**Invalid variation:** also add `credential: {principal: browser, secret: probe}`
+to the connection. It cannot select both an account and an existing credential.
+Changing `source_interface` to an undeclared role likewise refuses.
+An optional connection without `readiness` adds no execution wait; add readiness
+only if that exact profile role permits it. Changing the target does not transfer
+an existing account's ownership or authorise rotating its material.
 
 [Reference index](README.md) · [Policies](policies.md) · [Sources](sources.md)

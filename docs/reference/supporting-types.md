@@ -142,4 +142,66 @@ owned runtime leaves and selected private material remain sealed. Capacity,
 capability, mount, image and listener changes must survive both compiler and
 native guards. No type here implements generic commands, replacement or rollback.
 
+## Worked profile and runtime combination
+
+This complete profile body describes the tutorial's single Unbound socket. It
+is a value under `app_profiles.recursive`; a standalone leaf additionally needs
+`schema` and `kind: app-profile` headers.
+
+<!-- example: profile-minimal -->
+```yaml
+adapter: unbound
+display_name: Recursive DNS
+interfaces:
+  private: {required: true, accepts: [app-network]}
+  local: {required: true, accepts: [guest-loopback]}
+listeners:
+  udp:
+    service: unbound
+    namespace: app-network
+    interface: private
+    bind: wildcard
+    protocol: udp
+    port: 53
+    publish: {scope: guest-loopback, port: 5335}
+endpoints:
+  dns: {listener: udp, protocol: udp, via: local}
+software: [resolver]
+runtime: [resolver]
+health:
+  ready: {type: adapter, check: readiness}
+```
+
+Its selected `runtime_profiles.resolver` is a complete runtime value:
+
+<!-- example: runtime-minimal -->
+```yaml
+containers:
+  unbound: {memory_mib: 256, cpu_limit: 1, pids_limit: 128}
+```
+
+The [tutorial library](../examples/first-configuration/stack.json) supplies the
+matching software/image declaration. A concrete site binds both interface roles
+as shown on [Apps](apps.md). The endpoint's protocol is a value contract; its
+listener owns the actual UDP socket and publication. **Invalid variation:**
+change the listener's `interface` to an undeclared role, or use `cpu_limit: true`.
+Both fail their own validators. A valid profile can still fail later resource,
+namespace, image or traffic checks when composed with other apps.
+
+A serial declaration is another complete supporting value, placed in
+`devices.coordinator` and bound through an app's declared device role:
+
+<!-- example: device-minimal -->
+```yaml
+type: serial
+context: lab
+path: /dev/serial/by-id/example-coordinator
+capability: host_serial
+```
+
+`host_serial` must be a capability of context `lab`. The path is a synthetic
+identity, not a claim that a device exists. `/dev/ttyUSB0` is not an accepted
+substitute for the required stable by-id path. Later deployment verifies the
+actual selected device; changing the declaration is not radio commissioning.
+
 [Reference index](README.md) · [Library](library.md)

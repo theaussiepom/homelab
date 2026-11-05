@@ -26,7 +26,8 @@ The [Glossary](glossary.md) explains recurring terms.
 - [Operations](operations/README.md), [Deployment](operations/deployment.md)
   and [Troubleshooting](operations/troubleshooting.md).
 - [Contributing](contributing/README.md), [Components](contributing/components.md)
-  and [Testing](contributing/testing.md).
+  and [Testing](contributing/testing.md), plus the
+  [documentation standard and templates](contributing/documentation.md).
 - [Security and signing](contributing-safely.md).
 - [Host/bootstrap, installer and recovery](framework-reference.md) are separate
   subsystems, with their own prerequisites and authority.

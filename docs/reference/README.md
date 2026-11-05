@@ -5,6 +5,13 @@ All objects are closed: unknown fields refuse. Required fields have no default
 unless a table explicitly says otherwise. A list is ordered unless documented
 otherwise. Null is not interchangeable with omission.
 
+Configuration pages distinguish syntax, concrete worked values and complete
+sites. A value fragment still needs its named surrounding context; the
+[tutorial](../guides/first-configuration.md) is the complete runnable offline
+path. Named examples are exercised by existing component validators and real
+compiler integrations, including the documented invalid variations. Passing an
+example's source boundary does not prove deployment or service readiness.
+
 ## Documents and declarations
 
 | Contract | Fields covered |

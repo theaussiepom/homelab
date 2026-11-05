@@ -72,4 +72,30 @@ The real compiler tests compare inline/leaf JSON/YAML output and exercise wrong
 kind/schema, partial/unknown bodies, path escapes, symlinks, ambiguous siblings,
 duplicate fields and leaf drift.
 
+## Worked extraction without an overlay
+
+Move the tutorial's entire `apps.recursive_a` value into `apps/recursive.yaml`
+and replace its site entry with `{source: apps/recursive.yaml}`. This complete
+leaf is validated as an app after its two headers are removed:
+
+<!-- example: source-app -->
+```yaml
+schema: homelab-components-v1
+kind: app
+profile: recursive
+guest: resolver
+lifecycle: fresh
+interfaces:
+  private: {scope: app-network, network: default}
+  local: {scope: guest-loopback}
+```
+
+The original inline and extracted forms have identical resolved apps, runtime
+packets and dependency graph. The consumed source filenames/hashes differ.
+Combine extraction with an explicit app `display_name` inside that leaf, not
+beside `source` in the parent. **Invalid variation:**
+`{source: apps/recursive.yaml, display_name: Another label}` refuses; a reference
+is not an override. A `kind: guest` header in this same app leaf also refuses.
+These checks use the real confined reader, including for source-only compilation.
+
 [Reference index](README.md) · [References guide](../guides/references-and-reuse.md)

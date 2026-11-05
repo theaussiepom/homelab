@@ -59,4 +59,32 @@ Changing a default can affect every consuming instance. Compare effective
 outputs, budgets and native plans, and document changed support requirements.
 A profile name change does not itself move retained data or transfer ownership.
 
+## Worked reusable definition
+
+The library root is still fixed `stack.json`; the following is a complete YAML
+**guest-template leaf**, referenced by
+`guest_templates.base: {source: templates/base.yaml}` in that JSON manifest.
+It contains defaults, not a concrete VMID, host address or credential.
+
+<!-- example: template-minimal -->
+```yaml
+schema: homelab-components-v1
+kind: guest-template
+resources: {cpu_cores: 1, memory_mib: 512, root_gib: 8, os_reserve_mib: 128}
+startup: {started: true, start_on_boot: true, boot_order: 30}
+security: {unprivileged: true, protection: true, nesting: true, keyctl: false}
+```
+
+Combine this with the tutorial's complete `recursive` app profile, its software,
+image/runtime/health declarations and the worked [guest](guests.md#worked-guest-and-inherited-defaults).
+A site may override only `memory_mib` while inheriting the other template fields.
+**Invalid variation:** omit `security.protection`, or set it false. The template
+must be complete and protected. Do not put an `identity` field here; VMID and
+hostname belong to the guest instance.
+
+See the [complete tutorial library](../examples/first-configuration/stack.json)
+for a minimal useful library that compiles and lowers without an external
+catalogue. Extracting its template into this leaf preserves effective packets;
+changing a default can affect all instances that inherit it.
+
 [Reference index](README.md) · [Supporting types](supporting-types.md)

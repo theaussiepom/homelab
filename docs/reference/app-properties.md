@@ -32,9 +32,11 @@ Authentik additionally accepts:
   provider/application metadata and exact additions. It is not general IdP
   provisioning.
 
-Zabbix accepts no other properties. Outside root monitoring it needs the selected
-database_password role. Root monitoring owns that generated credential and
-refuses a duplicate selected role.
+Zabbix accepts no other properties. Source binding outside root monitoring
+accepts a selected `database_password` role, but that is not a supported ordinary
+deployment path: current app preparation requires root monitoring's owned
+credential and exact monitoring files, with no selected scalar password. Root
+monitoring owns the generated credential and refuses a duplicate selected role.
 
 ## PostgreSQL
 
@@ -111,6 +113,10 @@ environment overrides and multiple inverters are unsupported.
 | mariadb_jdbc | Library-owned only, required exactly when managed MariaDB exists |
 
 At most 16 unmanaged and 8 managed connections, 24 total.
+The current complete compiler path additionally requires **at least one managed
+connection**: its account binder validates the nonempty owned administrator set.
+Unmanaged metadata can accompany that set; an unmanaged-only configuration is
+currently unsupported even though its property object validates structurally.
 JDBC object has exactly version, sha256, image_filename: version 3.5.N
 (N 11–999), lowercase 64-hex SHA256, filename matching that version's JAR or
 the fixed image compatibility filename mariadb-java-client-3.5.10.jar.
@@ -119,6 +125,9 @@ software authority. The retired pgAdmin image is not an active property.
 
 Cloud requires its owned HTTPS origin and selected OIDC contract; recovery admin,
 workspace/custody, SQL/account/HOLD and private roles remain guarded.
+Its final health rows also require the explicit `public` HTTPS connection to
+IPv4 ingress port 443. Music Assistant has the same public-route floor, with
+its physical web source. See [Connections](connections.md).
 
 ## Changes and validation
 
@@ -129,5 +138,81 @@ relationships remain protected. A property table does not promise that every
 syntactically valid change can be applied online. Use
 [Lifecycle](lifecycle.md), the library's selected profile page and the actual
 native plan/service verification.
+
+## Worked property objects
+
+Each value below is a complete **effective properties object for the named
+adapter**, not a whole app or a selection of every adapter at once. Put only the
+chosen value under `apps.<id>.properties`, or let the library supply some direct
+keys. Reference IDs must then resolve through the accompanying app/site.
+These examples pass property validators; that is weaker than a supported complete
+profile, native commissioning or working external services.
+
+<!-- example: properties-adapters -->
+```yaml
+unbound: {publish_port: 5335}
+pihole: {}
+homeassistant: {mdns: {interface: web, startup: startup}}
+node_red: {}
+mqtt: {password_file: /mosquitto/config/passwords}
+mqtt_explorer: {connection_name: Example broker}
+music_assistant: {}
+mariadb: {}
+influxdb: {}
+authentik:
+  database: {name: example_identity, user: example_identity}
+  smtp:
+    host: mail.example.invalid
+    port: 587
+    use_tls: true
+    use_ssl: false
+    from: identity@example.invalid
+    username: ""
+    timeout: 30
+zabbix: {database: {name: example_monitoring, user: example_monitoring}}
+postgresql:
+  client_access:
+    - source: {app: client, interface: database}
+      database: all
+      user: all
+      method: scram-sha-256
+traefik:
+  dashboard: false
+  provider: {context: lab, token_id: reader@pve!discovery}
+  acme: {email: ops@example.invalid, resolvers: [{external: dns}]}
+zigbee2mqtt: {adapter: zstack, mqtt_base_topic: example/zigbee}
+bitwarden:
+  issuer: {protocol: https, domain: vault}
+  database_name: example_vault
+  data_uid: 1000
+  data_gid: 1000
+pegaprox: {trusted_proxy: {app: ingress, interface: web}}
+winet: {mqtt_prefix: example/inverter}
+cloudbeaver:
+  server_name: Example database browser
+  recovery_admin: recovery_admin
+  heap_mib: 512
+  auth_headers: {user: X-Example-User, team: X-Example-Team}
+  connections:
+    reporting: {name: Reporting, database: reports, sslmode: require}
+```
+
+The CloudBeaver `reporting` example is for an **unmanaged PostgreSQL** connection;
+its matching connection and existing credential are required separately. A
+managed connection omits `sslmode` and uses its owned account. Do not copy that
+key into managed PostgreSQL or any MariaDB metadata. The `reporting` property
+object alone is not a complete supported Cloud app: include at least one managed
+DB connection/account and the public/OIDC/origin prerequisites above.
+The Home Assistant mDNS
+example needs retained supported storage/capability/runtime selections; MQTT
+needs its file probe, and the retained-only apps above cannot be installed fresh
+just because their property values validate.
+
+For a practical change, increase CloudBeaver `heap_mib` to 768 and review the
+selected container budget; changing the property does not allocate RAM for you.
+**Invalid variations:** both SMTP TLS flags true, `data_uid: true`, a newline in
+Explorer's connection name, or unknown `image_id` on Bitwarden all refuse at the
+owning property boundary. Changes to actual credentials/data identities remain
+subject to [private material continuity](identity-and-secrets.md#protected-material-continuity).
 
 [Reference index](README.md) · [Apps](apps.md)

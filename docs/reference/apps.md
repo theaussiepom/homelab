@@ -61,4 +61,39 @@ Removing a sealed private role or changing material refuses; additions are
 checked through that role's normal parser. [Lifecycle](lifecycle.md) describes
 the effect boundary and unsupported deletion/rotation cases.
 
+## Worked app and combination
+
+This is the complete value of `apps.recursive_a` in the
+[offline tutorial](../examples/first-configuration/site.yaml). It compiles with
+that tutorial's `recursive` profile and `resolver` guest; it is not a standalone
+site or deployment-ready configuration.
+
+<!-- example: app-minimal -->
+```yaml
+profile: recursive
+guest: resolver
+lifecycle: fresh
+interfaces:
+  private: {scope: app-network, network: default}
+  local: {scope: guest-loopback}
+```
+
+For a practical override, add the following fields to this app. The `unbound`
+role comes from its selected runtime; 256 MiB remains within the tutorial guest's
+budget. The display label is independent of its persistent identity.
+
+<!-- example: app-overrides -->
+```yaml
+display_name: Example recursive resolver
+resources:
+  containers:
+    unbound: {memory_mib: 256, cpu_limit: 1, pids_limit: 128}
+```
+
+**Invalid variation:** change `interfaces.local` to `{scope: app-network,
+network: default}`. This is a valid scope generally, but this profile accepts
+only guest loopback for that role, so real resolution refuses it.
+Keep `lifecycle: fresh` for later ordinary deployments of this owned app; do not
+toggle it after installation. See [First installation and later deployments](lifecycle.md).
+
 [Reference index](README.md) · [Properties](app-properties.md)

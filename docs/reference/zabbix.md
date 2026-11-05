@@ -13,6 +13,13 @@ The site still declares the Zabbix app, guest, database/metrics connections,
 software and exposure. Root presence does not invent a guest allocation.
 Every selected guest's combined monitoring profiles must include linux.
 
+Current ordinary app preparation requires this root-owned monitoring capability:
+its generated database credential and exact monitoring files. A Zabbix app
+outside the root feature may pass structural/source binding with a selected
+`database_password`, but that combination is not supported by the ordinary
+preparation caller. Do not treat source acceptance as a standalone server
+installation recipe or pass an arbitrary scalar password to bypass that owner.
+
 ## Derived behavior
 
 The compiler selects active Agent2 settings and stable node-VMID host/PSK
@@ -53,5 +60,33 @@ precheck and exact HBA contract. It does not create/replace production database
 certificates. An encrypted connection alone is not a newly qualified certificate
 identity policy. InfluxDB organization/bucket discovery needs its own scoped
 credential and is not inferred from the metrics connection.
+
+## Worked selection and profile
+
+This is a **site-root fragment**, not an installation recipe:
+
+<!-- example: zabbix-selection -->
+```yaml
+zabbix: {server: monitoring}
+```
+
+It selects an already declared Zabbix app named `monitoring`. A reusable
+`monitoring_profiles.linux_host` value can be:
+
+<!-- example: zabbix-profile -->
+```yaml
+type: zabbix-agent
+profiles: [linux]
+```
+
+A template or guest can then select `monitoring: {profile: linux_host}`.
+Add `docker` to the same profile only for a guest whose selected workload needs
+that integration and whose runtime prerequisites are supported. Root monitoring
+still requires the declared server's database, software and connections.
+**Invalid variation:** `zabbix: false` refuses; omission is the disabled form.
+`profiles: [docker]` validates as a profile type but does not satisfy the root
+feature's required Linux profile for every selected guest.
+A later run updates the owned monitoring configuration without replacing host
+identities or regenerating existing credentials.
 
 [Reference index](README.md) · [Deployment](../operations/deployment.md)

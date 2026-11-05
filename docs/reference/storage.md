@@ -49,4 +49,49 @@ retirement require their separate supported procedures. Ordinary CD preserves
 unselected data and will refuse unsafe plans. [Lifecycle](lifecycle.md) supplies
 the shared update boundary.
 
+## Worked pool and data bindings
+
+This is the complete value of tutorial `storage.local`:
+
+<!-- example: pool-minimal -->
+```yaml
+context: lab
+pool: example-local
+```
+
+The following is a **combination fragment**, not a site root: the guest declares
+a provider volume, a profile declares a writable role, and the instance binds
+that role. The selected profile must support this target and initializer.
+
+<!-- example: storage-combination -->
+```yaml
+volume:
+  storage: local
+  slot: 0
+  path: /srv/example-data
+  size_gib: 8
+profile_role:
+  target: /data
+  read_only: false
+  required: true
+  kind: directory
+  initialize: {type: directory, uid: 1000, gid: 1000, mode: "0700"}
+app_binding:
+  volume: data
+  subpath: application
+```
+
+Use the `volume` value at `guests.<id>.volumes.data`, the `profile_role` value at
+`app_profiles.<id>.storage.data`, and `app_binding` at `apps.<id>.storage.data`.
+The three wrapper labels above are explanatory, not accepted source fields.
+This combination illustrates the direct volume/role/binding validators, not a
+complete supported app profile or a native mount procedure. Do not add this
+target/initializer to an arbitrary profile. Select a library profile that
+explicitly supports its storage role and use that profile's complete example.
+**Invalid variation:** set the volume path to `/etc/example-data`, or set
+`initialize` on a read-only role. Both refuse before execution. Reusing a volume
+slot or overlapping its path with another selected root also refuses.
+A later deployment preserves data; increasing a requested size still requires
+the guarded provider plan and is not an automatic data migration.
+
 [Reference index](README.md) · [Apps](apps.md)

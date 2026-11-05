@@ -31,4 +31,46 @@ API endpoint, node, VMID and hostname. Pointing an existing ID at another contex
 is not an import or replacement operation. Protected IDs and permanent locks/
 HOLDs remain runtime safeguards.
 
+## Worked context
+
+This minimal context follows the tutorial's `contexts.lab` shape. Its endpoint and
+secret-source IDs are declared in that same site. The paths are public synthetic
+examples: source checks validate their spelling without opening them.
+
+<!-- example: context-minimal -->
+```yaml
+backend: proxmox-lxc
+node: example-node
+api_endpoint: {external: api}
+trust: {ca_file: /example/ca.pem, known_hosts: /example/known_hosts}
+credentials: {api_token: token, ssh_private_key: ssh}
+paths:
+  state_root: /example/state
+  backup_directory: /example/backup/data
+  backup_mount: /example/backup
+  backup_source: example:/backup
+protected_guests: [9900]
+ssh_public_keys: []
+dns_servers: [{external: dns}]
+```
+
+A serial-equipped context can additionally declare this capability, then a site
+[device](supporting-types.md#devices) can reference `host_serial`. This is an
+explicit credential/trust boundary, not device discovery.
+
+<!-- example: context-capability -->
+```yaml
+capabilities:
+  host_serial:
+    type: serial-device
+    ssh_private_key: ssh
+    known_hosts: /example/host-known_hosts
+```
+
+**Invalid variation:** removing `trust.known_hosts` fails the closed required
+shape. An empty SSH key list is allowed for offline examples but refuses real
+deployment admission. Changing provider endpoint/node on an owned guest refuses
+normal continuity; changing trust files requires real trust validation, not a
+new context name to bypass the old owner.
+
 [Reference index](README.md) · [Networks](networks.md) · [Lifecycle](lifecycle.md)

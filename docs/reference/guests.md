@@ -75,4 +75,38 @@ guarded native plan; interruption is not universally specified.
 Retained state cannot become fresh by changing a label.
 See [Lifecycle](lifecycle.md).
 
+## Worked guest and inherited defaults
+
+This complete `guests.resolver` value works with the tutorial's context,
+`primary` network, `local` pool and `base` template. Those referenced objects
+must also exist; the example is synthetic and cannot pass deployment admission.
+
+<!-- example: guest-minimal -->
+```yaml
+context: lab
+template: base
+lifecycle: fresh
+identity: {vmid: 610, hostname: example-dns}
+template_file_id: example:vztmpl/debian.tar.zst
+root_storage: local
+control_interface: management
+interfaces:
+  management:
+    network: primary
+    slot: 0
+    mac: 02:00:00:20:00:10
+    address: {mode: static, value: 198.18.20.10}
+    default_route: true
+```
+
+Omitting resources/startup/security inherits the complete template. Add
+`resources: {memory_mib: 1024}` to keep its CPU/root/reserve defaults while
+allocating more memory. This is a direct-field merge, not recursive YAML merging.
+**Invalid variation:** `resources: {memory_mib: true}` refuses because a Boolean
+is not an integer allocation. A second NIC also cannot reuse slot zero.
+
+The same `fresh` source is used for first installation and subsequent owned
+updates. The runtime distinguishes them from genuine receipts and backend state;
+changing the label to `retained` is neither a required next step nor an import.
+
 [Reference index](README.md) · [Apps](apps.md)

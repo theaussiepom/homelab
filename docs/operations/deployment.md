@@ -12,8 +12,10 @@ framework/library selections.
    rejects known example bindings.
 3. Existing trusted CA/known-host inputs and protected controller paths with
    their required ownership/modes. Compile does not test those files.
-4. Supported fresh creation or genuine current retained receipt/backend/payload
-   ownership, with no conflicting active/pending marker.
+4. A supported first-installation path or genuine current owned
+   receipt/backend/payload continuation, with no conflicting active/pending marker.
+   A site originally installed with `fresh` keeps that source for later deployments;
+   there is no required lifecycle toggle. `retained` is not an import mechanism.
 5. Declared exact software/artifact selections, app-specific data/credential/
    database/device prerequisites and required traffic.
 6. Generated library/consumer workflows, selected protected environment and

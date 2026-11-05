@@ -83,4 +83,51 @@ Changing policy values changes selected configuration/access. It grants no
 authority to execute or bypass an existing HOLD. Verify public TLS, backend trust,
 authentication and actual reachability separately after authorised deployment.
 
+## Worked rule, binding and route middleware
+
+The complete [relationship composition](../examples/relationships/README.md)
+shows explicit endpoint-bound access and a selected `office_only` middleware in
+its actual [site.yaml](../examples/relationships/site.yaml). The minimal rule
+below can instead be added to the first tutorial's existing guest/context.
+
+This is a complete network-policy value. `service` is a local role whose target
+address and port are both bound by the guest, so the rule keeps one authority
+for the selected socket.
+
+<!-- example: policy-network -->
+```yaml
+rules:
+  - direction: out
+    proto: tcp
+    destination: {endpoint: service}
+    port: {endpoint: service}
+    comment: Selected HTTPS service
+```
+
+Select it as `policies.network.selected_service`, then bind it on a guest:
+
+<!-- example: policy-binding -->
+```yaml
+policy: selected_service
+endpoints:
+  service: {external: api}
+```
+
+This deliberately requests access to the declared endpoint; merely referencing
+it in an app does not add this rule. For an HTTP client allowlist, a complete
+middleware value uses a **list**, including when it selects one group:
+
+<!-- example: policy-middleware -->
+```yaml
+type: ip-allow-list
+ranges: [{address_group: clients}]
+```
+
+The site must declare `clients`; an exposure must explicitly select this named
+middleware for it to affect a route. **Invalid variation:** `ranges:
+{address_group: clients}` is a mapping, not the required list, and refuses.
+Likewise a missing endpoint binding or an unused extra binding refuses.
+Policy changes are desired access/configuration changes; they are not evidence
+that a firewall, TLS endpoint or login flow was observed working.
+
 [Reference index](README.md) · [Connections](connections.md) · [Exposures](exposures.md)

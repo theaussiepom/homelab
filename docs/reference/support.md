@@ -4,6 +4,19 @@ The implemented application platform is Debian13 LXC on Proxmox.
 VM guests, arbitrary physical fleet targets and universal hardware support are
 not implied. Host bootstrap/ISO/network recovery are separate subsystems.
 
+## First installation and later deployments
+
+The `fresh` column below describes first-installation capability, not a setting
+to switch off after creation. The same supported `fresh` configuration continues
+through later owned deployments. `retained` requires an installation already
+owned by genuine HomeLab receipts/state/payloads; it does not import an arbitrary
+existing service. A retained-only adapter has no promised first-installation path.
+
+For example, the [Unbound tutorial](../guides/first-configuration.md) compiles a
+supported fresh configuration offline. An already owned Bitwarden installation
+uses its retained contract and normal declared image, preserving its database,
+keys and data. Neither example promises general restore, replacement or rollback.
+
 ## Adapter capability matrix
 
 This is the framework adapter boundary, not a promise that every library profile
@@ -20,13 +33,13 @@ or private installation has completed native commissioning.
 | cloudbeaver | Compose gateway + app | Fresh/retained owned workspace, OIDC/recovery identity and selected DB accounts |
 | authentik | Compose server/worker/Redis | Existing database/private roles and optional exact callback update contract; source does not commission an IdP merely by selecting it |
 | traefik | Compose | Declared ACME/provider/runtime contracts; trust/token prerequisites required |
-| zabbix | Compose server/web | Selected database/auth/monitoring-owner prerequisites; root expansion does not invent placement |
+| zabbix | Compose server/web | Ordinary preparation requires root-owned monitoring credentials/files; database/auth prerequisites and explicit placement remain |
 | postgresql | Native packages/systemd | Exact version/data/listener/account ownership; current ordinary owned updates; source native render is not fresh database commissioning proof |
 | mariadb | Native packages/systemd | Package-account and existing data/credential guards; no automatic import/rotation |
 | influxdb | Native packages/systemd | Fixed native account/data/config ownership; no automatic organisation/bucket commissioning |
 | bitwarden | Compose | Retained only; genuine environment/install/DB/data identity; normal declared image |
 | zigbee2mqtt | Compose | Retained only; one owned serial coordinator; fresh commissioning refused |
-| music_assistant | Compose host network | Retained only; existing /data and exact process/listener contract |
+| music_assistant | Compose host network | Retained only; existing /data, exact process/listener contract, public HTTPS connection and owned origin |
 | pegaprox | Compose | Existing DB key/data and trusted private proxy; no arbitrary backend publication |
 | winet | Compose | Single inverter, closed existing options/credential contract; no arbitrary vendor options |
 
@@ -34,6 +47,10 @@ Each library profile specifies actual required interfaces, storage, resource
 minimums and software versions. A profile can be more restrictive than this
 adapter matrix. Source-only acceptance is deliberately weaker than target
 qualification; no unnamed fresh path is promised by this table.
+CloudBeaver currently needs at least one managed DB account/connection even when
+unmanaged metadata is also selected. CloudBeaver and Music Assistant need their
+explicit public HTTPS connection/origin for packet health generation; omission
+may pass an earlier structural boundary and still refuse full resolution/lowering.
 
 ## Placement and repeat instances
 

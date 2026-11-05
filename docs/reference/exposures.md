@@ -30,8 +30,14 @@ one of its own HTTP exposures. Optional domain selects its main/alias ID.
 The derived URL includes a nonstandard ingress port. It does not copy an
 unrelated route's origin. Authentication binders require this owned origin.
 
-## Example fragment
+## Worked exposure
 
+The complete [relationship example](../examples/relationships/README.md) supplies
+`apps.browser`, `apps.ingress`, `domains.browser` and `policies.tls.public`.
+Its [site.yaml](../examples/relationships/site.yaml) uses this exact exposure
+body plus the explicitly declared middleware combination explained below.
+
+<!-- example: exposure-http -->
 ```yaml
 schema: homelab-components-v1
 kind: exposure
@@ -40,11 +46,17 @@ endpoint: {app: browser, endpoint: web}
 domain: browser
 ingress: {app: ingress, endpoint: https}
 tls: public
-middlewares: [headers, office_only]
 ```
 
-This complete leaf requires declared app endpoints, domain and policies in its
-own site/library. It creates no readiness or general firewall rule.
+This complete leaf requires the `browser` web and `ingress` HTTPS endpoints,
+`domains.browser` and TLS policy `public: {type: acme, resolver: letsencrypt}`.
+It creates no readiness or general firewall rule. Combine it with named
+`default-headers` and `ip-allow-list` middleware values by adding
+`middlewares: [headers, office_only]` after declaring both policies. Main/alias
+hosts belong to this one exposure, so an app may select its origin.
+**Invalid variation:** repeat `browser` in `aliases`, or select a missing TLS
+policy. Both refuse in the real exposure binder; a domain alone does not make
+a valid public route.
 
 ## Updates and DNS retirement
 

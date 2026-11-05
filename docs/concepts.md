@@ -54,3 +54,15 @@ owns guest configuration. A canonical ordinary receipt, immutable operation
 receipt, sealed payloads and backend identity together establish normal retained
 ownership. They are not an import mechanism. [Lifecycle](reference/lifecycle.md)
 describes what a subsequent run may change.
+
+## First installation and later deployments
+
+For a supported new guest/app, `fresh` permits creation when there is no existing
+owner or backend. Keep that same source for later ordinary deployments: runtime
+ownership proofs distinguish updates from first creation. You do not toggle a
+lifecycle field after a successful run.
+
+`retained` means an already HomeLab-owned installation whose genuine prior
+receipt, backend and app proofs must match. It does not import a manually created
+installation. An adapter may support owned updates without supporting first
+installation; consult [Support](reference/support.md) before choosing a profile.

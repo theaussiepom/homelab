@@ -22,3 +22,9 @@ bindings and operating policy. Keep private facts out of reusable source.
 Read [Components](components.md), [Testing](testing.md) and the existing
 [security/signing procedure](../contributing-safely.md).
 Do not bypass hooks, reduce thresholds or suppress an unexplained failure.
+
+Use the [documentation standard](documentation.md) and its reusable
+[reference](../templates/configuration-reference.md),
+[task-guide](../templates/task-guide.md) and
+[tutorial](../templates/tutorial.md) templates. Copy the structure, replace every
+placeholder and validate the resulting examples; a template is not a finished page.

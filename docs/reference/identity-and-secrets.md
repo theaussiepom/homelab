@@ -19,11 +19,18 @@ sources. Generated sources belong to the separate [account](connections.md#accou
 owner. Scalar inputs are nonempty ≤65536 UTF-8 bytes with no CR/LF/NUL and remain
 unchanged. File-only compound roles still require their exact parser.
 
+For a complete generated-account use, the
+[relationship example](../examples/relationships/README.md) connects
+`apps.browser` to `apps.broker` using `accounts.client` and
+`secret_sources.browser_password` in its authored site. Existing-credential and
+OIDC values below illustrate their own source/provider validator boundary;
+they do not, by themselves, supply all prerequisites for an app installation.
+
 | Adapter | Finite private roles |
 | --- | --- |
 | authentik | secret_key, postgresql_password, smtp_password |
 | traefik | cloudflare_dns_token, proxmox_token |
-| zabbix | database_password (not when root monitoring owns it) |
+| zabbix | database_password is accepted structurally outside root; ordinary preparation requires root-owned monitoring instead, with no selected role |
 | node_red | api_token |
 | bitwarden | runtime_environment |
 | pegaprox | database_key |
@@ -83,5 +90,48 @@ app's payload publication, credential writers, STARTED and service executor.
 Infrastructure/preparation may already have completed. There is no implicit
 rotation, reset or authored override. Generated accounts have separate stable
 producer/principal/create-once ownership.
+
+## Worked sources and OIDC combination
+
+These are complete source values placed under separate named `secret_sources`
+keys. They describe where selected material comes from, never its contents.
+
+<!-- example: secret-file -->
+```yaml
+type: file
+path: /example/private/application.env
+```
+
+<!-- example: secret-environment -->
+```yaml
+type: environment
+name: EXAMPLE_API_TOKEN
+workflow_secret: EXAMPLE_WORKFLOW_TOKEN
+```
+
+A file-only role cannot use the environment form. **Invalid variation:** add
+`workflow_secret` to the file source; that key is accepted only for environment
+sources. The source reader does not test runtime mode/owner/contents.
+
+This complete OIDC provider value requires `domains.login` in the same site.
+A matching app policy still needs its own client ID/secret source and owned
+origin; this object does not provision an IdP application.
+
+<!-- example: identity-oidc -->
+```yaml
+type: oidc
+origin: {domain: login}
+issuer_path: /application/o/example/
+endpoints:
+  authorization: /application/o/authorize/
+  token: /application/o/token/
+  userinfo: /application/o/userinfo/
+  jwks: /application/o/example/jwks/
+signing_algorithms: [RS256]
+```
+
+**Invalid variation:** replace RS256 with HS256, or add a query to `issuer_path`.
+Both refuse. Later deployment may change supported public provider metadata, but
+source-ID renaming cannot remove or replace a sealed private role's material.
 
 [Reference index](README.md) · [Lifecycle](lifecycle.md) · [Policies](policies.md)

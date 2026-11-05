@@ -20,3 +20,7 @@
   integration, deployment and service verification separately.
 - Read docs/README.md for the canonical guides and reference. Keep public
   contracts, documentation, complete examples and tests in sync.
+- Follow the [documentation standard](docs/contributing/documentation.md) and
+  [reusable templates](docs/templates/configuration-reference.md) when adding
+  or changing documentation; validate concrete examples at the
+  owning contract and state first-installation/later-deployment limits.

@@ -1,9 +1,53 @@
 # Lifecycle and supported updates
 
-`fresh` and `retained` describe ownership intent. Neither is permission to
-adopt an existing backend, reset a database, rotate a key or remove a HOLD.
+First installation creates a supported guest/app. Later deployments update the
+same owned installation. You do **not** change `fresh` to `retained` after each
+successful run: the same `fresh` source continues through ordinary owned updates.
 
-## First creation
+| Policy | Meaning |
+| --- | --- |
+| `lifecycle: fresh` | HomeLab may create it if absent; later deployments update that same instance. |
+| `lifecycle: retained` | It must already exist and be managed by HomeLab; creation is refused. |
+
+**Both allow ordinary updates.** Creation still requires a supported path and
+absence of conflicting existing state. `retained` is not an import switch for a
+manually created guest. Neither value permits resetting data, rotating a key or
+removing a HOLD. Some adapters have no fresh installation path.
+Check the [support matrix](support.md) and the selected library profile first.
+
+## Worked first installation and later deployment
+
+This is the tutorial's complete app value. Its guest also uses `fresh`.
+
+<!-- example: lifecycle-fresh -->
+```yaml
+profile: recursive
+guest: resolver
+lifecycle: fresh
+interfaces:
+  private: {scope: app-network, network: default}
+  local: {scope: guest-loopback}
+```
+
+| Situation | Source and behavior |
+| --- | --- |
+| First installation, no backend/owner | The supported `fresh` path may create the selected guest/app after every real prerequisite passes. The tutorial is offline-only and deliberately cannot be deployed. |
+| Later deployment of that installation | Keep this same source. Current genuine receipts/state/payloads establish continuity; supported changes such as a display label are checked as updates. |
+| Existing HomeLab-owned installation selected as retained | `retained` requires explicit persistent identities and genuine prior ownership. It cannot create or adopt a missing owner. |
+| Existing manually created installation without those proofs | Neither changing the lifecycle label nor a successful compile imports it. No general import procedure is provided. |
+
+A retained-only app such as Bitwarden cannot become installable by changing its
+label to `fresh`. **Invalid variation:** `lifecycle: update` is not an enum value.
+Do not rewrite VMID, paths or service names to make a later deployment appear new.
+
+Guest and app policies are independent. A genuinely already owned guest may keep
+`lifecycle: retained` while a **new** supported app on it uses `lifecycle: fresh`.
+For example, another Unbound instance needs its own free listener/publication,
+service/project namespace and sufficient capacity. The guest is updated; that
+app is created. On the next deployment keep both policies unchanged. This does
+not permit an app to adopt an existing unowned data directory or service.
+
+## First installation
 
 A genuinely fresh guest has no prior ordinary owner or existing backend,
 and all selected apps use their supported fresh path. Fresh storage
@@ -12,7 +56,7 @@ A valid vendor image or successful compile alone does not establish fresh
 commissioning support. Use the [support matrix](support.md) and selected library
 profile.
 
-## Normal retained continuation
+## Later deployments and ownership checks
 
 The controller checks the genuine current canonical and immutable ordinary
 success, sealed static configuration, every phase and AppPayload proof, current
