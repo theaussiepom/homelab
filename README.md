@@ -13,7 +13,7 @@ It needs no host, credentials, Docker or private repository.
 | --- | --- |
 | Understand the model | [Start here](docs/start-here.md) and [Concepts](docs/concepts.md) |
 | Configure a field | [Configuration reference](docs/reference/README.md) |
-| Select an application | Your selected library's catalogue; [framework support limits](docs/reference/support.md) |
+| Select an application | [homelab-stack library](https://github.com/theaussiepom/homelab-stack) at your compatible selected revision; [framework support limits](docs/reference/support.md) |
 | Validate or generate workflows | [Validate and generate](docs/guides/validate-and-generate.md) |
 | Deploy or investigate a failure | [Operations](docs/operations/README.md) |
 | Extend a component | [Contributing](docs/contributing/README.md) |
@@ -44,7 +44,7 @@ not implicitly grant access or create startup waits.
 | Owner | Responsibility |
 | --- | --- |
 | This framework | Configuration grammar, compilation, phase runner, infrastructure and tests |
-| Application library | Profiles, templates, software versions, runtime defaults and synthetic compositions |
+| homelab-stack application library | Profiles, templates, software versions, runtime defaults and synthetic compositions |
 | Consumer site | Allocations, placement, bindings, protected input references and deployment policy |
 
 The executable platform is **Debian 13 LXC on Proxmox**. A valid configuration is
