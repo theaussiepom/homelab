@@ -20,10 +20,13 @@
   integration, deployment and service verification separately.
 - Read docs/README.md for the canonical guides and reference. Keep public
   contracts, documentation, complete examples and tests in sync.
-- Follow the [documentation standard](docs/contributing/documentation.md) and
-  [reusable templates](docs/templates/configuration-reference.md) when adding
-  or changing documentation; validate concrete examples at the
-  owning contract and state first-installation/later-deployment limits.
+- Follow the [documentation standard](docs/contributing/documentation-standard.md)
+  and [reusable templates](docs/templates/configuration-reference.md) for public
+  contract and documentation changes. Keep canonical path/variant records,
+  complete examples and test-local source/document/evidence mappings in sync.
+  Configuration and validators remain authoritative; mappings store pointers.
+  State first-installation/later-deployment limits and report source checks,
+  hosted CI enforcement and target verification separately.
 
 - Host firewall CD lives under `proxmox/bootstrap/host_firewall*.py` and
   `proxmox/bootstrap/host-firewall/`. Keep its two imported state resources

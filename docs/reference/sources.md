@@ -62,7 +62,15 @@ numbers refuse. JSON-compatible scalars are preserved: only lowercase
 is null; `on`, `yes` and date-looking values remain strings. Quote text which
 looks like a boolean, number or null. Literal blocks remain literal text.
 
-## Update and validation
+## First installation and later deployments
+
+A typed source file is organization of a declaration, not a resource or an
+installation action. The consuming [guest](guests.md), [app](apps.md),
+[connection](connections.md) or [exposure](exposures.md) owns execution and
+lifecycle. Extracting a file cannot create adoption, data-move or retry authority.
+
+<a id="update-and-validation"></a>
+## Source identity and validation
 
 Moving an unchanged complete entry into a leaf preserves the effective plan,
 packets and workflow graph. Source pins change because different bytes were

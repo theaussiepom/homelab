@@ -1,7 +1,12 @@
 # Validate and generate
 
 Use the selected framework checkout and the library/site paths you intend to
-review. These commands are local source operations.
+review. Start at the framework root in the isolated hash-locked Python environment
+from the [tutorial](first-configuration.md#prepare-an-isolated-workspace) or
+[testing guide](../contributing/testing.md). `LIBRARY` must be the selected library
+root and `SITE` its compatible complete consumer file; the absolute paths below
+are explicit placeholders to replace, not executable examples. These are local
+source operations.
 
 ```sh
 FRAMEWORK="$(pwd -P)"

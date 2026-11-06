@@ -1,42 +1,60 @@
 # Configuration reference
 
-This reference describes `homelab-components-v1`, the current public authored API.
-All objects are closed: unknown fields refuse. Required fields have no default
-unless a table explicitly says otherwise. A list is ordered unless documented
-otherwise. Null is not interchangeable with omission.
+This reference describes `homelab-components-v1`. Each declaration belongs to a
+site, library or named nested contract; generated packets are outputs, not a
+second authoring language. Start with the owning object, then follow its links
+to the fields and relationships you need.
 
-Configuration pages distinguish syntax, concrete worked values and complete
-sites. A value fragment still needs its named surrounding context; the
-[tutorial](../guides/first-configuration.md) is the complete runnable offline
-path. Named examples are exercised by existing component validators and real
-compiler integrations, including the documented invalid variations. Passing an
-example's source boundary does not prove deployment or service readiness.
+## Find a contract by the decision you are making
 
-## Documents and declarations
+| Decision | Canonical contract | Next relationship |
+| --- | --- | --- |
+| Define the desired installation | [Site](site.md) | [Complete typed sources](sources.md) |
+| Supply reusable choices and defaults | [Library](library.md) | [Supporting types](supporting-types.md) |
+| Select provider/trust/controller inputs | [Contexts](contexts.md) | [Guest placement](guests.md#guest-context) |
+| Allocate an IPv4 NIC and route | [Networks and NICs](networks.md) | [Address branches](networks.md#field-guest-nic-address), [control interface](guests.md#guest-control-interface) |
+| Allocate a guest and inherit defaults | [Guests](guests.md) | [Resource records](guests.md#resource-fields), [plan restrictions](lifecycle.md#infrastructure-plan-policy) |
+| Place an app and bind profile roles | [Apps](apps.md) | [Adapter properties](app-properties.md), [runtime identity](apps.md#runtime-identity) |
+| Select data roots and mount roles | [Storage](storage.md) | [App storage branches](storage.md#app-storage-bindings) |
+| Connect a consumer to an endpoint | [Connections](connections.md) | [Managed accounts](connections.md#accounts), [explicit policy](policies.md#bindings) |
+| Publish a DNS/HTTPS name | [Exposures](exposures.md) | [Owned public origin](exposures.md#public-origin), [TLS/backend trust](policies.md#tls-and-backend-transport) |
+| Declare access, trust or authentication | [Policies](policies.md) | [Identity and secrets](identity-and-secrets.md) |
+| Select protected material or provider identity | [Identity and secrets](identity-and-secrets.md) | [Material continuity](identity-and-secrets.md#protected-material-continuity) |
+| Select runtime/software/health/devices/assets | [Supporting types](supporting-types.md) | [Library selection](library.md), [adapter support](support.md) |
+| Enable the explicit monitoring feature | [Zabbix](zabbix.md) | [Guest monitoring](guests.md#guest-monitoring) |
 
-| Contract | Fields covered |
-| --- | --- |
-| [Site](site.md) | Every top-level site map and root Zabbix selection |
-| [Library](library.md) | Templates, profiles, software/runtime/health/auth/monitoring definitions, assets and bundles |
-| [Sources](sources.md) | Complete typed files, confined paths and JSON/YAML rules |
-| [Contexts](contexts.md) | Provider, trust, credentials, paths, DNS and serial capabilities |
-| [Networks](networks.md) | IPv4 networks, NICs, external endpoints, domains, aliases and address groups |
-| [Guests](guests.md) | Identity, defaults, resources, startup, security, projects and readiness |
-| [Apps](apps.md) | Profile/placement, identity, interfaces, storage, selection and origin |
-| [Application properties](app-properties.md) | Every adapter's closed property object |
-| [Storage](storage.md) | Pools, provider volumes, root paths and profile mount roles |
-| [Connections](connections.md) | Consumer/target, accounts, credential, transport, hostname and readiness |
-| [Exposures](exposures.md) | DNS records, HTTPS ingress, domain aliases, middleware and origin |
-| [Policies](policies.md) | Network rules, bindings, transport, TLS, middleware and authentication |
-| [Identity and secrets](identity-and-secrets.md) | Providers, accounts, source roles and material continuity |
-| [Supporting types](supporting-types.md) | Profile listeners/endpoints, resources, software, runtime, images/assets, health/devices/evidence |
-| [Zabbix](zabbix.md) | Presence/null/server semantics and derived monitoring behavior |
+## Read acceptance at the right stage
 
-## Commands and behavior
+Objects are closed: unknown keys refuse. Required fields have no implicit
+default; null is not interchangeable with omission. A list is ordered unless
+its owner says otherwise. Named-map IDs and scalar/path rules are defined in
+[shared types](supporting-types.md#scalar-and-path-types).
 
-[CLI](cli.md) · [Lifecycle and updates](lifecycle.md) · [Support matrix](support.md)
+A structural value may still fail reference resolution, selected-profile binding,
+lowering, admission or a native guard. A profile's optional metadata cannot
+weaken an adapter requirement. See [support](support.md), [lifecycle](lifecycle.md)
+and [evidence levels](../concepts/evidence.md) before interpreting a successful
+example as operating support.
 
-The reference does not promise automatic replacement or rollback. Infrastructure
-changes are subject to the native guarded plan; app changes to owned identities
-and material must satisfy runtime continuity. Every page's update notes use
-those same [lifecycle rules](lifecycle.md).
+## Use the examples
+
+The [first configuration](../guides/first-configuration.md) is a complete offline
+site/library/catalogue. The [relationship composition](../examples/relationships/README.md)
+adds broker, browser, account, policy and HTTPS ownership. Named reference fences
+are complete typed values or clearly labelled fragments, validated by their
+actual component owners; complete examples also resolve and lower.
+
+The detailed network/NIC [property indexes](networks.md#network-property-index)
+are the initial source-derived conformance scope. Broader reference pages are
+authored explanations with maintained examples; a reconciled automated inventory
+of every semantic condition is still outside that pilot. The
+[assurance record](../contributing/documentation-assurance.md) states the denominator.
+
+## Commands and operation
+
+Use [CLI](cli.md) for exact flags/output, [validate and generate](../guides/validate-and-generate.md)
+for the authoring task, [preparation](../guides/prepare-deployment.md) for real
+prerequisites and [operations](../operations/README.md) for execution/verification.
+
+[Documentation index](../README.md) · [Configuration model](../concepts.md) ·
+[Glossary](../glossary.md)

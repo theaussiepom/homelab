@@ -28,6 +28,19 @@ framework/library selections.
 The consumer's guide supplies its actual paths and trigger. Public docs do not
 provide a default production repository, runner or credential.
 
+## First installation
+
+Complete [deployment preparation](../guides/prepare-deployment.md) and select an
+adapter with an actual supported fresh path. The consumer's reviewed procedure
+supplies its real trigger, immutable source selections, target context and
+protected inputs. Public synthetic examples are deliberately inadmissible.
+A valid plan does not create missing trust, data, accounts or vendor commissioning.
+
+Run only that supported procedure under authority for the selected installation.
+The phase contract below explains its effects and stopping boundary. For an
+already owned installation follow [later deployments](verify-and-maintain.md#later-deployments);
+keep supported `fresh` source unchanged rather than toggling lifecycle.
+
 ## Review source before execution
 
 Compile offline, check workflow generation, inspect changed identities, storage,
@@ -58,7 +71,8 @@ After successful CD, verify the intended layer: DNS answer, public TLS,
 backend transport, application health, authentication and data/device behavior.
 For telemetry use fresh observations; a cached healthy value is insufficient.
 Service acceptance and household/device acceptance can require additional checks
-beyond the pipeline.
+beyond the pipeline. Use the [service verification guide](verify-and-maintain.md#service-verification)
+to define and record the actual outcome.
 
 ## Failure and recovery
 

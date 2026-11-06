@@ -12,6 +12,101 @@ metrics = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(metrics)
 
 
+def documentation_collection(directory, required):
+    """Use real unittest discovery from this independently collected CI harness."""
+    import subprocess
+    import sys
+
+    script = '''import json,sys,unittest
+from pathlib import Path
+directory=Path(sys.argv[1]).resolve()
+required=json.loads(sys.argv[2])
+sys.path.insert(0,str(directory))
+def cases(suite):
+    for item in suite:
+        if isinstance(item,unittest.TestSuite):yield from cases(item)
+        else:yield item
+for name in required:
+    loader=unittest.TestLoader()
+    named=loader.loadTestsFromName(name)
+    if loader.errors or not named.countTestCases():
+        raise SystemExit('DOC_COLLECTION: missing or empty '+name)
+    selected=list(cases(named))
+    for case in selected:
+        method=getattr(case,case._testMethodName)
+        if (getattr(case,'__unittest_skip__',False) or getattr(method,'__unittest_skip__',False)
+                or getattr(method,'__unittest_expecting_failure__',False)):
+            raise SystemExit('DOC_COLLECTION: skipped or expected failure '+case.id())
+    discovered=loader.discover(str(directory),pattern=name.split('.')[0]+'.py')
+    if loader.errors or not {case.id() for case in selected} <= {case.id() for case in cases(discovered)}:
+        raise SystemExit('DOC_COLLECTION: not discovered '+name)
+print('Documentation collection: '+str(len(required))+' required cases/classes present')
+'''
+    return subprocess.run(
+        [sys.executable, '-c', script, str(directory), json.dumps(required)],
+        cwd=directory, capture_output=True, text=True, timeout=30,
+    )
+
+
+def test_documentation_conformance_remains_in_normal_discovery():
+    required = [
+        'test_component_documentation.DocumentationContracts.test_network_nic_documentation_conformance',
+        'test_documentation_conformance.DocumentationConformanceMechanism',
+        'test_component_reference_examples.ReferenceExamples.test_network_nic_variants_and_exact_refusals',
+        'test_component_reference_examples.ReferenceExamples.test_unused_network_context_is_only_checked_when_consumed',
+        'test_documentation_navigation.DocumentationNavigation',
+        'test_documentation_navigation.NavigationMechanism',
+    ]
+    result = documentation_collection(ROOT / 'blueprints', required)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_documentation_collection_refuses_missing_empty_and_undiscoverable_cases(tmp_path):
+    module = tmp_path / 'test_contract.py'
+    module.write_text('import unittest\nclass Contract(unittest.TestCase):\n    def test_contract(self): pass\n')
+    result = documentation_collection(tmp_path, ['test_contract.Contract'])
+    assert result.returncode == 0, result.stderr
+    module.write_text('import unittest\nclass Contract(unittest.TestCase): pass\n')
+    for required in [['test_contract.Contract'], ['test_removed.Contract'], ['test_contract.Contract.test_removed']]:
+        result = documentation_collection(tmp_path, required)
+        assert result.returncode != 0
+        assert 'DOC_COLLECTION' in result.stderr
+    for decorator in ("unittest.skip('not required')", 'unittest.expectedFailure'):
+        module.write_text('import unittest\nclass Contract(unittest.TestCase):\n    @' + decorator + '\n    def test_contract(self): pass\n')
+        result = documentation_collection(tmp_path, ['test_contract.Contract'])
+        assert result.returncode != 0
+        assert 'skipped or expected failure' in result.stderr
+
+
+def test_documentation_ci_runs_for_all_prs_and_producer_failures_reach_required_gate(tmp_path):
+    import os
+    import subprocess
+    import sys
+    import yaml
+
+    workflow = yaml.load((ROOT / '.github/workflows/ci.yml').read_text(), Loader=yaml.BaseLoader)
+    assert workflow['on']['pull_request'] in ('', None)
+    assert workflow['on']['push'] == {'branches': ['main']}
+    producer = workflow['jobs']['blueprints']
+    assert 'if' not in producer and 'continue-on-error' not in producer
+    for command in ('test_coverage_metrics.py', 'measure_coverage.py --suite blueprints'):
+        step = next(step for step in producer['steps'] if command in step.get('run', ''))
+        assert 'if' not in step and 'continue-on-error' not in step
+    gate = workflow['jobs']['validate']
+    assert gate['name'] == 'Repository validation'
+    assert 'blueprints' in gate['needs'] and 'always()' in gate['if']
+    script = gate['steps'][0]['run'].split("<<'PYCODE'\n", 1)[1].rsplit('\nPYCODE', 1)[0]
+    for state in ('success', 'failure', 'cancelled', 'skipped'):
+        jobs = {name: {'result': 'success', 'outputs': {}} for name in gate['needs']}
+        jobs['blueprints']['result'] = state
+        jobs['changes']['outputs']['iso'] = 'false'
+        for name in ('installer-disk-safety', 'installer-config-validation'):
+            jobs[name]['result'] = 'skipped'
+        result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True,
+            env=dict(os.environ, RESULTS=json.dumps(jobs), EVENT='pull_request', GITHUB_STEP_SUMMARY=str(tmp_path / 'summary')))
+        assert (result.returncode == 0) == (state == 'success'), result.stdout + result.stderr
+
+
 def source_tree(root, failing=False):
     source = root / "tools/homelab"
     source.mkdir(parents=True)

@@ -20,6 +20,7 @@ import authored_config
 import compile as compiler
 import component_packet
 from component_errors import ComponentError
+from test_documentation_contract_helpers import PAGE, SOURCE, check_contract
 
 
 class DocumentationContracts(unittest.TestCase):
@@ -50,6 +51,11 @@ class DocumentationContracts(unittest.TestCase):
         with patch('sys.argv', argv), self.assertRaises(FileExistsError):
             compiler.main()
         self.assertEqual(target.read_bytes(), original)
+
+    def test_network_nic_documentation_conformance(self):
+        count = check_contract((ROOT / SOURCE).read_text(), (ROOT / PAGE).read_text(),
+                               read_text=lambda path: (ROOT / path).read_text())
+        self.assertGreater(count, 0)
 
     def test_tutorial_is_source_only_and_refuses_real_deployment_admission(self):
         with patch('subprocess.run', side_effect=AssertionError('No process or target')), \

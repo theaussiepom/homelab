@@ -1,53 +1,100 @@
-# Storage
+# Storage and owned data
 
-Storage pools, guest paths and profile mount roles are separate contracts.
-Compilation validates declarations; it does not create a mount or adopt data.
+Storage declarations have four owners: a site names provider pools, a guest
+allocates data roots, a library profile declares storage roles, and an app binds
+those roles. A path string alone neither creates a mount nor adopts existing data.
+Use [guest placement](guests.md) and the selected profile's complete example to
+establish the surrounding contract.
 
-## Pool and guest storage
+<a id="pool-and-guest-storage"></a>
+## Storage pool
 
-Site `storage.<id>` is exactly `{context: context_id, pool: text}`.
-A guest selects `root_storage` from its context.
+One site `storage.<id>` is a closed object with required `context` (identifier)
+and `pool` (nonempty text ≤4096 without NUL). Neither defaults or accepts null.
+The context must match a consuming guest's context; `root_storage` selects the
+pool. The provider pool's actual existence/capacity is a
+[preparation prerequisite](../guides/prepare-deployment.md#qualify-platform-and-ownership).
 
-| Guest declaration | Fields | Constraints |
+## Guest volume fields
+
+A `guests.<id>.volumes.<id>` value has exactly these required fields. There is
+no inheritance; omission/null/empty and unknown fields refuse.
+
+| Path within the volume | Type / inclusive domain | Resolution and effect |
 | --- | --- | --- |
-| volumes.<id> | Required `storage`, `slot`, `path`, `size_gib` | Pool ID; slot integer 0–255 unique within guest; size positive integer; canonical supported data path |
-| root_paths.<id> | Required `path` only | Canonical data path on root filesystem |
+| <a id="volume-storage"></a>`storage` | Identifier | Existing pool; resolver requires the guest's selected root pool |
+| <a id="volume-slot"></a>`slot` | Integer 0–255 | Unique and contiguous from zero across the guest's volumes |
+| <a id="volume-path"></a>`path` | Canonical absolute data path | Provider mount target; supported forms below; no overlap with other owned roots |
+| <a id="volume-size-gib"></a>`size_gib` | Integer 1–2147483647 GiB | Desired allocation; source validity is not permission for an existing mount change |
 
-Volume paths match `/srv/<lowercase-name>[/...]` or
-`/var/lib/mysql`, `/var/lib/postgresql`, `/var/lib/influxdb` with lowercase
-subdirectories. Root paths have the general data-path guard.
-Paths cannot be `/`, overlap each other as parent/child, or overlap framework/
-OS control roots such as `/etc`, `/usr`, `/dev`, `/run`,
-`/var/lib/homelab*`, `/opt/homelab-app`. See
-[scalar/path rules](supporting-types.md#scalar-and-path-types).
+Volume paths match `/srv/<lowercase-name>[/...]` or `/var/lib/mysql`,
+`/var/lib/postgresql`, `/var/lib/influxdb` with lowercase subdirectories. Data
+paths cannot be `/`, contain traversal or overlap each other as parent/child.
+They cannot overlap OS/framework control roots such as `/etc`, `/usr`, `/dev`,
+`/run`, the defined `/var/lib/homelab*` roots or `/opt/homelab-app`. See
+[canonical path rules](supporting-types.md#scalar-and-path-types) and the actual
+[`data_path`/`volume` owner](../../blueprints/component_types.py).
+
+## Guest root paths
+
+`guests.<id>.root_paths.<id>` contains required `path` only. It uses the general
+absolute data-path guard and overlap checks above, but does not allocate another
+provider volume. An app binding resolves relative to this selected root.
+Changing its declaration is not a native data-move operation.
 
 ## Profile storage roles
 
-Each role requires `target` (absolute container/native target), `read_only`
-(Boolean), `required` (Boolean), `kind` (`file` or `directory`).
-Optional `initialize` is exactly
-`{type: directory, uid: integer, gid: integer, mode: "0700"}`.
-UID/GID are 0–65535. Initialization is only for writable directory roles;
-the actual fresh binding must be beneath its provider volume. It is create-only
-and verifies ownership, not permission to empty or replace retained data.
+Each `app_profiles.<id>.storage.<role>` is closed and describes the destination
+and access expected by its adapter.
+
+| Field | Presence / accepted type | Meaning and constraints |
+| --- | --- | --- |
+| <a id="storage-role-target"></a>`target` | Required canonical absolute path | Adapter's container/native target; no default |
+| <a id="storage-role-read-only"></a>`read_only` | Required Boolean | Declared access mode; asset bindings require true |
+| <a id="storage-role-required"></a>`required` | Required Boolean | Whether the instance must supply this role; adapter floors may be stricter |
+| <a id="storage-role-kind"></a>`kind` | Required `file` or `directory` | Selected material kind |
+| <a id="storage-role-initialize"></a>`initialize` | Optional closed object | Supported writable directory initialization only, with exact fields below |
+
+`initialize.type` is exactly `directory`; `uid` and `gid` are integers 0–65535;
+`mode` is exactly the string `"0700"`. All four are required when the object is
+present; omission means no requested initializer. Null/empty refuse. Initialization
+requires `kind: directory` and `read_only: false`, and its actual fresh binding
+must be below a provider volume. It is create-only and verifies ownership; it
+cannot empty or replace retained data. The selected adapter must support the role.
 
 ## App storage bindings
 
-Each app role contains exactly one of:
+One `apps.<id>.storage.<role>` selects exactly one branch:
 
-- `{volume: guest_volume_id, subpath: relative_path}`
-- `{root_path: guest_root_path_id, subpath: relative_path}`
-- `{asset: library_asset_id}`
+| Variant | Required fields | Reference and effect |
+| --- | --- | --- |
+| volume | `volume`, `subpath` | Guest volume ID plus relative path within its root |
+| root path | `root_path`, `subpath` | Guest root-path ID plus relative path within its root |
+| asset | `asset` | Library asset ID; only a read-only profile role |
 
-`subpath` can be `""` for the whole selected root; otherwise it is canonical
-relative data with no traversal. Asset binding is allowed only for read-only
-profile roles. Missing required/unknown roles refuse.
+No branch has a default or accepts another branch's keys. `subpath: ""` selects
+the whole root; otherwise the [canonical relative path rules](supporting-types.md#scalar-and-path-types)
+apply. Unknown roles and missing required roles refuse. Literal assets follow
+[exact-byte/hash ownership](supporting-types.md#evidence-and-assets); they are not
+private credential sources. App bindings must also satisfy adapter-specific target
+and runtime namespace restrictions.
 
-Changing a path, slot or owner can affect resource/data identity and is not an
-automatic relocation. Shrink, import, destructive replacement, restore and
-retirement require their separate supported procedures. Ordinary CD preserves
-unselected data and will refuse unsafe plans. [Lifecycle](lifecycle.md) supplies
-the shared update boundary.
+## First installation
+
+A supported guest/app creation path consumes these declarations. Actual pools,
+capacity, private files and any preexisting data required by the selected profile
+must already satisfy [preparation](../guides/prepare-deployment.md). A configured
+initializer is not a general bootstrap or migration mechanism. A compile never
+mounts storage or inspects data ownership on the target.
+
+## Later deployments
+
+The ordinary native plan preserves the whole existing guest disk and mount-point
+blocks. Size growth, shrink and other changes to these blocks refuse, even if
+individual values validate. Path/owner changes are not relocation or adoption.
+There is no generic data retirement, import, replacement, restore or rollback
+contract. [Lifecycle](lifecycle.md#infrastructure-plan-policy) owns these restrictions;
+a separately supported procedure would need its own evidence and authority.
 
 ## Worked pool and data bindings
 
@@ -91,7 +138,17 @@ explicitly supports its storage role and use that profile's complete example.
 **Invalid variation:** set the volume path to `/etc/example-data`, or set
 `initialize` on a read-only role. Both refuse before execution. Reusing a volume
 slot or overlapping its path with another selected root also refuses.
-A later deployment preserves data; increasing a requested size still requires
-the guarded provider plan and is not an automatic data migration.
+Later deployments preserve data. The ordinary existing-guest plan treats the
+entire disk and mount-point blocks as immutable, so a size increase as well as
+a shrink is refused; a valid larger integer does not make resizing supported.
 
-[Reference index](README.md) · [Apps](apps.md)
+## Verification and navigation
+
+[`volume`, `root_path`, `storage_role` and app binding validators](../../blueprints/component_types.py)
+check shape/path boundaries; the [resolver](../../blueprints/component_plan.py)
+and [app binding resolution](../../blueprints/component_plan.py) check relationships.
+The [reference examples](../../blueprints/test_component_reference_examples.py)
+exercise pool and combination values at their actual source boundary. They do
+not qualify an arbitrary app initializer or native mount.
+
+[Reference index](README.md) · [Guest fields](guests.md) · [App bindings](apps.md)

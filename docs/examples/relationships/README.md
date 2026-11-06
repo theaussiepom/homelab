@@ -54,3 +54,18 @@ they do not rotate the generated account or silently adopt an unowned service.
 
 [Complete first tutorial](../first-configuration/README.md) ·
 [Lifecycle](../../reference/lifecycle.md)
+
+## Compatibility and evidence ownership
+
+The framework revision is the reviewed checkout containing this example. Library,
+site and image-catalogue revisions are that same checkout: their complete files
+are vendored together here, so no external library branch is silently selected.
+The catalogue's fake image identity is source-test input and must never be pulled
+or treated as a deployment pin. Use that framework's hash-locked tooling.
+
+The [reference example tests](../../../blueprints/test_component_reference_examples.py)
+parse maintained excerpts and exercise real resolution/lowering. The
+[documentation tests](../../../blueprints/test_component_documentation.py) check
+the tutorial CLI, create-only output and source-admission boundary. See
+[evidence levels](../../concepts/evidence.md), then
+[prepare real inputs](../../guides/prepare-deployment.md) for the next stage.

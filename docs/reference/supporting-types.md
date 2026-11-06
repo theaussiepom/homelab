@@ -7,7 +7,7 @@ closed and optional maps/lists default empty unless stated.
 
 Identifiers match `[a-z][a-z0-9_-]{0,62}`; maps contain at most 1024 named entries.
 General text is a nonempty string ≤4096 without NUL. Generic string lists have
-at most1024 nonempty strings ≤4096, unique unless a specific type permits repeats.
+at most 1024 nonempty strings ≤4096, unique unless a specific type permits repeats.
 Integer means actual integer (not Boolean), default structural range
 0–2147483647.
 
@@ -26,7 +26,7 @@ relative paths do not. Data paths additionally exclude OS/framework control root
 | listener.namespace | host or app-network | Must agree with selected interface scope |
 | listener.interface | Profile interface role ID | Must be bound by instance |
 | listener.bind | interface, wildcard or loopback | Derives address, no raw host override |
-| listener.protocol / port | tcp or udp / integer1–65535 | Socket collision checks apply |
+| listener.protocol / port | tcp or udp / integer 1–65535 | Socket collision checks apply |
 | listener.publish | scope, port | scope guest-interface requires interface role; guest-loopback forbids interface |
 | endpoints.<id> | listener, protocol, via | protocol http/https/tcp/udp; listener and interface role must exist |
 | endpoints.<id> internal alternative | internal: dashboard | Traefik only; authenticated owned exposure required |
@@ -76,8 +76,8 @@ workload reservations. Total app reservations plus effective OS reserve must fit
 
 Library `images.json` is a named map of image records.
 Normal form requires repository, tag and digest. Repository matches
-[a-z0-9][a-z0-9./_-]*, tag null or [A-Za-z0-9_.-]+, digest
-sha256: followed by64lowercasehex. It renders literal repository[:tag]@digest.
+`[a-z0-9][a-z0-9./_-]*`, tag null or `[A-Za-z0-9_.-]+`, digest
+sha256: followed by 64 lowercase hex characters. It renders literal repository[:tag]@digest.
 
 The catalogue parser accepts unpinned-latest records only as exact repository/tag/digest forms
 for ghcr.io/bitwarden/lite and ghcr.io/music-assistant/server with tag latest
@@ -125,13 +125,13 @@ Site evidence accepts that same raw form, or ongoing identity-callbacks:
 `{type: identity-callbacks, source: file.json, sha256: lower64hex}`.
 The source form must be JSON. No active one-time migration evidence types exist.
 
-Callback document is a list of1–8 records, unique positive provider_id.
+Callback document is a list of 1–8 records, unique positive provider_id.
 Each record requires application_id (canonical UUID), client_id_sha256,
 provider_metadata_sha256, application_metadata_sha256, policy_metadata_sha256
-(all lowercase64hex), existing_redirects (1–20 objects with
+(all lowercase 64-character hex), existing_redirects (1–20 objects with
 matching_mode:strict and url), additions (1–4 unique HTTPS URLs).
 No credentials/query/fragment/backslash/whitespace are allowed in URLs; optional
-port1–65535. New additions use exact /oauth2/callback.
+port 1–65535. New additions use exact /oauth2/callback.
 All old+new URLs are unique. Installed validators still bind actual IdP metadata;
 source evidence alone cannot authorize an account/provider change.
 

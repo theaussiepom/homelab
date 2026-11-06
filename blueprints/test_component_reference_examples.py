@@ -24,6 +24,7 @@ import component_properties
 import component_secrets
 import component_sources
 import component_types as types
+from test_documentation_contract_helpers import assert_typed_equal, expect_component_refusal
 
 # Explicitly maintained test selection, not another configuration grammar.
 EXAMPLES = {
@@ -171,6 +172,81 @@ class ReferenceExamples(unittest.TestCase):
             elif change=='missing-binding':wrong['guests']['resolver']['network_policy'][0]['endpoints']={}
             else:wrong['guests']['resolver']['network_policy'][0]['endpoints']['unused']={'external':'dns'}
             with self.subTest(change=change),self.assertRaises(ValueError):self.resolve(wrong)
+
+    def test_network_nic_variants_and_exact_refusals(self):
+        selected = authored_config.read(self.site)
+        assert_typed_equal(example('networks.md', 'network-minimal'), selected['networks']['primary'],
+                           'networks.md/network-minimal -> first-configuration/site.yaml:networks.primary')
+        assert_typed_equal(example('networks.md', 'nic-minimal'), selected['guests']['resolver']['interfaces']['management'],
+                           'networks.md/nic-minimal -> first-configuration/site.yaml:guests.resolver.interfaces.management')
+        before, packets = self.resolve(selected)
+        self.assertEqual(set(packets), {'resolver'})
+        self.assertEqual(before.resolved['guests']['resolver']['provider_interfaces'][0]['ipv4'], '198.18.20.10/24')
+        dhcp = copy.deepcopy(selected)
+        nic = dhcp['guests']['resolver']['interfaces']['management']
+        nic['address'] = {'mode': 'dhcp', 'endpoint': '198.18.20.10'}
+        nic.pop('default_route')
+        plan, _ = self.resolve(dhcp)
+        provider = plan.resolved['guests']['resolver']['provider_interfaces'][0]
+        self.assertEqual((provider['ipv4'], provider['ipv4_endpoint'], provider['gateway']),
+                         ('dhcp', '198.18.20.10/24', None))
+        manual = copy.deepcopy(selected)
+        manual['guests']['resolver']['interfaces']['backend']['address'] = {'mode': 'manual'}
+        plan, _ = self.resolve(manual)
+        self.assertIsNone(plan.resolved['guests']['resolver']['interface_addresses']['backend'])
+        self.assertEqual(plan.resolved['guests']['resolver']['provider_interfaces'][1]['ipv4'], 'manual')
+        manual_control = copy.deepcopy(manual)
+        manual_control['guests']['resolver']['control_interface'] = 'backend'
+        expect_component_refusal(lambda: self.resolve(manual_control), 'component.control-interface',
+                                 ('guests', 'resolver'))
+        for vlan in (None, 1, 4094):
+            valid = copy.deepcopy(selected)
+            valid['networks']['primary']['vlan'] = vlan
+            self.resolve(valid)
+        # Each variation starts from the same complete, proven-valid source.
+        # Expected diagnostics are the actual current boundary, including generic
+        # resolution errors; none implies native network/service qualification.
+        network_path = ('networks', 'primary')
+        nic_path = ('guests', 'resolver', 'interfaces', 'management')
+        variations = (
+            (network_path + ('cidr',), '198.18.20.10/24', 'component.invalid', network_path),
+            (network_path + ('context',), '', 'component.invalid', network_path),
+            (network_path + ('bridge',), '', 'component.invalid', network_path),
+            (network_path + ('vlan',), 4095, 'component.integer', network_path),
+            (network_path + ('vlan',), True, 'component.integer', network_path),
+            (network_path + ('gateway',), None, 'component.invalid', network_path),
+            (network_path + ('gateway',), '198.18.20.0', 'component.invalid', network_path),
+            (network_path + ('unexpected',), True, 'component.fields', network_path),
+            (nic_path + ('network',), 'missing', 'component.invalid', ()),
+            (nic_path + ('slot',), True, 'component.integer', nic_path),
+            (nic_path + ('slot',), 32, 'component.integer', nic_path),
+            (nic_path + ('slot',), 2, 'component.invalid', ('guests', 'resolver')),
+            (nic_path + ('mac',), 'not-a-mac', 'component.invalid', nic_path),
+            (nic_path + ('ipv6',), None, 'component.invalid', nic_path),
+            (nic_path + ('default_route',), None, 'component.invalid', nic_path),
+            (nic_path + ('address',), {'mode': 'dhcp', 'endpoint': '198.18.20.10'}, 'component.invalid', nic_path),
+            (nic_path + ('address',), {'mode': 'static'}, 'component.fields', nic_path),
+            (nic_path + ('address',), {'mode': 'dhcp'}, 'component.fields', nic_path),
+            (nic_path + ('address',), {'mode': 'manual', 'value': '198.18.20.10'}, 'component.fields', nic_path),
+            (nic_path + ('address',), {'mode': 'other'}, 'component.invalid', nic_path),
+            (nic_path + ('address', 'value'), '198.18.20.0', 'component.invalid', ()),
+            (nic_path + ('default_route',), False, 'component.default-route', ('guests', 'resolver')),
+        )
+        for path, value, code, error_path in variations:
+            with self.subTest(path=path, value=value):
+                wrong = copy.deepcopy(selected)
+                target = wrong
+                for part in path[:-1]:
+                    target = target[part]
+                target[path[-1]] = value
+                expect_component_refusal(lambda: self.resolve(wrong), code, error_path)
+
+    def test_unused_network_context_is_only_checked_when_consumed(self):
+        selected = authored_config.read(self.site)
+        selected['networks']['unused'] = dict(selected['networks']['primary'], context='missing')
+        self.resolve(selected)
+        selected['guests']['resolver']['interfaces']['management']['network'] = 'unused'
+        expect_component_refusal(lambda: self.resolve(selected), 'component.invalid', ())
 
     def test_managed_connection_account_and_exposure_examples_use_real_binders_and_lowering(self):
         # The reader can obtain this complete composition from authored docs;

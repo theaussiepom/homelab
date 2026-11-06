@@ -1,79 +1,136 @@
 # Guests
 
-A guest selects a template and allocates a Debian LXC instance.
-Entries are inline or complete `kind: guest` [sources](sources.md).
+A guest is one `guests.<id>` value in a [site](site.md), inline or in a complete
+`kind: guest` [typed leaf](sources.md). It selects a library template and describes
+one Debian LXC allocation, its control interface and owned data/runtime space.
+The [complete tutorial](../examples/first-configuration/site.yaml) supplies a
+working offline composition; real use also requires [deployment preparation](../guides/prepare-deployment.md).
 
-## Properties
+<a id="properties"></a>
+## Guest property index
 
-| Field | Type / requirement / default | Constraint and meaning |
+All objects are closed. Required fields have no default. Null is not an
+inheritance marker; optional maps/lists use the explicitly stated behavior.
+Named IDs and scalar paths follow [shared type rules](supporting-types.md#scalar-and-path-types).
+
+| Path under `guests.<id>` | Presence / accepted type | Default or effect |
 | --- | --- | --- |
-| context | Required ID | Existing context |
-| template | Required ID | Library guest template |
-| lifecycle | Required enum | `fresh` or `retained`; an ownership assertion, not an import override |
-| identity | Required object | Exactly positive integer `vmid` and `hostname` |
-| identity.hostname | Required string | `[a-z][a-z0-9-]{0,62}` |
-| template_file_id | Required text | Existing provider template file identity |
-| root_storage | Required ID | Storage pool in same context |
-| interfaces | Required nonempty named map | [NICs](networks.md#guest-nic) |
-| control_interface | Required ID | This guest's static/DHCP NIC used for management |
-| display_name | Optional text | Default hostname; nonempty, at most 4096 characters |
-| resources | Optional partial object | Inherits template, fields below |
-| startup | Optional partial object | Inherits template, fields below |
-| security | Optional partial object | Inherits template, fields below |
-| ssh_public_keys | Optional unique string list | Inherits context; explicit [] remains empty and cannot pass deployment key admission |
-| dns_servers | Optional nonempty endpoint list | Inherits context; resolved DNS port 53 |
-| timezone | Optional timezone string | Guest, then context, then `Etc/UTC` |
-| volumes | Optional named map, {} | Provider-backed [data volumes](storage.md) |
-| root_paths | Optional named map, {} | Owned root-filesystem [data paths](storage.md) |
-| compose_projects | Optional named map, {} | `{name: text, file?: filename}`; file default `compose-<map-key>.yml` |
-| software / runtime | Optional unique ID lists, [] | Appended to template selections; guest runtime cannot own containers/native budgets |
-| network_policy | Optional ordered list, [] | Policy ID or explicit [policy binding](policies.md#bindings) |
-| readiness | Optional list, [] | Each `{stage: preparation, target: {app: id, endpoint: name}}`; target must be on another guest |
-| source_policy_route | Optional object | Exactly `{interface: nic_id}`; non-default static NIC with gateway distinct from its own address |
-| monitoring | Optional object | `{profile: id}`; overrides template's monitoring selection |
-
-VMIDs are unique across a declared API authority, including different nodes.
-MAC/address identities, ports, device owners and runtime paths also have their
-own collision checks. Reserved guest/app/phase IDs include execution stage names;
-do not use those as app instances.
+| <a id="guest-context"></a>`context` | Required ID | Existing [context](contexts.md); owns provider/trust/controller inputs |
+| <a id="guest-template"></a>`template` | Required ID | Existing library [guest template](library.md#guest-template) |
+| <a id="guest-lifecycle"></a>`lifecycle` | Required `fresh` or `retained` | [Ownership policy](lifecycle.md); no import override |
+| <a id="guest-identity"></a>`identity` | Required closed object | Required `vmid` and `hostname`, below |
+| <a id="guest-identity-vmid"></a>`identity.vmid` | Required integer 1–2147483647 | Unique across declared API address/port, including nodes; native plan additionally requires at least 100 and excludes protected IDs |
+| <a id="guest-identity-hostname"></a>`identity.hostname` | Required string | `[a-z][a-z0-9-]{0,62}`; stable ownership identity |
+| <a id="guest-template-file-id"></a>`template_file_id` | Required nonempty text, ≤4096, no NUL | Existing provider template identity; source validation does not fetch it |
+| <a id="guest-root-storage"></a>`root_storage` | Required ID | [Storage pool](storage.md#storage-pool) in the same context |
+| <a id="guest-interfaces"></a>`interfaces` | Required nonempty named map | Exact [NIC records and address branches](networks.md#nic-property-index) |
+| <a id="guest-control-interface"></a>`control_interface` | Required ID | One declared static/DHCP NIC; supplies management address/MAC, never a manual NIC |
+| <a id="guest-display-name"></a>`display_name` | Optional nonempty text, ≤4096, no NUL | Defaults to hostname; cosmetic, not an identity rename |
+| <a id="guest-resources"></a>`resources` | Optional partial object | Direct-field template inheritance; [resource records](#resource-fields) |
+| <a id="guest-startup"></a>`startup` | Optional partial object | Direct-field template inheritance; [startup records](#startup-fields) |
+| <a id="guest-security"></a>`security` | Optional partial object | Direct-field template inheritance; [security records](#security-fields) |
+| <a id="guest-ssh-public-keys"></a>`ssh_public_keys` | Optional unique string list | Omission inherits context; explicit `[]` stays empty and fails deployment key admission |
+| <a id="guest-dns-servers"></a>`dns_servers` | Optional nonempty endpoint-reference list | Omission inherits context; resolved TCP/UDP IPv4 DNS port 53 |
+| <a id="guest-timezone"></a>`timezone` | Optional timezone string | Guest, then context, then `Etc/UTC`; shared timezone rules |
+| <a id="guest-volumes"></a>`volumes` | Optional named map; omitted `{}` | Provider [volumes](storage.md#guest-volume-fields) |
+| <a id="guest-root-paths"></a>`root_paths` | Optional named map; omitted `{}` | Owned [root-filesystem paths](storage.md#guest-root-paths) |
+| <a id="guest-compose-projects"></a>`compose_projects` | Optional named map; omitted `{}` | [Project records](#compose-project-fields) |
+| <a id="guest-software"></a>`software` | Optional unique ID list; omitted `[]` | Append to template software; [software declarations](supporting-types.md#software) |
+| <a id="guest-runtime"></a>`runtime` | Optional unique ID list; omitted `[]` | Append to template runtime; guest selection cannot own app container/native budgets |
+| <a id="guest-network-policy"></a>`network_policy` | Optional ordered list; omitted `[]` | Policy ID or explicit [policy binding](policies.md#bindings) |
+| <a id="guest-readiness"></a>`readiness` | Optional ordered list; omitted `[]` | Each exactly `{stage: preparation, target: {app: id, endpoint: name}}`; target must be on another guest |
+| <a id="guest-source-policy-route"></a>`source_policy_route` | Optional closed object | Exactly `{interface: nic_id}`; selected non-default static NIC requires a gateway different from its address |
+| <a id="guest-monitoring"></a>`monitoring` | Optional closed object | Exactly `{profile: id}`; replaces template selection; see [monitoring](zabbix.md) |
 
 ## Defaults and resolution
 
-Only `resources`, `startup`, `security` merge by direct field:
-complete template followed by explicitly supplied guest fields.
-An omitted field inherits; an explicitly repeated equal value is redundant.
-There is no recursive overlay language. Guest software/runtime lists append to
-template lists; conflicting versions/security settings refuse.
+Only resources, startup and security merge by direct field: complete template
+first, then explicit guest keys. Omitted blocks and empty partial maps inherit;
+null refuses. Software/runtime lists append to template lists; an empty guest
+list contributes nothing and cannot erase a template selection. Monitoring
+selection replaces the complete template reference; empty/null does not disable it.
 
-| Resource field | Template required / guest optional | Bounds |
+For the tutorial's `base` template, adding `resources: {memory_mib: 1024}` produces
+CPU 1, memory 1024 MiB, root 8 GiB and authored OS reserve 128 MiB. Runtime
+budgeting can raise the effective reserve to its 256 MiB floor and selected
+requirements. The source values and runtime allocation are different layers;
+see the [complete library](../examples/first-configuration/stack.json).
+
+### Resource fields
+
+These full paths are `guests.<id>.resources.<field>`; the same object is complete
+in a template. Each field is an actual integer, never Boolean. Guest omission
+inherits the corresponding template value; no framework scalar default replaces it.
+
+| Field | Inclusive domain | Consumer and change limit |
 | --- | --- | --- |
-| cpu_cores | Integer | 1–2147483647 |
-| memory_mib | Integer | 256–2147483647 |
-| root_gib | Integer | 4–2147483647 |
-| os_reserve_mib | Integer | 0–2147483647; less than memory_mib |
+| <a id="guest-resources-cpu-cores"></a>`cpu_cores` | 1–2147483647 | Desired CPU allocation; native capacity and guarded plan remain required |
+| <a id="guest-resources-memory-mib"></a>`memory_mib` | 256–2147483647 MiB | Must cover effective OS reserve and selected app reservations |
+| <a id="guest-resources-root-gib"></a>`root_gib` | 4–2147483647 GiB | Existing guest disk block is immutable; growth and shrink are both refused by ordinary policy |
+| <a id="guest-resources-os-reserve-mib"></a>`os_reserve_mib` | 0–2147483647 MiB | Resolved value must be less than memory; runtime requirements may raise its effective reserve |
 
-Runtime requirements can increase the effective reserve (at least 256 MiB when
-budgeting workloads). Selected native/container reservations must fit.
-These syntax bounds do not promise physical host capacity.
+### Startup fields
 
-Startup: `started` and `start_on_boot` are Booleans; `boot_order` is integer
-0–2147483647. All three are required in a template.
-Security: `unprivileged`, `protection`, `nesting`, `keyctl` are Booleans,
-all required in a template. `unprivileged` and `protection` must be true.
-Runtime requirements may require nesting/keyctl.
+Full paths are `guests.<id>.startup.<field>`. All fields are required in the
+template and individually optional in the guest.
 
-Compose project filenames match `[a-z][a-z0-9_-]{0,62}.yaml` or `.yml`
-and are unique within a guest. Project names are nonempty text; execution
-additionally validates the actual closed runtime identities.
+| Field | Accepted type / effect | Additional boundary |
+| --- | --- | --- |
+| <a id="guest-startup-started"></a>`started` | Boolean desired running state | False is structurally valid but the saved-plan policy requires an active planned guest |
+| <a id="guest-startup-start-on-boot"></a>`start_on_boot` | Boolean boot policy | No general interruption guarantee from changing it |
+| <a id="guest-startup-boot-order"></a>`boot_order` | Integer 0–2147483647 | Host startup order; distinct from app/guest readiness dependencies |
 
-## Changes
+### Security fields
 
-Display names are cosmetic. VMID, hostname, provider authority, persistent
-storage and owned app namespaces are continuity identities. Changing CPU,
-memory or startup changes desired infrastructure and requires the actual
-guarded native plan; interruption is not universally specified.
-Retained state cannot become fresh by changing a label.
-See [Lifecycle](lifecycle.md).
+Full paths are `guests.<id>.security.<field>`. All fields are required in the
+template, individually optional in the guest and actual Booleans.
+
+| Field | Accepted values / resolved effect |
+| --- | --- |
+| <a id="guest-security-unprivileged"></a>`unprivileged` | Must be true; false refuses structurally and identity is preserved by the native plan |
+| <a id="guest-security-protection"></a>`protection` | Must be true; removing protection is not ordinary maintenance |
+| <a id="guest-security-nesting"></a>`nesting` | Boolean; selected runtime may require true |
+| <a id="guest-security-keyctl"></a>`keyctl` | Boolean; selected runtime may require true |
+
+### Compose project fields
+
+Each `guests.<id>.compose_projects.<id>` requires `name` (nonempty text ≤4096,
+no NUL) and optionally `file`. The file defaults to `compose-<map-key>.yml` and
+must match `[a-z][a-z0-9_-]{0,62}.yaml` or `.yml`; files are unique within the
+guest. Null/empty is not the default. Execution validates the selected closed
+runtime identity in addition to source shape. [App identity](apps.md#runtime-identity)
+uses the map key as the project reference.
+
+## Resolution and relationships
+
+VMIDs are unique within API address/port scope, including different nodes.
+[NIC identity conflicts](networks.md#field-guest-nic-mac), ports, devices and
+owned paths have separate collision scopes. Provider NIC order follows slots;
+volume slots are contiguous from zero. App placement contributes software and
+runtime requirements and must fit the guest's effective budget.
+
+Readiness creates only its explicit dependency. Network policy supplies access;
+DNS/endpoint references supply values. The [relationship guide](../guides/references-and-reuse.md)
+explains why none substitutes for the others. Reserved guest/app IDs include
+execution phase names and cannot be used as instance keys.
+
+## First installation
+
+The selected template is a default source, not a guest provisioning procedure.
+A supported `fresh` guest requires absent owner/backend, admitted allocations,
+real trust/material/platform prerequisites and compatible app creation paths.
+See [preparation](../guides/prepare-deployment.md) and [lifecycle](lifecycle.md).
+The example below deliberately cannot pass deployment admission.
+
+<a id="changes"></a>
+## Later deployments
+
+Keep the supported `fresh` source for owned updates. VMID, hostname, provider,
+storage and app namespaces remain continuity identities; changing a label does
+not create a new owner. CPU/memory/startup/NIC changes alter desired infrastructure
+and require the actual [saved-plan policy](lifecycle.md#infrastructure-plan-policy).
+Disk and mount-point changes, replacement/import/adoption and an inactive planned
+guest are refused. No universal online resizing, relocation or rollback is implied.
 
 ## Worked guest and inherited defaults
 
@@ -109,4 +166,14 @@ The same `fresh` source is used for first installation and subsequent owned
 updates. The runtime distinguishes them from genuine receipts and backend state;
 changing the label to `retained` is neither a required next step nor an import.
 
-[Reference index](README.md) · [Apps](apps.md)
+## Verification and navigation
+
+The structural owner is [`guest`](../../blueprints/component_types.py), the
+resolved owner is [`guest_values`](../../blueprints/component_plan.py), and the
+native policy is [`check_plan`](../../proxmox/applications/plan_policy.py).
+[Reference examples](../../blueprints/test_component_reference_examples.py)
+exercise the real inherited override and invalid Boolean allocation without
+native execution. These checks do not establish live capacity or service continuity.
+
+[Reference index](README.md) · [Networks/NICs](networks.md) · [Apps](apps.md) ·
+[Offline tutorial](../guides/first-configuration.md)

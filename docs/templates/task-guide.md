@@ -1,7 +1,7 @@
 # Template: task guide
 
 **Reusable template, not an executable procedure.** Replace every bracketed
-instruction. Follow the [documentation standard](../contributing/documentation.md).
+instruction. Follow the [documentation standard](../contributing/documentation-standard.md).
 
 ## Outcome and boundary
 
@@ -41,3 +41,11 @@ Keep separately authorised operating procedures separate.]
 
 [Link canonical fields, complete maintained example, lifecycle/support and the
 owning contributor or operations index. Remove this instruction in the real page.]
+
+## Author review before publication
+
+[Bind named examples to complete canonical files and existing real parser/validator/
+compiler tests. Record compatible source selections, actual evidence and any
+unperformed hosted/native checks. Follow the [assurance guide](../contributing/documentation-assurance.md),
+check exact local destinations and read the rendered journey. Do not leave this
+instruction or other placeholders in the finished page.]

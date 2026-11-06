@@ -73,15 +73,32 @@ the workflow is not an automatic retry/release system.
 
 Historical sealed v1 component configurations may contain retired fields.
 They are read as immutable proof, not parsed as new active source.
-The current seven-field binding is permanent; there is no authored migration
-waiver, bootstrap adapter or new release hook.
+Historical proof does not add an authored migration waiver, bootstrap adapter
+or release hook to the current contract.
+
+## Infrastructure plan policy
+
+The ordinary [saved-plan guard](../../proxmox/applications/plan_policy.py) admits
+exactly the selected guest and its two firewall resources. Fresh creation needs
+three creates with absent prior resources. Existing resources allow only update
+or no-op, preserving node, VMID, disk, mount points, operating system,
+unprivileged/protection flags and purge-on-destroy policy. The planned guest
+must be active. Import, move, adoption and replacement are refused.
+
+The complete disk and mount-point blocks are immutable for an existing guest;
+this refuses growth as well as shrink. An accepted numeric resource value or a
+provider-proposed action does not bypass that restriction. Device attachment
+has its separate host-capability owner. These are execution constraints beyond
+structural validation and packet lowering; an admitted update does not establish
+that every permitted change is interruption-free.
 
 ## Change effects
 
 | Change | Expected contract / update limit |
 | --- | --- |
 | Display name | Cosmetic; must not rename persistent resources |
-| CPU/memory/startup | Changes desired infrastructure; actual guarded plan determines support/interruption |
+| CPU/memory/startup | Changes desired infrastructure; planned guest must be active; permitted updates still need actual native and service verification |
+| Disk/mount-point block | Immutable on an existing guest, including size increases; no ordinary resize or move |
 | NIC/address/gateway | Changes reachability and desired infrastructure; management/identity/traffic checks apply |
 | Template/profile default | Affects inheriting instances; compare effective output before adoption |
 | Software/image/runtime | Changes selected packages or services; health, process identity and owned data guards remain |

@@ -103,7 +103,7 @@ environment overrides and multiple inverters are unsupported.
 | Property | Type / constraint |
 | --- | --- |
 | server_name | Required single nonempty line ≤100 |
-| recovery_admin | Required [a-z][a-z0-9_-]{2,63} |
+| recovery_admin | Required `[a-z][a-z0-9_-]{2,63}` |
 | heap_mib | Required integer 256–16384 |
 | auth_headers | Required object with user/team, distinct case-insensitive X- headers ≤63; forwarded-for/proto/host/port and real-ip reserved headers refuse |
 | connections | Required named map, 1–24 roles matching resolved PostgreSQL/MariaDB connections |

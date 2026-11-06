@@ -89,6 +89,12 @@ Linux hosted fixture before claiming that layer complete.
 
 ## Check documentation
 
+Use [Documentation assurance](documentation-assurance.md#reproduce-the-focused-checks)
+for the live 16-control network/NIC pilot, pointer mappings, normal collection
+guard and local navigation commands. The [canonical standard](documentation-standard.md)
+adds authored property/lifecycle review beyond those source assertions.
+
+
 The maintained offline tutorial is exercised by the real compiler/packet tests.
 Run it from its documented working directory using a disposable workspace.
 Keep the site YAML-first; the library's fixed JSON indexes and runtime JSON

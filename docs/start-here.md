@@ -1,38 +1,44 @@
 # Start here
 
-You need basic Git, YAML or JSON, and IPv4 networking to author a site.
-You do not need a running Proxmox host to complete the offline tutorial.
+HomeLab describes a desired installation in typed YAML and compiles it before
+execution. You can learn the entire source path without a running Proxmox host.
+The first result to aim for is a [synthetic guest packet](guides/first-configuration.md),
+which demonstrates accepted configuration without making a target change.
 
-## What you are configuring
+## Choose the owner before choosing a setting
 
-A **library** supplies guest templates and app profiles. A **site** chooses those
-definitions, places app instances on guests and binds concrete resources.
-An app profile owns a finite adapter contract; it is not an arbitrary Compose
-document. [Concepts](concepts.md) shows how these pieces fit.
+| You want to change… | Owner | Read next |
+| --- | --- | --- |
+| What a field accepts or how it compiles | Framework | [Contract reference](reference/README.md) |
+| Which app profile, software or defaults are selected | Compatible library | [Library contract](reference/library.md) and that library's catalogue |
+| Guest placement, addresses, paths or secret-source references | Consumer site | [Site contract](reference/site.md) |
+| An existing installation's actual resources/services | Consumer's protected deployment procedure | [Preparation](guides/prepare-deployment.md) and [lifecycle](reference/lifecycle.md) |
 
-Use compatible, reviewed immutable framework/library revisions. The library's
-workflow selection identifies its framework. Do not replace those selections
-with an unreviewed branch tip just to make compilation succeed.
+A profile is a finite adapter contract, not an arbitrary Compose override. A
+source reference includes a complete typed declaration, not an overlay language.
+The [model](concepts.md) explains how these choices fit together.
 
-## Local prerequisites
+## Prepare for the offline tutorial
 
-Use Git and Python 3.12 or newer. Install the selected framework's
-`requirements.lock.txt` with `--require-hashes` in an isolated environment.
-The [tutorial](guides/first-configuration.md) defines every path and command.
-The source reader uses locked PyYAML; no custom YAML functions or tags exist.
+You need basic Git, YAML and IPv4 knowledge, Git, and Python 3.12 or newer. Work
+from a reviewed checkout of this framework. The tutorial creates an isolated
+virtual environment and installs that checkout's `requirements.lock.txt` with
+`--require-hashes`. The authored reader uses locked PyYAML; there are no custom
+functions or tags to learn.
 
-## Decide what success means
+The tutorial's library, catalogue and site live together in the framework
+checkout, so there is no external library revision to guess. When using
+homelab-stack, its selected framework revision is the compatibility authority;
+an unrelated current framework branch is a different selection. See
+[compatibility preparation](guides/prepare-deployment.md#select-compatible-source).
 
-| Check | Establishes |
-| --- | --- |
-| Offline compilation | The selected typed source resolves and lowers to packets |
-| Workflow generation | The generated graph matches that same selected plan |
-| Controller/helper tests | The exercised ownership, file or protocol behavior, with stated fakes |
-| Protected CD | The actual selected deployment phases completed |
-| Service verification | The affected application's real health and user-facing behavior |
+## Know what each result means
 
-A Docker fixture does not establish physical radio behavior, a household login
-or native state ownership. For an existing installation, read
-[Lifecycle](reference/lifecycle.md) before changing identities or private inputs.
+Parsing, validation and real compiler lowering are separate checks; none opens
+a target service. A workflow result identifies completed phases, while actual
+service acceptance requires current observations. The
+[evidence guide](concepts/evidence.md) names each boundary.
 
-**Next:** [First configuration](guides/first-configuration.md).
+Continue with [your first configuration](guides/first-configuration.md), then
+[prepare a real deployment](guides/prepare-deployment.md). Existing operators
+can go directly to [later maintenance](operations/verify-and-maintain.md#later-deployments).

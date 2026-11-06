@@ -2,7 +2,7 @@
 
 **Reusable template, not a runnable tutorial.** Replace all bracketed instructions
 and supply complete real example files. Follow the
-[documentation standard](../contributing/documentation.md).
+[documentation standard](../contributing/documentation-standard.md).
 
 ## What you will build
 
@@ -43,3 +43,11 @@ ordinary updates without toggling lifecycle. Link profile-specific limits.]
 [Name the maintained compiler/example test and evidence level, known limitations,
 cleanup only for owned disposable resources, and canonical next guides. Replace
 all placeholders; a tutorial must finish with a reproducible result.]
+
+## Author review before publication
+
+[Bind named examples to complete canonical files and existing real parser/validator/
+compiler tests. Record compatible source selections, actual evidence and any
+unperformed hosted/native checks. Follow the [assurance guide](../contributing/documentation-assurance.md),
+check exact local destinations and read the rendered journey. Do not leave this
+instruction or other placeholders in the finished page.]

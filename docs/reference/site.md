@@ -87,34 +87,42 @@ documented type; null does not stand for an empty map.
 
 | Property | Type / required / default | Meaning and constraints |
 | --- | --- | --- |
-| schema | String, required | Exactly `homelab-components-v1` |
-| kind | String, required | Exactly `site` |
-| contexts | Named map, required | [Contexts](contexts.md) |
-| networks | Named map, required | [Networks](networks.md) |
-| storage | Named map, required | Context/pool [storage declarations](storage.md) |
-| guests | Named map, required | Complete inline [guest](guests.md) or `{source: path}` |
-| apps | Named map, required | Complete inline [app](apps.md) or `{source: path}` |
-| connections | Named map, optional, {} | Complete [connection](connections.md) or typed source |
-| exposures | Named map, optional, {} | Complete [exposure](exposures.md) or typed source |
-| domains | Named map of host strings, optional, {} | Valid DNS labels, total length 1–253; no URL/path |
-| external_endpoints | Named map, optional, {} | Protocol/address/port [endpoints](networks.md#external-endpoints) |
-| host_aliases | Named map, optional, {} | Docker-local `{hostname: text}`; underscores allowed in labels |
-| address_groups | Named map, optional, {} | Bounded ordered [address groups](networks.md#address-groups) |
-| secret_sources | Named map, optional, {} | [File/environment/generated metadata](identity-and-secrets.md#secret-sources), never secret values |
-| accounts | Named map, optional, {} | [Create-once account declarations](connections.md#accounts) |
-| identity_providers | Named map, optional, {} | [OIDC/SAML declarations](identity-and-secrets.md#identity-providers) |
-| devices | Named map, optional, {} | [Serial declarations](supporting-types.md#devices) |
-| images | Named map, optional, {} | Only declared custom archive replacement bindings; normal image versions belong to library software |
-| evidence | Named map, optional, {} | Ongoing callback records or raw UTF-8 [evidence](supporting-types.md#evidence-and-assets) |
-| policies | Closed map, optional | Submaps `network/transport/tls/middlewares/authentication`, each defaults {} |
-| zabbix | Optional null or `{server: app_id}` | Absent disables root monitoring expansion; [Zabbix](zabbix.md) |
+| <a id="site-schema"></a>`schema` | String, required | Exactly `homelab-components-v1` |
+| <a id="site-kind"></a>`kind` | String, required | Exactly `site` |
+| <a id="site-contexts"></a>`contexts` | Named map, required | [Contexts](contexts.md) |
+| <a id="site-networks"></a>`networks` | Named map, required | [Networks](networks.md) |
+| <a id="site-storage"></a>`storage` | Named map, required | Context/pool [storage declarations](storage.md) |
+| <a id="site-guests"></a>`guests` | Named map, required | Complete inline [guest](guests.md) or `{source: path}` |
+| <a id="site-apps"></a>`apps` | Named map, required | Complete inline [app](apps.md) or `{source: path}` |
+| <a id="site-connections"></a>`connections` | Named map, optional, {} | Complete [connection](connections.md) or typed source |
+| <a id="site-exposures"></a>`exposures` | Named map, optional, {} | Complete [exposure](exposures.md) or typed source |
+| <a id="site-domains"></a>`domains` | Named map of host strings, optional, {} | Valid DNS labels, total length 1–253; no URL/path |
+| <a id="site-external-endpoints"></a>`external_endpoints` | Named map, optional, {} | Protocol/address/port [endpoints](networks.md#external-endpoints) |
+| <a id="site-host-aliases"></a>`host_aliases` | Named map, optional, {} | Docker-local `{hostname: text}`; underscores allowed in labels |
+| <a id="site-address-groups"></a>`address_groups` | Named map, optional, {} | Bounded ordered [address groups](networks.md#address-groups) |
+| <a id="site-secret-sources"></a>`secret_sources` | Named map, optional, {} | [File/environment/generated metadata](identity-and-secrets.md#secret-sources), never secret values |
+| <a id="site-accounts"></a>`accounts` | Named map, optional, {} | [Create-once account declarations](connections.md#accounts) |
+| <a id="site-identity-providers"></a>`identity_providers` | Named map, optional, {} | [OIDC/SAML declarations](identity-and-secrets.md#identity-providers) |
+| <a id="site-devices"></a>`devices` | Named map, optional, {} | [Serial declarations](supporting-types.md#devices) |
+| <a id="site-images"></a>`images` | Named map, optional, {} | Only declared custom archive replacement bindings; normal image versions belong to library software |
+| <a id="site-evidence"></a>`evidence` | Named map, optional, {} | Ongoing callback records or raw UTF-8 [evidence](supporting-types.md#evidence-and-assets) |
+| <a id="site-policies"></a>`policies` | Closed map, optional | Submaps `network/transport/tls/middlewares/authentication`, each defaults {} |
+| <a id="site-zabbix"></a>`zabbix` | Optional null or `{server: app_id}` | Absent disables root monitoring expansion; [Zabbix](zabbix.md) |
 
 Unknown fields, former fixed-bundle configuration and authored migration
 admissions refuse. Library and site policy names may not collide: the site
 adds named policies, not overrides. A source reference does not recursively
 merge sections.
 
-## Resolution and changes
+## First installation
+
+A complete site describes desired allocations and relationships; source validity
+does not provide target trust, capacity, material or a supported commissioning
+path. Follow [preparation](../guides/prepare-deployment.md) after the offline
+result and inspect each selected [adapter's support](support.md).
+
+<a id="resolution-and-changes"></a>
+## Resolution and later deployments
 
 The compiler validates every declared component, including disabled guests.
 It resolves values, then exposure/auth/connection bindings, ordered policies,
