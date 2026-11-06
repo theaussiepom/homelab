@@ -28,10 +28,12 @@ class FakeEngine:
             else 'snapshot' if argv[:3] == ['proxmox-backup-client', 'snapshot', 'list']
             else 'upload' if argv[:2] == ['proxmox-backup-client', 'backup']
             else 'restore' if argv[:2] == ['proxmox-backup-client', 'restore']
-            else 'ps' if '--services' in argv else 'start' if restore
+            else 'health' if 'ps' in argv and '--format' in argv else 'ps' if '--services' in argv else 'start' if restore
             else 'stop' if 'stop' in argv else 'tar' if argv[0] == 'tar' else 'database')
         if self.failure == action: raise RuntimeError('synthetic '+action+' failure')
         if action == 'route': output.write_text(json.dumps([{'dev': 'eth1', 'prefsrc': '192.0.2.10'}]))
+        elif action == 'health':
+            output.write_text(json.dumps([{'Service':'service','State':'running','Health':'unhealthy' if self.failure=='unhealthy' else 'healthy'}]))
         elif action == 'ps': output.write_text('service\n' if self.failure != 'not_running' else '')
         elif action == 'upload':
             self.upload = Path(next(value.removeprefix('recovery.pxar:') for value in argv if value.startswith('recovery.pxar:')))
@@ -97,12 +99,12 @@ class WorkerTests(unittest.TestCase):
 
     def test_every_controlled_failure_preserves_evidence_and_restarts_only_prior_running_services(self):
         for failure in ('preflight', 'not_running', 'stop', 'tar', 'start', 'upload',
-                        'snapshot', 'wrong_snapshot', 'restore', 'corrupt_readback'):
+                        'snapshot', 'wrong_snapshot', 'restore', 'corrupt_readback', 'unhealthy'):
             with self.subTest(failure=failure):
                 self.root = self.tmp/failure; self.root.mkdir(mode=0o700)
                 engine = FakeEngine(failure)
                 with self.assertRaises((ValueError, RuntimeError)): self.run_worker(engine)
-                self.assertEqual((self.root/'PENDING').exists(), failure != 'preflight')
+                self.assertEqual((self.root/'PENDING').exists(), failure not in ('preflight', 'not_running'))
                 self.assertTrue((self.root/('a'*32)/'failed.json').exists())
                 self.assertFalse((self.root/('a'*32)/'complete.json').exists())
                 if failure not in ('preflight', 'not_running'):

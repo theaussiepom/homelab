@@ -6,6 +6,8 @@ from component_sources import closed, identifier, named, require
 import component_types as types
 import backup_group
 import backup_capture
+import backup_policy
+from component_errors import ComponentError
 
 
 def job(value):
@@ -79,7 +81,9 @@ def bind(resolver, value):
         require(stage in guest.get('volumes', {}), 'component.backup-staging-volume')
         volume = guest['volumes'][stage]
         interface = client['interface']
-        require(interface in guest['interfaces'] and guest['interface_addresses'].get(interface) is not None,
+        require(interface in guest['interfaces']
+                and guest['interfaces'][interface].get('address', {}).get('mode') == 'static'
+                and guest['interface_addresses'].get(interface) is not None,
                 'component.backup-interface')
         require('backup' not in volume and volume['size_gib']*1024**3 >= 4*value['limits']['max_bytes']
                 and not any(binding.get('volume') == stage for app in resolver.apps.values()
@@ -101,14 +105,21 @@ def bind(resolver, value):
                     if resolver.apps[key]['guest'] == guest_id}}}
         guest['backup']['job']['group'] = {'name': value['name'],
             'member': guest['backup']['job']['destination']['backup_id']}
+        try:
+            backup_policy.validate(guest['backup']['job'])
+        except ValueError:
+            raise ComponentError('component.backup-job-binding') from None
         for app in guest['backup'].get('applications', {}).values():
             for relation in app['databases']:
                 target = relation['target']
-                require(set(target) == {'app'} and target['app'] in resolver.apps
+                require('app' in target and target['app'] in resolver.apps
                         and resolver.apps[target['app']]['adapter'] == relation['type'],
                         'component.backup-database-producer')
-        backup_capture.normalize(guest['backup'])
-        backup_capture.recipes(guest['backup'])
+        try:
+            backup_capture.normalize(guest['backup'])
+            backup_capture.recipes(guest['backup'])
+        except ValueError:
+            raise ComponentError('component.backup-capture-binding') from None
     members = {}
     for guest_id, guest in resolver.guests.items():
         context = resolver.site['contexts'][guest['context']]

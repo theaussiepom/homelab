@@ -263,7 +263,10 @@ compilation/admission; no arbitrary command hook is available.
 3. All permitted app writers pause before any member captures files or native
    database exports. Each worker creates a new private generation; GNU tar
    preserves selected metadata, ACLs, xattrs and explicit exclusions. Original
-   containers are started again in `finally`, with running-service readback.
+   containers are started again in `finally`, with running-service readback. After every group member has restarted,
+   read-only checks await configured container health before uploading. These
+   checks never repeat a failed start or serialize one guest behind another
+   guest’s application readiness.
    No container recreation, `compose up`, restore, radio/NVM command or synthetic
    device command forms part of backup capture.
 4. All members resume before upload. Every archive includes the same recovery-set
@@ -292,7 +295,10 @@ Select the profile and explicit authoritative volume markers. For an operational
 job, first supply the existing server/namespace, certificate pin, separately
 escrowed encryption keys, scoped token files, transport policy and dedicated
 staging volume for every guest. Review every service pause/database-lock impact
-before a private-site rollout.
+before a private-site rollout. That review must also qualify unattended use of
+the existing scoped deployment SSH key and the exact saved-plan staging
+allocation. Public source validation does not grant live key use, volume
+allocation or service interruption.
 
 Ordinary `Prepare` installs the selected exact client package. The `PBS agent`
 step seals the inventory and selected private inputs, installs the guest worker

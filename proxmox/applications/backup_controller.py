@@ -24,6 +24,7 @@ from private_io import encoded, private_directory, private_writer, read_json, re
 
 
 def schedule(value):
+    """Validate the single versioned root schedule and physical membership."""
     backup_policy.exact(value, ('schema', 'group', 'schedule', 'limits'))
     require(value['schema'] == 'homelab-pbs-schedule-v1', 'Use the versioned recovery schedule')
     backup_group.configuration(value['group'])
@@ -90,6 +91,7 @@ def controls(cfg):
 
 
 def command(cfg):
+    """Build a finite noninteractive SSH invocation using existing pinned trust."""
     return ['ssh', '-F', '/dev/null', '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes',
         '-o', 'StrictHostKeyChecking=yes', '-o', 'GlobalKnownHostsFile=/dev/null',
         '-o', 'UserKnownHostsFile='+cfg['paths']['known_hosts'], '-o', 'ControlMaster=no',
@@ -102,6 +104,7 @@ def command(cfg):
 class Exchange:
     """Concurrent bounded pipe I/O; a silent or partial peer cannot freeze others."""
     def __init__(self, peers, generation, deadline):
+        """Bind peer pipes and their shared operation deadline."""
         self.peers, self.generation, self.deadline = peers, generation, deadline
         for peer in peers.values():
             os.set_blocking(peer.stdin.fileno(), False); os.set_blocking(peer.stdout.fileno(), False)
@@ -267,10 +270,12 @@ def units(value, source_directory, user):
 
 
 def main():
+    """Run one declared recovery group from its protected schedule descriptor."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--group', type=Path, required=True)
     args = parser.parse_args()
     def interrupted(signum, frame):
+        """Abort through the operation cleanup path when the timer is interrupted."""
         raise InterruptedError('Recovery coordinator interrupted')
     signal.signal(signal.SIGTERM, interrupted); signal.signal(signal.SIGINT, interrupted)
     print(json.dumps(run(args.group)))

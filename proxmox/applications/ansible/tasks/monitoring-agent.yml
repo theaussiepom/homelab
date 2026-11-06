@@ -29,6 +29,17 @@
       - not monitoring_agent_before.results[0].stat.exists or monitoring_agent_before.results[0].stat.isreg | default(false)
     fail_msg: 'Existing monitoring needs its ownership receipt; do not adopt or replace it.'
 
+- name: Inspect the existing monitoring state directory
+  ansible.builtin.stat:
+    path: "{{ monitoring_agent_paths.state }}"
+    follow: false
+  register: monitoring_agent_state_before
+
+- name: Refuse foreign monitoring state before any directory or package change
+  ansible.builtin.assert:
+    that:
+      - not monitoring_agent_state_before.stat.exists or (monitoring_agent_state_before.stat.isdir and not monitoring_agent_state_before.stat.islnk and monitoring_agent_state_before.stat.uid == 0 and monitoring_agent_state_before.stat.mode == '0700')
+
 - name: Create the private guest monitoring directory
   ansible.builtin.file:
     path: "{{ monitoring_agent_paths.state }}"

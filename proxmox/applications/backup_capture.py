@@ -84,6 +84,8 @@ def recipes(inventory):
                 require(isinstance(producer['endpoint'], str) and re.fullmatch(
                     r'http://[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:8086', producer['endpoint']),
                     'Use the owning native Influx listener')
+            if app['adapter'] == 'postgresql':
+                postgresql_client(producer['packages'])
             if app['adapter'] == 'mariadb':
                 require(app_id in job['capture']['database_lock'], 'Explicitly permit the database read lock')
             if app['adapter'] == 'influxdb':
@@ -93,25 +95,39 @@ def recipes(inventory):
 
 
 def compose(row, action):
-    require(action in ('stop', 'start', 'ps'), 'Use a finite backup service action')
+    require(action in ('stop', 'start', 'ps', 'health'), 'Use a finite backup service action')
     args = ['docker', 'compose', '--project-name', row['project'], '-f', row['file']]
     if 'overlay' in row: args += ['-f', row['overlay']]
     return args + ({'stop': ['stop', '--timeout', '60'], 'start': ['start'],
-                    'ps': ['ps', '--status', 'running', '--services']}[action]) + row['services']
+                    'ps': ['ps', '--status', 'running', '--services'],
+                    'health': ['ps', '--all', '--format', 'json']}[action]) + row['services']
 
 
 def database(row, destination):
     """Use package-owned local authentication; never put passwords in argv."""
     adapter = row['type']
     if adapter == 'postgresql':
-        versions = [item.split('=')[0].removeprefix('postgresql-client-')
-                    for item in row['packages'] if item.startswith('postgresql-client-')]
-        require(len(versions) == 1 and re.fullmatch(r'[1-9][0-9]*', versions[0]),
-                'Bind one installed PostgreSQL client major')
-        return ['runuser', '-u', 'postgres', '--', '/usr/lib/postgresql/' + versions[0]
-                + '/bin/pg_dumpall', '--no-password'], 'cluster.sql'
+        return ['runuser', '-u', 'postgres', '--', postgresql_client(row['packages']), '--no-password'], 'cluster.sql'
     if adapter == 'mariadb':
         return ['mariadb-dump', '--protocol=socket', '--user=root', '--all-databases',
                 '--lock-all-tables', '--routines', '--events', '--triggers', '--hex-blob'], 'cluster.sql'
     require(adapter == 'influxdb', 'Use an admitted native database producer')
     return ['influx', 'backup', '--host', row['endpoint'], str(destination/'native')], None
+
+
+def postgresql_client(packages):
+    """Resolve the installed major from the effective guest selection before pause."""
+    versions = [item.split('=')[0].removeprefix('postgresql-client-')
+                for item in packages if item.startswith('postgresql-client-')]
+    require(len(versions) == 1 and re.fullmatch(r'[1-9][0-9]*', versions[0]),
+            'Bind one installed PostgreSQL client major')
+    return '/usr/lib/postgresql/' + versions[0] + '/bin/pg_dumpall'
+
+
+def archive(selected, target):
+    """GNU tar receives literal root-anchored exclusions, never glob patterns."""
+    argv = ['tar', '--create', '--file', str(target), '--acls', '--xattrs', '--numeric-owner',
+        '--sparse', '--one-file-system', '--directory', '/', '--anchored', '--no-wildcards']
+    for excluded in selected['exclude']:
+        argv += ['--exclude='+excluded.lstrip('/')]
+    return argv + ['--', *[row['path'].lstrip('/') for row in selected['include']]]

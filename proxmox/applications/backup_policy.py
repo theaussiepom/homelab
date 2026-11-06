@@ -7,11 +7,13 @@ from private_io import require
 
 
 def exact(value, fields, optional=()):
+    """Require a closed mapping with only its declared optional fields."""
     require(isinstance(value, dict) and set(fields) <= set(value) <= set(fields) | set(optional),
             'Preserve the closed operational backup contract')
 
 
 def validate(value):
+    """Check the finite destination, transport, credentials and capture contract."""
     exact(value, ('destination', 'schedule', 'limits', 'secrets', 'capture', 'staging', 'transport', 'group'))
     import backup_group
     backup_group.member(value['group'])
@@ -61,6 +63,7 @@ def validate(value):
 
 
 def owner(value):
+    """Bind the stable guest node, VMID and hostname."""
     exact(value, ('node', 'vmid', 'hostname'))
     require(isinstance(value['node'], str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,62}', value['node'])
             and type(value['vmid']) is int and 100 <= value['vmid'] <= 999999999
@@ -70,6 +73,7 @@ def owner(value):
 
 
 def schedule(value):
+    """Limit UTC scheduling to the supported calendar and bounded jitter."""
     exact(value, ('calendar', 'jitter_seconds'))
     require(isinstance(value['calendar'], str) and re.fullmatch(
         r'hourly|daily|[0-2][0-9]:[0-5][0-9]', value['calendar'])
@@ -79,6 +83,7 @@ def schedule(value):
 
 
 def limits(value):
+    """Bound selected bytes, entries and the duration of each native phase."""
     exact(value, ('max_bytes', 'max_files', 'timeout_seconds'))
     for field, minimum, maximum in [('max_bytes', 1048576, 2**50), ('max_files', 1, 1000000),
                                    ('timeout_seconds', 60, 86400)]:

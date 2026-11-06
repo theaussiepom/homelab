@@ -144,7 +144,7 @@ def bind(resolver):
                     record['configuration']['native'] = {
                         'path': component_native.configuration_root(app['adapter']), 'kind': 'directory'}
                     record['producer'] = {'type': app['adapter'],
-                        'packages': app['software_selection']['packages']}
+                        'packages': guest['software_selection']['packages']}
                     if app['adapter'] == 'influxdb':
                         record['producer']['endpoint'] = 'http://' + app['role_addresses']['service'] + ':8086'
                 if app['adapter'] in ('node_red', 'bitwarden') and app.get('secret_bindings'):

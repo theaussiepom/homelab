@@ -48,3 +48,15 @@ class SourceTests(unittest.TestCase):
         with patch.object(sys,'argv',['verify']),self.assertRaises(ValueError):source.main()
         # The exact inline-Ansible entry has no target operation, even on refusal.
         with patch.object(sys,'argv',['verify']),self.assertRaises(ValueError):runpy.run_path(source.__file__,run_name='__main__')
+
+    def test_matching_hash_cannot_adopt_a_non_root_inventory_member(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary).resolve();app=root/'applications';app.mkdir();common=root/'common';common.mkdir()
+            target=app/'public.py';target.write_text('PUBLIC = True')
+            digest=hashlib.sha256();digest.update(b'applications/public.py');digest.update(hashlib.sha256(target.read_bytes()).digest())
+            original=Path.lstat
+            def metadata(path):
+                info=original(path)
+                return SimpleNamespace(st_mode=info.st_mode,st_uid=1000 if path==target else 0,st_nlink=info.st_nlink)
+            with patch.object(source,'ancestors'),patch.object(Path,'lstat',metadata),self.assertRaisesRegex(ValueError,'foreign public'):
+                source.verify(app,digest.hexdigest())

@@ -17,7 +17,7 @@ def fixture():
         'capture': {'pause': [], 'database_lock': [], 'influx_tokens': {}},
         'limits': {'max_bytes': 32*1024*1024, 'max_files': 1000, 'timeout_seconds': 300}}
     resolver = SimpleNamespace(guests={'one': {'context': 'lab', 'identity': {'vmid': 610, 'hostname': 'one'},
-        'backup': {'configuration': {}, 'applications': {}}, 'interfaces': {'backup': {'slot': 1}},
+        'backup': {'configuration': {}, 'applications': {}}, 'interfaces': {'backup': {'slot': 1, 'address': {'mode': 'static', 'value': '192.0.2.10'}}},
         'interface_addresses': {'backup': '192.0.2.10'}, 'volumes': {
         'stage': {'path': '/srv/backup-stage', 'size_gib': 1}}}}, apps={},
         site={'contexts': {'lab': {'node': 'example-node', 'api_endpoint': {'external': 'api'},
@@ -94,8 +94,19 @@ class BackupJobTests(unittest.TestCase):
         value, resolver = fixture()
         resolver.apps['database'] = {'adapter':'postgresql','guest':'one'}
         resolver.guests['one']['backup']['applications']['consumer'] = {
-            'databases':[{'type':'postgresql','target':{'app':'database'}}]}
+            'databases':[{'type':'postgresql','target':{'app':'database','guest':'one','protocol':'tcp','address':'192.0.2.10','port':5432}}]}
         subject.bind(resolver,value)
+
+    def test_dhcp_and_invalid_staging_bindings_refuse_during_source_resolution(self):
+        for change in [lambda r: r.guests['one']['interfaces']['backup']['address'].update(mode='dhcp'),
+                       lambda r: r.guests['one']['volumes']['stage'].update(path='/srv/_stage')]:
+            value, resolver = fixture(); change(resolver)
+            with self.assertRaises(ComponentError): subject.bind(resolver,value)
+
+    def test_capture_policy_failure_has_a_component_diagnostic(self):
+        value, resolver = fixture()
+        with patch.object(subject.backup_capture,'recipes',side_effect=ValueError('invalid capture')):
+            with self.assertRaisesRegex(ComponentError,'backup-capture-binding'):subject.bind(resolver,value)
 
     def test_database_capabilities_are_bound_to_their_owning_guest(self):
         value, resolver = fixture()

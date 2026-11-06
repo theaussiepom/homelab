@@ -70,5 +70,8 @@ class BackupPlanTests(unittest.TestCase):
                 result=infrastructure(cfg,case.root/'site',work,operation,{})
                 self.assertEqual(inspect.call_count,0 if existing_stage else 1)
                 self.assertEqual(trust.call_count,0 if existing_stage else 1)
+                if not existing_stage:
+                    inspect.assert_called_once_with(cfg,'/srv/stage',operation/'infrastructure.log')
+                    trust.assert_called_once_with(cfg,work,persist=False)
                 self.assertFalse(result['created'])
         self.assertEqual(seen,['inspect','apply'])

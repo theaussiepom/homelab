@@ -17,21 +17,25 @@ STAGES = [('prepared', 'pause'), ('paused', 'capture'), ('captured', 'resume'),
 
 
 def identifier(value):
+    """Recognise a stable literal backup or group identifier."""
     return isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', value)
 
 
 def inventory_digest(value):
+    """Hash the complete deployed coverage without changing its semantic fields."""
     selected = copy.deepcopy(value)
     return digest(encoded(selected))
 
 
 def member(value):
+    """Validate the local participant identity without embedding peer configuration."""
     require(isinstance(value, dict) and set(value) == {'name', 'member'}
             and identifier(value['name']) and identifier(value['member']), 'Bind the stable backup group member')
     return value
 
 
 def configuration(value):
+    """Validate the finite physical membership allowlist before custody admission."""
     require(isinstance(value, dict) and set(value) == {'name', 'members'}
             and identifier(value['name']) and isinstance(value['members'], dict)
             and 0 < len(value['members']) <= 64, 'Bind the closed backup group')
@@ -56,6 +60,7 @@ def configuration(value):
 
 
 def message(stream, timeout=None):
+    """Read one byte-bounded JSON frame with duplicate checks and an optional lease."""
     if timeout is None:
         raw = stream.readline(LIMIT+1)
     else:
@@ -71,6 +76,7 @@ def message(stream, timeout=None):
         require(raw.count(b'\n') == 1, 'Do not pipeline backup protocol commands')
     require(raw and len(raw) <= LIMIT and raw.endswith(b'\n'), 'Use bounded complete backup protocol messages')
     def unique(pairs):
+        """Reject duplicate JSON fields before interpreting a protocol message."""
         result = dict(pairs)
         require(len(result) == len(pairs), 'Duplicate backup protocol fields refuse')
         return result
@@ -80,12 +86,14 @@ def message(stream, timeout=None):
 
 
 def send(stream, value):
+    """Write one complete bounded protocol command or metadata frame."""
     raw = json.dumps(value, sort_keys=True, separators=(',', ':')).encode()+b'\n'
     require(len(raw) <= LIMIT, 'The backup protocol message exceeds its bound')
     stream.write(raw); stream.flush()
 
 
 def recovery_set(group, generation, stamp, captures, destinations):
+    """Bind every completed member digest to its exact destination and snapshot."""
     configuration(group)
     require(isinstance(generation, str) and re.fullmatch('[0-9a-f]{32}', generation)
             and type(stamp) is int and stamp > 0 and set(captures) == set(group['members'])
@@ -112,6 +120,7 @@ def recovery_set(group, generation, stamp, captures, destinations):
 
 
 def received_set(group, generation, stamp, value):
+    """Re-derive and compare the complete recovery set, refusing foreign fields."""
     require(isinstance(value, dict) and isinstance(value.get('members'), dict), 'Use the complete recovery set')
     expected = recovery_set(group, generation, stamp,
         {key: row.get('data_manifest_sha256') for key, row in value['members'].items()},

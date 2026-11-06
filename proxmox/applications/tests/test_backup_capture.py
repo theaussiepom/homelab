@@ -46,10 +46,13 @@ class CaptureTests(unittest.TestCase):
         result = capture.recipes(value)
         self.assertEqual(result['pause'][0]['services'], ['service'])
         self.assertEqual(value, before)
-        for action in ('ps', 'stop', 'start'):
+        for action in ('ps', 'stop', 'start', 'health'):
             argv = capture.compose(result['pause'][0], action)
             self.assertEqual(argv[:3], ['docker', 'compose', '--project-name'])
             self.assertEqual(argv[-1], 'service')
+            if action == 'health':
+                self.assertIn('--format', argv)
+                self.assertIn('json', argv)
         with self.assertRaises(ValueError): capture.compose(result['pause'][0], 'down')
         changes = [lambda v: v['job']['capture'].update(pause=[]),
             lambda v: v['job']['capture'].update(pause=['foreign']),
@@ -81,6 +84,10 @@ class CaptureTests(unittest.TestCase):
         with self.assertRaises(ValueError): capture.recipes(value)
         value['applications']['app']['producer']['type'] = 'foreign'
         with self.assertRaises(ValueError): capture.recipes(value)
+        pg = operational()
+        pg['applications']['app'].update(adapter='postgresql', storage={}, producer={'type':'postgresql','packages':[]})
+        pg['job']['capture']['pause'] = []
+        with self.assertRaisesRegex(ValueError,'installed PostgreSQL'): capture.recipes(pg)
         for packages in ([], ['postgresql-client-bad=1'], ['postgresql-client-16=1', 'postgresql-client-17=1']):
             with self.subTest(packages=packages), self.assertRaises(ValueError):
                 capture.database({'type': 'postgresql', 'packages': packages}, Path('/stage'))

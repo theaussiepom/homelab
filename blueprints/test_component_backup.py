@@ -74,12 +74,15 @@ class BackupUnits(unittest.TestCase):
             r = fixture(); app = r.apps['application']; app.update(adapter=adapter,
                 software_selection={'packages': ['postgresql-client-16=16.10-1']},
                 role_addresses={'service':'192.0.2.10'})
+            r.guests['one']['software_selection']['packages'].append('postgresql-client-16=16.10-1')
+            app['software_selection']['packages'] = []
             rule = r.library['app_profiles']['example']['backup']
             rule['configuration']['native']['path'] = root
             backup.bind(r)
             selected = r.guests['one']['backup']['applications']['application']
             self.assertEqual(selected['configuration']['native']['path'], root)
             self.assertEqual(selected['producer']['type'], adapter)
+            self.assertIn('postgresql-client-16=16.10-1', selected['producer']['packages'])
             rule['configuration']['native']['path'] = '/foreign'
             with self.assertRaisesRegex(ComponentError, 'configuration-owner'): backup.bind(r)
         r = fixture(); app = r.apps['application']

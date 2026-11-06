@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Guest-local selected recovery worker. No scheduler, deployment or recovery writes."""
+"""Guest-local capture/readback worker; no live restore, deployment or repair."""
 from contextlib import ExitStack
 import datetime
 import hashlib
-import json
 import os
 from pathlib import Path
 import resource
@@ -17,7 +16,7 @@ import sys
 import uuid
 
 import backup_capture
-from private_io import encoded, digest, private_directory, private_writer, read_json, regular, require, sync, write_new
+from private_io import decode_json, encoded, digest, private_directory, private_writer, read_json, regular, require, sync, write_new
 
 CONFIG = Path('/etc/homelab-backup')
 
@@ -25,14 +24,17 @@ CONFIG = Path('/etc/homelab-backup')
 class Engine:
     """Run bounded fixed commands with output private and no inherited credentials."""
     def __init__(self, log, limits, abort_stream=None):
+        """Bind private command output, selected limits and the coordinator pipe."""
         self.log, self.limits, self.abort_stream = log, limits, abort_stream
         self.begin_phase()
 
     def begin_phase(self):
+        """Start a fresh bounded budget for the next native phase."""
         self.deadline = time.monotonic() + self.limits['timeout_seconds']
 
     def run(self, argv, *, output=None, environment=None, restore=False):
         def bounded():
+            """Set the child output-file size limit before executing a native command."""
             resource.setrlimit(resource.RLIMIT_FSIZE, (self.limits['max_bytes'], self.limits['max_bytes']))
         env = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': str(self.log.parent), 'LC_ALL': 'C'}
         env.update(environment or {})
@@ -134,6 +136,28 @@ def release_copy(directory, expected, limits):
     directory.rmdir(); sync(directory.parent)
 
 
+def ready(rows, operation, engine):
+    """After all members restart, read container health without another start attempt."""
+    deadline = time.monotonic()+60
+    for index in range(60):
+        healthy = True
+        for row in rows:
+            output = operation/(row['app']+'-health-'+str(index)+'.json')
+            engine.run(backup_capture.compose(row, 'health'), output=output)
+            raw = regular(output, private=True)
+            states = decode_json(raw) if raw.lstrip().startswith(b'[') else [decode_json(line) for line in raw.splitlines()]
+            require(isinstance(states, list) and len(states) == len(row['services'])
+                    and all(isinstance(state, dict) for state in states)
+                    and {state.get('Service') for state in states} == set(row['services'])
+                    and all(state.get('State') == 'running' and state.get('Health', '') in ('', 'healthy', 'starting')
+                        for state in states), 'A resumed owned service exited or became unhealthy')
+            healthy = healthy and all(state.get('Health', '') != 'starting' for state in states)
+        if healthy: return
+        require(time.monotonic() < deadline, 'Resumed container health did not become ready within its allowance')
+        time.sleep(1)
+    raise ValueError('Resumed container health exceeded the bounded check count')
+
+
 def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrier=None,
         backup_time=None, group_config=None, control_files=None, abort_stream=None):
     """Publish success only after export, local manifest, upload and snapshot check."""
@@ -198,6 +222,12 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
                     for row in existing), 'Refuse an existing or malformed selected snapshot before capture')
         inventory(selected['include'], selected['exclude'], limits)
         if control_files is not None: controls(recipes, control_files)
+        for row in recipes['pause']:
+            output = operation/(row['app']+'-preflight-running.txt')
+            engine.run(backup_capture.compose(row, 'ps'), output=output)
+            running = output.read_text().splitlines()
+            require(len(running) == len(row['services']) and set(running) == set(row['services']),
+                    'Every selected service must be running before opening a capture window')
         if barrier is not None:
             barrier('prepared', {})
             engine.begin_phase()
@@ -227,12 +257,7 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
                         'A native database producer returned no recovery data')
                 receipt['completed_databases'].append(row['app'])
             receipt['selected'] = inventory(selected['include'], selected['exclude'], limits)
-            args = ['tar', '--create', '--file', str(payload/'configuration-and-state.tar'),
-                '--acls', '--xattrs', '--numeric-owner', '--sparse', '--one-file-system', '--directory', '/']
-            for excluded in selected['exclude']:
-                args += ['--exclude='+excluded.lstrip('/')]
-            args += ['--', *[row['path'].lstrip('/') for row in selected['include']]]
-            engine.run(args)
+            engine.run(backup_capture.archive(selected, payload/'configuration-and-state.tar'))
             # Include exact source ownership, consistency classifications and database relationships.
             write_new(payload/'inventory.json', encoded(value))
             data_manifest = encoded(manifest(payload, limits))
@@ -263,6 +288,7 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
                     'Preserve this guest completed native capture binding')
             write_new(payload/'group.json', encoded(group))
         engine.begin_phase()
+        ready(recipes['pause'], operation, engine)
         expected_files = manifest(payload, limits)
         write_new(operation/'manifest.json', encoded(expected_files))
         engine.run(['proxmox-backup-client', 'backup', 'recovery.pxar:'+str(payload),
@@ -355,11 +381,13 @@ def serve(value, incoming, outgoing, *, runner=run, receive=None):
 
 
 def main():
+    """Serve only the installed coordinator protocol and coverage configuration."""
     require(sys.argv[1:] == ['--serve'], 'The backup worker accepts only the bounded coordinator protocol')
     value = read_json(CONFIG/'coverage.json', private=True)
     import backup_policy
     backup_policy.validate(value['job']); staging(value)
     def interrupted(signum, frame):
+        """Abort through finally cleanup so originally running services can restart."""
         raise InterruptedError('Recovery worker interrupted')
     signal.signal(signal.SIGTERM, interrupted); signal.signal(signal.SIGINT, interrupted)
     serve(value, sys.stdin.buffer, sys.stdout.buffer)

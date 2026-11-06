@@ -1,12 +1,12 @@
 """Verify an installed public bundle without importing any code from that bundle."""
 import hashlib
-import os
 from pathlib import Path
 import stat
 import sys
 
 
 def metadata(path, directory):
+    """Refuse foreign or writable public source, symlinks and linked files."""
     info = path.lstat()
     if not ((stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))
             and info.st_uid == 0 and not stat.S_IMODE(info.st_mode) & 0o022
@@ -15,6 +15,7 @@ def metadata(path, directory):
 
 
 def ancestors(directory):
+    """Qualify existing public-source ancestors without creating or changing them."""
     directory = Path(directory)
     if not directory.is_absolute() or str(directory) != str(directory.resolve(strict=False)):
         raise ValueError('Use a canonical public source directory')
@@ -23,6 +24,7 @@ def ancestors(directory):
 
 
 def verify(directory, expected=None):
+    """Recompute the complete selected source hash only after ownership checks."""
     directory = Path(directory); ancestors(directory)
     if expected is None: return
     paths = sorted([*directory.rglob('*'), *(directory.parent/'common').rglob('*')])
@@ -37,6 +39,7 @@ def verify(directory, expected=None):
 
 
 def main():
+    """Run the inline Ansible read-only verifier without importing candidate code."""
     if len(sys.argv) not in (2, 3): raise ValueError('Supply one pinned public bundle path and optional digest')
     verify(sys.argv[1], sys.argv[2] if len(sys.argv) == 3 else None)
 

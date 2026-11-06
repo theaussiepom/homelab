@@ -48,7 +48,17 @@ run "dedicated_backup_staging_is_a_new_unprotected_pool_allocation" {
       proxmox_virtual_environment_container.guest.mount_point[1].size == "1G" &&
       proxmox_virtual_environment_container.guest.mount_point[1].volume == var.guest.storage_id &&
       !proxmox_virtual_environment_container.guest.mount_point[1].backup &&
-      proxmox_virtual_environment_container.guest.mount_point[1].replicate
+      proxmox_virtual_environment_container.guest.mount_point[1].replicate &&
+      length(setsubtract(toset(keys(proxmox_virtual_environment_container.guest.mount_point[1])), toset([
+        "path", "size", "volume", "backup", "replicate", "acl", "quota", "read_only", "shared", "mount_options", "path_in_datastore"
+      ]))) == 0 &&
+      alltrue([for flag in [
+        proxmox_virtual_environment_container.guest.mount_point[1].acl,
+        proxmox_virtual_environment_container.guest.mount_point[1].quota,
+        proxmox_virtual_environment_container.guest.mount_point[1].read_only,
+        proxmox_virtual_environment_container.guest.mount_point[1].shared
+      ] : flag == null || flag == false]) &&
+      (proxmox_virtual_environment_container.guest.mount_point[1].mount_options == null ? true : length(proxmox_virtual_environment_container.guest.mount_point[1].mount_options) == 0)
     )
     error_message = "Staging uses a fresh last-slot allocation in the selected pool, never an existing volume or app backup."
   }

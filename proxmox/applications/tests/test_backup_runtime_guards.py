@@ -144,6 +144,13 @@ class RuntimeGuardTests(unittest.TestCase):
         with patch.object(backup_staging,'quiet') as command:
             backup_staging.inspect({'paths':{'known_hosts':'/known','private_key':'/key'},'app':{'address':'192.0.2.1'}},'/srv/stage',None)
             self.assertEqual(command.call_args.kwargs['input_bytes'],backup_staging.SCRIPT)
+            argv=command.call_args.args[0]
+            for option in ('StrictHostKeyChecking=yes','BatchMode=yes','IdentitiesOnly=yes','ControlMaster=no',
+                           'GlobalKnownHostsFile=/dev/null','VerifyHostKeyDNS=no','UpdateHostKeys=no','UserKnownHostsFile=/known'):
+                self.assertIn(option,argv)
+            self.assertEqual(argv[argv.index('-i')+1],'/key')
+            self.assertEqual(argv[-2],'root@192.0.2.1')
+            self.assertEqual(argv[-1],'python3 - /srv/stage')
             with self.assertRaises(ValueError):backup_staging.inspect({},'/srv/../outside',None)
 
     def test_native_command_abort_cleanup_and_restore_allowance_are_bounded(self):
@@ -252,3 +259,24 @@ class RuntimeGuardTests(unittest.TestCase):
              patch.object(deployment_inputs,'source_hash',return_value='b'*64):
             binding=component_inputs.binding(cfg,inputs/'site.json')
         self.assertTrue(all(row['path'] in binding['input_hashes'] for row in value['job']['secrets'].values()))
+
+    def test_post_group_health_reads_never_restart_or_retry_a_failed_service(self):
+        from types import SimpleNamespace
+        records=[{'Service':'owned','State':'running','Health':'healthy'}]
+        row={'app':'app','services':['owned'],'project':'fixture','file':'/opt/homelab-app/compose.yml'}
+        for case,values in [('array',[records]),('ndjson',[records]),('starting',[ [{**records[0],'Health':'starting'}],records]),
+                            ('unhealthy',[[{**records[0],'Health':'unhealthy'}]]),
+                            ('exited',[[{**records[0],'State':'exited'}]]),('foreign',[[{**records[0],'Service':'foreign'}]]),
+                            ('shape',[[42]]),('timeout',[[{**records[0],'Health':'starting'}]]),
+                            ('count',[[{**records[0],'Health':'starting'}]])]:
+            target=self.tmp/case;target.mkdir(mode=0o700);calls=[]
+            def run(argv,*,output):
+                self.assertIn('ps',argv);self.assertNotIn('start',argv);calls.append(argv)
+                data=values[min(len(calls)-1,len(values)-1)]
+                output.write_text('\n'.join(json.dumps(item) for item in data) if case=='ndjson' else json.dumps(data))
+            clock=iter([0,61]) if case=='timeout' else None
+            with patch.object(worker.time,'sleep'),patch.object(worker.time,'monotonic',side_effect=(lambda:next(clock)) if clock else lambda:0):
+                if case in ('array','ndjson','starting'):worker.ready([row],target,SimpleNamespace(run=run))
+                else:
+                    with self.assertRaises(ValueError):worker.ready([row],target,SimpleNamespace(run=run))
+            if case=='count':self.assertEqual(len(calls),60)
