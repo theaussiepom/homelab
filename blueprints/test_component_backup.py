@@ -21,6 +21,7 @@ def profile():
 
 def fixture():
     guest = {'context': 'lab', 'identity': {'vmid': 610, 'hostname': 'example'},
+        'software_selection': {'packages': ['proxmox-backup-client=4.2.8-1']},
         'volumes': {'data': {'path': '/srv/example', 'backup': None}},
         'root_paths': {'root': {'path': '/srv/config'}}}
     definition = {'storage': {'data': {'kind': 'directory'}, 'logs': {'kind': 'directory'},
@@ -44,6 +45,30 @@ def fixture():
 
 
 class BackupUnits(unittest.TestCase):
+    def test_effective_client_package_selection_refuses_missing_conflicting_or_invalid_versions(self):
+        for packages in ([], ['unrelated=1'], ['proxmox-backup-client'],
+                ['proxmox-backup-client=4.2.8-1', 'proxmox-backup-client=4.1.0-1'],
+                ['proxmox-backup-client='], ['proxmox-backup-client=bad version']):
+            r = fixture(); r.guests['one']['software_selection']['packages'] = packages
+            with self.subTest(packages=packages), self.assertRaisesRegex(ComponentError, 'client-package'):
+                backup.bind(r)
+
+    def test_selected_monitoring_retains_exact_configuration_key_and_ownership_without_caches(self):
+        r = fixture(); r.guests['one']['monitoring'] = {}
+        expected = backup.MONITORING_CONFIGURATION
+        r.library['backup_profiles']['pbs']['configuration'].update(copy.deepcopy(expected))
+        backup.bind(r)
+        for key, row in expected.items():
+            self.assertEqual(r.guests['one']['backup']['configuration'][key], row)
+        r.guests['one']['backup']['configuration']['zabbix-agent-key']['path'] = '/changed'
+        self.assertEqual(expected['zabbix-agent-key']['path'], '/etc/zabbix/agent.psk')
+        r = fixture(); backup.bind(r)
+        self.assertFalse(set(expected) & set(r.guests['one']['backup']['configuration']))
+        r = fixture(); r.guests['one']['monitoring'] = {}
+        r.library['backup_profiles']['pbs']['configuration']['zabbix-agent-key'] = {
+            'path': '/foreign', 'kind': 'file'}
+        with self.assertRaisesRegex(ComponentError, 'configuration-owner'): backup.bind(r)
+
     def test_presence_and_selection_are_closed_and_ambiguous_defaults_refuse(self):
         for value in (None, {}): backup.presence(value)
         for value in (True, False, 'yes', 1, [], {'enabled': True}):
@@ -164,6 +189,13 @@ class BackupIntegration(unittest.TestCase):
             self.assertEqual(cfg['deployment']['phases'][-1], backup.PHASE)
             self.assertEqual(component_workflows.model(plan)['guests']['resolver']['phases'][-1]['name'], 'PBS agent')
             component_guest.packet(packet, component_packet.INPUTS)
+            for packages in ([], ['proxmox-backup-client=4.2.8-1', 'proxmox-backup-client=4.1.0-1']):
+                invalid_library = copy.deepcopy(authored)
+                invalid_library['software']['pbs-client']['packages'] = packages
+                (stack/'stack.json').write_text(json.dumps(invalid_library))
+                with self.subTest(packages=packages), self.assertRaises(ComponentError):
+                    component_plan.resolve(stack, path)
+            (stack/'stack.json').write_text(json.dumps(authored))
             for invalid in (True, False, {'profile': 'missing'}, {'enabled': True}):
                 bad = copy.deepcopy(selected); bad['backup'] = invalid
                 path.write_text(yaml.safe_dump(bad))

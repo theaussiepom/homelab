@@ -80,6 +80,12 @@ class PlanTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             plan.check_plan(fresh, 'pve-lab', 6100, existing=False, protected_guests=[],
                             backup_selection={'/srv/example': False})
+        for unknown in (True, [{'backup': True}], [{'path': True}], [{'size': True}]):
+            invalid = copy.deepcopy(fresh)
+            invalid['resource_changes'][0]['change']['after_unknown'] = {'mount_point': unknown}
+            with self.subTest(unknown=unknown), self.assertRaises(ValueError):
+                plan.check_plan(invalid, 'pve-lab', 6100, existing=False, protected_guests=[],
+                                backup_selection={'/srv/example': True})
 
     def test_compacted_rule_values_keep_the_same_three_owned_resource_ids(self):
         import component_generation

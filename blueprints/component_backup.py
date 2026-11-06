@@ -5,6 +5,7 @@ classify their own storage; guest bindings supply paths exactly once. Database
 engine directories are never represented as selected file-backup inputs.
 """
 import copy
+import re
 from pathlib import PurePosixPath
 
 from component_errors import at, checked
@@ -17,6 +18,11 @@ CATEGORIES = {'configuration', 'state', 'database'}
 CAPTURES = {'files', 'application-export', 'database-export'}
 EXCLUSIONS = {'transient', 'rebuildable'}
 DATABASES = {'postgresql', 'mariadb', 'influxdb'}
+MONITORING_CONFIGURATION = {
+    'zabbix-agent-configuration': {'path': '/etc/zabbix/zabbix_agent2.conf', 'kind': 'file'},
+    'zabbix-agent-key': {'path': '/etc/zabbix/agent.psk', 'kind': 'file'},
+    'zabbix-agent-ownership': {'path': '/var/lib/homelab-monitoring/agent.json', 'kind': 'file'},
+}
 
 
 def presence(value):
@@ -89,6 +95,11 @@ def bind(resolver):
         return None
     client = resolver.library['backup_profiles'][name]
     for guest_id, guest in resolver.guests.items():
+        packages = [item for item in guest['software_selection']['packages']
+                    if item.startswith('proxmox-backup-client=')]
+        require(len(packages) == 1 and re.fullmatch(
+            r'proxmox-backup-client=[0-9][A-Za-z0-9.+:~\-]*', packages[0]),
+            'component.backup-client-package')
         context = resolver.site['contexts'][guest['context']]
         document = {'schema': SCHEMA, 'profile': name,
             'owner': {'node': context['node'], **guest['identity']},
@@ -96,6 +107,11 @@ def bind(resolver):
             'applications': {}, 'managed_volumes': {
                 key: {'path': row['path'], 'include': 'backup' in row}
                 for key, row in guest.get('volumes', {}).items()}}
+        if 'monitoring' in guest:
+            for key, row in MONITORING_CONFIGURATION.items():
+                require(key not in document['configuration'] or document['configuration'][key] == row,
+                        'component.backup-configuration-owner')
+                document['configuration'][key] = copy.deepcopy(row)
         # Source closure covers configured guests, including disabled guests.
         # The deployment selector controls installation, never retirement.
         for app_id, app in resolver.apps.items():

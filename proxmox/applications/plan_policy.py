@@ -201,7 +201,8 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
                 "The host capability owns coordinator attachment; API plans cannot change it",
             )
             if not existing and backup_selection is not None:
-                require(backup_flags(after.get('mount_point'), after.get('mount_point'), backup_selection),
+                require(not has_unknown(unknown.get('mount_point'))
+                        and backup_flags(after.get('mount_point'), after.get('mount_point'), backup_selection),
                         'Bind native backup flags to the exact compiled volume selection')
         if existing:
             require(

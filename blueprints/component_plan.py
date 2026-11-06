@@ -635,8 +635,8 @@ class Resolver:
             self.apps[app_id]['settings'] = settings
         canonical_accounts = component_accounts.bind(self, dependencies['accounts'])
         component_identity.bind(self)
-        backup = component_backup.bind(self)
         monitoring = component_monitoring.bind(self, exposure)
+        backup = component_backup.bind(self)
         component_traffic.bind(self, exposure)
         require(disabled is None or isinstance(disabled, list), 'component.disabled')
         disabled = [] if disabled is None else disabled

@@ -77,6 +77,15 @@ repository keys into the ordinary packet. It does not fetch packages, read
 private configuration, connect to PBS or create credentials. The library owns
 the selected client version; the framework does not duplicate its pin.
 
+When root monitoring is also selected, the inventory includes the framework-owned
+agent configuration `/etc/zabbix/zabbix_agent2.conf`, retained key
+`/etc/zabbix/agent.psk` and ownership receipt
+`/var/lib/homelab-monitoring/agent.json`. These use the reserved configuration IDs
+`zabbix-agent-configuration`, `zabbix-agent-key` and `zabbix-agent-ownership`;
+conflicting profile paths refuse. Package caches and interrupted-installation
+holds are not normal configuration inputs. Independent controller credential and
+hold records still need their own protected recovery custody.
+
 ## Application recovery declarations
 
 An app profile's closed `backup` object classifies **every storage role**, including
