@@ -239,11 +239,11 @@ def prepare_agent(cfg,environment=None):
 
 
 def prepare_backup(cfg, environment=None):
-    """Prepare public coverage only; no credential creation or data capture."""
+    """Seal coverage and selected existing inputs; no credential creation or data capture."""
     import backup_agent
     backup_agent.configuration(cfg)
     component_input_secrets.selected('agent', {}, environment)
     parent = component_inputs.app_directory(cfg, create=True)
     component_payload.existing(parent, cfg['deployment']['input_identity'], 'backup-agent')
     return component_payload.prepare(parent, cfg['deployment']['input_identity'], 'backup-agent',
-        {'application.json': encoded(cfg['app']['backup'])})
+        {'application.json': encoded(cfg['app']['backup']), **backup_agent.inputs(cfg['app']['backup'])})

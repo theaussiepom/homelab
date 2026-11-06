@@ -1,13 +1,19 @@
-# PBS client preparation and recovery coverage
+# PBS backup and recovery coverage
 
 [Reference index](README.md) · [Storage](storage.md) · [Library](library.md) ·
 [Workflow and lifecycle](lifecycle.md)
 
-The root `backup` property prepares the Proxmox Backup Client in every configured
-guest and compiles an explicit recovery inventory from the selected application
-profiles. It uses the existing guest preparation, deployment locks, owned inputs
-and per-guest workflow. It does not create a backup server or activate backup
-jobs. A prepared client and an inventory are not a successful recovery point.
+The site-root `backup` property selects the Proxmox Backup Client and derives
+recovery paths from existing guest/app bindings. Add its closed `job` object to
+install a coordinated, encrypted selected-recovery schedule. This uses ordinary
+CD inputs, completion receipts, deployment locks and failed-operation holds.
+
+There are two recovery tiers: native Proxmox full-guest backups (OS plus selected
+managed volumes), and guest-client recovery archives containing configuration,
+quiesced application state and native database exports. This contract implements
+the client tier and native volume selection. Creating the NAS-hosted PBS server,
+configuring PVE full-guest jobs and server maintenance belong to the subsequent
+site integration. A successful upload/readback is not an application restore.
 
 ## Syntax
 
@@ -28,20 +34,25 @@ backup:
 | Property | Type | Required/default | Meaning and constraints |
 | --- | --- | --- | --- |
 | Site `backup` | Null or closed object | Optional; omission adds no client phase | Presence enables client preparation for all configured guests. Boolean values refuse. |
-| `backup.profile` | [Identifier](supporting-types.md#scalar-and-path-types) | Required in a nonempty object | Reference to `backup_profiles`. An empty/null selection requires exactly one registered profile. |
+| `backup.profile` | [Identifier](supporting-types.md#scalar-and-path-types) | Optional when exactly one profile exists | Reference to `backup_profiles`; omission selects the sole registered profile. |
+| `backup.job` | Closed [operational job](#operational-job) | Optional; no timer without it | Destination, protected input references, transport, schedule and capture permissions. |
 | Guest `volumes.<id>.backup` | Null or empty object | Optional | With root backup selected, presence includes the managed volume in native full-guest backup; omission excludes it. It is not a native database export. |
 
-These are the accepted fields in this release. Repository credentials, endpoint,
-schedule, retention and server-creation settings are not accepted as invented
-keys. Their private deployment and native scheduling integration is a separate
-stage. Selecting this feature grants no NAS access or database administration.
+Bare/null/empty `backup` selects client software and coverage only. It is useful
+while preparing the server; it never silently assumes a destination, credential
+or permission to interrupt a service. A bound `job` is the operational selection.
+Unknown fields and booleans refuse. Compilation performs no network or secret
+reads. Neither form grants NAS administration or creates accounts/keys.
 
 Without the root feature, the existing provider volume defaults remain unchanged.
 With it selected, an application role classified for protection cannot bind to a
 managed volume lacking `backup`. This includes a database engine volume: native
 full-guest recovery and a coherent database export are separate requirements.
 Changes to native backup flags must match the compiled selection exactly; every
-other mount attribute and its order stay immutable in an update. Unknown flags,
+existing mount attribute and its order stay immutable in an update. The only
+additional allocation permitted by this contract is the exact new, empty,
+unprotected staging volume appended after existing mount slots. A read-only
+preimage check refuses a foreign mount, symlink or nonempty target before apply. Unknown flags,
 changed paths/sizes/volumes, replacements and undeclared changes still refuse.
 The root filesystem belongs to the native full-guest tier; a `root_paths` binding
 does not create another provider mount or native `backup` flag.
@@ -132,68 +143,201 @@ site path or address. Compiler-owned runtime leaves and sidecars are listed
 individually, preserving app ownership instead of archiving a shared runtime
 directory. Related PostgreSQL/MariaDB/InfluxDB endpoints are derived from the
 existing [connections](connections.md); these are recovery associations, not
-new deployment readiness edges or proof of a common transaction.
+new deployment readiness edges or proof of a common transaction. An operational
+job requires each related database to have a configured native producer in the
+root group; an external database endpoint alone cannot establish that proof.
 
 The library's application-specific coverage guide must explain the contents of
 each role and its capture requirements. A field named `config` is not evidence
 that everything within it is static or that it contains no secrets.
 
+## Operational job
+
+This is a **site-root fragment**. The library's complete tested
+[synthetic backup example](https://github.com/theaussiepom/homelab-stack/blob/feature/pbs-client-contract/site.backup.example.yaml)
+provides the referenced endpoint, context, file-secret sources, interface,
+network rule and dedicated guest volume. The fragment alone is not deployable.
+
+```yaml
+backup:
+  job:
+    name: example-recovery
+    destination:
+      endpoint: {external: pbs}
+      datastore: recovery
+      namespace: guests
+      fingerprint: ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab
+    schedule: {calendar: '02:00', jitter_seconds: 300}
+    clients:
+      resolver:
+        auth_id: resolver@pbs!backup
+        password: pbs-password
+        encryption_key: pbs-key
+        staging_volume: backup-stage
+        interface: primary
+    capture: {pause: [], database_lock: [], influx_tokens: {}}
+    limits: {max_bytes: 33554432, max_files: 10000, timeout_seconds: 300}
+```
+
+### Job fields
+
+All six fields are required when `job` is present; null values and unknown keys
+refuse. These values are resolved once into the versioned ordinary packet.
+
+| Field | Type | Required/default | Constraints and effect |
+| --- | --- | --- | --- |
+| `name` | Identifier | Required | Stable root schedule identity. Renaming is a retirement/handover, not an ordinary update. |
+| `destination` | Closed object | Required | Existing PBS destination; no server provisioning. |
+| `destination.endpoint` | `{external: id}` | Required | Existing HTTPS [external endpoint](networks.md#external-endpoints). Resolves server and port; never a management fallback. |
+| `destination.datastore` | String | Required | Literal ASCII letters/digits/underscore/hyphen, at most 128 characters; no `/`. |
+| `destination.namespace` | String | Required | Same segments separated by `/`, at most 128 characters and six segments. A stable backup-ID segment is appended for each guest. |
+| `destination.fingerprint` | String | Required | Lowercase SHA256 certificate fingerprint, exactly 32 colon-separated hexadecimal bytes. |
+| `schedule` | Closed object | Required | One controller timer for the root group, no guest-local independent timers. |
+| `schedule.calendar` | String | Required | `hourly`, `daily` or quoted 24-hour `HH:MM`. All schedules use UTC. |
+| `schedule.jitter_seconds` | Integer | Required | 0–3600; randomized timer delay. Missed runs are not replayed on restart. |
+| `clients` | Named map | Required | Exactly every configured guest, including CD-disabled members; at most 64 members. |
+| `capture` | Closed object | Required | Explicit supported interruption and native-producer bindings; see below. |
+| `limits` | Closed object | Required | Finite capture capacity, entry count and phase duration. |
+| `limits.max_bytes` | Integer | Required | 1 MiB through 1 PiB. Bounds native output, complete payload/readback and selected source intake. Metadata also consumes this budget. |
+| `limits.max_files` | Integer | Required | 1–1,000,000 selected entries/artifacts. |
+| `limits.timeout_seconds` | Integer | Required | 60–86,400 per bounded preflight/capture/upload phase. The coordinator also enforces a finite total lease. |
+
+### Client fields
+
+Each `clients.<guest-id>` references an existing configured guest. Inputs are
+references to [file secret sources](identity-and-secrets.md#secret-sources), never inline secret values.
+Public compilation validates references but does not open their paths.
+
+| Field | Type | Required/default | Constraints and effect |
+| --- | --- | --- | --- |
+| `auth_id` | String | Required | Unique PBS token identity `user@pbs!token`; each member has its own scoped identity. No root/PAM login. |
+| `password` | Secret-source identifier | Required | Protected controller file containing the existing PBS token secret. |
+| `encryption_key` | Secret-source identifier | Required | Existing PBS client encryption-key file. No key creation, rotation or default key fallback. |
+| `key_password` | Secret-source identifier | Optional; absent for an unprotected key file | Password for an encrypted key file; passed only through the private process environment. |
+| `staging_volume` | Guest volume identifier | Required | Dedicated managed volume, no app binding and no `backup:` marker. Size must be at least four times `max_bytes`. Its path is reused from the volume declaration. |
+| `interface` | Guest interface identifier | Required | Existing interface with resolved static IPv4 address. Native route admission must report that exact device and source address before capture. |
+| `backup_id` | String | Optional; `guest-<VMID>` | Stable ASCII letters/digits/dot/underscore/hyphen, first character alphanumeric, 1–128 characters. Must be unique in the root group. Set it explicitly for VMIDs duplicated across contexts. Changing it requires explicit protection handover. |
+
+The final namespace is `<namespace>/<backup_id>` and the snapshot is
+`host/<backup_id>/<UTC capture time>`. Pre-create the namespaces and grant only
+the permissions needed to upload and read back that member's archives. Guest
+credentials need no server administration, pruning or GC rights. See
+[Proxmox access control](https://pbs.proxmox.com/docs/user-management.html).
+Keep an independently recoverable encryption key outside the encrypted archive;
+a key stored only inside its own archive cannot recover that archive.
+
+### Capture permissions
+
+| Field | Type | Required/default | Meaning |
+| --- | --- | --- | --- |
+| `capture.pause` | Unique app-ID list | Required; may be empty | Explicit permission to stop/start only that app's already-running Compose services. Every `application-export` dataset needs its owning app here. |
+| `capture.database_lock` | Unique app-ID list | Required; may be empty | Exactly the configured MariaDB producers. Authorizes their all-table read lock while dumping all databases, routines, events and triggers. |
+| `capture.influx_tokens` | App-ID → secret-source map | Required; may be empty | Exactly the configured Influx producers, each bound to its existing operator-token file. |
+
+PostgreSQL uses its installed major's `pg_dumpall` under local peer authentication,
+including globals/roles and individual database snapshots. MariaDB uses its
+native all-database logical dump with an explicit all-table lock. Influx uses
+its native full backup command. Raw database engine directories never enter the
+selected-file archive. These are native recovery formats, not restored-service
+acceptance; version-compatible restore and extensions/plugin requirements still
+need target qualification.
+
+For example, a composition with Bitwarden `vault` and MariaDB `database` needs
+`pause: [vault]` and `database_lock: [database]`. Authentik similarly needs its
+owned app services paused and its PostgreSQL member included in the group. A
+missing pause permission, Influx token, group member or database lock refuses
+compilation/admission; no arbitrary command hook is available.
+
+### Coordinated execution and failure behavior
+
+1. The controller acquires existing database-network/shared and per-guest
+   workflow/deployment/exclusive locks, nonblocking. It verifies actual canonical
+   and immutable ordinary receipts, sealed inputs, backend identity and pinned
+   SSH trust. Any failed/pending/foreign hold refuses. It does not require every
+   guest to have participated in the newest CD run: disabled members retain
+   their genuinely completed deployed configuration.
+2. Every worker preflights its dedicated mount/capacity, selected route, PBS
+   reachability, input paths and exact deployed Compose control-file digests.
+   Only when every member is ready does the controller establish its own backup
+   window holds and permit explicitly selected service pauses.
+3. All permitted app writers pause before any member captures files or native
+   database exports. Each worker creates a new private generation; GNU tar
+   preserves selected metadata, ACLs, xattrs and explicit exclusions. Original
+   containers are started again in `finally`, with running-service readback.
+   No container recreation, `compose up`, restore, radio/NVM command or synthetic
+   device command forms part of backup capture.
+4. All members resume before upload. Every archive includes the same recovery-set
+   manifest, exact snapshot destinations and member data-manifest digests.
+   This establishes a coordinated quiescence window, **not a distributed database
+   transaction** or protection against independent writers outside the declared
+   apps. Deployment does not gain new scheduling edges.
+5. Upload always requests client encryption. Each worker downloads/decrypts its
+   exact archive into separate private readback and compares every artifact hash.
+   The root set succeeds only after all members confirm that readback and exit
+   successfully. Successful temporary payload/readback copies are released only
+   after their exact-byte verification; receipts/manifests remain.
+
+A partial preflight preserves its failed UUID evidence without opening a capture
+window. A new scheduled UUID may attempt a fresh preflight. Once a window opens,
+any failure preserves local pending markers, controller holds and failed payloads;
+no automatic replay, generic recovery, marker clearing or retry is provided.
+EOF/timeouts abort workers and allow only bounded attempts to restart services
+that were running before capture. Uncertain interruption keeps the hold. No
+remote snapshot, earlier failure or last successful recovery generation is
+pruned by this client.
+
 ## First installation
 
-1. Validate the complete source and each profile's recovery classification.
-2. Select root `backup`, and mark the authoritative managed volumes with bare
-   `backup:`. Review the native full-guest volume flags before deployment.
-3. Ordinary `Prepare` installs the selected pinned client through the existing
-   package/repository machinery. The later `PBS agent` step validates the guest
-   identity and writes root-owned `/etc/homelab-backup/coverage.json` with mode
-   `0600` in a `0700` directory, then checks the client executable.
-4. Review this inventory alongside the native database and application capture
-   producers before the later private-site backup activation.
+Select the profile and explicit authoritative volume markers. For an operational
+job, first supply the existing server/namespace, certificate pin, separately
+escrowed encryption keys, scoped token files, transport policy and dedicated
+staging volume for every guest. Review every service pause/database-lock impact
+before a private-site rollout.
 
-The feature creates no NAS VM, datastore, export, account, key, timer, prune/GC
-job or recovery claim. It does not stop an application, signal a radio, copy
-live data or run a database export. Public source tests and a client version
-check cannot establish that a later native capture or restore works.
+Ordinary `Prepare` installs the selected exact client package. The `PBS agent`
+step seals the inventory and selected private inputs, installs the guest worker
+and one root controller timer through Ansible. It does not run a backup during
+CD. New staging on an existing guest is an append-only exact empty allocation;
+any missing/foreign preimage or provider-plan ambiguity refuses. The controller
+schedule runs as the existing CD actor, from its immutable verified public source
+bundle. It starts only after genuine ordinary completion can be proved for every
+member. A version check or installed timer is not a recovery point.
 
-## Later deployments
+## Later deployments and retirement
 
-The phase uses the same sealed ordinary payload and deployment receipts as
-other guest work. It validates previous PBS phase ownership on repeat runs.
-Changed coverage is a new desired input generation, not a historical rewrite.
-Existing failed/pending holds remain enforced.
+Owned CD updates preserve credential bytes, stable group/member identity,
+previous recovery records, ordinary failure holds and backend ownership. Changed
+coverage becomes a new sealed input generation. Merely skipping a guest in CD
+never removes it from backup membership. An operational job/member cannot be
+omitted, renamed or moved by ordinary deployment: retire/drain its protection
+explicitly first. This contract has no automatic retirement executor.
 
-Coverage includes configured guests even when they are excluded from a CD run;
-only selected guests execute the phase. Disabling a guest or omitting the root
-property performs no agent removal, job deletion, retention change or history
-pruning. Explicit retirement and any future schedule handover need their own
-supported procedure. No backup scheduler is installed by this release.
+Source without an operational job installs no scheduler. Source with a job must
+preserve previously installed operational protection; it cannot downgrade it to
+preparation-only. New configuration does not repin state, migrate databases,
+clear old holds or invoke historical commissioning controllers.
 
-## Validation and examples
+## Validation and support limits
 
-The maintained library backup example is a complete synthetic source that can
-be compiled without a server. Framework tests exercise source parsing, path
-derivation, native volume flags, disabled selection, the actual packet receiver,
-workflow steps and sealed ordinary repeats with fake native engines.
+Component units exercise closed schemas, reference/path resolution and extensive
+invalid cases. App/guest tests mock their collaborators; real compiler integration
+checks packets, explicit volume flags and disabled membership. Local runtime
+fixtures exercise actual private filesystem generations, concurrent pipe framing,
+deadlines, failure preservation and worker restart paths with fake native engines.
+Provider mock plans test allocation/guard agreement. These are source/integration
+checks, not a claim of actual PBS/Linux guest/restore operation. The feature
+follows the supported Debian LXC guest backend; it adds no NAS VMM or physical-host
+provisioning backend.
 
-Useful invalid cases include `backup: true`, an ambiguous profile selection,
-unknown fields, a newly added unclassified storage role, a state role using
-`capture: files`, a raw database folder treated as a file export, and an
-authoritative volume without its presence marker. Compilation refuses these
-without opening private inputs or contacting a target.
+Before declaring protection, qualify a real scheduled capture, native database
+exports, encrypted transfer and full archive readback on the intended network,
+then restore the related app/database set in isolation and verify its service
+behavior. Full PVE guest schedules, NAS capacity/datastore provisioning, server
+retention/verify/prune/GC and complete-datastore offsite copies remain separate
+server/site work. This client deliberately cannot prune remote history.
 
-## Required later qualification
-
-Before claiming protection, configure a real PBS destination, scoped client
-identity, certificate trust, client-side encryption and independently recoverable
-keys. Qualify each native producer, completed immutable generation, cross-artifact
-association, transfer/readback, successful scheduled cycle and isolated restore.
-Keep full-guest and selected-recovery tiers distinct. Database exports need
-native metadata/roles and application restore checks; database-only recovery
-does not restore attachments, radio keys or app encryption material.
-
-Server retention, verification, prune, GC, NAS capacity and any offsite complete-
-datastore copy remain separately owned operations. A failed capture/upload must
-not replace the last verified generation. No automatic cleanup is implied here.
-
-Product background: [Proxmox client installation](https://pbs.proxmox.com/docs/installation.html#proxmox-backup-client-only-repository)
-and [backup client usage](https://pbs.proxmox.com/docs/backup-client.html).
+Product references: [PBS client usage](https://pbs.proxmox.com/docs/backup-client.html),
+[client commands](https://pbs.proxmox.com/docs/proxmox-backup-client/man1.html),
+[PostgreSQL dumpall](https://www.postgresql.org/docs/current/app-pg-dumpall.html),
+[MariaDB dump](https://mariadb.com/docs/server/clients-and-utilities/backup-restore-and-import-clients/mariadb-dump)
+and [Influx backup](https://docs.influxdata.com/influxdb/v2/reference/cli/influx/backup/).

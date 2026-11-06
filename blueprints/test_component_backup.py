@@ -69,6 +69,34 @@ class BackupUnits(unittest.TestCase):
             'path': '/foreign', 'kind': 'file'}
         with self.assertRaisesRegex(ComponentError, 'configuration-owner'): backup.bind(r)
 
+    def test_native_configuration_and_compose_overlay_come_from_their_owners(self):
+        for adapter, root in [('postgresql', '/etc/postgresql'), ('mariadb', '/etc/mysql'), ('influxdb', '/etc/influxdb')]:
+            r = fixture(); app = r.apps['application']; app.update(adapter=adapter,
+                software_selection={'packages': ['postgresql-client-16=16.10-1']},
+                role_addresses={'service':'192.0.2.10'})
+            rule = r.library['app_profiles']['example']['backup']
+            rule['configuration']['native']['path'] = root
+            backup.bind(r)
+            selected = r.guests['one']['backup']['applications']['application']
+            self.assertEqual(selected['configuration']['native']['path'], root)
+            self.assertEqual(selected['producer']['type'], adapter)
+            rule['configuration']['native']['path'] = '/foreign'
+            with self.assertRaisesRegex(ComponentError, 'configuration-owner'): backup.bind(r)
+        r = fixture(); app = r.apps['application']
+        app.update(adapter='node_red', identity={'project':'project','services':{'service':'owned'}},
+                   secret_bindings={'api_token':'secret-reference'})
+        r.guests['one']['compose_projects']={'project':{'name':'example','file':'compose.yml'}}
+        backup.bind(r)
+        selected = r.guests['one']['backup']['applications']['application']
+        self.assertEqual(selected['producer']['overlay'], '/opt/homelab-app/component-application-environment.yml')
+        from test_component_backup_job import fixture as job_fixture
+        from unittest.mock import patch
+        value, _ = job_fixture(); r = fixture(); r.site['backup'] = {'job':value}
+        self.assertEqual(backup.selected(r), 'pbs')
+        with patch.object(backup.component_backup_job, 'bind', return_value={'schema':'group'}) as bind:
+            result = backup.bind(r)
+            self.assertEqual(result['mode'], 'scheduled-recovery'); bind.assert_called_once()
+
     def test_presence_and_selection_are_closed_and_ambiguous_defaults_refuse(self):
         for value in (None, {}): backup.presence(value)
         for value in (True, False, 'yes', 1, [], {'enabled': True}):
@@ -140,9 +168,9 @@ class BackupUnits(unittest.TestCase):
 
     def test_owned_compose_and_private_environment_remain_in_the_recovery_inventory(self):
         r = fixture(); app = r.apps['application']
-        app['adapter'] = 'bitwarden'; app['identity']['project'] = 'shared'
+        app['adapter'] = 'bitwarden'; app['identity'].update(project='shared', services={'server': 'vault'})
         app['secret_bindings'] = {'runtime_environment': {'source_id': 'owned'}}
-        r.guests['one']['compose_projects'] = {'shared': {'file': 'compose-shared.yml'}}
+        r.guests['one']['compose_projects'] = {'shared': {'name': 'shared', 'file': 'compose-shared.yml'}}
         backup.bind(r)
         files = r.guests['one']['backup']['applications']['application']['runtime_files']
         self.assertIn('/opt/homelab-app/compose-shared.yml', files)
@@ -189,6 +217,22 @@ class BackupIntegration(unittest.TestCase):
             self.assertEqual(cfg['deployment']['phases'][-1], backup.PHASE)
             self.assertEqual(component_workflows.model(plan)['guests']['resolver']['phases'][-1]['name'], 'PBS agent')
             component_guest.packet(packet, component_packet.INPUTS)
+            from test_component_backup_job import fixture as operational_fixture
+            job, _ = operational_fixture()
+            job['clients'] = {'resolver': {**job['clients']['one'], 'staging_volume':'cache', 'interface':'backend'}}
+            selected['external_endpoints']['pbs'] = {'protocol':'https','address':'192.0.2.50','port':8007}
+            job['clients']['resolver']['password'] = 'token'
+            job['clients']['resolver']['encryption_key'] = 'ssh'
+            selected['backup'] = {'job':job}; path.write_text(yaml.safe_dump(selected))
+            operational = component_plan.resolve(stack,path,disabled=['resolver'])
+            packet = component_packet.lower_plan(operational)['resolver']
+            with self.assertRaisesRegex(ValueError,'Enable one reviewed'): component_guest.packet(packet,component_packet.INPUTS)
+            self.assertEqual(set(json.loads(packet['files']['backup-group.json'])['group']['members']),{'guest-610'})
+            self.assertEqual(operational.resolved['enabled'],[])
+            operational = component_plan.resolve(stack,path)
+            packet = component_packet.lower_plan(operational)['resolver']
+            component_guest.packet(packet,component_packet.INPUTS)
+            selected['backup'] = None; path.write_text(yaml.safe_dump(selected))
             for packages in ([], ['proxmox-backup-client=4.2.8-1', 'proxmox-backup-client=4.1.0-1']):
                 invalid_library = copy.deepcopy(authored)
                 invalid_library['software']['pbs-client']['packages'] = packages

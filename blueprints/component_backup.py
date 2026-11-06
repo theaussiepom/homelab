@@ -11,6 +11,9 @@ from pathlib import PurePosixPath
 from component_errors import at, checked
 from component_sources import closed, identifier, named, require
 import component_types as types
+import component_backup_job
+import monitoring_paths
+import component_native
 
 SCHEMA = 'homelab-pbs-coverage-v1'
 PHASE = 'pbs-agent'
@@ -18,11 +21,7 @@ CATEGORIES = {'configuration', 'state', 'database'}
 CAPTURES = {'files', 'application-export', 'database-export'}
 EXCLUSIONS = {'transient', 'rebuildable'}
 DATABASES = {'postgresql', 'mariadb', 'influxdb'}
-MONITORING_CONFIGURATION = {
-    'zabbix-agent-configuration': {'path': '/etc/zabbix/zabbix_agent2.conf', 'kind': 'file'},
-    'zabbix-agent-key': {'path': '/etc/zabbix/agent.psk', 'kind': 'file'},
-    'zabbix-agent-ownership': {'path': '/var/lib/homelab-monitoring/agent.json', 'kind': 'file'},
-}
+MONITORING_CONFIGURATION = monitoring_paths.RECOVERY
 
 
 def presence(value):
@@ -77,8 +76,12 @@ def selected(resolver):
         require(len(resolver.library['backup_profiles']) == 1, 'component.backup-profile-selection')
         name = next(iter(resolver.library['backup_profiles']))
     else:
-        closed(value, ('profile',))
-        name = value['profile']
+        closed(value, (), ('profile', 'job'))
+        require('profile' in value or len(resolver.library['backup_profiles']) == 1,
+                'component.backup-profile-selection')
+        name = value.get('profile', next(iter(resolver.library['backup_profiles']), None))
+        if 'job' in value:
+            component_backup_job.job(value['job'])
     require(identifier(name) and name in resolver.library['backup_profiles'],
             'component.backup-profile-selection')
     return name
@@ -131,8 +134,23 @@ def bind(resolver):
                 if 'project' in app['identity']:
                     project = guest['compose_projects'][app['identity']['project']]
                     record['runtime_files'].append('/opt/homelab-app/' + project['file'])
+                    record['producer'] = {'type': 'compose', 'project': project['name'],
+                        'file': '/opt/homelab-app/' + project['file'],
+                        'services': list(app['identity']['services'].values())}
+                elif app['adapter'] in DATABASES:
+                    require('native' not in record['configuration'] or record['configuration']['native'] == {
+                        'path': component_native.configuration_root(app['adapter']), 'kind': 'directory'},
+                        'component.backup-configuration-owner')
+                    record['configuration']['native'] = {
+                        'path': component_native.configuration_root(app['adapter']), 'kind': 'directory'}
+                    record['producer'] = {'type': app['adapter'],
+                        'packages': app['software_selection']['packages']}
+                    if app['adapter'] == 'influxdb':
+                        record['producer']['endpoint'] = 'http://' + app['role_addresses']['service'] + ':8086'
                 if app['adapter'] in ('node_red', 'bitwarden') and app.get('secret_bindings'):
-                    record['runtime_files'].append('/opt/homelab-app/component-' + app_id + '-environment.yml')
+                    overlay = '/opt/homelab-app/component-' + app_id + '-environment.yml'
+                    record['runtime_files'].append(overlay)
+                    record['producer']['overlay'] = overlay
                 for role, binding in app.get('storage', {}).items():
                     require('asset' not in binding, 'component.backup-binding')
                     kind = 'root_paths' if 'root_path' in binding else 'volumes'
@@ -154,4 +172,7 @@ def bind(resolver):
                             'target': copy.deepcopy(row['target'])})
                 document['applications'][app_id] = record
         guest['backup'] = document
-    return {'profile': name, 'mode': 'client-preparation'}
+    result = {'profile': name, 'mode': 'client-preparation'}
+    if isinstance(resolver.site['backup'], dict) and 'job' in resolver.site['backup']:
+        result.update(mode='scheduled-recovery', group=component_backup_job.bind(resolver, resolver.site['backup']['job']))
+    return result

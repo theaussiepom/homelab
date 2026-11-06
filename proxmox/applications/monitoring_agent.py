@@ -1,4 +1,5 @@
 """Closed guest Agent 2 configuration derived from the blueprint inventory."""
+import monitoring_paths
 import ipaddress
 from pathlib import Path
 import re
@@ -205,7 +206,7 @@ def validate(cfg):
 def configuration(cfg, password=None):
     selected = validate(cfg)
     text = monitoring.agent_config({k: selected[k] for k in ('hostname', 'server_active', 'psk_identity')}
-                                   | {'psk_path': '/etc/zabbix/agent.psk'})
+                                   | {'psk_path': monitoring_paths.PATHS['key']})
     if 'docker' in selected['profiles']:
         text += 'Plugins.Docker.Endpoint=unix:///var/run/docker.sock\n'
     for profile, plugin, port in [('postgresql', 'PostgreSQL', 5432), ('mysql', 'Mysql', 3306)]:

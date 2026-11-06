@@ -33,9 +33,9 @@ def main():
             if case=='public-receipt':receipt.chmod(0o644)
             if case=='linked-receipt':os.link(receipt,root/'extra-name')
             if case=='linked-config':cfg.unlink();cfg.symlink_to(receipt)
-            raw=json.dumps(selected).replace('/etc/zabbix/zabbix_agent2.conf',str(cfg)).replace('/var/lib/homelab-monitoring/agent.json',str(receipt)).replace('/var/lib/homelab-monitoring/AGENT-HOLD',str(hold))
+            raw=json.dumps(selected)
             play=root/'play.json';play.write_text(json.dumps([{'hosts':'all','connection':'local','gather_facts':False,
-                'vars':{'app':{'monitoring':{'hostname':owner['hostname'],'psk_identity':owner['psk_identity']}},'monitoring_agent_package':{'version':owner['version']}},'tasks':json.loads(raw)}]))
+                'vars':{'monitoring_agent_paths':{'configuration':str(cfg),'receipt':str(receipt),'hold':str(hold)},'app':{'monitoring':{'hostname':owner['hostname'],'psk_identity':owner['psk_identity']}},'monitoring_agent_package':{'version':owner['version']}},'tasks':json.loads(raw)}]))
             before={p.name:p.read_bytes() for p in (cfg,receipt,hold) if p.exists()}
             run=subprocess.run([str(Path(sys.executable).with_name('ansible-playbook')),'-i','localhost,',str(play)],capture_output=True,text=True,timeout=45)
             assert (run.returncode==0)==(case in {'first','retained'}),case+': '+run.stdout[-1200:]

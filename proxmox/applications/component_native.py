@@ -15,6 +15,14 @@ from private_io import require
 
 _DATA = {'postgresql': '/var/lib/postgresql', 'mariadb': '/var/lib/mysql',
          'influxdb': '/var/lib/influxdb'}
+CONFIGURATION_ROOTS = {'postgresql': '/etc/postgresql', 'mariadb': '/etc/mysql',
+                       'influxdb': '/etc/influxdb'}
+
+
+def configuration_root(adapter):
+    """Deployment and recovery consume the same native configuration owner."""
+    require(adapter in CONFIGURATION_ROOTS, 'Select a native configuration owner')
+    return CONFIGURATION_ROOTS[adapter]
 
 
 class NativeNamespaceError(ValueError):
@@ -171,21 +179,21 @@ def render(app, *, clients=()):
                  'pg_hba.conf': 'local all postgres peer\nlocal all all peer\n'
                  'host all all 127.0.0.1/32 scram-sha-256\nhost all all ::1/128 scram-sha-256\n'
                  + _clients(clients)}
-        directory = '/etc/postgresql/' + major + '/main/'
+        directory = configuration_root(adapter) + '/' + major + '/main/'
         targets = [directory + 'conf.d/homelab.conf', directory + 'pg_hba.conf']
         identity = {'uid': 70, 'gid': 1000, 'user': 'postgres', 'group': 'postgres', 'home': data,
                     'version_command': ['/usr/lib/postgresql/' + major + '/bin/postgres', '--version']}
     elif adapter == 'mariadb':
         files = {'homelab.cnf': f'[mysqld]\nbind-address = {address}\nskip-name-resolve\n'
                  'max_connections = 100\ninnodb_buffer_pool_size = 256M\n'}
-        targets = ['/etc/mysql/mariadb.conf.d/99-homelab.cnf']
+        targets = [configuration_root(adapter) + '/mariadb.conf.d/99-homelab.cnf']
         identity = {'account_mode': 'package', 'user': 'mysql', 'group': 'mysql', 'home': data,
                     'version_command': ['mariadb', '--version']}
     else:
         files = {'config.toml': 'bolt-path = ' + json.dumps(data + '/influxd.bolt', ensure_ascii=False)
                  + '\nengine-path = ' + json.dumps(data + '/engine', ensure_ascii=False)
                  + '\nhttp-bind-address = "' + address + ':8086"\nreporting-disabled = true\n'}
-        targets = ['/etc/influxdb/config.toml']
+        targets = [configuration_root(adapter) + '/config.toml']
         identity = {'uid': 1000, 'gid': 1000, 'user': 'influxdb', 'group': 'influxdb', 'home': data,
                     'version_command': ['influxd', 'version']}
     identity['version_pattern'] = version

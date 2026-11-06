@@ -26,6 +26,34 @@ run "explicit_backup_flags_preserve_managed_volume_paths_and_sizes" {
   }
 }
 
+run "dedicated_backup_staging_is_a_new_unprotected_pool_allocation" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      volumes = {
+        retained = { path = "/srv/retained", size_gib = 8, backup = true }
+        staging  = { path = "/srv/backup-stage", size_gib = 1, backup = false }
+      }
+      volume_order = ["retained", "staging"]
+    })
+  }
+  assert {
+    condition = (
+      length(proxmox_virtual_environment_container.guest.mount_point) == 2 &&
+      proxmox_virtual_environment_container.guest.mount_point[0].path == "/srv/retained" &&
+      proxmox_virtual_environment_container.guest.mount_point[0].backup &&
+      proxmox_virtual_environment_container.guest.mount_point[1].path == "/srv/backup-stage" &&
+      proxmox_virtual_environment_container.guest.mount_point[1].size == "1G" &&
+      proxmox_virtual_environment_container.guest.mount_point[1].volume == var.guest.storage_id &&
+      !proxmox_virtual_environment_container.guest.mount_point[1].backup &&
+      proxmox_virtual_environment_container.guest.mount_point[1].replicate
+    )
+    error_message = "Staging uses a fresh last-slot allocation in the selected pool, never an existing volume or app backup."
+  }
+}
+
 run "omitted_internal_backup_flag_preserves_the_existing_provider_default" {
   command = plan
   module { source = "./guest" }

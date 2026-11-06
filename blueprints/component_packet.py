@@ -114,6 +114,8 @@ def lower_guest(plan, guest_id, *, inputs=INPUTS):
         cfg['app']['backup'] = copy.deepcopy(guest['backup'])
         cfg['deployment']['payload_phases']['pbs-agent'] = 'backup-agent'
         cfg['deployment']['phases'].append('pbs-agent')
+        if 'group' in plan.resolved['backup']:
+            files['backup-group.json'] = encoded(plan.resolved['backup']['group']).decode()
     if 'serial_device' in provider['guest']:
         devices = [plan.site['devices'][ref] for app in plan.resolved['apps'].values()
                    if app['guest'] == guest_id for ref in app.get('devices', {}).values()]

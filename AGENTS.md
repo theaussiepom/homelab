@@ -31,4 +31,4 @@
   environmental imports/recovery are separate operator work. Do not introduce
   migration flags or competing host-rule writers.
 
-- PBS client preparation and recovery classification follow [the backup contract](docs/reference/backup.md). Preserve native database/export ownership and protection history; never describe client preparation or warm file copies as verified recovery.
+- PBS contracts follow [the backup reference](docs/reference/backup.md). Reuse owned path/custody components; keep native producers finite and pause permissions explicit. Test component negatives, coordinated protocol failures and real packet composition separately. Preserve failed protection/history; source tests and archive readback are not service-restore acceptance.

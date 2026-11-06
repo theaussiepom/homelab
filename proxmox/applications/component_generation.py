@@ -161,6 +161,14 @@ def binding(value):
     return value
 
 
+def backup_continuity(previous, current):
+    """Omission is not retirement of a commissioned recurring protection job."""
+    old = previous.get('backup', {}).get('job')
+    require(old is None or ('job' in current.get('backup', {})
+            and old['group'] == current['backup']['job']['group']),
+            'Retire existing backup protection explicitly; ordinary deployment cannot disable it')
+
+
 def previous(attempt):
     """Validate the actual prior canonical/immutable component and sealed inputs."""
     if not attempt.receipt.exists() and not attempt.receipt.is_symlink():return None
@@ -211,6 +219,7 @@ def previous(attempt):
         else:
             require(app==apps[proof['app']],'Preserve the prior sealed app descriptor')
             validate(app,read_json(payload.directory/'private-material.json',private=True))
+    backup_continuity(cfg['app'], attempt.cfg['app'])
     return value,cfg,apps
 
 

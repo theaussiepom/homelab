@@ -17,7 +17,34 @@
     - name: Preserve configuration ownership
       ansible.builtin.assert:
         that:
-          - not backup_directory.stat.exists or (backup_directory.stat.isdir and not backup_directory.stat.islnk and backup_directory.stat.uid == 0)
+          - not backup_directory.stat.exists or (backup_directory.stat.isdir and not backup_directory.stat.islnk and backup_directory.stat.uid == 0 and backup_directory.stat.mode == '0700')
+
+    - name: Inspect previous backup coverage ownership
+      ansible.builtin.stat:
+        path: /etc/homelab-backup/coverage.json
+        follow: false
+      register: backup_coverage_before
+
+    - name: Refuse a foreign or interrupted backup configuration
+      ansible.builtin.assert:
+        that:
+          - backup_directory.stat.exists == backup_coverage_before.stat.exists
+          - not backup_coverage_before.stat.exists or (backup_coverage_before.stat.isreg and not backup_coverage_before.stat.islnk and backup_coverage_before.stat.uid == 0 and backup_coverage_before.stat.mode == '0600' and backup_coverage_before.stat.nlink == 1)
+
+    - name: Read previous backup ownership
+      ansible.builtin.slurp:
+        src: /etc/homelab-backup/coverage.json
+      register: backup_previous_coverage
+      when: backup_coverage_before.stat.exists
+      no_log: true
+
+    - name: Preserve the existing guest coverage owner
+      ansible.builtin.assert:
+        that:
+          - (backup_previous_coverage.content | b64decode | from_json).schema == 'homelab-pbs-coverage-v1'
+          - (backup_previous_coverage.content | b64decode | from_json).owner == (backup_agent.inventory | from_json).owner
+      when: backup_coverage_before.stat.exists
+      no_log: true
 
     - name: Prepare backup configuration
       ansible.builtin.file:
@@ -42,3 +69,7 @@
           - /usr/bin/proxmox-backup-client
           - version
       changed_when: false
+
+    - name: Configure the selected recovery job
+      ansible.builtin.import_tasks: tasks/backup-job.yml
+      when: backup_agent.credentials is defined

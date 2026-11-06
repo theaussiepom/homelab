@@ -38,6 +38,12 @@ def bootstrap_closed(root=Path("/var/lib/homelab-bootstrap")):
         no_markers(root, bootstrap=True)
 
 
+def custody_paths(root, work):
+    """One unchanged lock order for deployment and read-only backup custody."""
+    return [(root / 'database-network.lock', True),
+            (work / 'workflow.lock', False), (work / 'deployment.lock', False)]
+
+
 class DeploymentAttempt:
     """Own an existing state directory and one GitHub run's ordered phase evidence."""
 
@@ -66,11 +72,7 @@ class DeploymentAttempt:
         private_directory(self.root)
         private_directory(self.work, create=not self.work.exists())
         try:
-            for path, shared in [
-                (self.root / "database-network.lock", True),
-                (self.work / "workflow.lock", False),
-                (self.work / "deployment.lock", False),
-            ]:
+            for path, shared in custody_paths(self.root, self.work):
                 fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
                 stream = self.locks.enter_context(os.fdopen(fd, "a+"))
                 fcntl.flock(
