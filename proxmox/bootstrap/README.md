@@ -546,3 +546,7 @@ application data protection remain separate. The checks did not audit NAS-side
 access controls, encryption at rest or protection against later modification. See the dated
 [physical verification record](verification.md#physical-nas-and-database-foundation-passed-on-26-october-2026)
 for the evidence boundary and the preserved failures.
+
+## Maintain host firewall policy through CD
+
+For an already owned host policy, use the separate [host firewall CD guide](HOST-FIREWALL.md). It owns node TCP allowances and explicit cluster options with its own imported OpenTofu state; ordinary application credentials and guest policies are unchanged. Initial environmental import is separate from normal deployments.

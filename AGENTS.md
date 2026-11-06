@@ -24,3 +24,9 @@
   [reusable templates](docs/templates/configuration-reference.md) when adding
   or changing documentation; validate concrete examples at the
   owning contract and state first-installation/later-deployment limits.
+
+- Host firewall CD lives under `proxmox/bootstrap/host_firewall*.py` and
+  `proxmox/bootstrap/host-firewall/`. Keep its two imported state resources
+  separate from guest/bootstrap state. Normal source describes desired policy;
+  environmental imports/recovery are separate operator work. Do not introduce
+  migration flags or competing host-rule writers.

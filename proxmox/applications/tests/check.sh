@@ -14,6 +14,13 @@ tofu fmt -check -recursive
 tofu init -backend=false -input=false -lockfile=readonly -no-color
 tofu validate -no-color
 tofu test -no-color
+cp -R /src/proxmox/bootstrap/host-firewall /tmp/host-firewall-tofu
+cp /src/proxmox/bootstrap/docker/versions.tf /src/proxmox/bootstrap/docker/.terraform.lock.hcl /tmp/host-firewall-tofu/
+cd /tmp/host-firewall-tofu
+tofu fmt -check -recursive
+tofu init -backend=false -input=false -lockfile=readonly -no-color
+tofu validate -no-color
+tofu test -no-color
 export ANSIBLE_LOCAL_TEMP=/tmp/ansible-local
 export ANSIBLE_CONFIG=/src/proxmox/applications/ansible/ansible.cfg
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-preparation.yml
