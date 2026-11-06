@@ -198,7 +198,7 @@ def test_scheduler_cli_publishes_failure_and_never_implicitly_repairs(
     tmp_path, scenario, capsys
 ):
     config = copy.deepcopy(CONFIG)
-    config["hostname"] = "ben-beast"
+    config["hostname"] = "fixture-recovery-host"
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps(config))
     state = tmp_path / "state"
@@ -604,7 +604,7 @@ def test_recovery_install_cli_reports_review_or_failure_without_mutating():
 )
 def test_recovery_policy_refuses_unbounded_inputs_before_any_observation(scenario):
     cfg = copy.deepcopy(CONFIG)
-    cfg["hostname"] = "ben-beast"
+    cfg["hostname"] = "fixture-recovery-host"
     if scenario == "schema":
         cfg["schema"] = 2
     if scenario == "policy":

@@ -15,9 +15,12 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import deployment_state as state
 import commands
-import guest_contract as contract
+import component_guest as contract
+import component_inputs
+import component_payload
+import component_process_fixtures as fixtures
 import private_io as io
-from fixtures import guest, github_source
+from fixtures import github_source
 
 WORKER = Path(__file__).with_name("deployment_process_fixture.py")
 
@@ -26,16 +29,11 @@ class DeploymentResilienceTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
-        self.cfg = guest(self.root)
-        self.work = self.root / "state/808"
-        self.work.parent.mkdir(mode=0o700)
-        self.work.mkdir(mode=0o700)
-        io.write_new(self.work / "terraform.tfstate", b"authoritative backend")
-        io.write_new(self.root / "site.json", b"{}")
-        self.binding = {"vmid": 808, "site_sha256": "a" * 64}
-        self.phases = ["preparation", "mariadb"]
+        self.root = Path(self.temporary.name).resolve()
         self.source, self.revisions = github_source(self.root)
+        self.cfg = fixtures.initialize(self.root,workspace=self.source,revision=self.revisions[0])
+        self.work = self.root / "state/808"
+        self.phases = contract.phases(self.cfg)
         context = patch.dict(
             os.environ,
             {"GITHUB_SHA": self.revisions[0], "GITHUB_WORKSPACE": str(self.source)},
@@ -83,30 +81,9 @@ class DeploymentResilienceTests(unittest.TestCase):
                     # Each failure gets an independent guest history.
                     with tempfile.TemporaryDirectory() as directory:
                         previous_root = self.root
-                        self.root = Path(directory)
+                        self.root = Path(directory).resolve()
+                        fixtures.initialize(self.root,workspace=self.source,revision=self.revisions[0])
                         work = self.root / "state/808"
-                        work.parent.mkdir(mode=0o700)
-                        work.mkdir(mode=0o700)
-                        io.write_new(
-                            work / "terraform.tfstate", b"authoritative backend"
-                        )
-                        io.write_new(self.root / "site.json", b"{}")
-                        io.write_new(
-                            work / "ordinary-complete.json",
-                            io.encoded(
-                                {
-                                    "status": "passed",
-                                    "binding": {"old": True},
-                                    "run_number": 1,
-                                    "site_revision": self.revisions[0],
-                                    "workflow": [
-                                        "example/private-site",
-                                        "example/private-site/.github/workflows/deploy.yml",
-                                    ],
-                                    "operation": str(work / "ordinary-1-1"),
-                                }
-                            ),
-                        )
                         old = (work / "ordinary-complete.json").read_bytes()
                         try:
                             sequence = ["infrastructure", "preparation", "mariadb"]
@@ -126,7 +103,7 @@ class DeploymentResilienceTests(unittest.TestCase):
                             )
                             self.assertEqual(
                                 (work / "terraform.tfstate").read_bytes(),
-                                b"authoritative backend",
+                                fixtures.backend_bytes(),
                             )
                             self.assertFalse(
                                 (
@@ -141,9 +118,14 @@ class DeploymentResilienceTests(unittest.TestCase):
                                         / (phase + "-started.json")
                                     ).is_file()
                                 )
+                            if phase == "mariadb":
+                                started = io.read_json(work / "ordinary-777-1/mariadb-started.json", private=True)
+                                self.assertEqual(started['phase_inputs']['app'], 'database')
+                                self.assertEqual(started['phase_inputs']['identity'], 'a' * 64)
                             for run_id in ("777", "778"):
+                                expected_failure="FileNotFoundError" if phase=="infrastructure" and run_id=="777" else "ValueError"
                                 self.assertIn(
-                                    "ValueError",
+                                    expected_failure,
                                     self.finish(self.child(phase, run_id=run_id), 2),
                                 )
                             self.assertEqual(
@@ -167,32 +149,30 @@ class DeploymentResilienceTests(unittest.TestCase):
         # did not change or clear the first run's hold.
         self.finish(self.child("preparation"))
 
+    def test_actual_source_nonancestor_refuses_before_guest_work_and_matching_history_advances(self):
+        receipt = self.work / "ordinary-complete.json"
+        old=fixtures.seed(self.root,self.source,self.revisions[1],run_id='2',identity='f'*64)
+        # The current checked-out ancestor cannot consume a receipt from its
+        # future descendant. Both revisions belong to this real disposable Git.
+        self.assertIn("ValueError", self.finish(self.child(), 2))
+        self.assertEqual(receipt.read_bytes(), old)
+        self.assertFalse((self.root / "guest-operations").exists())
+        self.assertFalse((self.work / "ORDINARY-HOLD.json").exists())
+        self.assertFalse((Path(self.cfg['deployment']['input_directory']) / 'applications').exists())
+        with patch.dict(os.environ, {"GITHUB_SHA": self.revisions[1]}):
+            self.finish(self.child())
+        self.assertEqual((self.root / "guest-operations").read_text(), "infrastructure\n")
+        self.assertEqual(receipt.read_bytes(), old)
+
     def packet(self):
-        io.write_new(
-            self.root / "packet.json",
-            io.encoded(
-                {
-                    "schema": contract.SCHEMA,
-                    "enabled": True,
-                    "kind": "mariadb",
-                    "identity": "a" * 64,
-                    "files": {
-                        "site.json": json.dumps(self.cfg),
-                        "homelab.cnf": "retained listener\n",
-                    },
-                }
-            ),
-        )
-        (self.root / "inputs").mkdir(mode=0o700)
-        (self.root / "inputs/mariadb").mkdir(mode=0o700)
         return self.root / "inputs/mariadb" / ("a" * 64)
 
     def assert_prepared(self, destination):
-        manifest = io.read_json(destination / "prepared.json", private=True)
+        manifest = io.read_json(destination / component_inputs.MANIFEST, private=True)
         self.assertEqual(manifest["packet_sha256"], io.sha(self.root / "packet.json"))
         self.assertEqual(
             set(p.name for p in destination.iterdir()),
-            {"prepared.json", *manifest["files"]},
+            {component_inputs.MANIFEST, *manifest["files"]},
         )
         for name, digest in manifest["files"].items():
             self.assertEqual(
@@ -220,9 +200,9 @@ class DeploymentResilienceTests(unittest.TestCase):
         first = self.child(mode="prepare", pause="partial")
         self.checkpoint(first, "input-partial")
         before = (destination / "site.json").read_bytes()
-        self.assertIn("ValueError", self.finish(self.child(mode="prepare"), 2))
+        self.assertIn("FileNotFoundError", self.finish(self.child(mode="prepare"), 2))
         self.assertEqual((destination / "site.json").read_bytes(), before)
-        self.assertFalse((destination / "prepared.json").exists())
+        self.assertFalse((destination / component_inputs.MANIFEST).exists())
         self.finish(first, release=True)
         self.assert_prepared(destination)
         original = {p.name: p.read_bytes() for p in destination.iterdir()}
@@ -238,7 +218,7 @@ class DeploymentResilienceTests(unittest.TestCase):
         before = {p.name: p.read_bytes() for p in destination.iterdir()}
         publisher.kill()
         self.finish(publisher, -signal.SIGKILL)
-        self.assertIn("ValueError", self.finish(self.child(mode="prepare"), 2))
+        self.assertIn("FileNotFoundError", self.finish(self.child(mode="prepare"), 2))
         self.assertEqual(
             {p.name: p.read_bytes() for p in destination.iterdir()}, before
         )
@@ -250,26 +230,13 @@ class DeploymentResilienceTests(unittest.TestCase):
                 self.subTest(failure=failure),
                 tempfile.TemporaryDirectory() as directory,
             ):
-                cfg = guest(directory)
-                work = Path(directory) / "state/808"
-                work.parent.mkdir(mode=0o700)
-                work.mkdir(mode=0o700)
-                io.write_new(work / "terraform.tfstate", b"authoritative backend")
+                root = Path(directory).resolve()
+                fixtures.initialize(root,workspace=self.source,revision=self.revisions[0])
+                with patch('deployment_inputs.source_hash', return_value='b' * 64):
+                    cfg, binding = fixtures.prepare(root)
+                work = root / "state/808"
                 receipt = work / "ordinary-complete.json"
-                old = io.encoded(
-                    {
-                        "status": "passed",
-                        "binding": {"old": True},
-                        "run_number": 1,
-                        "site_revision": self.revisions[0],
-                        "workflow": [
-                            "example/private-site",
-                            "example/private-site/.github/workflows/deploy.yml",
-                        ],
-                        "operation": str(work / "ordinary-1-1"),
-                    }
-                )
-                io.write_new(receipt, old)
+                old=receipt.read_bytes()
                 with (
                     patch.dict(
                         os.environ,
@@ -281,8 +248,9 @@ class DeploymentResilienceTests(unittest.TestCase):
                             "HOMELAB_DEPLOYMENT_WORKFLOW": "example/private-site/.github/workflows/deploy.yml@refs/heads/main",
                         },
                     ),
-                    state.DeploymentAttempt(cfg, self.binding, self.phases) as attempt,
+                    state.DeploymentAttempt(cfg, binding, self.phases) as attempt,
                 ):
+                    self.assertFalse(attempt.completed(commands.is_ancestor))
                     attempt.begin_infrastructure()
                     attempt.infrastructure_complete(
                         {
@@ -292,7 +260,8 @@ class DeploymentResilienceTests(unittest.TestCase):
                     )
                     ready = attempt.begin_phase("preparation")
                     attempt.phase_complete("preparation", {"changed": False}, ready)
-                    ready = attempt.begin_phase("mariadb")
+                    payload = fixtures.payload(cfg)
+                    ready = attempt.begin_phase("mariadb", payload=payload)
                     hold = attempt.hold.read_bytes()
                     pending = receipt.with_name(receipt.name + ".pending")
                     fdopen, fsync, replace, sync = (
@@ -361,16 +330,20 @@ class DeploymentResilienceTests(unittest.TestCase):
                         patch.object(io, "sync", side_effect=sync_directory),
                         self.assertRaises(OSError) as raised,
                     ):
-                        attempt.phase_complete("mariadb", {"changed": False}, ready)
+                        attempt.phase_complete("mariadb", {"changed": False}, ready, payload=payload)
                     self.assertEqual(
                         raised.exception.errno,
                         errno.ENOSPC if failure == "write" else errno.EIO,
                     )
                     self.assertEqual(attempt.hold.read_bytes(), hold)
                     self.assertTrue((attempt.operation / "complete.json").is_file())
+                    complete = io.read_json(attempt.operation / "complete.json", private=True)
+                    self.assertEqual(complete['schema'], 'homelab-component-ordinary-complete-v1')
+                    self.assertEqual(complete['binding']['schema'], component_payload.BINDING_SCHEMA)
+                    self.assertEqual(complete['phase_inputs']['mariadb']['app'], 'database')
                     if failure == "directory-fsync":
                         self.assertEqual(
-                            json.loads(receipt.read_bytes())["binding"], self.binding
+                            json.loads(receipt.read_bytes())["binding"], binding
                         )
                         self.assertFalse(pending.exists())
                     else:
@@ -381,7 +354,7 @@ class DeploymentResilienceTests(unittest.TestCase):
                         else:
                             self.assertEqual(
                                 json.loads(pending.read_bytes())["binding"],
-                                self.binding,
+                                binding,
                             )
                     if renamed:
                         with self.assertRaises(ValueError):
@@ -399,11 +372,12 @@ class DeploymentResilienceTests(unittest.TestCase):
                             "HOMELAB_DEPLOYMENT_WORKFLOW": "example/private-site/.github/workflows/deploy.yml@refs/heads/main",
                         },
                     ),
-                    self.assertRaisesRegex(ValueError, "pending custody|existing attempt"),
+                    self.assertRaisesRegex(ValueError, "exact current run hold ownership"
+                        if failure == "directory-fsync" else "pending custody"),
                 ):
                     # A retained .pending now refuses at admission; a completed
                     # rename with a hold still refuses before any new attempt.
-                    with state.DeploymentAttempt(cfg, self.binding, self.phases) as next_attempt:
+                    with state.DeploymentAttempt(cfg, binding, self.phases) as next_attempt:
                         next_attempt.begin_infrastructure()
                 self.assertEqual((work / "ORDINARY-HOLD.json").read_bytes(), hold)
 

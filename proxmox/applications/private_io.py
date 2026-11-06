@@ -33,8 +33,10 @@ def private_directory(path, create=False):
     )
 
 
-def regular(path, private=False, *, limit=1024 * 1024, modes=(0o600,)):
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+def regular(path, private=False, *, limit=1024 * 1024, modes=(0o600,), dir_fd=None):
+    path = relative_name(path, dir_fd)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                 **({} if dir_fd is None else {'dir_fd':dir_fd}))
     with os.fdopen(fd, "rb") as stream:
         info = os.fstat(stream.fileno())
         require(
@@ -147,7 +149,8 @@ def write(path, value):
     write_bytes(path, encoded(value))
 
 
-def read_json(path, *, private=False):
+def decode_json(raw):
+    """The same duplicate-field guard for supplied bytes and owned files."""
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -155,4 +158,8 @@ def read_json(path, *, private=False):
             result[key] = value
         return result
 
-    return json.loads(regular(path, private=private), object_pairs_hook=unique)
+    return json.loads(raw, object_pairs_hook=unique)
+
+
+def read_json(path, *, private=False):
+    return decode_json(regular(path, private=private))

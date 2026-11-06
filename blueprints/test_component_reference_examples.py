@@ -1,0 +1,267 @@
+"""Execute named reference examples through the existing parser and contracts."""
+import copy
+import json
+from pathlib import Path
+import re
+import shutil
+import sys
+import tempfile
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'proxmox/applications'))
+import authored_config
+import component_addresses
+import component_accounts
+import component_auth
+import component_foundations
+import component_monitoring
+import component_packet
+import component_plan
+import component_properties
+import component_secrets
+import component_sources
+import component_types as types
+
+# Explicitly maintained test selection, not another configuration grammar.
+EXAMPLES = {
+    'site.md': ['site-worked'],
+    'library.md': ['template-minimal'],
+    'sources.md': ['source-app'],
+    'contexts.md': ['context-minimal', 'context-capability'],
+    'networks.md': ['network-minimal', 'nic-minimal', 'network-groups'],
+    'guests.md': ['guest-minimal'],
+    'apps.md': ['app-minimal', 'app-overrides'],
+    'app-properties.md': ['properties-adapters'],
+    'storage.md': ['pool-minimal', 'storage-combination'],
+    'connections.md': ['connection-managed', 'account-managed', 'account-source'],
+    'exposures.md': ['exposure-http'],
+    'policies.md': ['policy-network', 'policy-binding', 'policy-middleware'],
+    'identity-and-secrets.md': ['secret-file', 'secret-environment', 'identity-oidc'],
+    'supporting-types.md': ['profile-minimal', 'runtime-minimal', 'device-minimal'],
+    'zabbix.md': ['zabbix-selection', 'zabbix-profile'],
+    'lifecycle.md': ['lifecycle-fresh'],
+}
+
+
+def example_text(page, name):
+    text = (ROOT / 'docs/reference' / page).read_text()
+    found = re.findall(r'<!-- example: ' + re.escape(name) + r' -->\n```yaml\n(.*?)\n```', text, re.S)
+    if len(found) != 1:
+        raise AssertionError('Expected exactly one maintained example: ' + page + '/' + name)
+    return found[0] + '\n'
+
+
+def example(page, name):
+    return authored_config.parse(example_text(page, name).encode(), '.yaml')
+
+
+class ReferenceExamples(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.config = self.root / 'config'
+        shutil.copytree(ROOT / 'docs/examples/first-configuration', self.config)
+        self.site = self.config / 'site.yaml'
+
+    def resolve(self, selected=None, library=None):
+        if selected is not None:
+            self.site.write_text(json.dumps(selected))
+        if library is not None:
+            (self.config / 'stack.json').write_text(json.dumps(library))
+        with patch('subprocess.run', side_effect=AssertionError('No process or target')), \
+             patch('socket.create_connection', side_effect=AssertionError('No network')):
+            plan = component_plan.resolve(self.config, self.site)
+            packets = component_packet.lower_plan(plan)
+        return plan, packets
+
+    def test_worked_site_and_all_tutorial_value_examples_resolve_and_lower(self):
+        selected = example('site.md', 'site-worked')
+        self.resolve(selected)
+        selected['contexts']['lab'] = example('contexts.md', 'context-minimal')
+        selected['networks']['primary'] = example('networks.md', 'network-minimal')
+        selected['storage']['local'] = example('storage.md', 'pool-minimal')
+        selected['guests']['resolver'] = example('guests.md', 'guest-minimal')
+        selected['guests']['resolver']['interfaces']['management'] = example('networks.md', 'nic-minimal')
+        selected['apps']['recursive_a'] = example('apps.md', 'app-minimal')
+        before, packets = self.resolve(selected)
+        self.assertEqual(set(packets), {'resolver'})
+        selected['apps']['recursive_a'].update(example('apps.md', 'app-overrides'))
+        selected['guests']['resolver']['resources'] = {'memory_mib': 1024}
+        after, _ = self.resolve(selected)
+        self.assertEqual(after.resolved['guests']['resolver']['resources']['memory_mib'], 1024)
+        self.assertEqual(after.resolved['apps']['recursive_a']['identity'], before.resolved['apps']['recursive_a']['identity'])
+        for change in ('unknown-guest', 'wrong-local-scope', 'boolean-memory'):
+            wrong = copy.deepcopy(selected)
+            if change == 'unknown-guest': wrong['apps']['recursive_a']['guest'] = 'missing'
+            elif change == 'wrong-local-scope': wrong['apps']['recursive_a']['interfaces']['local'] = {'scope':'app-network','network':'default'}
+            else: wrong['guests']['resolver']['resources']['memory_mib'] = True
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.resolve(wrong)
+
+    def test_complete_template_profile_runtime_and_app_leaves_preserve_packets(self):
+        _, before = self.resolve()
+        library = authored_config.read(self.config / 'stack.json')
+        leaf = self.config / 'base.yaml'
+        leaf.write_text(example_text('library.md', 'template-minimal'))
+        library['guest_templates']['base'] = {'source':'base.yaml'}
+        library['app_profiles']['recursive'] = example('supporting-types.md', 'profile-minimal')
+        library['runtime_profiles']['resolver'] = example('supporting-types.md', 'runtime-minimal')
+        selected = authored_config.read(self.site)
+        app_leaf = self.config / 'recursive.yaml'
+        app_leaf.write_text(example_text('sources.md', 'source-app'))
+        selected['apps']['recursive_a'] = {'source':'recursive.yaml'}
+        _, after = self.resolve(selected, library)
+        self.assertEqual(after, before)
+        selected['apps']['recursive_a']['display_name'] = 'Not an overlay'
+        with self.assertRaises(ValueError): self.resolve(selected, library)
+        selected['apps']['recursive_a'] = {'source':'recursive.yaml'}
+        app_leaf.write_text(example_text('sources.md', 'source-app').replace('kind: app','kind: guest'))
+        with self.assertRaises(ValueError): self.resolve(selected, library)
+        for wrong in (False, None):
+            template = example('library.md', 'template-minimal')
+            template.pop('schema'); template.pop('kind')
+            if wrong is None: template['security'].pop('protection')
+            else: template['security']['protection'] = False
+            with self.subTest(protection=wrong), self.assertRaises(ValueError): types.template(template)
+
+    def test_context_storage_and_device_examples_refuse_the_documented_invalid_variations(self):
+        context = example('contexts.md','context-minimal')
+        context.update(example('contexts.md','context-capability'))
+        types.context(context)
+        wrong = copy.deepcopy(context);wrong['trust'].pop('known_hosts')
+        with self.assertRaises(ValueError):types.context(wrong)
+        rows=example('storage.md','storage-combination')
+        types.volume(rows['volume']);types.storage_role(rows['profile_role'])
+        types.app(dict(example('apps.md','app-minimal'),storage={'data':rows['app_binding']}))
+        for target in ('volume','profile_role'):
+            wrong=copy.deepcopy(rows)
+            if target=='volume':wrong[target]['path']='/etc/example-data'
+            else:wrong[target]['read_only']=True
+            with self.subTest(target=target),self.assertRaises(ValueError):
+                (types.volume if target=='volume' else types.storage_role)(wrong[target])
+        types.device(example('supporting-types.md','device-minimal'))
+        wrong=dict(example('supporting-types.md','device-minimal'),path='/dev/ttyUSB0')
+        with self.assertRaises(ValueError):types.device(wrong)
+        wrong=example('supporting-types.md','profile-minimal');wrong['listeners']['udp']['interface']='missing'
+        with self.assertRaises(ValueError):types.profile(wrong)
+        wrong=example('supporting-types.md','runtime-minimal');wrong['containers']['unbound']['cpu_limit']=True
+        with self.assertRaises(ValueError):types.runtime(wrong)
+
+    def test_network_group_rule_binding_and_middleware_examples_compile_in_combination(self):
+        selected=authored_config.read(self.site)
+        selected['address_groups']=example('networks.md','network-groups')
+        selected['policies']={'network':{'selected_service':example('policies.md','policy-network')},
+            'middlewares':{'office_only':example('policies.md','policy-middleware')}}
+        selected['guests']['resolver']['network_policy']=[example('policies.md','policy-binding')]
+        plan,_=self.resolve(selected)
+        self.assertEqual(plan.resolved['guests']['resolver']['rules'][0]['destination'],'192.0.2.10/32')
+        self.assertEqual(plan.resolved['guests']['resolver']['rules'][0]['port'],'8006')
+        self.assertEqual(component_addresses.resolve(selected['address_groups'],selected['networks'])['clients'],
+                         ['198.18.20.0/24','198.18.15.0/28'])
+        for change in ('cidr','cycle','dhcp-flag','ranges-map','missing-binding','unused-binding'):
+            wrong=copy.deepcopy(selected)
+            if change=='cidr':wrong['networks']['primary']['cidr']='198.18.20.10/24'
+            elif change=='cycle':wrong['address_groups']['vpn']={'members':[{'address_group':'vpn'}]}
+            elif change=='dhcp-flag':wrong['guests']['resolver']['interfaces']['management']['address']={'mode':'dhcp','endpoint':'198.18.20.10'}
+            elif change=='ranges-map':wrong['policies']['middlewares']['office_only']['ranges']={'address_group':'clients'}
+            elif change=='missing-binding':wrong['guests']['resolver']['network_policy'][0]['endpoints']={}
+            else:wrong['guests']['resolver']['network_policy'][0]['endpoints']['unused']={'external':'dns'}
+            with self.subTest(change=change),self.assertRaises(ValueError):self.resolve(wrong)
+
+    def test_managed_connection_account_and_exposure_examples_use_real_binders_and_lowering(self):
+        # The reader can obtain this complete composition from authored docs;
+        # the test does not hide required declarations in a Python fixture.
+        complete=ROOT/'docs/examples/relationships'
+        library=authored_config.read(complete/'stack.json')
+        selected=authored_config.read(complete/'site.yaml')
+        shutil.copyfile(complete/'images.json',self.config/'images.json')
+        self.assertEqual(selected['connections']['broker'],example('connections.md','connection-managed'))
+        self.assertEqual(selected['accounts']['client'],example('connections.md','account-managed'))
+        self.assertEqual(selected['secret_sources']['browser_password'],example('connections.md','account-source'))
+        exposure=example('exposures.md','exposure-http');exposure.pop('schema');exposure.pop('kind')
+        self.assertEqual(selected['exposures']['browser'],dict(exposure,middlewares=['headers','office_only']))
+        plan,packets=self.resolve(selected,library)
+        self.assertEqual(plan.resolved['apps']['browser']['origin_url'],'https://browser.example.invalid')
+        self.assertIn('component-runtime.json',packets['resolver']['files'])
+        self.assertEqual(selected['policies']['middlewares']['office_only'],example('policies.md','policy-middleware'))
+        for change in ('both-credentials','wrong-role','duplicate-domain','missing-tls'):
+            wrong=copy.deepcopy(selected)
+            if change=='both-credentials':wrong['connections']['broker']['credential']={'principal':'browser','secret':'probe'}
+            elif change=='wrong-role':wrong['connections']['broker']['source_interface']='missing'
+            elif change=='duplicate-domain':wrong['exposures']['browser']['aliases']=['browser']
+            else:wrong['exposures']['browser']['tls']='missing'
+            with self.subTest(change=change),self.assertRaises(ValueError):self.resolve(wrong,library)
+
+    def test_all_adapter_property_objects_validate_and_named_invalid_properties_refuse(self):
+        values=example('app-properties.md','properties-adapters')
+        self.assertEqual(set(values),component_foundations.OWNED | component_properties.ADAPTERS)
+        for adapter,value in values.items():
+            with self.subTest(adapter=adapter):
+                (component_foundations.validate if adapter in component_foundations.OWNED else component_properties.validate)(adapter,value)
+        for adapter,changes in [('authentik',{'smtp':dict(values['authentik']['smtp'],use_ssl=True)}),
+                ('bitwarden',{'data_uid':True}),('bitwarden',{'image_id':'retired'}),
+                ('mqtt_explorer',{'connection_name':'two\nlines'})]:
+            wrong=dict(values[adapter],**changes)
+            with self.subTest(adapter=adapter,changes=changes),self.assertRaises(ValueError):
+                (component_foundations.validate if adapter in component_foundations.OWNED else component_properties.validate)(adapter,wrong)
+
+    def test_cloud_unmanaged_property_example_is_not_a_complete_owned_account_configuration(self):
+        # Conforming reference/placement collaborators; the real property binder
+        # creates the DTO consumed by the real account binder, which owns this
+        # later floor. No assertion that this fragment is a deployable app.
+        value=example('app-properties.md','properties-adapters')['cloudbeaver']
+        app={'id':'browser','adapter':'cloudbeaver','lifecycle':'fresh',
+             'origin_url':'https://browser.example.invalid',
+             'resolved_connections':{'reporting':{'type':'postgresql',
+                 'target':{'protocol':'tcp','address':'198.18.31.23','port':5432}}}}
+        resolver=SimpleNamespace(apps={'browser':app},role_address=lambda app,role:'198.18.30.12')
+        app['settings']=component_properties._cloudbeaver(resolver,app,value)
+        self.assertEqual(app['settings']['managed_connections'],{})
+        self.assertEqual(set(app['settings']['connections']),{'reporting'})
+        with self.assertRaisesRegex(ValueError,'Keep new owned administrator connections separate'):
+            component_accounts.bind(resolver,{})
+
+    def test_secret_and_oidc_values_use_real_source_and_provider_validators(self):
+        for name in ('secret-file','secret-environment'):component_secrets.source(example('identity-and-secrets.md',name))
+        wrong=dict(example('identity-and-secrets.md','secret-file'),workflow_secret='FORBIDDEN')
+        with self.assertRaises(ValueError):component_secrets.source(wrong)
+        provider=example('identity-and-secrets.md','identity-oidc')
+        resolver=SimpleNamespace(site={'identity_providers':{'login':provider}})
+        exposures=SimpleNamespace(domains={'login':'login.example.invalid'},resolved={})
+        self.assertEqual(component_auth.providers(resolver,exposures)['login']['issuer'],
+                         'https://login.example.invalid/application/o/example/')
+        for change in ({'signing_algorithms':['HS256']},{'issuer_path':'/application/o/example/?query'}):
+            resolver.site['identity_providers']['login']=dict(provider,**change)
+            with self.subTest(change=change),self.assertRaises(ValueError):component_auth.providers(resolver,exposures)
+
+    def test_monitoring_selection_and_lifecycle_examples_keep_their_distinct_boundaries(self):
+        selected=authored_config.read(self.site)
+        fragment=example('zabbix.md','zabbix-selection');selected.update(fragment)
+        # Validate source shape and the server selector, without pretending this
+        # minimal fixture has an actual monitoring installation.
+        self.site.write_text(json.dumps(selected));loaded,_=component_sources.site(self.site)
+        resolver=SimpleNamespace(site=loaded,apps={'monitoring':{'adapter':'zabbix'}})
+        self.assertEqual(component_monitoring.server(resolver),'monitoring')
+        profile=example('zabbix.md','zabbix-profile');component_monitoring.profile(profile)
+        selected['zabbix']=False;self.site.write_text(json.dumps(selected))
+        with self.assertRaises(ValueError):component_sources.site(self.site)
+        fresh=example('lifecycle.md','lifecycle-fresh')
+        types.app(fresh)
+        selected=example('site.md','site-worked');selected['apps']['recursive_a']=fresh
+        _,before=self.resolve(selected);_,after=self.resolve(selected)
+        self.assertEqual(before,after)
+        with self.assertRaises(ValueError):types.app(dict(fresh,lifecycle='update'))
+
+    def test_all_named_configuration_examples_are_in_the_explicit_execution_inventory(self):
+        for page,names in EXAMPLES.items():
+            with self.subTest(page=page):
+                actual=re.findall(r'<!-- example: ([a-z0-9-]+) -->',(ROOT/'docs/reference'/page).read_text())
+                self.assertEqual(sorted(actual),sorted(names))
+                for name in names:self.assertIsInstance(example(page,name),dict)
+
+
+if __name__=='__main__':unittest.main()

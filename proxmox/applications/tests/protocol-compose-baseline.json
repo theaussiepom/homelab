@@ -1,0 +1,335 @@
+{
+  "framework_commit": "f28725b1e8334a0baba26dfc2fa623cb3a63cdf5",
+  "documents": {
+    "cloudbeaver": {
+      "name": "homelab-db-tools",
+      "services": {
+        "cloudbeaver": {
+          "image": "dbeaver/cloudbeaver:26.2.3@sha256:a537c60a7ca98d8d791c11c01172c1354e8dedfe222d04a54795ceeb32f12bbc",
+          "pull_policy": "missing",
+          "restart": "always",
+          "mem_limit": "1536m",
+          "cpus": 1,
+          "pids_limit": 128,
+          "stop_grace_period": "60s",
+          "logging": {
+            "driver": "json-file",
+            "options": {
+              "max-size": "10m",
+              "max-file": "3"
+            }
+          },
+          "environment": {
+            "JAVA_OPTS": "-Xms128m -Xmx1024m -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=64m"
+          },
+          "volumes": [
+            {
+              "type": "bind",
+              "source": "/srv/homelab/data/cloudbeaver",
+              "target": "/opt/cloudbeaver/workspace",
+              "bind": {
+                "create_host_path": false
+              }
+            },
+            {
+              "type": "bind",
+              "source": "/opt/homelab-app/runtime/cloudbeaver.conf",
+              "target": "/opt/cloudbeaver/conf/cloudbeaver.conf",
+              "read_only": true,
+              "bind": {
+                "create_host_path": false
+              }
+            },
+            {
+              "type": "bind",
+              "source": "/opt/homelab-app/runtime/cloudbeaver.auto.conf",
+              "target": "/opt/cloudbeaver/conf/.cloudbeaver.auto.conf",
+              "read_only": true,
+              "bind": {
+                "create_host_path": false
+              }
+            },
+            {
+              "type": "bind",
+              "source": "/opt/homelab-app/runtime/cloudbeaver-connections.json",
+              "target": "/opt/cloudbeaver/conf/initial-data-sources.conf",
+              "read_only": true,
+              "bind": {
+                "create_host_path": false
+              }
+            },
+            {
+              "type": "bind",
+              "source": "/opt/homelab-app/runtime/CloudBeaverHealth.java",
+              "target": "/opt/cloudbeaver/conf/CloudBeaverHealth.java",
+              "read_only": true,
+              "bind": {
+                "create_host_path": false
+              }
+            }
+          ],
+          "networks": [
+            "database_tools"
+          ],
+          "cap_drop": [
+            "ALL"
+          ],
+          "security_opt": [
+            "no-new-privileges:true"
+          ],
+          "user": "8978:8978",
+          "healthcheck": {
+            "test": [
+              "CMD",
+              "/opt/java/openjdk/bin/java",
+              "-Xms8m",
+              "-Xmx64m",
+              "-Xss512k",
+              "-XX:MaxMetaspaceSize=64m",
+              "-XX:ReservedCodeCacheSize=16m",
+              "-XX:ActiveProcessorCount=1",
+              "-XX:CICompilerCount=2",
+              "-XX:+UseSerialGC",
+              "/opt/cloudbeaver/conf/CloudBeaverHealth.java"
+            ],
+            "start_period": "60s",
+            "interval": "10s",
+            "timeout": "8s",
+            "retries": 18
+          }
+        },
+        "auth_gateway": {
+          "image": "quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:0d989b27d90d5e527fb2b045d864c4001c3104bdd763b3211b7e9ba2110380ea",
+          "pull_policy": "missing",
+          "restart": "always",
+          "mem_limit": "128m",
+          "cpus": 1,
+          "pids_limit": 128,
+          "stop_grace_period": "60s",
+          "logging": {
+            "driver": "json-file",
+            "options": {
+              "max-size": "10m",
+              "max-file": "3"
+            }
+          },
+          "environment": {
+            "GOMEMLIMIT": "96MiB"
+          },
+          "volumes": [
+            {
+              "type": "bind",
+              "source": "/opt/homelab-app/runtime/oauth2-alpha.json",
+              "target": "/etc/oauth2-proxy/alpha.json",
+              "read_only": true,
+              "bind": {
+                "create_host_path": false
+              }
+            },
+            {
+              "type": "bind",
+              "source": "/opt/homelab-app/runtime/oauth2.cfg",
+              "target": "/etc/oauth2-proxy/oauth2.cfg",
+              "read_only": true,
+              "bind": {
+                "create_host_path": false
+              }
+            }
+          ],
+          "networks": [
+            "database_tools"
+          ],
+          "cap_drop": [
+            "ALL"
+          ],
+          "security_opt": [
+            "no-new-privileges:true"
+          ],
+          "user": "65532:65532",
+          "read_only": true,
+          "ports": [
+            "198.18.30.32:80:4180"
+          ],
+          "command": [
+            "--config=/etc/oauth2-proxy/oauth2.cfg",
+            "--alpha-config=/etc/oauth2-proxy/alpha.json"
+          ],
+          "depends_on": {
+            "cloudbeaver": {
+              "condition": "service_healthy"
+            }
+          }
+        }
+      },
+      "networks": {
+        "database_tools": {}
+      }
+    },
+    "bitwarden": {
+      "name": "homelab-bitwarden",
+      "services": {
+        "bitwarden": {
+          "image": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "pull_policy": "always",
+          "restart": "always",
+          "mem_limit": "1536m",
+          "cpus": 1,
+          "pids_limit": 256,
+          "stop_grace_period": "60s",
+          "logging": {
+            "driver": "json-file",
+            "options": {
+              "max-size": "10m",
+              "max-file": "3"
+            }
+          },
+          "environment": {},
+          "volumes": [
+            {
+              "type": "bind",
+              "source": "/srv/homelab/data/bitwarden/data",
+              "target": "/etc/bitwarden",
+              "bind": {
+                "create_host_path": false
+              }
+            },
+            {
+              "type": "bind",
+              "source": "/srv/homelab/data/bitwarden/logs",
+              "target": "/var/log/bitwarden",
+              "bind": {
+                "create_host_path": false
+              }
+            }
+          ],
+          "ports": [
+            "198.18.30.35:8080:8080"
+          ],
+          "healthcheck": {
+            "test": [
+              "CMD-SHELL",
+              "curl -fsSo /dev/null http://localhost:8080"
+            ]
+          }
+        }
+      }
+    },
+    "zabbix": {
+      "name": "homelab-monitoring",
+      "services": {
+        "zabbix_server": {
+          "image": "zabbix/zabbix-server-pgsql:ubuntu-7.0.32@sha256:bc0505eff209ab5ca9cfb6c7363f061b03b1a31ed529102274413febae54f002",
+          "pull_policy": "missing",
+          "restart": "always",
+          "mem_limit": "768m",
+          "cpus": 1,
+          "pids_limit": 128,
+          "stop_grace_period": "60s",
+          "logging": {
+            "driver": "json-file",
+            "options": {
+              "max-size": "10m",
+              "max-file": "3"
+            }
+          },
+          "environment": {
+            "DB_SERVER_HOST": "postgres",
+            "DB_SERVER_PORT": "5432",
+            "POSTGRES_USER": "zabbix",
+            "POSTGRES_DB": "zabbix",
+            "POSTGRES_PASSWORD_FILE": "/run/secrets/database-password",
+            "ZBX_DBTLSCONNECT": "required",
+            "TZ": "Etc/UTC",
+            "ZBX_STARTREPORTWRITERS": "0",
+            "ZBX_STARTBROWSERPOLLERS": "0"
+          },
+          "volumes": [
+            {
+              "type": "bind",
+              "source": "/opt/homelab-app/runtime/database-password",
+              "target": "/run/secrets/database-password",
+              "read_only": true,
+              "bind": {
+                "create_host_path": false
+              }
+            },
+            {
+              "type": "bind",
+              "source": "/opt/homelab-app/runtime/proxmox-ca.pem",
+              "target": "/var/lib/zabbix/ssl/ssl_ca/proxmox-ca.pem",
+              "read_only": true,
+              "bind": {
+                "create_host_path": false
+              }
+            }
+          ],
+          "ports": [
+            "198.18.30.50:10051:10051"
+          ]
+        },
+        "zabbix_web": {
+          "image": "zabbix/zabbix-web-nginx-pgsql:ubuntu-7.0.32@sha256:562b70986134a6083ba503ed5189afeda98b9b69c1960a5f0fb2faa13dfd5151",
+          "pull_policy": "missing",
+          "restart": "always",
+          "mem_limit": "512m",
+          "cpus": 1,
+          "pids_limit": 128,
+          "stop_grace_period": "60s",
+          "logging": {
+            "driver": "json-file",
+            "options": {
+              "max-size": "10m",
+              "max-file": "3"
+            }
+          },
+          "environment": {
+            "DB_SERVER_HOST": "postgres",
+            "DB_SERVER_PORT": "5432",
+            "POSTGRES_USER": "zabbix",
+            "POSTGRES_DB": "zabbix",
+            "POSTGRES_PASSWORD_FILE": "/run/secrets/database-password",
+            "ZBX_DBTLSCONNECT": "required",
+            "TZ": "Etc/UTC",
+            "ZBX_SERVER_HOST": "zabbix_server",
+            "ZBX_SERVER_PORT": "10051",
+            "PHP_TZ": "Etc/UTC",
+            "ZBX_DB_ENCRYPTION": "true"
+          },
+          "volumes": [
+            {
+              "type": "bind",
+              "source": "/opt/homelab-app/runtime/database-password",
+              "target": "/run/secrets/database-password",
+              "read_only": true,
+              "bind": {
+                "create_host_path": false
+              }
+            }
+          ],
+          "ports": [
+            "198.18.30.50:8080:8080",
+            "127.0.0.1:8081:8080"
+          ],
+          "depends_on": {
+            "zabbix_server": {
+              "condition": "service_started"
+            }
+          }
+        }
+      }
+    }
+  },
+  "cloudbeaver_file_hashes": {
+    "CloudBeaverHealth.java": "7df3c32ddbb805d1eda16ce14ed2bfaadb7b82416f99d9f618968496e75d509c",
+    "cloudbeaver.conf": "382de4e1daf5928e655b973023fe83404bdb07a37cf327614752a723a69e8930",
+    "cloudbeaver.auto.conf": "26fa35f0069b27882cf25a300851e9695d52f9c42312eea21e7f0c14fb4c8d3e",
+    "cloudbeaver-connections.json": "8646d4c8dd2c905952b28d9d1ee7d6a23892f01bf597732416fac54290a7eefd",
+    "cloudbeaver-permissions.json": "67b1edcf41536993165d93a09dd383d2896f6453de33e0053cfe2e339df34858",
+    "oauth2-alpha.json": "79405a2beb6a86d307cf7c20ae0985595cbeb1185beb6b60bfe8939321d5d191",
+    "oauth2.cfg": "b0053c9a69680429d569537c8f10cc5605fe55e905962f36c102db9176f6574e",
+    "cloudbeaver-public.json": "22bada50bf235d7a99d17ee52434b514fabdb3543311e5436b4ff77f0adee07a"
+  },
+  "protected_fixture_shapes": {
+    "monitoring_fixture.py": "0811a407ee7ad6b0df1351b41afb4f464d0809a5684ffd5033ea04e411d22672"
+  }
+}

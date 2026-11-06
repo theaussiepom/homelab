@@ -9,7 +9,9 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import ansible_guest
+import component_ansible as ansible_guest
+import component_inputs
+import component_process_fixtures as current_inputs
 import deployment_inputs
 import deploy
 import guest_identity
@@ -18,7 +20,7 @@ import proxmox_guest as pve
 from fixtures import guest
 import test_guest_identity as identity_cases
 from test_plan import fixture as plan_fixture
-import test_deployment as deployment_cases
+import test_component_lifecycle as deployment_cases
 
 REAL_RUN_PHASE = ansible_guest.run_phase
 
@@ -134,9 +136,10 @@ class DhcpAdmissionTests(unittest.TestCase):
         for phase in ("preparation", "mariadb"):
             with self.subTest(phase=phase), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
-                cfg = guest(root)
+                root=root.resolve()
+                cfg=current_inputs.initialize(root)
                 nic = cfg["guest"]["interfaces"][0]
-                nic.update(ipv4="dhcp", ipv4_endpoint="198.18.25.8/27", gateway=None)
+                nic.update(ipv4="dhcp", ipv4_endpoint="198.18.25.8/27", gateway=None, bridge="vmbr0", vlan=25)
                 config = {"hostname": cfg["guest"]["hostname"], "protection": 1, "unprivileged": 1,
                           "net0": "bridge=vmbr0,hwaddr=" + nic["mac"] + ",tag=25,ip=dhcp"}
                 events = []
@@ -146,8 +149,16 @@ class DhcpAdmissionTests(unittest.TestCase):
                 def quiet(command, environment, log):
                     events.append("ssh")
                     log.write_text("changed=0\n")
-                with patch.object(deployment_inputs, "binding", return_value={}), patch.object(pve, "api_get", side_effect=fetch), patch.object(pve, "guest_trust", side_effect=lambda *_: events.append("trust")), patch.object(ansible_guest, "quiet", side_effect=quiet):
-                    self.assertFalse(REAL_RUN_PHASE(cfg, root / "site", root, root, {}, phase)["changed"])
+                packet=private_io.read_json(root/'packet.json',private=True)
+                packet['files']['site.json']=private_io.encoded(cfg).decode()
+                private_io.write_bytes(root/'packet.json',private_io.encoded(packet))
+                cfg,site=component_inputs.prepare(root/'packet.json',root/'inputs',create=True)
+                binding=component_inputs.binding(cfg,site)
+                payload=None if phase=='preparation'else current_inputs.payload(cfg)
+                with patch.object(pve, "api_get", side_effect=fetch),patch.object(pve,"guest_trust",side_effect=lambda *_:events.append("trust")), \
+                        patch.object(ansible_guest,"variables",return_value={('component_preparation_app' if phase=='preparation' else 'app'):copy.deepcopy(cfg['app']),'network_ready_interfaces':['eth0']}), \
+                        patch.object(ansible_guest,"quiet",side_effect=quiet):
+                    self.assertFalse(REAL_RUN_PHASE(cfg,site,root,root,binding,phase,payload=payload)["changed"])
                 self.assertEqual(events, ["config", "interfaces", "trust", "ssh"])
                 inventory = json.loads((root / phase / "inventory.json").read_text())
                 self.assertEqual(inventory["application"]["hosts"][cfg["app"]["hostname"]]["ansible_host"], "198.18.25.8")
@@ -155,25 +166,26 @@ class DhcpAdmissionTests(unittest.TestCase):
                 self.assertEqual(variables["network_ready_interfaces"], ["eth0"])
 
     def test_lease_change_during_preparation_creates_a_durable_hold_before_ssh(self):
-        case = deployment_cases.LifecycleTests()
+        case = deployment_cases.ComponentLifecycleTests()
         case.setUp()
         self.addCleanup(case.doCleanups)
         cfg = case.cfg
-        cfg['guest']['interfaces'][0].update(ipv4='dhcp', ipv4_endpoint='198.18.25.8/27', gateway=None)
+        cfg['guest']['interfaces'][0].update(ipv4='dhcp', ipv4_endpoint='198.18.25.8/27', gateway=None,bridge='vmbr0',vlan=25)
+        case.publish()
         hosts = Path(cfg['paths']['known_hosts'])
         hosts.write_text('retained synthetic trust\n'); hosts.chmod(0o600)
         state = (case.work / 'terraform.tfstate').read_bytes()
-        deploy.run('infrastructure', case.site)
+        case.phase('infrastructure')
         case.app.side_effect = REAL_RUN_PHASE
         config = {'hostname':cfg['guest']['hostname'], 'protection':1, 'unprivileged':1, 'net0':'bridge=vmbr0,hwaddr='+cfg['app']['mac']+',tag=25,ip=dhcp'}
         def fetch(c, path):
             return config if path.endswith('/config') else [{'hwaddr':cfg['app']['mac'], 'inet':'198.18.25.8/24'}]
         with patch.object(pve, 'api_get', side_effect=fetch) as api, patch.object(pve, 'guest_trust') as trust, patch.object(ansible_guest, 'quiet') as ssh:
             with self.assertRaisesRegex(ValueError, 'observed guest endpoint'):
-                deploy.run('preparation', case.site)
+                case.phase('preparation')
             calls = api.call_count
             with self.assertRaises(ValueError):
-                deploy.run('preparation', case.site)
+                case.phase('preparation')
             self.assertEqual(api.call_count, calls)
         trust.assert_not_called(); ssh.assert_not_called()
         self.assertTrue((case.work / 'ORDINARY-HOLD.json').is_file())

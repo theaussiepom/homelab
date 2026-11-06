@@ -277,3 +277,36 @@ class DiagnosticTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class MonitoringBootstrapTests(unittest.TestCase):
+    def test_root_feature_uses_existing_bootstrap_transaction_without_a_new_controller(self):
+        import monitoring_access
+        c=config();c['applications'].append({'vmid':216,'hostname':'zabbix'})
+        c['monitoring']={'vmid':216,'address':'198.18.25.36'}
+        cd.validate(c)
+        expected={key:c[key] for key in ('endpoint','node','backup_source')}
+        expected.update(schema='homelab-zabbix-access-v1',address='198.18.25.36')
+        self.assertEqual(monitoring_access.bootstrap_configuration(c),expected)
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)/'state';nas=Path(td)/'nas';root.mkdir(mode=0o700);nas.mkdir(mode=0o700)
+            with patch.object(cd,'check_backup'),patch.object(monitoring_access,'initialize',return_value={'created':True,'identity':monitoring_access.IDENTITY}) as initialize:
+                result=cd.run(c,FakeAPI(),root,nas)
+                initialize.assert_called_once()
+                self.assertEqual(initialize.call_args.args[1:],(expected,root,nas))
+                self.assertEqual(result['monitoring']['identity'],monitoring_access.IDENTITY)
+                self.assertFalse((root/'BOOTSTRAP-CD-HOLD.json').exists())
+        for value in [{'vmid':True,'address':'198.18.25.36'},{'vmid':217,'address':'198.18.25.36'},
+                      {'vmid':216,'address':'8.8.8.8'},{'vmid':216,'address':'198.18.25.36','extra':True}]:
+            c['monitoring']=value
+            with self.subTest(value=value),self.assertRaises(ValueError):cd.validate(c)
+
+    def test_monitoring_failure_preserves_the_existing_bootstrap_hold_and_private_evidence(self):
+        import monitoring_access
+        c=config();c['applications'].append({'vmid':216,'hostname':'zabbix'})
+        c['monitoring']={'vmid':216,'address':'198.18.25.36'}
+        with tempfile.TemporaryDirectory() as td:
+            root=Path(td)/'state';nas=Path(td)/'nas';root.mkdir(mode=0o700);nas.mkdir(mode=0o700)
+            with patch.object(cd,'check_backup'),patch.object(monitoring_access,'initialize',side_effect=ValueError('Monitoring identity exists')):
+                with self.assertRaises(ValueError):cd.run(c,FakeAPI(),root,nas)
+                self.assertTrue((root/'BOOTSTRAP-CD-HOLD.json').is_file())
+                with self.assertRaises(ValueError):cd.run(c,FakeAPI(),root,nas)

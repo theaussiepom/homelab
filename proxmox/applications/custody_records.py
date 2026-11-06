@@ -1,11 +1,10 @@
-"""Bounded read-only custody snapshots, marker refusal and existing NAS identity."""
+"""Bounded read-only ownership snapshots and unresolved marker refusal."""
 
 from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
 import stat
-import subprocess
 from private_io import require, digest
 
 LIMIT = 1024 * 1024
@@ -85,18 +84,6 @@ class Snapshot:
         return dict(self.hashes)
 
 
-def recovery(cfg):
-    """Check an existing recovery mount; never mkdir, mount or repair a path."""
-    mount = Path(cfg["paths"]["backup_mount"])
-    require(os.path.ismount(mount), "The selected NAS recovery mount is unavailable")
-    info = mount.lstat()
-    require(stat.S_ISDIR(info.st_mode), "Preserve the existing recovery mount identity")
-    fields = subprocess.check_output(
-        ["findmnt", "-rn", "-o", "FSTYPE,SOURCE", "--target", str(mount)], text=True, timeout=10
-    ).split()
-    require(len(fields) == 2 and fields[0] in {"nfs", "nfs4", "cifs"}
-            and fields[1] == cfg["paths"]["backup_source"], "The selected NAS filesystem/source changed")
-    return mount
 
 
 def read_existing(path, *, private=True):

@@ -1,61 +1,67 @@
 #!/usr/bin/env python3
-"""Reconcile one reviewed guest through infrastructure, preparation and applications."""
+"""Reconcile one admitted component guest through the existing deployment engines."""
 import argparse
 import json
 import os
 from pathlib import Path
-import ansible_guest
 import commands
-import deployment_inputs
-from deployment_state import DeploymentAttempt, bootstrap_closed
-import guest_contract
+from deployment_state import DeploymentAttempt,bootstrap_closed
 import proxmox_guest
-from private_io import require
-
-PHASES = {"infrastructure", "preparation"} | {
-    p for b in guest_contract.BLUEPRINTS.values() for p in b["applications"]
-}
+from private_io import require,read_json
 
 
-def run(
-    phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), environment=None
-):
-    require(phase in PHASES, "Select a current deployment phase")
+def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), environment=None):
+    """The same attempt/ToFu/Ansible engines, selected by real component phases."""
+    import component_guest
+    import component_inputs
+    import component_prepare
+    import component_ownership
+    import component_ansible
+    from private_io import encoded
     bootstrap_closed()
-    cfg, site = deployment_inputs.prepare(packet, inputs, environment)
-    phases = guest_contract.phases(cfg)
-    require(
-        phase == "infrastructure" or phase in phases,
-        "Select this guest application phase",
-    )
-    expected = deployment_inputs.binding(cfg, site)
-    with DeploymentAttempt(cfg, expected, phases) as attempt:
+    cfg, directory = component_guest.packet(read_json(packet, private=True), inputs)
+    phases = component_guest.phases(cfg)
+    if phase == component_guest.AGENT_PHASE and 'monitoring' not in cfg['app']:
+        return {'status':'not_selected','vmid':cfg['guest']['vmid'],
+                'changed':False,'target_contacted':False}
+    require(phase == 'infrastructure' or phase in phases, 'Select this component guest phase')
+    site = directory/'site.json'
+    def prepare(allow_create):
+        prepared, selected = component_inputs.prepare(packet, inputs,
+            create=allow_create and phase == 'infrastructure')
+        require(encoded(prepared)==encoded(cfg) and selected==site, 'Static component preparation changed')
+        return component_inputs.binding(cfg,site)
+    with DeploymentAttempt(cfg,None,phases,prepare_inputs=prepare) as attempt:
+        expected=attempt.binding
         if attempt.completed(commands.is_ancestor):
-            return {
-                "status": "passed",
-                "vmid": cfg["guest"]["vmid"],
-                "changed": False,
-                "target_contacted": False,
-            }
-        if phase == "infrastructure":
+            return {'status':'passed','vmid':cfg['guest']['vmid'],'changed':False,'target_contacted':False}
+        if phase == 'infrastructure':
             attempt.begin_infrastructure()
-            result = proxmox_guest.infrastructure(
-                cfg, site, attempt.work, attempt.operation, expected,
-                **({"state_identity": attempt.custody_identity} if attempt.custody_identity is not None else {})
-            )
+            result=proxmox_guest.infrastructure(cfg,site,attempt.work,attempt.operation,expected,
+                **({'state_identity':attempt.custody_identity} if attempt.custody_identity is not None else {}))
             attempt.infrastructure_complete(result)
         else:
-            ready = attempt.begin_phase(phase)
-            result = ansible_guest.run_phase(
-                cfg, site, attempt.work, attempt.operation, expected, phase
-            )
-            result = dict(result, changed=attempt.phase_complete(phase, result, ready))
-        return {"status": "passed", "vmid": cfg["guest"]["vmid"], **result}
+            attempt.phase_ready(phase)
+            payload=None
+            previously_owned=False
+            if phase != 'preparation':
+                if phase==component_guest.AGENT_PHASE:
+                    payload=component_prepare.prepare_agent(cfg,environment)
+                else:
+                    app_id=cfg['deployment']['payload_phases'][phase]
+                    runtime=read_json(Path(cfg['deployment']['runtime_file']),private=True)
+                    previously_owned=component_ownership.prior(attempt,runtime['applications'][app_id])
+                    payload=component_prepare.prepare(cfg,app_id,environment,attempt=attempt)
+            ready=attempt.begin_phase(phase,payload=payload)
+            result=component_ansible.run_phase(cfg,site,attempt.work,attempt.operation,expected,phase,
+                payload=payload,previously_owned=previously_owned)
+            result=dict(result,changed=attempt.phase_complete(phase,result,ready,payload=payload))
+        return {'status':'passed','vmid':cfg['guest']['vmid'],**result}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--phase", choices=sorted(PHASES), required=True)
+    parser.add_argument("--phase", required=True)
     parser.add_argument("--packet", type=Path, required=True)
     args = parser.parse_args()
     try:
@@ -67,5 +73,5 @@ def main():
         ) from None
 
 
-if __name__ == "__main__":
-    main()
+
+if __name__=="__main__":main()

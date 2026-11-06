@@ -455,7 +455,7 @@ class HostDeviceTests(unittest.TestCase):
         value = existing_fixture()
         value["resource_drift"] = [drift]
         plan_policy.check_plan(
-            value, "pve-lab", 6100, existing=True, serial_device=selected
+            value, "pve-lab", 6100, existing=True, serial_device=selected, protected_guests=[9900,9914,9915,9920]
         )
         drift["change"]["after"]["memory"] = 999
         self.assertRaises(
@@ -466,6 +466,7 @@ class HostDeviceTests(unittest.TestCase):
             6100,
             existing=True,
             serial_device=selected,
+            protected_guests=[9900,9914,9915,9920],
         )
 
     def test_cli_entrypoints_and_growing_policy_inputs(self):
@@ -512,13 +513,19 @@ class HostDeviceTests(unittest.TestCase):
                 self.assertRaises(ValueError, helper.read_policy, source)
 
     def test_host_capability_files_participate_in_input_identity(self):
+        import component_inputs
         import deployment_inputs
-
-        cfg = self.cfg()
-        ca = self.root / "ca"
-        ca.write_bytes(b"fixture-ca")
-        cfg["paths"]["ca_file"] = str(ca)
-        before = deployment_inputs.input_hashes(cfg)
-        (self.root / "key").write_bytes(b"changed retained key")
-        self.assertNotEqual(before, deployment_inputs.input_hashes(cfg))
-        self.assertIn(str(self.root / "hosts"), before)
+        from private_io import write_new
+        cfg=self.cfg();root=self.root.resolve()
+        ca=root/'ca';ca.write_bytes(b'fixture-ca')
+        runtime=root/'component-runtime.json';write_new(runtime,b'{"applications":{}}')
+        site=root/'site.json';write_new(site,b'{}')
+        cfg['paths']['ca_file']=str(ca)
+        cfg['deployment']={'runtime_file':str(runtime),'input_directory':str(root),
+            'input_identity':'a'*64,'protected_guests':[9900,9914,9915,9920]}
+        with patch.object(component_inputs,'inspect',side_effect=lambda *args:{}), \
+                patch.object(deployment_inputs,'source_hash',return_value='b'*64):
+            before=component_inputs.binding(cfg,site)['input_hashes']
+            (self.root/'key').write_bytes(b'changed retained key')
+            self.assertNotEqual(before,component_inputs.binding(cfg,site)['input_hashes'])
+        self.assertIn(str(self.root/'hosts'),before)

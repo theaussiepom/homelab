@@ -9,7 +9,6 @@ RESOURCES = {
     "module.guest.proxmox_virtual_environment_firewall_options.guest": "container_id",
     "module.guest.proxmox_virtual_environment_firewall_rules.guest": "container_id",
 }
-PROTECTED = {900, 4914, 4915, 4920}
 IMMUTABLE_GUEST_FIELDS = (
     "node_name",
     "vm_id",
@@ -30,9 +29,27 @@ def has_unknown(value):
     return value is not None and value is not False
 
 
+def refresh_values(value):
+    """Normalize only bpg 0.117.0 optional null/empty refresh representations."""
+    result = dict(value)
+    for name, empty in (("tags", []), ("environment_variables", {})):
+        if name in result and result[name] is None:
+            result[name] = empty
+    for block, field in (("disk", "mount_options"),
+                         ("mount_point", "mount_options"), ("features", "mount")):
+        rows = result.get(block)
+        if isinstance(rows, list):
+            result[block] = [
+                dict(row, **{field: []})
+                if isinstance(row, dict) and field in row and row[field] is None
+                else row for row in rows
+            ]
+    return result
+
+
 def allowed_guest_drift(rows, node, vmid, serial_device):
-    """Reconcile active state and the registered host-owned device, preserving all else."""
-    if not rows:
+    """Reconcile active/device drift and bpg 0.117.0 top-level computed IP maps."""
+    if rows is None or rows == []:
         return True
     if not isinstance(rows, list) or len(rows) != 1:
         return False
@@ -43,17 +60,18 @@ def allowed_guest_drift(rows, node, vmid, serial_device):
     before, after = change.get("before"), change.get("after")
     if not isinstance(before, dict) or not isinstance(after, dict):
         return False
+    old, new = refresh_values(before), refresh_values(after)
     if (
         before.get("vm_id") != vmid
         or before.get("node_name") != node
         or has_unknown(change.get("after_unknown", {}))
         or {
             k: v
-            for k, v in before.items()
-            if k not in {"started", "device_passthrough"}
+            for k, v in old.items()
+            if k not in {"started", "device_passthrough", "ipv4", "ipv6"}
         }
         != {
-            k: v for k, v in after.items() if k not in {"started", "device_passthrough"}
+            k: v for k, v in new.items() if k not in {"started", "device_passthrough", "ipv4", "ipv6"}
         }
     ):
         return False
@@ -71,14 +89,25 @@ def allowed_guest_drift(rows, node, vmid, serial_device):
     was, now = before.get("started"), after.get("started")
     if was != now and not (type(was) is bool and type(now) is bool):
         return False
-    return was != now or old_devices != new_devices
+    return (
+        was != now
+        or old_devices != new_devices
+        or before.get("ipv4") != after.get("ipv4")
+        or before.get("ipv6") != after.get("ipv6")
+        or (before != after and old == new)
+    )
 
 
-def check_plan(value, node, vmid, *, existing, serial_device=None):
+
+
+def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=None):
     """Validate the exact saved plan under an explicit backend custody decision."""
     require(type(existing) is bool, "Select creation or reconciliation explicitly")
+    protected = protected_guests
+    require(isinstance(protected,(list,set)) and all(type(value) is int and value >= 1 for value in protected)
+            and len(protected)==len(set(protected)), 'Preserve the explicit execution context protection policy')
     require(
-        type(vmid) is int and vmid >= 100 and vmid not in PROTECTED,
+        type(vmid) is int and vmid >= 100 and vmid not in protected,
         "Preserve protected guest identities",
     )
     require(isinstance(node, str) and node, "Select a known Proxmox node")

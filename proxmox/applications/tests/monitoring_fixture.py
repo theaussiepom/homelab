@@ -17,7 +17,8 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import monitoring
-import render
+import monitoring_fixture_tls as fixture_tls
+import protocol_component_fixtures as component_fixtures
 
 
 def api(method, params, token=None):
@@ -158,7 +159,7 @@ def client():
                 token,
             )
         )
-    assert len(http_items) == 7 and all(
+    assert len(http_items) == 8 and all(
         row["verify_peer"] == "1" and row["verify_host"] == "1" for row in http_items
     )
     resources = api(
@@ -273,14 +274,14 @@ def docker(*args, **kwargs):
 
 
 def main(args):
-    from test_monitoring import fixture
-
     project = "homelab-zabbix-fixture-" + uuid.uuid4().hex[:10]
     root = args.output.resolve() / project
     root.mkdir(parents=True, mode=0o755)
-    cfg = fixture(root)
-    cfg["monitoring"]["postgresql_host"] = "postgres"
-    document = render.compose(cfg)
+    (root / "password").write_text("synthetic-fixture-password")
+    (root / "password").chmod(0o600)
+    (root / "ca").write_text("-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n")
+    app = component_fixtures.zabbix_app(database_host="postgres", images=monitoring.VERSIONS)
+    document = component_fixtures.document(app)
     document.pop("name")
     document["networks"] = {"default": {"internal": True}}
     document["services"]["zabbix_server"]["networks"] = {
@@ -358,6 +359,7 @@ def main(args):
             "retries": 60,
         },
     }
+    fixture_tls.apply(document["services"]["postgres"],fixture_tls.prepare(root))
     (root / "agent.psk").write_text(secrets.token_hex(32) + "\n")
     (root / "wrong.psk").write_text(secrets.token_hex(32) + "\n")
     (root / "wrong-expected.psk").write_text(secrets.token_hex(32) + "\n")
@@ -379,7 +381,7 @@ def main(args):
     )
     # Container users need read access only to synthetic fixture files.
     for file in root.iterdir():
-        file.chmod(0o644)
+        if file.is_file(): file.chmod(0o644)
     compose = root / "compose.json"
     compose.write_text(json.dumps(document))
     command = ["compose", "-p", project, "-f", str(compose)]

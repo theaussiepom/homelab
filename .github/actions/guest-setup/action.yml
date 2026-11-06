@@ -1,0 +1,71 @@
+name: Setup
+description: Select immutable settings, services and tools
+runs:
+  using: composite
+  steps:
+  - name: Check readiness
+    run: 'test ! -e /var/lib/homelab-bootstrap/CONFIGURING
+
+      test ! -e /var/lib/homelab-bootstrap/BOOTSTRAP-CD-HOLD.json
+
+      '
+    shell: bash
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+    with:
+      fetch-depth: 0
+      persist-credentials: false
+    name: Get settings
+  - name: Choose services
+    id: stack
+    run: 'python3 - <<''PYCODE'' >> "$GITHUB_OUTPUT"
+
+      import pathlib, re
+
+      text = pathlib.Path(''.github/workflows/deploy.yml'').read_text()
+
+      pins = re.findall(r''^(?:\s*uses:|  HOMELAB_STACK_SOURCE:) ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/\.github/workflows/deploy\.yml@([0-9a-f]{40})\s*$'', text, re.M)
+
+      if len(pins) != 1: raise SystemExit(''Select one immutable stack workflow'')
+
+      print(''repository=''+pins[0][0]); print(''revision=''+pins[0][1])
+
+      PYCODE
+
+      '
+    shell: bash
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+    with:
+      repository: ${{ steps.stack.outputs.repository }}
+      ref: ${{ steps.stack.outputs.revision }}
+      path: stack-source
+      persist-credentials: false
+    name: Get services
+  - name: Choose tools
+    id: framework
+    run: 'python3 - <<''PYCODE'' >> "$GITHUB_OUTPUT"
+
+      import pathlib, re
+
+      text = pathlib.Path(''stack-source/.github/workflows/phase.yml'').read_text()
+
+      pins = re.findall(r''^\s*uses: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/\.github/workflows/guest-phase\.yml@([0-9a-f]{40})\s*$'', text, re.M)
+
+      if len(pins) != 1: raise SystemExit(''Select one immutable framework workflow'')
+
+      print(''repository=''+pins[0][0]); print(''revision=''+pins[0][1])
+
+      PYCODE
+
+      '
+    shell: bash
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+    with:
+      repository: ${{ steps.framework.outputs.repository }}
+      ref: ${{ steps.framework.outputs.revision }}
+      path: framework-source
+      persist-credentials: false
+    name: Get tools
+  - name: Prepare config
+    run: "umask 077\nconfig_env=$(mktemp -d \"$RUNNER_TEMP/homelab-config-XXXXXX\")\npython3 -m venv \"$config_env\"\npython3 - \"$config_env/pyyaml.lock\" <<'PYCODE'\nfrom pathlib import Path\nimport re, sys\nlock = Path('framework-source/requirements.lock.txt')\nif lock.is_symlink() or not lock.is_file() or lock.stat().st_size > 1024 * 1024:\n    raise SystemExit('Use the selected framework dependency lock')\nlines = lock.read_text().splitlines()\nstarts = [i for i, line in enumerate(lines) if line.startswith('pyyaml==')]\nif len(starts) != 1:\n    raise SystemExit('Use one exact hash-locked authored config dependency')\nfirst = starts[0]\nblock = [lines[first]]\nfor line in lines[first + 1:]:\n    if not line.startswith('    --hash='): break\n    block.append(line)\nif (not re.fullmatch(r'pyyaml==[0-9]+(?:\\.[0-9]+)+ \\\\', block[0]) or len(block) < 2\n        or any(not re.fullmatch(r'    --hash=sha256:[0-9a-f]{64} \\\\', line) for line in block[1:-1])\n        or not re.fullmatch(r'\
+      \    --hash=sha256:[0-9a-f]{64}', block[-1])):\n    raise SystemExit('Use one exact hash-locked authored config dependency')\nPath(sys.argv[1]).write_text('\\n'.join(block) + '\\n')\nPYCODE\n\"$config_env/bin/python\" -m pip --isolated install --disable-pip-version-check --require-hashes --no-deps -r \"$config_env/pyyaml.lock\"\nprintf 'HOMELAB_CONFIG_PYTHON=%s/bin/python\\n' \"$config_env\" >> \"$GITHUB_ENV\"\n"
+    shell: bash

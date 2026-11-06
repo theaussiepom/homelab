@@ -15,35 +15,15 @@ from urllib.request import (
 ENDPOINTS = ("/api/alive", "/api/config", "/identity/.well-known/openid-configuration")
 
 
-def validate(cfg):
-    if set(cfg) - {
-        "kind",
-        "guest_memory_mib",
-        "timezone",
-        "data_root",
-        "bitwarden",
-        "services",
-    }:
-        raise ValueError("Use the current Bitwarden runtime stack contract")
-    if (
-        cfg.get("kind") != "bitwarden"
-        or cfg.get("bitwarden", {}).get("schema") != "homelab-bitwarden-runtime-v1"
-    ):
-        raise ValueError("Use the current Bitwarden runtime stack contract")
-    return validate_stack(cfg)
 
 
-def validate_stack(cfg):
+def validate_settings(settings):
+    """Pure selected database and numeric ownership contract."""
     import re
 
-    # Only rendering uses controller policy; the copied health CLI is standalone.
-    from container_policy import restart_policy
-
-    settings = cfg["bitwarden"]
     fields = {
         "schema",
         "bind_address",
-        "image_id",
         "database_server",
         "database_provider",
         "database_name",
@@ -52,12 +32,12 @@ def validate_stack(cfg):
     }
     if (
         set(settings) != fields
+        or settings["schema"] != "homelab-bitwarden-runtime-v2"
         or settings["database_provider"] != "mysql"
         or any(
             type(settings.get(key)) is not int or not 1 <= settings[key] <= 2147483647
             for key in ("data_uid", "data_gid")
         )
-        or not re.fullmatch(r"sha256:[0-9a-f]{64}", settings.get("image_id", ""))
         or not re.fullmatch(r"[A-Za-z0-9_]+", settings.get("database_name", ""))
         or not all(
             isinstance(settings.get(key), str)
@@ -67,7 +47,7 @@ def validate_stack(cfg):
         )
     ):
         raise ValueError(
-            "Select the observed image, mysql schema and retained numeric ownership"
+            "Select the mysql schema and retained numeric ownership"
         )
     address = ipaddress.IPv4Address(settings["bind_address"])
     database = ipaddress.IPv4Address(settings["database_server"])
@@ -86,66 +66,25 @@ def validate_stack(cfg):
         raise ValueError(
             "Use explicit private backend addresses for Bitwarden and shared MariaDB"
         )
-    services = cfg.get("services", {})
-    if set(services) != {"bitwarden"}:
-        raise ValueError(
-            "Bitwarden uses one application container and the existing shared database"
-        )
-    service = services["bitwarden"]
-    restart_policy(service)
-    allowed = {
-        "image",
-        "memory_mib",
-        "cpus",
-        "pids_limit",
-        "restart",
-        "environment",
-        "archive",
-        "archive_sha256",
-    }
-    image = service.get("image", "")
-    registry = re.fullmatch(
-        r"ghcr\.io/bitwarden/lite(?::[A-Za-z0-9_.-]+)?@sha256:[0-9a-f]{64}", image
-    )
-    archived = image == settings["image_id"] and set(service) >= {
-        "archive",
-        "archive_sha256",
-    }
-    if set(service) - allowed or not (
-        registry or archived or image == "ghcr.io/bitwarden/lite:latest"
-    ):
-        raise ValueError(
-            "Use official Lite latest or the preserved image, with an observed source image identity"
-        )
     return str(address)
 
 
-def configure(cfg, document):
-    address = validate(cfg)
-    service = document["services"]["bitwarden"]
-    del service["network_mode"]
-    original = cfg["services"]["bitwarden"].get("environment", {})
-    if "TZ" in original:
-        service["environment"]["TZ"] = original["TZ"].replace("$", "$$")
-    else:
-        service["environment"].pop("TZ", None)
-    service["ports"] = [f"{address}:8080:8080"]
-    # Retain the existing root HTTP readiness probe, suppressing response output.
-    service["healthcheck"] = {
-        "test": ["CMD-SHELL", "curl -fsSo /dev/null http://localhost:8080"]
-    }
-    service["volumes"] = [
-        {
-            "type": "bind",
-            "source": f"/srv/homelab/data/bitwarden/{name}",
-            "target": target,
-            "bind": {"create_host_path": False},
-        }
-        for name, target in [("data", "/etc/bitwarden"), ("logs", "/var/log/bitwarden")]
-    ]
-    # Keep the image's default process identity.
-    # No absent capture can silently become an empty vault directory.
-    return document
+
+
+def service_configuration(service, *, environment, ports, data_sources):
+    """Pure renderer; the existing ordinary runtime parser owns private values."""
+    service.pop('network_mode', None)
+    service['environment'] = {key: str(value).replace('$', '$$') for key, value in environment.items()}
+    if 'TZ' in environment:
+        service['environment']['TZ'] = environment['TZ'].replace('$', '$$')
+    service['ports'] = ports
+    service['healthcheck'] = {'test': ['CMD-SHELL', 'curl -fsSo /dev/null http://localhost:8080']}
+    service['volumes'] = [{'type': 'bind', 'source': data_sources[name], 'target': target,
+        'bind': {'create_host_path': False}} for name, target in (
+            ('data', '/etc/bitwarden'), ('logs', '/var/log/bitwarden'))]
+    return service
+
+
 
 
 def health(fetch, issuer):

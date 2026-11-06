@@ -1,0 +1,59 @@
+# Inactive TEMPLATE for a private deployment repository. Replace BOTH zero SHAs
+# with the same reviewed published framework commit containing this capability.
+# No import or first-installation mutation runs in this workflow.
+name: Host firewall
+on:
+  pull_request:
+    paths: [bootstrap/firewall.yaml, .github/workflows/firewall.yml]
+  push:
+    branches: [main]
+    paths: [bootstrap/firewall.yaml, .github/workflows/firewall.yml]
+permissions:
+  contents: read
+jobs:
+  validate:
+    name: Check policy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: theaussiepom/homelab
+          ref: '0000000000000000000000000000000000000000'
+          path: framework-source
+          persist-credentials: false
+      - name: Install pinned source dependencies
+        run: python3 -m pip install --require-hashes -r framework-source/requirements.lock.txt
+      - name: Validate authored policy without target contact
+        run: python3 framework-source/proxmox/bootstrap/host_firewall.py --check --config bootstrap/firewall.yaml
+  firewall:
+    name: Firewall
+    needs: validate
+    if: github.event.repository.private == true && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, homelab-private-deploy]
+    environment: homelab-bootstrap
+    concurrency:
+      group: homelab-private-deployment
+      cancel-in-progress: false
+      queue: max
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: theaussiepom/homelab
+          ref: '0000000000000000000000000000000000000000'
+          path: framework-source
+          persist-credentials: false
+      - name: Apply the declared host policy from existing owned state
+        env:
+          PROXMOX_BOOTSTRAP_TOKEN: ${{ secrets.PROXMOX_BOOTSTRAP_TOKEN }}
+        run: |
+          /opt/homelab-tools/bin/python3 framework-source/proxmox/bootstrap/host_firewall.py \
+            --config bootstrap/firewall.yaml \
+            --work /var/lib/homelab-bootstrap/host-firewall

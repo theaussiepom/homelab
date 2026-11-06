@@ -7,8 +7,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from test_render import fixture
-import render
+import protocol_component_fixtures as component_fixtures
 
 IMAGE = "koenkk/zigbee2mqtt@sha256:fef0de769dcd04c27b3a6d277b61046eb96284bdd4198dcb1687c3a01b3020f3"
 CHECK = r"""
@@ -41,7 +40,8 @@ server.listen(8099, '127.0.0.1', async () => {
 """
 
 if __name__ == "__main__":
-    health = render.compose(fixture("zigbee2mqtt"))["services"]["zigbee2mqtt"][
+    app = component_fixtures.zigbee_app(image=IMAGE)
+    health = component_fixtures.document(app)["services"]["zigbee2mqtt"][
         "healthcheck"
     ]["test"]
     result = subprocess.run(

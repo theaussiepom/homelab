@@ -11,7 +11,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import dns_records
-import render
+import protocol_component_fixtures as component_fixtures
 
 # This fixture image is independent of any site's live image selection.
 IMAGE = "pihole/pihole@sha256:70a9c11171ded2eee735d88c127996da209284a329d50f5ae59c06b861d401b3"
@@ -21,16 +21,8 @@ def run(output, tools_image):
     output.mkdir(mode=0o700)
     project = "homelab-dns-" + uuid.uuid4().hex[:12]
     compose = output / "compose.json"
-    config = {
-        "kind": "dns",
-        "guest_memory_mib": 1024,
-        "dns_records": {"broker.mqtt": "198.18.40.21"},
-        "services": {
-            name: {"image": IMAGE, "memory_mib": 256, "cpus": 1, "pids_limit": 128}
-            for name in ("pihole", "unbound")
-        },
-    }
-    document = render.compose(config)
+    config = {"dns_records": {"broker.mqtt": "198.18.40.21"}}
+    document = component_fixtures.dns_document(image=IMAGE, records=config["dns_records"])
     document["name"] = project
     document["volumes"] = {"pihole-data": {}}
     pihole = document["services"]["pihole"]

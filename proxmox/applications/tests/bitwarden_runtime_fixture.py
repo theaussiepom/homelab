@@ -16,9 +16,9 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import bitwarden
-import render
+import protocol_component_fixtures as component_fixtures
 
-IMAGE = 'ghcr.io/bitwarden/lite:latest'
+IMAGE = 'ghcr.io/bitwarden/lite@sha256:94484fe9382df51ad755151ea360663e922e60a32385500454dd1f38045bf6a6'
 DATABASE = 'mariadb@sha256:805c8e104bd563d5bfa24fadd3f31cd419ea859cb5277f32b5dbf2db714f9ed1'
 
 
@@ -54,26 +54,13 @@ def main():
     args = parser.parse_args()
     if args.inside:
         return inside()
-    # Evidence of this invocation's pull; the deployment reference remains latest.
+    # Inspect only the declared immutable source fixture image.
     docker('image', 'inspect', '--format', '{{json .RepoDigests}}', IMAGE)
     project = 'homelab-bitwarden-fixture-' + uuid.uuid4().hex[:10]
     with tempfile.TemporaryDirectory(prefix=project) as temporary:
         root = Path(temporary)
-        image_id = subprocess.check_output(['docker', 'image', 'inspect', '--format', '{{.Id}}', IMAGE], text=True).strip()
-        cfg = {
-            'kind': 'bitwarden', 'guest_memory_mib': 2048,
-            'bitwarden': {
-                'schema': 'homelab-bitwarden-runtime-v1', 'bind_address': '198.18.30.35',
-                'image_id': image_id, 'database_server': '198.18.32.24',
-                'database_provider': 'mysql', 'database_name': 'bitwarden_fixture',
-                'data_uid': 1000, 'data_gid': 1000,
-            },
-            'services': {'bitwarden': {
-                'image': IMAGE, 'memory_mib': 1536, 'cpus': 1, 'pids_limit': 256,
-                'environment': {},
-            }},
-        }
-        document = render.compose(cfg)
+        app = component_fixtures.bitwarden_app(image=IMAGE)
+        document = component_fixtures.document(app)
         document.pop('name')
         document['networks'] = {'default': {'internal': True}}
         document['volumes'] = {name: {} for name in ('data', 'logs', 'database')}
@@ -163,7 +150,7 @@ def main():
                    '--name', seed_name, '--network', 'none', '--read-only',
                    '--cap-drop', 'ALL', '--cpus', '0.5', '--memory', '128m', '--pids-limit', '32',
                    '-v', project + '_data:/data:ro', '--entrypoint', 'python3', args.tools_image, '-c', check)
-            print('Synthetic Lite latest / MariaDB startup, restart and recreation preserve the attachment fixture; no native migration acceptance.')
+            print('Synthetic selected Lite / MariaDB startup, restart and recreation preserve the attachment fixture; no native migration acceptance.')
         finally:
             # Only resources with this invocation's random project/name are removed.
             subprocess.run(['docker', 'rm', '-f', client_name, seed_name],

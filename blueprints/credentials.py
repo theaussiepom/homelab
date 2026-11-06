@@ -14,7 +14,7 @@ import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "proxmox/applications"))
 import private_io as files
-from guest_contract import SCHEMA
+import component_guest
 
 
 def bind(packet, environment=os.environ):
@@ -24,11 +24,7 @@ def bind(packet, environment=os.environ):
         "Only reviewed main pushes bind deployment Secrets",
     )
     value = json.loads(files.regular(packet))
-    files.require(
-        value["enabled"] is True and value["schema"] == SCHEMA,
-        "A disabled guest cannot bind deployment credentials",
-    )
-    cfg = json.loads(value["files"]["site.json"])
+    cfg, _ = component_guest.packet(value, Path('/var/lib/homelab-inputs/ordinary'))
     token = environment.get("PROXMOX_APP_TOKEN", "").strip()
     key = environment.get("APPLICATION_SSH_KEY", "").rstrip("\n")
     files.require(

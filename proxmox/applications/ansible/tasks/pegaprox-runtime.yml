@@ -11,7 +11,7 @@
 
 - name: Inspect the existing service database key
   ansible.builtin.stat:
-    path: /opt/homelab-app/runtime/pegaprox-db-key
+    path: "{{ app.pegaprox.key_runtime_path | default('/opt/homelab-app/runtime/pegaprox-db-key') }}"
     checksum_algorithm: sha256
     follow: false
   register: pegaprox_runtime_key

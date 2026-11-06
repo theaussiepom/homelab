@@ -1,6 +1,6 @@
 # Local network recovery installation
 
-The installer is restricted to root on host `ben-beast`. It installs a fixed payload from its own staged directory, not from arbitrary command-line paths. Run the dry-run first:
+The installer is restricted to root on the hostname explicitly supplied by the staged configuration. The hostname must be a valid DNS hostname and match the live host before destination or service operations. It installs a fixed payload from its own staged directory, not from arbitrary command-line paths. Run the dry-run first:
 
 ```sh
 /usr/bin/python3 /path/to/staged/candidate/install.py

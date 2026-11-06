@@ -12,6 +12,14 @@ import pegaprox
 
 
 class HealthTests(unittest.TestCase):
+    def test_owned_compose_parameters_preserve_defaults_and_refuse_paths_or_options(self):
+        self.assertEqual(health.command(),['docker','compose','-f','/opt/homelab-app/compose.yml','exec','-T','pegaprox'])
+        self.assertEqual(health.command('/opt/homelab-app/compose-second.yaml','second')[-1],'second')
+        for path,service in [('/tmp/other.yml','owned'),('/opt/homelab-app/../other.yml','owned'),
+                ('/opt/homelab-app/${ENV}.yml','owned'),('/opt/homelab-app/compose.yml','--flag'),
+                ('/opt/homelab-app/compose.yml','foreign/name')]:
+            with self.subTest(service=service),self.assertRaises(ValueError):health.command(path,service)
+
     def test_probe_is_read_only_and_has_no_initial_account_interface(self):
         self.assertNotIn("/api/auth/setup", health.CONTAINER_CODE)
         self.assertNotIn("/api/auth/login", health.CONTAINER_CODE)

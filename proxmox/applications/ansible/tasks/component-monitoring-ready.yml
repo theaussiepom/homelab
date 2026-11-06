@@ -1,0 +1,27 @@
+---
+- name: Inspect server ownership before publishing its frontend
+  ansible.builtin.stat:
+    path: /var/lib/homelab-monitoring/server.json
+    follow: false
+  register: monitoring_server_receipt
+
+- name: Preserve retained server ownership metadata
+  ansible.builtin.assert:
+    that:
+      - not monitoring_server_receipt.stat.islnk | default(false)
+      - not monitoring_server_receipt.stat.exists or (monitoring_server_receipt.stat.isreg | default(false) and monitoring_server_receipt.stat.uid == 0 and monitoring_server_receipt.stat.mode == '0600' and monitoring_server_receipt.stat.nlink == 1)
+
+- name: Read retained server ownership
+  ansible.builtin.slurp:
+    src: /var/lib/homelab-monitoring/server.json
+  register: monitoring_owned_server
+  when: monitoring_server_receipt.stat.exists
+
+- name: Bind the existing server to its exact guest
+  ansible.builtin.assert:
+    that: (monitoring_owned_server.content | b64decode | from_json) == monitoring_server_owner
+  when: monitoring_server_receipt.stat.exists
+
+- name: Select guest-local initial publication
+  ansible.builtin.set_fact:
+    monitoring_first_install: "{{ not monitoring_server_receipt.stat.exists }}"

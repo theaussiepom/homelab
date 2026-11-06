@@ -1,0 +1,209 @@
+{
+  "bitwarden": {
+    "name": "homelab-bitwarden",
+    "services": {
+      "bitwarden": {
+        "cpus": 1,
+        "environment": {},
+        "healthcheck": {
+          "test": [
+            "CMD-SHELL",
+            "curl -fsSo /dev/null http://localhost:8080"
+          ]
+        },
+        "image": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "1536m",
+        "pids_limit": 256,
+        "ports": [
+          "198.18.30.35:8080:8080"
+        ],
+        "pull_policy": "always",
+        "restart": "always",
+        "stop_grace_period": "60s",
+        "volumes": [
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "source": "/srv/homelab/data/bitwarden/data",
+            "target": "/etc/bitwarden",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "source": "/srv/homelab/data/bitwarden/logs",
+            "target": "/var/log/bitwarden",
+            "type": "bind"
+          }
+        ]
+      }
+    }
+  },
+  "pegaprox": {
+    "name": "homelab-pegaprox",
+    "services": {
+      "pegaprox": {
+        "cap_drop": [
+          "ALL"
+        ],
+        "cpus": 2,
+        "environment": {
+          "PEGAPROX_BEHIND_PROXY": "true",
+          "PEGAPROX_HOST": "0.0.0.0",
+          "PEGAPROX_KEY_FILE": "/run/secrets/pegaprox-db-key",
+          "PEGAPROX_PW_HASH_CONCURRENCY": "2",
+          "PEGAPROX_SSH_STRICT_HOST_KEYS": "1",
+          "PEGAPROX_SUPERVISED": "1",
+          "PEGAPROX_TRUSTED_PROXIES": "198.18.25.33/32",
+          "TZ": "Etc/UTC"
+        },
+        "image": "ghcr.io/pegaprox/pegaprox@sha256:8d295a524a52f0b923616a3eb415ff6422fe62beba5bb441f35c75d8985f1add",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "1536m",
+        "pids_limit": 256,
+        "platform": "linux/amd64",
+        "ports": [
+          "198.18.25.34:5000:5000/tcp"
+        ],
+        "pull_policy": "missing",
+        "read_only": true,
+        "restart": "always",
+        "security_opt": [
+          "no-new-privileges:true"
+        ],
+        "stop_grace_period": "60s",
+        "tmpfs": [
+          "/tmp:rw,nosuid,nodev,size=64m"
+        ],
+        "volumes": [
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "source": "/srv/homelab/data/pegaprox/config",
+            "target": "/app/config",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "source": "/srv/homelab/data/pegaprox/logs",
+            "target": "/app/logs",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/pegaprox-db-key",
+            "target": "/run/secrets/pegaprox-db-key",
+            "type": "bind"
+          }
+        ]
+      }
+    }
+  },
+  "traefik": {
+    "name": "homelab-ingress",
+    "services": {
+      "traefik": {
+        "command": [
+          "--configFile=/etc/traefik/traefik.yml"
+        ],
+        "cpus": 1,
+        "environment": {
+          "CF_DNS_API_TOKEN_FILE": "/run/secrets/cloudflare-dns-token",
+          "CLOUDFLARE_PROPAGATION_TIMEOUT": "2100",
+          "SSL_CERT_FILE": "/etc/ssl/certs/homelab-pve.pem",
+          "TZ": "Australia/Brisbane"
+        },
+        "image": "traefik@sha256:1336e85aaed293bd63d005086e0dd013b04078b26aaeb1c18b26a2f928af7e65",
+        "logging": {
+          "driver": "json-file",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "512m",
+        "network_mode": "host",
+        "pids_limit": 256,
+        "pull_policy": "missing",
+        "restart": "always",
+        "stop_grace_period": "60s",
+        "volumes": [
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/traefik.yml",
+            "target": "/etc/traefik/traefik.yml",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/shared.yml",
+            "target": "/etc/traefik/shared.yml",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/pve-ca.pem",
+            "target": "/etc/ssl/certs/homelab-pve.pem",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/cloudflare-dns-token",
+            "target": "/run/secrets/cloudflare-dns-token",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "source": "/srv/homelab/data/traefik/certs",
+            "target": "/var/traefik/certs",
+            "type": "bind"
+          },
+          {
+            "bind": {
+              "create_host_path": false
+            },
+            "read_only": true,
+            "source": "/opt/homelab-app/runtime/route-proxmox.pem",
+            "target": "/etc/ssl/certs/route-proxmox.pem",
+            "type": "bind"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,5 +1,6 @@
 import sys
 import json
+import hashlib
 import io
 from pathlib import Path
 import subprocess
@@ -9,6 +10,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import monitoring_verify as verification
+from monitoring_configure import marker
 
 
 class InitialCollectionTests(unittest.TestCase):
@@ -17,19 +19,24 @@ class InitialCollectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             password = Path(tmp) / 'password'; password.write_text('synthetic-password')
             config = {'url': 'https://fixture.invalid', 'password_file': str(password), 'not_before': 0,
-                      'agents': [{'hostname': 'fixture-linux', 'psk_identity': 'fixture-linux'}],
+                      'agents': [{'hostname': 'fixture-linux', 'psk_identity': 'fixture-linux',
+                                  'psk_sha256': hashlib.sha256(b'synthetic-PSK').hexdigest()}],
                       'proxmox_hostname': 'fixture-pve', 'commissioned_vmids': [213]}
             def response(result): return io.StringIO(json.dumps({'result': result}))
-            for outcome in ('identity', 'pending', 'passed', 'passed_outer'):
+            for outcome in ('identity', 'old-marker', 'foreign-identity', 'bad-digest', 'wrong-key', 'pending', 'passed', 'passed_outer'):
                 with self.subTest(outcome=outcome):
                     values = [response('fixture-token')]
-                    if outcome == 'identity':
-                        values.append(response([]))
+                    if outcome in {'identity', 'old-marker', 'foreign-identity', 'bad-digest', 'wrong-key'}:
+                        descriptions = {'old-marker': 'HomeLab active agent; PSK identity=fixture-linux',
+                            'foreign-identity': marker('agent', 'other', 'synthetic-PSK'),
+                            'bad-digest': 'HomeLab blueprint agent; identity=fixture-linux; credential=invalid',
+                            'wrong-key': marker('agent', 'fixture-linux', 'different-synthetic-PSK')}
+                        values.append(response([] if outcome == 'identity' else [{'hostid': '1', 'tls_accept': '2', 'description': descriptions[outcome]}]))
                         expected, message = verification.AcceptanceFailure, 'individual PSK'
                     else:
                         values.extend([
                             response([{'hostid': '1', 'tls_accept': '2',
-                                       'description': 'HomeLab active agent; PSK identity=fixture-linux'}]),
+                                       'description': marker('agent', 'fixture-linux', 'synthetic-PSK')}]),
                             response([{'type': '7', 'state': '0',
                                        'lastclock': str(0 if outcome == 'pending' else now), 'lastvalue': '1'}]),
                             response([{'hostid': '2', 'macros': [{'macro': '{$HTTP.TLS.VERIFY}', 'value': 'full'}]}]),
@@ -90,3 +97,18 @@ class InitialCollectionTests(unittest.TestCase):
                 patch.object(verification.time, 'monotonic', side_effect=[0, 601]), patch.object(verification.time, 'sleep') as sleep:
             with self.assertRaisesRegex(ValueError, 'did not arrive'): verification.verify({})
             sleep.assert_not_called()
+
+    def test_missing_or_malformed_commissioned_digest_refuses_before_host_lookup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            password = Path(tmp) / 'password'; password.write_text('synthetic-password')
+            for digest in (None, 1, '', 'a'*63, 'G'*64):
+                config = {'url': 'https://fixture.invalid', 'password_file': str(password),
+                          'not_before': 0, 'agents': [{'hostname': 'fixture-linux',
+                          'psk_identity': 'fixture-linux', 'psk_sha256': digest}]}
+                def response(result): return io.StringIO(json.dumps({'result': result}))
+                opener = Mock(); opener.open.side_effect = [response('fixture-token'), response(True)]
+                with self.subTest(digest=digest), patch.object(verification, 'build_opener', return_value=opener):
+                    with self.assertRaisesRegex(verification.AcceptanceFailure, 'commissioned PSK digest'):
+                        verification._verify_once(config)
+                methods = [json.loads(call.args[0].data)['method'] for call in opener.open.call_args_list]
+                self.assertEqual(methods, ['user.login', 'user.logout'])

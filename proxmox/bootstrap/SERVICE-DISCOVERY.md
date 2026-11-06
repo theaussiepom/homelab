@@ -10,14 +10,14 @@ Review it with the application profiles before merging. The merge lets bootstrap
 CD create the token and one host firewall allowance; no workstation command or
 root SSH key is needed on the runner.
 
-Add `service_discovery` to the private host settings. These are example addresses
-and guest IDs; replace them together with the rest of the host configuration:
+Add `service_discovery` to the private host settings. The following uses explicitly synthetic RFC2544
+addresses and lab guest IDs; replace them together with the rest of the host configuration:
 
 ```json
 "service_discovery": {
-  "vmid": 212,
-  "address": "10.77.25.33",
-  "guests": [202, 211, 212]
+  "vmid": 12012,
+  "address": "198.19.125.43",
+  "guests": [12002, 12011, 12012]
 }
 ```
 
@@ -32,10 +32,10 @@ For the example, bootstrap creates:
 
 | Item | Result |
 | --- | --- |
-| API token | `root@pam!homelab-traefik-212`, privilege separation enabled, no expiry |
-| Custom role | `HomelabTraefikRead212`, containing only `Sys.Audit` and `VM.Audit` |
-| Grants | That role on the exact node and `/vms/202`, `/vms/211`, `/vms/212`; propagation disabled |
-| Host firewall | One incoming TCP 8006 allowance from `10.77.25.33/32` to the selected host address `/32` |
+| API token | `root@pam!homelab-traefik-12012`, privilege separation enabled, no expiry |
+| Custom role | `HomelabTraefikRead12012`, containing only `Sys.Audit` and `VM.Audit` |
+| Grants | That role on the exact node and `/vms/12002`, `/vms/12011`, `/vms/12012`; propagation disabled |
+| Host firewall | One incoming TCP 8006 allowance from `198.19.125.43/32` to the selected host address `/32` |
 
 The role permits reading metadata and Notes at those paths. It cannot create,
 configure, start, stop or delete guests. It receives no storage, guest-agent,
@@ -79,7 +79,7 @@ reviewed host-settings change:
 ```json
 "service_discovery_extension": {
   "owner_sha256": "<SHA256 of the current non-secret discovery owner>",
-  "guests": [215]
+  "guests": [12015]
 }
 ```
 
@@ -127,3 +127,52 @@ extension request may be removed, retaining the full desired guest list.
 
 Omit `service_discovery` when this provider is not part of your deployment. The
 original host prerequisite workflow keeps its existing behaviour.
+
+## Extend only an already owned scope
+
+When the complete historical host plan is not being changed, the same protected
+bootstrap workflow can invoke `bootstrap_cd.py --owned-discovery-extension
+--config <private-json> --ca <pinned-ca>`. Ordinary application CD does not receive
+the bootstrap credential. This mode accepts exactly these fields:
+
+```json
+{
+  "schema": "homelab-owned-discovery-extension-v1",
+  "endpoint": "https://198.19.125.11:8006/",
+  "node": "fixture-node",
+  "backup_source": "198.19.120.2:/backups/fixture",
+  "application_vmids": [12002, 12011, 12012, 12015],
+  "service_discovery": {
+    "vmid": 12012,
+    "address": "198.19.125.43",
+    "guests": [12002, 12011, 12012, 12015]
+  },
+  "service_discovery_extension": {
+    "owner_sha256": "<canonical current owner SHA256>",
+    "guests": [12015]
+  },
+  "added_guests": [
+    {"node": "fixture-node", "vmid": 12015, "hostname": "fixture-mqtt", "type": "lxc"}
+  ]
+}
+```
+
+These values are synthetic; the owner hash must come from genuine current
+custody. `added_guests` binds every appended ID, in order, to its exact native
+node, guest type and hostname. CD reads only those added guest configurations
+before its saved plan and again before granting access. A missing or different
+identity refuses the change.
+
+The mode requires matching `owner.json`, `token.json` and `READY.json` in both
+`service-discovery` directories, an exact mounted NAS, and no bootstrap hold or
+maintenance marker. The mirrored `scope-extensions` chain is required only when
+previous extensions exist; it is absent for the first extension. The mode can add only the
+declared non-propagating discovery ACL rows and their mirrored scope receipt. It
+cannot mint credentials or change bridges, application grants, monitoring or
+firewall rules. Plans and results use the existing private evidence boundary.
+The exact unique API allowance may follow only input rules whose single literal
+IPv4 source/CIDR excludes the discovery guest. Unknown, inverted, compound or
+overlapping sources refuse; CD never moves or edits those rules.
+Preflight refusals create no hold. Failures after plan and hold creation retain
+that hold and do not retry; an unchanged successful repeat
+verifies the exact completed extension without another grant or receipt.

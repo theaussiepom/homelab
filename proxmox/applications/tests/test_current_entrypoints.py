@@ -52,6 +52,7 @@ class CurrentEntrypointTests(unittest.TestCase):
         ):
             with (
                 self.subTest(status=status, stdout=stdout),
+                patch.object(sys, "argv", ["pegaprox_health.py"]),
                 patch(
                     "subprocess.run",
                     return_value=subprocess.CompletedProcess([], status, stdout, ""),

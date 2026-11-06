@@ -53,11 +53,12 @@ class ArchitectureTests(unittest.TestCase):
 
     def test_definition_validation_and_custody_have_no_native_executor(self):
         for name in [
-            "guest_contract.py",
+            "component_guest.py",
+            "component_continuity.py",
             "deployment_state.py",
             "private_io.py",
             "plan_policy.py",
-            "secret_contract.py",
+            "component_input_secrets.py",
         ]:
             source = (ROOT / name).read_text()
             imports = {
@@ -67,7 +68,7 @@ class ArchitectureTests(unittest.TestCase):
                 for n in node.names
             }
             self.assertNotIn("subprocess", imports, name)
-        text = (ROOT / "ansible/tasks/compose.yml").read_text()
+        text = (ROOT / "ansible/tasks/component-compose.yml").read_text()
         self.assertNotIn("ordinary_reconcile", text)
         self.assertNotIn("compose-bootstrap.yml", text)
         self.assertNotIn("node-red-settings.js", text)

@@ -1,0 +1,149 @@
+---
+- name: Install component admission
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../component-preflight.py"
+    dest: /usr/local/bin/homelab-component-preflight.py
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Check the owned namespace before reconciliation
+  ansible.builtin.command:
+    argv: [python3, /usr/local/bin/homelab-component-preflight.py, before]
+    stdin: "{{ component_preflight | to_json }}"
+  register: component_before
+  changed_when: false
+  no_log: true
+
+- name: Install this application's service probes
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../{{ item.source }}"
+    dest: "{{ item.destination }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop: "{{ component_helpers }}"
+
+- name: Install bounded runtime namespace preparation
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../component-data.py"
+    dest: /usr/local/bin/homelab-component-data.py
+    owner: root
+    group: root
+    mode: '0700'
+  when: component_runtime_directory is defined
+
+- name: Preserve or create only this application's runtime namespace
+  ansible.builtin.command:
+    argv: [python3, /usr/local/bin/homelab-component-data.py, runtime]
+    stdin: "{{ component_runtime_directory | to_json }}"
+  register: component_runtime_directory_prepare
+  changed_when: (component_runtime_directory_prepare.stdout | from_json).initialized | int > 0
+  no_log: true
+  when: component_runtime_directory is defined
+
+- name: Inspect monitoring publication ownership
+  ansible.builtin.include_tasks: component-monitoring-ready.yml
+  when: component_application.adapter == 'zabbix'
+
+- name: Install the declared shared Compose base
+  ansible.builtin.include_tasks: image.yml
+  loop: "{{ component_image_archives | dict2items }}"
+  loop_control:
+    loop_var: image_input
+  no_log: true
+
+- name: Install the declared shared Compose base
+  ansible.builtin.copy:
+    src: "{{ component_compose_source }}"
+    dest: "{{ component_compose_file }}"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  when: component_application.adapter != 'zabbix' or not monitoring_first_install | default(false)
+
+- name: Keep the factory-password frontend guest-local until configuration
+  ansible.builtin.copy:
+    src: "{{ component_initial_compose_source }}"
+    dest: "{{ component_compose_file }}"
+    owner: root
+    group: root
+    mode: '0600'
+  when: component_application.adapter == 'zabbix' and monitoring_first_install
+  no_log: true
+
+- name: Preserve the existing PegaProx key before any runtime copy
+  ansible.builtin.include_tasks: pegaprox-runtime.yml
+  when: component_application.adapter == 'pegaprox'
+
+- name: Install selected runtime files
+  ansible.builtin.copy:
+    src: "{{ component_payload_directory }}/{{ item.source }}"
+    dest: "{{ item.destination }}"
+    owner: "{{ item.uid }}"
+    group: "{{ item.gid }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ component_runtime_files }}"
+  register: component_runtime_install
+  no_log: true
+
+- name: Prepare this application's owned proxy workspace
+  ansible.builtin.include_tasks: component-proxy-ready.yml
+  when: component_proxy_lifecycle is defined
+
+- name: Preserve the vault database login
+  ansible.builtin.include_tasks: component-bitwarden-ready.yml
+  when: component_bitwarden is defined
+
+- name: Install only the selected private environment
+  ansible.builtin.copy:
+    src: "{{ component_environment_source }}"
+    dest: "{{ component_environment_file }}"
+    owner: root
+    group: root
+    mode: '0600'
+  register: component_environment_install
+  when: component_environment_source is defined
+  no_log: true
+
+- name: Select this application's Compose files
+  ansible.builtin.include_tasks: component-app-before.yml
+
+- name: Select this application's Compose files
+  ansible.builtin.set_fact:
+    component_compose_argv: "{{ ['docker', 'compose', '-f', component_compose_file] + (['-f', component_environment_file] if component_environment_file is defined else []) }}"
+
+- name: Validate without emitting private configuration
+  ansible.builtin.command:
+    argv: "{{ component_compose_argv + ['config', '--quiet'] }}"
+  changed_when: false
+  no_log: true
+
+- name: Start only this application's owned services
+  ansible.builtin.command:
+    argv: "{{ component_compose_argv + ['up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false', '--no-deps'] + (['--force-recreate'] if component_runtime_install.changed | default(false) or component_environment_install.changed | default(false) or component_driver_install.changed | default(false) else []) + component_services }}"
+  register: component_start
+  changed_when: "'Started' in component_start.stderr or 'Created' in component_start.stderr or 'Recreated' in component_start.stderr"
+  no_log: true
+
+- name: Configure monitoring before publishing its listener
+  ansible.builtin.include_tasks: component-app-after.yml
+
+- name: Configure monitoring before publishing its listener
+  ansible.builtin.include_tasks: monitoring-server.yml
+  when: component_application.adapter == 'zabbix'
+
+- name: Maintain only the reviewed identity callbacks
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/opt/homelab-app/identity_callbacks.py', '--config', component_identity_callbacks.config, '--compose', component_compose_file] + (['--service', component_identity_callbacks.service] if component_identity_callbacks.service != 'server' else []) }}"
+  changed_when: false
+  no_log: true
+  when: component_identity_callbacks is defined and not ansible_check_mode
+
+- name: Verify peer continuity
+  ansible.builtin.command:
+    argv: [python3, /usr/local/bin/homelab-component-preflight.py, after]
+    stdin: "{{ {'selection': component_preflight, 'before': (component_before.stdout | from_json)} | to_json }}"
+  changed_when: false
+  no_log: true

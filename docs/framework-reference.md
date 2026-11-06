@@ -14,3 +14,5 @@ The current application entrypoint is `proxmox/applications/deploy.py`. Host/ISO
 bootstrap and recovery are separate current subsystems. Old application deployment
 and migration requests are available through Git history only; they are not
 alternate current entrypoints.
+
+- [Host firewall desired policy through bootstrap CD](../proxmox/bootstrap/HOST-FIREWALL.md): existing owned node allowances and cluster options, separate from application guest policy.

@@ -3,6 +3,7 @@
 set -eu
 export PYTHONDONTWRITEBYTECODE=1
 python3 /src/tools/measure_coverage.py --suite applications --output "${HOMELAB_COVERAGE_OUTPUT:-/tmp/application-coverage}"
+python3 /src/proxmox/applications/tests/cloudbeaver_workspace_fixture.py
 python3 /src/proxmox/applications/tests/package_install_fixture.py
 python3 /src/proxmox/applications/tests/database_account_fixture.py
 python3 /src/proxmox/applications/tests/database_server_fixture.py
@@ -13,8 +14,16 @@ tofu fmt -check -recursive
 tofu init -backend=false -input=false -lockfile=readonly -no-color
 tofu validate -no-color
 tofu test -no-color
+cp -R /src/proxmox/bootstrap/host-firewall /tmp/host-firewall-tofu
+cp /src/proxmox/bootstrap/docker/versions.tf /src/proxmox/bootstrap/docker/.terraform.lock.hcl /tmp/host-firewall-tofu/
+cd /tmp/host-firewall-tofu
+tofu fmt -check -recursive
+tofu init -backend=false -input=false -lockfile=readonly -no-color
+tofu validate -no-color
+tofu test -no-color
 export ANSIBLE_LOCAL_TEMP=/tmp/ansible-local
 export ANSIBLE_CONFIG=/src/proxmox/applications/ansible/ansible.cfg
-ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/reconcile.yml
-ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/preparation.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-preparation.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-reconcile.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-agent.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/bootstrap/ansible/host-device.yml

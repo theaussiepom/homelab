@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Read-only loopback health and closed-setup verification for PegaProx."""
+import argparse
+import re
 import subprocess
 
 CONTAINER_CODE = r"""
@@ -54,21 +56,21 @@ def verify(command):
     return result.stdout.strip()
 
 
+def command(compose_file='/opt/homelab-app/compose.yml', service='pegaprox'):
+    if not (isinstance(compose_file,str) and re.fullmatch(
+            r'/opt/homelab-app/[a-z][a-z0-9_-]{0,62}\.ya?ml',compose_file)
+            and isinstance(service,str) and re.fullmatch('[a-z0-9][a-z0-9_-]{0,127}',service)):
+        raise ValueError('Select the declared PegaProx project file and owned service')
+    return ['docker','compose','-f',compose_file,'exec','-T',service]
+
+
 if __name__ == "__main__":
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--compose-file',default='/opt/homelab-app/compose.yml')
+    parser.add_argument('--service',default='pegaprox')
+    args=parser.parse_args()
     try:
-        print(
-            verify(
-                [
-                    "docker",
-                    "compose",
-                    "-f",
-                    "/opt/homelab-app/compose.yml",
-                    "exec",
-                    "-T",
-                    "pegaprox",
-                ]
-            )
-        )
+        print(verify(command(args.compose_file,args.service)))
     except Exception:
         raise SystemExit(
             "PegaProx health contract failed; inspect private evidence."

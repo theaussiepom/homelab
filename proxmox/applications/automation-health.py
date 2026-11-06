@@ -1,7 +1,12 @@
 """Read-only application probes; never publish MQTT or log private credentials."""
 import argparse
+import base64
+import hashlib
+from http.client import HTTPConnection, HTTPException
 import json
+import os
 from pathlib import Path
+import re
 import socket
 import struct
 import time
@@ -52,12 +57,18 @@ def connect(username=None, password=None):
         return reply[3]
 
 
-def mqtt(path=Path('/srv/homelab/data/homeassistant/config/.storage/core.config_entries')):
-    entries = json.loads(path.read_text())['data']['entries']
-    selected = [row['data'] for row in entries if row['domain'] == 'mqtt']
-    if len(selected) != 1:
-        raise ValueError('Restore the selected existing MQTT integration')
-    credentials = selected[0]
+def mqtt(path=Path('/srv/homelab/data/homeassistant/config/.storage/core.config_entries'), *, standalone=False):
+    value = json.loads(path.read_text())
+    if standalone:
+        if not isinstance(value, dict) or set(value) != {'username', 'password'}:
+            raise ValueError('Use only the retained broker probe account')
+        credentials = value
+    else:
+        entries = value['data']['entries']
+        selected = [row['data'] for row in entries if row['domain'] == 'mqtt']
+        if len(selected) != 1:
+            raise ValueError('Restore the selected existing MQTT integration')
+        credentials = selected[0]
     if connect(credentials.get('username'), credentials.get('password')) != 0:
         raise ValueError('The retained MQTT account cannot authenticate')
     if connect() not in (4, 5):
@@ -76,27 +87,121 @@ def http(port, path):
         return response.code, b''
 
 
-def probe(service):
+def homeassistant_auth_challenge():
+    """Check the API's initial challenge without submitting a failed login."""
+    key = base64.b64encode(os.urandom(16)).decode('ascii')
+    connection = HTTPConnection('127.0.0.1', 8123, timeout=5)
+    try:
+        connection.request('GET', '/api/websocket', headers={
+            'Upgrade': 'websocket', 'Connection': 'Upgrade',
+            'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': key,
+        })
+        response = connection.getresponse()
+        accept = base64.b64encode(hashlib.sha1(
+            (key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode('ascii'),
+            usedforsecurity=False,
+        ).digest()).decode('ascii')
+        if (response.status != 101
+                or response.getheader('Upgrade', '').lower() != 'websocket'
+                or 'upgrade' not in {part.strip().lower() for part in response.getheader('Connection', '').split(',')}
+                or response.getheader('Sec-WebSocket-Accept') != accept):
+            raise ValueError('HA WebSocket upgrade differs')
+
+        def receive(size):
+            data = response.fp.read(size)
+            if len(data) != size:
+                raise ValueError('Incomplete HA authentication challenge')
+            return data
+
+        header = receive(2)
+        if header[0] != 0x81 or header[1] & 0x80 or header[1] == 127:
+            raise ValueError('Unexpected HA authentication frame')
+        size = int.from_bytes(receive(2), 'big') if header[1] == 126 else header[1]
+        if size > 4096:
+            raise ValueError('HA authentication challenge exceeds its bound')
+        challenge = json.loads(receive(size))
+        if (not isinstance(challenge, dict) or challenge.get('type') != 'auth_required'
+                or not isinstance(challenge.get('ha_version'), str)
+                or not challenge['ha_version']):
+            raise ValueError('HA API must require authentication')
+        mask = os.urandom(4)
+        connection.sock.sendall(b'\x88\x82' + mask + bytes(
+            value ^ mask[index] for index, value in enumerate(b'\x03\xe8')
+        ))
+    finally:
+        connection.close()
+
+
+def local_response(path):
+    """Inspect one fixed loopback response without following any redirect."""
+    if path not in {'/', '/onboarding.html', '/api/'}:
+        raise ValueError('Select a fixed fresh HA readiness path')
+    connection = HTTPConnection('127.0.0.1', 8123, timeout=5)
+    try:
+        connection.request('GET', path)
+        response = connection.getresponse()
+        if len(response.read(65537)) > 65536:
+            raise ValueError('Local service probe response exceeds its bound')
+        return response.status, response.getheader('Location')
+    finally:
+        connection.close()
+
+
+def homeassistant_fresh():
+    """Qualify vendor onboarding or owned repeat readiness, never follow it."""
+    status, location = local_response('/')
+    if status == 302 and location == '/onboarding.html':
+        if local_response('/onboarding.html') != (200, None):
+            raise ValueError('Fresh HA onboarding page is not ready')
+    elif status != 200 or location is not None:
+        raise ValueError('Fresh HA must use its exact local onboarding boundary')
+    if local_response('/api/')[0] != 401:
+        raise ValueError('Fresh HA must refuse unauthenticated API access')
+    homeassistant_auth_challenge()
+
+
+def selected_probe(service, mqtt_probe):
+    if mqtt_probe is not None and not (service=='mqtt-broker' and isinstance(mqtt_probe,(str,Path))
+            and re.fullmatch(r'/opt/homelab-app/runtime(?:/[a-z0-9_-]+)*/mqtt-probe\.json',str(mqtt_probe))):
+        raise ValueError('Select only the owned broker probe input')
+    return Path('/opt/homelab-app/runtime/mqtt-probe.json') if mqtt_probe is None else Path(mqtt_probe)
+
+
+def probe(service, mqtt_probe=None):
+    selected=selected_probe(service,mqtt_probe)
     if service == 'mqtt':
         mqtt()
+    elif service == 'mqtt-broker':
+        mqtt(selected, standalone=True)
     elif service == 'homeassistant':
-        if http(8123, '/')[0] != 200 or http(8123, '/api/')[0] != 401:
+        if http(8123, '/')[0] != 200:
             raise ValueError('HA web/API login boundary is not ready')
+        homeassistant_auth_challenge()
+    elif service == 'homeassistant-fresh':
+        homeassistant_fresh()
     elif service == 'node_red':
         status, body = http(1880, '/auth/login')
         if status != 200 or json.loads(body).get('type') != 'strategy' or http(1880, '/flows')[0] != 401:
             raise ValueError('Node-RED native strategy or API login boundary differs')
+    elif service == 'node_red-fresh':
+        if http(1880, '/')[0] != 200:
+            raise ValueError('Fresh Node-RED local UI is not ready')
     else:
         raise ValueError('Select one automation service')
 
 
-def run(service):
+def run(service, mqtt_probe=None):
+    selected_probe(service,mqtt_probe)
     deadline = time.monotonic() + 180
     while True:
         try:
-            probe(service)
-            return {'service': service, 'read_only_probe': 'passed'}
-        except (OSError, ValueError, KeyError, TypeError):
+            if mqtt_probe is None:
+                probe(service)
+            else:
+                probe(service,mqtt_probe)
+            return {'service': service, 'read_only_probe': 'passed',
+                    **({'scope': 'ui_only'} if service == 'node_red-fresh' else {})}
+        except (OSError, ValueError, KeyError, TypeError, HTTPException):
             if time.monotonic() >= deadline:
                 raise ValueError('Application probe did not pass; inspect its private logs') from None
             time.sleep(2)
@@ -104,8 +209,10 @@ def run(service):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('service', choices=('mqtt', 'homeassistant', 'node_red'))
+    parser.add_argument('service', choices=('mqtt', 'mqtt-broker', 'homeassistant', 'homeassistant-fresh', 'node_red', 'node_red-fresh'))
+    parser.add_argument('--mqtt-probe',type=Path)
     try:
-        print(json.dumps(run(parser.parse_args().service)))
+        args=parser.parse_args()
+        print(json.dumps(run(args.service,args.mqtt_probe)))
     except (OSError, ValueError, KeyError, TypeError):
         raise SystemExit('Automation service verification held; private values were not printed') from None

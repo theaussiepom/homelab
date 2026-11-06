@@ -32,7 +32,7 @@ class ApplicationScopeTests(unittest.TestCase):
         host.run_cd()
         original = copy.deepcopy(host.c)
         host.c['applications'].append({'vmid': 200, 'hostname': 'automation'})
-        host.c['service_discovery']['guests'] = [202, 211, 212, 200]
+        host.c['service_discovery']['guests'] = [*original['service_discovery']['guests'], 200]
         host.c['service_discovery_extension'] = {'owner_sha256':provider_access.owner_sha256(provider_access.owner(original)), 'guests':[200]}
         return host, original
 
@@ -65,7 +65,7 @@ class ApplicationScopeTests(unittest.TestCase):
                 host, original = self.setup(); writes = copy.deepcopy(host.api.writes)
                 if problem == 'missing': host.c.pop('service_discovery_extension')
                 if problem == 'wrong': host.c['service_discovery_extension']['owner_sha256'] = '0'*64
-                if problem == 'removal': host.c['service_discovery']['guests'] = [200, 212]
+                if problem == 'removal': host.c['service_discovery']['guests'] = [200, original['service_discovery']['vmid']]
                 with self.assertRaises(ValueError): host.run_cd()
                 self.assertEqual(host.api.writes, writes)
 

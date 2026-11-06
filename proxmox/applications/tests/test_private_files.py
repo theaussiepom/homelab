@@ -10,10 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import commands
-import foundation
-import monitoring
 import private_io
-from test_monitoring import fixture as monitoring_fixture
 
 
 class PrivateFileTests(unittest.TestCase):
@@ -48,34 +45,32 @@ class PrivateFileTests(unittest.TestCase):
     ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            cfg = monitoring_fixture(root)
             password = root / "password"
+            password.write_text("synthetic-fixture-password")
+            password.chmod(0o600)
             for mode in (0o400, 0o600):
                 password.chmod(mode)
                 self.assertEqual(
-                    foundation.read_private(password), "synthetic-fixture-password"
-                )
-                files = {row["path"]: row["content"] for row in monitoring.files(cfg)}
-                self.assertEqual(
-                    files["database-password"], "synthetic-fixture-password"
+                    private_io.regular(password, private=True, limit=65536,
+                        modes=(0o400, 0o600)).decode().removesuffix("\n"), "synthetic-fixture-password"
                 )
                 self.assertEqual(password.stat().st_mode & 0o777, mode)
 
     def test_monitoring_source_refuses_public_or_symlinked_secret_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            cfg = monitoring_fixture(root)
             password = root / "password"
+            password.write_text("synthetic-fixture-password")
+            password.chmod(0o600)
             password.chmod(0o644)
             with self.assertRaises(ValueError):
-                monitoring.files(cfg)
+                private_io.regular(password, private=True, modes=(0o400, 0o600))
             self.assertEqual(password.stat().st_mode & 0o777, 0o644)
             password.chmod(0o600)
             link = root / "link"
             link.symlink_to(password)
-            cfg["monitoring"]["secret_files"]["database_password"] = str(link)
             with self.assertRaises(OSError):
-                monitoring.files(cfg)
+                private_io.regular(link, private=True, modes=(0o400, 0o600))
             self.assertTrue(link.is_symlink())
             self.assertEqual(password.read_text(), "synthetic-fixture-password")
 
@@ -100,6 +95,33 @@ class PrivateFileTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 private_io.sha(link)
             self.assertTrue(link.is_symlink())
+
+    def test_child_inherits_blocking_private_log_for_both_output_streams(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence.log"
+            private_io.write_new(path, b"retained evidence\n")
+            child = (
+                "import os, sys; "
+                "assert os.get_blocking(sys.stdout.fileno()); "
+                "assert os.get_blocking(sys.stderr.fileno()); "
+                "print('stdout evidence', flush=True); "
+                "print('stderr evidence', file=sys.stderr, flush=True); "
+                "raise SystemExit(int(sys.argv[1]))"
+            )
+            for code in (0, 7):
+                with self.subTest(exit_code=code):
+                    argv = [sys.executable, "-c", child, str(code)]
+                    if code:
+                        with self.assertRaises(subprocess.CalledProcessError) as failed:
+                            commands.quiet(argv, os.environ.copy(), path)
+                        self.assertEqual(failed.exception.returncode, code)
+                    else:
+                        commands.quiet(argv, os.environ.copy(), path)
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(
+                path.read_text(),
+                "retained evidence\n" + "stdout evidence\nstderr evidence\n" * 2,
+            )
 
     def test_failed_commands_preserve_private_evidence_and_later_logs_append(self):
         with tempfile.TemporaryDirectory() as directory:

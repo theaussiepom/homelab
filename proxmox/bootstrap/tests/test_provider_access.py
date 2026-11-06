@@ -31,7 +31,7 @@ class ProviderAPI(FakeAPI):
         self.string_mint_metadata = False
         self.secret_was_saved = None
         self.extra_permission = False
-        self.valid_secret = 'root@pam!homelab-traefik-212=' + SECRET
+        self.valid_secret = 'root@pam!homelab-traefik-12012=' + SECRET
 
     def discovery(self, token):
         fixture = self
@@ -42,7 +42,7 @@ class ProviderAPI(FakeAPI):
                 if path != '/access/permissions' or method != 'GET' or values is not None:
                     raise AssertionError((path, method, values))
                 permissions = {r['path']: {'Sys.Audit': 0, 'VM.Audit': 0} for r in fixture.acls
-                               if r['ugid'] == 'root@pam!homelab-traefik-212'}
+                               if r['ugid'] == 'root@pam!homelab-traefik-12012'}
                 if fixture.extra_permission:
                     permissions['/'] = {'VM.PowerMgmt': 1}
                 return {'data': permissions}
@@ -56,11 +56,11 @@ class ProviderAPI(FakeAPI):
             if path == '/access/roles':
                 self.roles.append({'roleid': values['roleid'], 'privs': values['privs'], 'special': 0})
             elif '/token/homelab-traefik-' in path:
-                self.tokens.append({'tokenid': 'homelab-traefik-212', **values})
+                self.tokens.append({'tokenid': 'homelab-traefik-12012', **values})
                 if self.fail_token_response:
                     raise discovery.ProviderAccessError('Synthetic lost token response')
                 info = {k:str(v) if type(v) is int else v for k,v in values.items()} if self.string_mint_metadata else values
-                return {'data': {'full-tokenid': 'root@pam!homelab-traefik-212', 'value': SECRET, 'info': info}}
+                return {'data': {'full-tokenid': 'root@pam!homelab-traefik-12012', 'value': SECRET, 'info': info}}
             elif path == '/access/acl':
                 if self.secret_was_saved:
                     self.secret_was_saved()
@@ -96,10 +96,11 @@ class DiscoveryTests(unittest.TestCase):
         self.root = Path(self.tmp.name) / 'state'; self.root.mkdir()
         self.nas = Path(self.tmp.name) / 'nas'; self.nas.mkdir()
         self.c = config()
-        self.c['applications'] += [{'vmid': 212, 'hostname': 'traefik'}, {'vmid': 211, 'hostname': 'security'},
-                                   {'vmid': 202, 'hostname': 'db-tools'}]
-        self.c['service_discovery'] = {'vmid': 212, 'address': '10.77.25.33', 'guests': [202, 211, 212]}
-        self.c['endpoint'] = 'https://10.77.25.10:8006/'
+        self.c['applications'] = [{'vmid':12008,'hostname':'fixture-database'}]
+        self.c['applications'] += [{'vmid': 12012, 'hostname': 'fixture-ingress'}, {'vmid': 12011, 'hostname': 'fixture-identity'},
+                                   {'vmid': 12002, 'hostname': 'fixture-dbtools'}]
+        self.c['service_discovery'] = {'vmid': 12012, 'address': '198.19.125.43', 'guests': [12002, 12011, 12012]}
+        self.c['endpoint'] = 'https://198.19.125.11:8006/'
         self.api = ProviderAPI()
 
     def run_cd(self):
@@ -111,13 +112,13 @@ class DiscoveryTests(unittest.TestCase):
         old_rules, old_options = copy.deepcopy(self.api.rules), copy.deepcopy(self.api.options)
         result = self.run_cd()['service_discovery']
         self.assertTrue(result['created'])
-        self.assertEqual(self.api.roles, [{'roleid': 'HomelabTraefikRead212', 'privs': 'Sys.Audit,VM.Audit', 'special': 0}])
-        grants = [r for r in self.api.acls if r['ugid'] == 'root@pam!homelab-traefik-212']
-        self.assertEqual({r['path'] for r in grants}, {'/nodes/pve', '/vms/202', '/vms/211', '/vms/212'})
+        self.assertEqual(self.api.roles, [{'roleid': 'HomelabTraefikRead12012', 'privs': 'Sys.Audit,VM.Audit', 'special': 0}])
+        grants = [r for r in self.api.acls if r['ugid'] == 'root@pam!homelab-traefik-12012']
+        self.assertEqual({r['path'] for r in grants}, {'/nodes/pve', '/vms/12002', '/vms/12011', '/vms/12012'})
         self.assertTrue(all(r['propagate'] == 0 for r in grants))
         rule = self.api.rules[0]
         self.assertEqual((rule['source'], rule['dest'], rule['dport'], rule['proto']),
-                         ('10.77.25.33/32', '10.77.25.10/32', '8006', 'tcp'))
+                         ('198.19.125.43/32', '198.19.125.11/32', '8006', 'tcp'))
         self.assertEqual(self.api.rules[1:], old_rules)
         self.assertEqual(self.api.options, old_options)
         writes = copy.deepcopy(self.api.writes)
@@ -270,7 +271,7 @@ class DiscoveryTests(unittest.TestCase):
                 elif drift == 'token_expiry': self.api.tokens[0]['expire'] = 123
                 elif drift == 'secret': self.api.valid_secret += '-changed'
                 elif drift == 'effective_permission': self.api.extra_permission = True
-                elif drift == 'extra_acl': self.api.acls.append({'path':'/', 'roleid':'HomelabTraefikRead212',
+                elif drift == 'extra_acl': self.api.acls.append({'path':'/', 'roleid':'HomelabTraefikRead12012',
                     'propagate':1, 'type':'token', 'ugid':'root@pam!other'})
                 elif drift == 'firewall': self.api.rules[0]['action'] = 'ACCEPT'
                 elif drift == 'host_network': self.api.network[0]['bridge_ports'] = 'different0'
@@ -281,7 +282,7 @@ class DiscoveryTests(unittest.TestCase):
                 if drift == 'config': self.c['node'] = 'pve'
 
     def test_mint_numeric_metadata_is_exact_not_coerced(self):
-        base = {'full-tokenid':'root@pam!homelab-traefik-212', 'value':SECRET, 'info':{'privsep':1,'expire':0}}
+        base = {'full-tokenid':'root@pam!homelab-traefik-12012', 'value':SECRET, 'info':{'privsep':1,'expire':0}}
         for key, value in (('privsep', True), ('privsep', 1.0), ('privsep','01'), ('privsep','0'),
                            ('expire',False), ('expire',0.0), ('expire','00'), ('expire',None)):
             minted = copy.deepcopy(base); minted['info'][key] = value
@@ -315,8 +316,8 @@ class DiscoveryTests(unittest.TestCase):
     def test_existing_unknown_token_role_or_owned_firewall_rule_never_adopted(self):
         for kind in ('token', 'role', 'rule'):
             self.api = ProviderAPI()
-            if kind == 'token': self.api.tokens.append({'tokenid': 'homelab-traefik-212'})
-            if kind == 'role': self.api.roles.append({'roleid': 'HomelabTraefikRead212', 'privs': 'Sys.Audit,VM.Audit'})
+            if kind == 'token': self.api.tokens.append({'tokenid': 'homelab-traefik-12012'})
+            if kind == 'role': self.api.roles.append({'roleid': 'HomelabTraefikRead12012', 'privs': 'Sys.Audit,VM.Audit'})
             if kind == 'rule': self.api.rules.insert(0, discovery.allowance(self.c))
             with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, 'no adoption'):
                 self.run_cd()
@@ -361,14 +362,14 @@ class DiscoveryTests(unittest.TestCase):
                 if kind == 'role': self.api.roles[0]['privs'] += ',VM.PowerMgmt'
                 if kind == 'expire': self.api.tokens[0]['expire'] = 1234
                 if kind == 'secret': self.api.valid_secret += '-rotated'
-                if kind == 'firewall': self.api.rules[0]['source'] = '10.77.25.0/24'
+                if kind == 'firewall': self.api.rules[0]['source'] = '198.19.125.0/24'
                 self.api.writes.clear()
                 with self.assertRaises(ValueError): self.run_cd()
                 self.assertEqual(self.api.writes, [])
 
     def test_changed_declared_scope_is_not_silently_expanded(self):
         self.run_cd()
-        self.c['service_discovery']['guests'].append(208)
+        self.c['service_discovery']['guests'].append(12008)
         self.api.writes.clear()
         with self.assertRaisesRegex(ValueError, 'configuration changed'):
             self.run_cd()
@@ -377,11 +378,11 @@ class DiscoveryTests(unittest.TestCase):
     def prepare_extension(self):
         self.run_cd()
         original = json.loads((self.root / 'service-discovery/owner.json').read_bytes())
-        self.c['applications'].append({'vmid': 215, 'hostname': 'bitwarden'})
-        self.c['service_discovery']['guests'].append(215)
+        self.c['applications'].append({'vmid': 12015, 'hostname': 'fixture-vault'})
+        self.c['service_discovery']['guests'].append(12015)
         self.c['service_discovery_extension'] = {
             'owner_sha256': hashlib.sha256(json.dumps(original, sort_keys=True,
-                separators=(',', ':')).encode()).hexdigest(), 'guests': [215]}
+                separators=(',', ':')).encode()).hexdigest(), 'guests': [12015]}
         self.api.writes.clear()
 
     def test_explicit_extension_adds_only_new_guest_and_preserves_original_custody(self):
@@ -392,8 +393,8 @@ class DiscoveryTests(unittest.TestCase):
         result = self.run_cd()['service_discovery']
         self.assertFalse(result['created'])
         self.assertEqual(result['new_acl_rows'], 1)
-        self.assertEqual(len(self.api.writes), 2)  # Deployment and discovery, each guest215 only.
-        self.assertTrue(all(path == '/access/acl' and values['path'] == '/vms/215'
+        self.assertEqual(len(self.api.writes), 2)  # Deployment and discovery, each guest 12015 only.
+        self.assertTrue(all(path == '/access/acl' and values['path'] == '/vms/12015'
                             for path, _, values in self.api.writes))
         self.assertEqual(self.api.rules, rules)
         for name, raw in originals.items():
@@ -418,9 +419,9 @@ class DiscoveryTests(unittest.TestCase):
                 original_c = copy.deepcopy(self.c)
                 self.prepare_extension()
                 if drift == 'hash': self.c['service_discovery_extension']['owner_sha256'] = '0'*64
-                elif drift == 'removal': self.c['service_discovery']['guests'].remove(202)
-                elif drift == 'extra_guest': self.c['service_discovery_extension']['guests'].append(211)
-                elif drift == 'address': self.c['service_discovery']['address'] = '10.77.25.34'
+                elif drift == 'removal': self.c['service_discovery']['guests'].remove(12002)
+                elif drift == 'extra_guest': self.c['service_discovery_extension']['guests'].append(12011)
+                elif drift == 'address': self.c['service_discovery']['address'] = '198.19.125.44'
                 else: self.c.pop('service_discovery_extension')
                 with self.assertRaises(ValueError): self.run_cd()
                 self.assertEqual(self.api.writes, [])
@@ -458,8 +459,8 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_extension_does_not_adopt_live_acl_or_broader_privilege_drift(self):
         self.prepare_extension()
-        self.api.acls.append({'path': '/vms/215', 'roleid': 'HomelabTraefikRead212',
-                             'propagate': 0, 'ugid': 'root@pam!homelab-traefik-212', 'type': 'token'})
+        self.api.acls.append({'path': '/vms/12015', 'roleid': 'HomelabTraefikRead12012',
+                             'propagate': 0, 'ugid': 'root@pam!homelab-traefik-12012', 'type': 'token'})
         with self.assertRaisesRegex(ValueError, 'scope differs'): self.run_cd()
         self.assertEqual(self.api.writes, [])
 
@@ -469,10 +470,10 @@ class DiscoveryTests(unittest.TestCase):
         first = self.root / 'service-discovery/scope-extensions/0001.json'
         original = first.read_bytes()
         current = json.loads(original)['owner']
-        self.c['applications'].append({'vmid': 216, 'hostname': 'another-app'})
-        self.c['service_discovery']['guests'].append(216)
+        self.c['applications'].append({'vmid': 12016, 'hostname': 'another-app'})
+        self.c['service_discovery']['guests'].append(12016)
         self.c['service_discovery_extension'] = {
-            'owner_sha256': discovery.owner_sha256(current), 'guests': [216]}
+            'owner_sha256': discovery.owner_sha256(current), 'guests': [12016]}
         self.api.writes.clear()
         self.assertEqual(self.run_cd()['service_discovery']['new_acl_rows'], 1)
         self.assertEqual(first.read_bytes(), original)
@@ -488,7 +489,7 @@ class DiscoveryTests(unittest.TestCase):
             return save(path, value)
         with patch.object(discovery, 'save_new', side_effect=fail_nas):
             with self.assertRaisesRegex(OSError, 'NAS receipt'): self.run_cd()
-        self.assertTrue(any(r['path'] == '/vms/215' and r['ugid'] == 'root@pam!homelab-traefik-212'
+        self.assertTrue(any(r['path'] == '/vms/12015' and r['ugid'] == 'root@pam!homelab-traefik-12012'
                             for r in self.api.acls))
         self.assertTrue((self.root / 'BOOTSTRAP-CD-HOLD.json').exists())
         writes = copy.deepcopy(self.api.writes)
@@ -496,7 +497,7 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(self.api.writes, writes)
 
     def test_extension_cannot_create_or_rotate_an_unowned_token(self):
-        self.c['service_discovery_extension'] = {'owner_sha256': '0'*64, 'guests': [211]}
+        self.c['service_discovery_extension'] = {'owner_sha256': '0'*64, 'guests': [12011]}
         with self.assertRaisesRegex(ValueError, 'existing owned access'): self.run_cd()
         self.assertEqual(self.api.writes, [])
 
@@ -548,8 +549,8 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_closed_configuration_rejects_extra_fields_unknown_guests_and_network_ranges(self):
         mutations = [lambda s: s.update(privileges=['Administrator']), lambda s: s['guests'].append(900),
-                     lambda s: s.update(vmid=4915), lambda s: s.update(address='10.77.25.0/24'),
-                     lambda s: s.update(address='10.77.25.10'), lambda s: s['guests'].append(211),
+                     lambda s: s.update(vmid=4915), lambda s: s.update(address='198.19.125.0/24'),
+                     lambda s: s.update(address='198.19.125.11'), lambda s: s['guests'].append(12011),
                      lambda s: s.update(address='8.8.8.8')]
         for change in mutations:
             c = copy.deepcopy(self.c); change(c['service_discovery'])

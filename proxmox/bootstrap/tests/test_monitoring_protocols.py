@@ -75,10 +75,17 @@ class MonitoringReadbackTests(unittest.TestCase):
         )
 
     def test_effective_permissions_require_the_exact_read_only_scope(self):
-        for effective in (
-            {"/": dict.fromkeys(monitoring.PRIVILEGES, 1)},
-            {"/": {"Sys.Modify": 1}},
-            {"/vms/1": {"VM.Audit": 1}},
+        audit = dict.fromkeys(monitoring.PRIVILEGES, 1)
+        for valid, effective in (
+            (True, {"/": audit}),
+            # Native Proxmox reports inherited audit rights at existing ACL paths.
+            (True, {"/": audit, "/nodes/practice-pve": audit, "/vms/216": audit,
+                    "/storage/local-zfs": audit, "/access/groups": audit}),
+            (False, {"/": {"Sys.Modify": 1}}),
+            (False, {"/vms/1": {"VM.Audit": 1}}),
+            (False, {"/": audit, "/vms/216": dict(audit, **{"VM.PowerMgmt": 1})}),
+            (False, {"/": audit, "/vms/216": dict.fromkeys(monitoring.PRIVILEGES, 0)}),
+            (False, {"/": audit, "/storage/local": {"Datastore.Audit": 1}}),
         ):
             api = Mock(ca=Path("/synthetic/ca"))
             with (
@@ -87,7 +94,7 @@ class MonitoringReadbackTests(unittest.TestCase):
                 patch.object(cd.API, "configure") as configure,
                 patch.object(cd.API, "call", return_value={"data": effective}),
             ):
-                if set(effective.get("/", {})) == monitoring.PRIVILEGES:
+                if valid:
                     self.assertEqual(
                         monitoring.verify(api, self.config, {"token": "synthetic"}, []),
                         self.after,

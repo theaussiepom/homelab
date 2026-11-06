@@ -1,0 +1,21 @@
+schema: homelab-host-firewall-v1
+endpoint: https://pve.example.invalid:8006/
+node: pve
+host_address: 198.18.25.10
+allowances:
+  - source: 198.18.25.11/32
+    port: 8006
+    comment: Existing deployment API
+  - source: 192.0.2.0/24
+    port: 22
+    comment: Approved management SSH
+cluster:
+  enabled: true
+  ebtables: true
+  input_policy: DROP
+  output_policy: ACCEPT
+  forward_policy: ACCEPT
+  log_ratelimit:
+    enabled: true
+    rate: 1/second
+    burst: 5

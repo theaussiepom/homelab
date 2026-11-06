@@ -1,0 +1,51 @@
+---
+- name: Prepare one composed guest
+  hosts: application
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  vars:
+    app: "{{ component_preparation_app }}"
+  tasks:
+    - name: Check guest identity
+      ansible.builtin.import_tasks: tasks/component-ready.yml
+
+    - name: Prepare declared native account identities
+      ansible.builtin.include_tasks: tasks/component-native-account.yml
+      loop: "{{ component_native_applications }}"
+      loop_control:
+        loop_var: component_native_app
+
+    - name: Install declared exact packages
+      ansible.builtin.import_tasks: tasks/packages-install.yml
+
+    - name: Check package-owned native identities
+      ansible.builtin.include_tasks: tasks/database-package-account.yml
+      vars:
+        app: "{{ component_native_app }}"
+        database_account_after_packages: true
+      loop: "{{ component_native_applications | selectattr('kind', 'equalto', 'mariadb') | list }}"
+      loop_control:
+        loop_var: component_native_app
+
+    - name: Prepare Docker networking
+      ansible.builtin.import_tasks: ../../common/ansible/network-ready.yml
+      vars:
+        network_ready_unit: docker.service
+      when: "'docker' in preparation_capabilities"
+
+    - name: Enable Docker
+      ansible.builtin.systemd_service:
+        name: docker
+        state: started
+        enabled: true
+      when: "'docker' in preparation_capabilities"
+
+    - name: Check Docker and Compose
+      ansible.builtin.command:
+        argv: "{{ item }}"
+      loop:
+        - [docker, version]
+        - [docker, compose, version, --short]
+      changed_when: false
+      when: "'docker' in preparation_capabilities"

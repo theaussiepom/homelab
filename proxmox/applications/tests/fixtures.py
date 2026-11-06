@@ -6,7 +6,7 @@ from pathlib import Path
 def guest(root):
     root = Path(root)
     return {
-        "deployment": {"contract": 2, "capabilities": ["linux"]},
+        "deployment": {"contract": 2, "capabilities": ["linux"], "protected_guests": [9900, 9914, 9915, 9920]},
         "guest": {
             "vmid": 808,
             "hostname": "fixture",

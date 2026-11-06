@@ -1,0 +1,14 @@
+---
+- name: Install the bounded vault health helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../bitwarden.py"
+    dest: /opt/homelab-app/bitwarden.py
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Verify the retained vault database before startup
+  ansible.builtin.include_tasks: bitwarden-database.yml
+  vars:
+    bitwarden_settings: "{{ component_bitwarden.settings }}"
+    bitwarden_environment: "{{ component_bitwarden.environment }}"

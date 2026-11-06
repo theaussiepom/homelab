@@ -1,0 +1,28 @@
+{
+  "framework_commit": "f28725b1e8334a0baba26dfc2fa623cb3a63cdf5",
+  "synthetic_public_inputs_only": true,
+  "private_reads": false,
+  "rows": {
+    "traefik.yml": {
+      "path": "traefik.yml",
+      "content": "{\n  \"entryPoints\": {\n    \"web\": {\n      \"address\": \"198.18.40.33:80\",\n      \"http\": {\n        \"redirections\": {\n          \"entryPoint\": {\n            \"to\": \"websecure\",\n            \"scheme\": \"https\"\n          }\n        }\n      }\n    },\n    \"websecure\": {\n      \"address\": \"198.18.40.33:443\"\n    },\n    \"health\": {\n      \"address\": \"127.0.0.1:8082\"\n    }\n  },\n  \"ping\": {\n    \"entryPoint\": \"health\"\n  },\n  \"api\": {\n    \"dashboard\": true\n  },\n  \"experimental\": {\n    \"abortOnPluginFailure\": true,\n    \"plugins\": {\n      \"traefik-proxmox-provider\": {\n        \"moduleName\": \"github.com/NX211/traefik-proxmox-provider\",\n        \"version\": \"v0.7.0\",\n        \"hash\": \"9e3b91e0ba79fc27dd2587e8b92db725a424a9c21cb17cfcf07b1ef6e354efd7\"\n      }\n    }\n  },\n  \"providers\": {\n    \"file\": {\n      \"filename\": \"/etc/traefik/shared.yml\",\n      \"watch\": true\n    },\n    \"plugin\": {\n      \"traefik-proxmox-provider\": {\n        \"pollInterval\": \"30s\",\n        \"apiEndpoint\": \"https://198.18.25.10:8006\",\n        \"apiTokenId\": \"fixture@pve!discovery\",\n        \"apiToken\": \"synthetic-value-17\",\n        \"apiLogging\": \"info\",\n        \"apiValidateSSL\": \"true\"\n      }\n    }\n  },\n  \"certificatesResolvers\": {\n    \"letsencrypt\": {\n      \"acme\": {\n        \"email\": \"operator@example.invalid\",\n        \"storage\": \"/var/traefik/certs/acme.json\",\n        \"dnsChallenge\": {\n          \"provider\": \"cloudflare\",\n          \"resolvers\": [\n            \"198.18.40.2:53\"\n          ],\n          \"propagation\": {\n            \"disableANSChecks\": true,\n            \"requireAllRNS\": true\n          }\n        }\n      }\n    }\n  },\n  \"log\": {\n    \"level\": \"INFO\"\n  },\n  \"accessLog\": {}\n}\n",
+      "uid": 0,
+      "gid": 0,
+      "mode": "0400"
+    },
+    "pve-ca.pem": {
+      "path": "pve-ca.pem",
+      "content": "-----BEGIN CERTIFICATE-----\nsynthetic-public-fixture\n-----END CERTIFICATE-----\n",
+      "uid": 0,
+      "gid": 0,
+      "mode": "0400"
+    },
+    "cloudflare-dns-token": {
+      "path": "cloudflare-dns-token",
+      "content": "synthetic-cloudflare-$literal",
+      "uid": 0,
+      "gid": 0,
+      "mode": "0400"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "cpus": 2,
+  "environment": {
+    "TZ": "Australia/Brisbane"
+  },
+  "healthcheck": {
+    "interval": "30s",
+    "retries": 5,
+    "start_period": "60s",
+    "test": [
+      "CMD",
+      "python3",
+      "-c",
+      "import socket,urllib.request;urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://198.19.100.241:8095/info',timeout=3).close();socket.create_connection(('198.19.100.241',8097),timeout=3).close()"
+    ],
+    "timeout": "8s"
+  },
+  "image": "ghcr.io/music-assistant/server:latest",
+  "logging": {
+    "driver": "json-file",
+    "options": {
+      "max-file": "3",
+      "max-size": "10m"
+    }
+  },
+  "mem_limit": "1536m",
+  "network_mode": "host",
+  "pids_limit": 512,
+  "pull_policy": "always",
+  "restart": "always",
+  "stop_grace_period": "60s",
+  "volumes": [
+    {
+      "bind": {
+        "create_host_path": false
+      },
+      "source": "/srv/homelab/data/music-assistant/data",
+      "target": "/data",
+      "type": "bind"
+    }
+  ]
+}
