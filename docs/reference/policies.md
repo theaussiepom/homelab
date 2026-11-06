@@ -157,4 +157,10 @@ Likewise a missing endpoint binding or an unused extra binding refuses.
 Policy changes are desired access/configuration changes; they are not evidence
 that a firewall, TLS endpoint or login flow was observed working.
 
+The backend may combine adjacent TCP/UDP allowances that differ only in their
+same-family destination literals. Each provider row contains at most eight
+destinations and 512 ASCII bytes; other fields and logical order remain exact.
+This bounds provider API work without changing the authored rules or adding
+resources. ICMP, ICMPv6 and IGMP rows remain separate.
+
 [Reference index](README.md) · [Connections](connections.md) · [Exposures](exposures.md)

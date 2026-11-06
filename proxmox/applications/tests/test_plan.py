@@ -40,6 +40,47 @@ def existing_fixture(action="update"):
 
 
 class PlanTests(unittest.TestCase):
+    def test_compacted_rule_values_keep_the_same_three_owned_resource_ids(self):
+        import component_generation
+
+        value = existing_fixture()
+        identities = {}
+        for index, row in enumerate(value['resource_changes']):
+            identity = 'fixture-resource-' + str(index)
+            identities[row['address']] = {'id': identity}
+            for side in ('before', 'after'):
+                row['change'][side]['id'] = identity
+        rule = {'type': 'out', 'action': 'ACCEPT', 'proto': 'tcp', 'dport': '443',
+                'source': '198.18.100.20/32', 'iface': 'net0', 'comment': 'Selected peers'}
+        change = value['resource_changes'][2]['change']
+        change['before']['rule'] = [dict(rule, dest=address) for address in
+                                   ('192.0.2.1/32', '192.0.2.2/32')]
+        change['after']['rule'] = [dict(rule, dest='192.0.2.1/32,192.0.2.2/32')]
+
+        def admit(candidate):
+            plan.check_plan(candidate, 'pve-lab', 6100, existing=True,
+                            protected_guests=[9900, 9914, 9915, 9920])
+            component_generation.plan_identity(candidate, {'resources': identities})
+
+        original = copy.deepcopy(value)
+        admit(value)
+        self.assertEqual(value, original)
+        mutations = [
+            lambda v: v['resource_changes'][2]['change']['after'].update(id='foreign'),
+            lambda v: v['resource_changes'][2]['change'].update(after_unknown={'id': True}),
+            lambda v: v['resource_changes'][2]['change']['after'].update(container_id=6101),
+            lambda v: v['resource_changes'][2]['change']['after'].update(node_name='foreign'),
+            lambda v: v['resource_changes'][2]['change'].update(actions=['delete', 'create']),
+            lambda v: v['resource_changes'].append(copy.deepcopy(v['resource_changes'][2])),
+        ]
+        for index, mutate in enumerate(mutations):
+            invalid = copy.deepcopy(value)
+            mutate(invalid)
+            preserved = copy.deepcopy(invalid)
+            with self.subTest(index=index), self.assertRaises(ValueError):
+                admit(invalid)
+            self.assertEqual(invalid, preserved)
+
     def test_component_context_protection_is_explicit_instead_of_fleet_constants(self):
         plan.check_plan(fixture(),'pve-lab',6100,existing=False,protected_guests=[9900])
         for protected in ([6100], [True], [0], [9900,9900], '9900'):
