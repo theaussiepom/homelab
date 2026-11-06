@@ -11,6 +11,7 @@ import yaml
 
 def main():
     assert Path('/.dockerenv').is_file() and os.geteuid()==0
+    os.umask(0o077)
     source=Path(__file__).resolve().parents[1]/'ansible/tasks/monitoring-agent.yml'
     tasks=yaml.safe_load(source.read_text())
     names=[t['name'] for t in tasks]
@@ -35,6 +36,7 @@ def main():
             if case=='linked-config':cfg.unlink();cfg.symlink_to(receipt)
             if case in {'public-state','foreign-state'}:
                 state.mkdir(mode=0o755 if case=='public-state' else 0o700)
+                if case=='public-state':state.chmod(0o755)
                 if case=='foreign-state':os.chown(state,1000,1000)
             if case=='linked-state':state.symlink_to(root)
             raw=json.dumps(selected)

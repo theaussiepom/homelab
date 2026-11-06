@@ -118,7 +118,8 @@ def database(row, destination):
 def postgresql_client(packages):
     """Resolve the installed major from the effective guest selection before pause."""
     versions = [item.split('=')[0].removeprefix('postgresql-client-')
-                for item in packages if item.startswith('postgresql-client-')]
+                for item in packages if item.startswith('postgresql-client-')
+                and item.split('=')[0] != 'postgresql-client-common']
     require(len(versions) == 1 and re.fullmatch(r'[1-9][0-9]*', versions[0]),
             'Bind one installed PostgreSQL client major')
     return '/usr/lib/postgresql/' + versions[0] + '/bin/pg_dumpall'

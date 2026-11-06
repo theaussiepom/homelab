@@ -74,4 +74,10 @@ class BackupPlanTests(unittest.TestCase):
                     inspect.assert_called_once_with(cfg,'/srv/stage',operation/'infrastructure.log')
                     trust.assert_called_once_with(cfg,work,persist=False)
                 self.assertFalse(result['created'])
+                if existing_stage:
+                    cfg['guest']['volumes']['data']['backup']=False
+                    refused=case.root/'mismatched-no-op';refused.mkdir(mode=0o700)
+                    with self.assertRaisesRegex(ValueError,'Preserve the guest identity and managed application data'):
+                        infrastructure(cfg,case.root/'site',work,refused,{})
+                    self.assertEqual(inspect.call_count,0)
         self.assertEqual(seen,['inspect','apply'])

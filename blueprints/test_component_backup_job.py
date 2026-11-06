@@ -98,10 +98,14 @@ class BackupJobTests(unittest.TestCase):
         subject.bind(resolver,value)
 
     def test_dhcp_and_invalid_staging_bindings_refuse_during_source_resolution(self):
-        for change in [lambda r: r.guests['one']['interfaces']['backup']['address'].update(mode='dhcp'),
-                       lambda r: r.guests['one']['volumes']['stage'].update(path='/srv/_stage')]:
+        for change, code in [
+            (lambda r: r.guests['one']['interfaces']['backup']['address'].update(mode='dhcp'),
+             'component.backup-interface'),
+            (lambda r: r.guests['one']['volumes']['stage'].update(path='/srv/_stage'),
+             'component.backup-job-binding')]:
             value, resolver = fixture(); change(resolver)
-            with self.assertRaises(ComponentError): subject.bind(resolver,value)
+            with self.assertRaises(ComponentError) as caught: subject.bind(resolver,value)
+            self.assertEqual(caught.exception.code, code)
 
     def test_capture_policy_failure_has_a_component_diagnostic(self):
         value, resolver = fixture()

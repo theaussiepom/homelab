@@ -88,7 +88,11 @@ class CaptureTests(unittest.TestCase):
         pg['applications']['app'].update(adapter='postgresql', storage={}, producer={'type':'postgresql','packages':[]})
         pg['job']['capture']['pause'] = []
         with self.assertRaisesRegex(ValueError,'installed PostgreSQL'): capture.recipes(pg)
-        for packages in ([], ['postgresql-client-bad=1'], ['postgresql-client-16=1', 'postgresql-client-17=1']):
+        for shared in ('postgresql-client-common', 'postgresql-client-common=1'):
+            self.assertEqual(capture.postgresql_client([shared, 'postgresql-client-16=1']),
+                             '/usr/lib/postgresql/16/bin/pg_dumpall')
+        for packages in ([], ['postgresql-client-common=1'], ['postgresql-client-bad=1'],
+                         ['postgresql-client-16=1', 'postgresql-client-17=1']):
             with self.subTest(packages=packages), self.assertRaises(ValueError):
                 capture.database({'type': 'postgresql', 'packages': packages}, Path('/stage'))
         with self.assertRaises(ValueError): capture.database({'type': 'shell'}, Path('/stage'))
