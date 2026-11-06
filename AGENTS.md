@@ -30,3 +30,5 @@
   separate from guest/bootstrap state. Normal source describes desired policy;
   environmental imports/recovery are separate operator work. Do not introduce
   migration flags or competing host-rule writers.
+
+- PBS client preparation and recovery classification follow [the backup contract](docs/reference/backup.md). Preserve native database/export ownership and protection history; never describe client preparation or warm file copies as verified recovery.

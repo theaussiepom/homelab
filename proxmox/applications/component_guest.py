@@ -12,7 +12,8 @@ from private_io import require
 PACKET_SCHEMA = 'homelab-component-guest-deployment-v1'
 CONFIG_SCHEMA = 'homelab-component-guest-v1'
 AGENT_PHASE = 'zabbix-agent'
-RESERVED = {'infrastructure', 'preparation', AGENT_PHASE, 'validate', 'selection', 'agent'}
+BACKUP_PHASE = 'pbs-agent'
+RESERVED = {'infrastructure', 'preparation', AGENT_PHASE, BACKUP_PHASE, 'validate', 'selection', 'agent', 'backup-agent'}
 
 
 def identifier(value):
@@ -38,9 +39,11 @@ def phases(cfg):
             and all(identifier(value) for value in selected) and len(selected) == len(set(selected)),
             'Use an explicit ordered component phase list')
     monitored = 'monitoring' in cfg['app']
-    require(set(selected) == {'preparation', *applications} | ({AGENT_PHASE} if monitored else set())
-            and (not monitored or selected[-1] == AGENT_PHASE)
-            and set(deployment['payload_phases']) == set(applications) | ({AGENT_PHASE} if monitored else set()),
+    backup = 'backup' in cfg['app']
+    tail = ([AGENT_PHASE] if monitored else []) + ([BACKUP_PHASE] if backup else [])
+    require(set(selected) == {'preparation', *applications, *tail}
+            and (not tail or selected[-len(tail):] == tail)
+            and set(deployment['payload_phases']) == set(applications) | set(tail),
             'Bind every component phase exactly once')
     ids = []
     for phase, row in applications.items():
@@ -57,6 +60,8 @@ def phases(cfg):
             and all(cfg['app']['service_health_checks'].values()), 'Preserve each selected app health contract')
     require(not monitored or deployment['payload_phases'][AGENT_PHASE] == 'agent',
             'Bind the explicit monitoring agent payload')
+    require(not backup or deployment['payload_phases'][BACKUP_PHASE] == 'backup-agent',
+            'Bind the explicit PBS preparation payload')
     return selected[:]
 
 
@@ -102,6 +107,9 @@ def validate(cfg):
     require(path(deployment['runtime_file']) == directory/'component-runtime.json',
             'Bind the actual component runtime input file')
     phases(cfg)
+    if 'backup' in app:
+        import backup_agent
+        backup_agent.configuration(cfg)
     return vmid
 
 

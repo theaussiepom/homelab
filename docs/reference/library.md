@@ -14,6 +14,7 @@ image selections require it.
 | runtime_profiles | Optional named map, {} | Limits/security and native memory reservations |
 | health_profiles | Optional named map, {} | Adapter readiness checks |
 | authentication_profiles | Optional named map, {} | `{type, required}`; type is `cloudbeaver-oidc`, `node-red-retained-oidc` or `zabbix-saml`; required is Boolean |
+| backup_profiles | Optional named map, {} | [PBS client software/configuration definitions](backup.md#backup-profiles) |
 | monitoring_profiles | Optional named map, {} | `{type: zabbix-agent, profiles: [...]}` |
 | assets | Optional named map, {} | Hash-pinned raw UTF-8 files |
 | policies | Optional closed map | `network/transport/tls/middlewares/authentication`, each a named map |
@@ -88,3 +89,5 @@ catalogue. Extracting its template into this leaf preserves effective packets;
 changing a default can affect all instances that inherit it.
 
 [Reference index](README.md) · [Supporting types](supporting-types.md)
+
+App profiles may declare the closed [backup coverage object](backup.md#application-recovery-declarations). It classifies every storage role and native configuration path without repeating guest allocations.

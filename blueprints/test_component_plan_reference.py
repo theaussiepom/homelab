@@ -13,7 +13,7 @@ from test_component_plan import library, site
 def resolver(*, guests=True, apps=False):
     r = object.__new__(plan.Resolver)
     r.library, r.site = library(), site()
-    for key in ('software', 'runtime_profiles', 'health_profiles', 'monitoring_profiles', 'assets'):
+    for key in ('software', 'runtime_profiles', 'health_profiles', 'monitoring_profiles', 'backup_profiles', 'assets'):
         r.library.setdefault(key, {})
     for key in ('devices', 'evidence', 'images', 'domains', 'exposures', 'accounts', 'address_groups'):
         r.site.setdefault(key, {})
@@ -337,6 +337,7 @@ class PlanCompilerWiringReview(unittest.TestCase):
             stack.enter_context(patch.object(plan.component_properties, 'bind', return_value={'browser': settings}))
             stack.enter_context(patch.object(plan.component_accounts, 'bind', return_value={}))
             stack.enter_context(patch.object(plan.component_monitoring, 'bind', return_value={'guest': monitoring_guest}))
+            stack.enter_context(patch.object(plan.component_backup, 'bind', return_value=None))
             admission = stack.enter_context(patch.object(plan.component_admission, 'admit'))
             for owner in (plan.component_secrets, plan.component_foundations, plan.component_identity, plan.component_traffic):
                 stack.enter_context(patch.object(owner, 'bind'))

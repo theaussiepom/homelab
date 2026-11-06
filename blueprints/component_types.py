@@ -197,7 +197,10 @@ def data_path(value):
 
 
 def volume(value):
-    closed(value, ('storage', 'slot', 'path', 'size_gib'))
+    closed(value, ('storage', 'slot', 'path', 'size_gib'), ('backup',))
+    if 'backup' in value:
+        from component_backup import presence
+        presence(value['backup'])
     require(identifier(value['storage']))
     checked(integer, value['slot'], 'slot', minimum=0, maximum=255)
     checked(data_path, value['path'], 'path')
@@ -387,7 +390,7 @@ def health(value):
 def profile(value):
     closed(value, ('adapter', 'display_name', 'interfaces'),
            ('listeners', 'endpoints', 'storage', 'software', 'runtime', 'authentication',
-            'connections', 'health', 'monitoring', 'properties', 'devices', 'secrets'))
+            'connections', 'health', 'monitoring', 'properties', 'devices', 'secrets', 'backup'))
     owner = adapter(value['adapter'])
     # Import locally: the source validators remain independently callable.
     from component_secrets import requirements
@@ -428,6 +431,9 @@ def profile(value):
     if 'monitoring' in value:
         from component_monitoring import reference
         reference(value['monitoring'])
+    if 'backup' in value:
+        from component_backup import application
+        application(value['backup'], value.get('storage', {}))
     from component_foundations import OWNED, validate
     if value['adapter'] in OWNED:
         validate(value['adapter'], value.get('properties', {}), partial=True)

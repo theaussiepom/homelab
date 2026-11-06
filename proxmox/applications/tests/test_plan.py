@@ -40,6 +40,47 @@ def existing_fixture(action="update"):
 
 
 class PlanTests(unittest.TestCase):
+    def test_only_exact_compiled_backup_metadata_can_change_without_touching_a_volume(self):
+        value = existing_fixture()
+        change = value['resource_changes'][0]['change']
+        volume = {'path': '/srv/example', 'size': '8G', 'volume': 'pool:vm-6100-disk-1',
+                  'backup': True, 'read_only': False}
+        change['before']['mount_point'] = [copy.deepcopy(volume)]
+        change['after']['mount_point'] = [dict(volume, backup=False)]
+        def admit(candidate, selection=None):
+            plan.check_plan(candidate, 'pve-lab', 6100, existing=True, protected_guests=[],
+                            backup_selection=selection)
+        with self.assertRaises(ValueError): admit(value)
+        admit(value, {'/srv/example': False})
+        mutations = [
+            lambda c: c['after']['mount_point'][0].update(path='/srv/other'),
+            lambda c: c['after']['mount_point'][0].update(size='4G'),
+            lambda c: c['after']['mount_point'][0].update(volume='foreign'),
+            lambda c: c['after']['mount_point'][0].update(read_only=True),
+            lambda c: c['after']['mount_point'][0].update(backup=0),
+            lambda c: c['after'].update(mount_point=[]),
+            lambda c: c.update(after_unknown={'mount_point': [{'backup': True}]}),
+        ]
+        for mutate in mutations:
+            invalid = copy.deepcopy(value); mutate(invalid['resource_changes'][0]['change'])
+            with self.subTest(case=mutations.index(mutate)), self.assertRaises(ValueError):
+                admit(invalid, {'/srv/example': False})
+        with self.assertRaises(ValueError): admit(value, {'/srv/example': True})
+        self.assertFalse(plan.backup_flags([volume], [volume], {'/srv/example': 1}))
+        self.assertFalse(plan.backup_flags([volume], [volume], {1: True}))
+        self.assertFalse(plan.backup_flags([volume], [volume], []))
+        self.assertFalse(plan.backup_flags(None, [volume], {'/srv/example': True}))
+        self.assertFalse(plan.backup_flags([None], [volume], {'/srv/example': True}))
+        self.assertFalse(plan.backup_flags([volume], [volume], {}))
+        self.assertFalse(plan.backup_flags([volume], [dict(volume, path=None)], {'/srv/example': True}))
+        self.assertTrue(plan.backup_flags(None, [], {}))
+        fresh = fixture(); fresh['resource_changes'][0]['change']['after']['mount_point'] = [volume]
+        plan.check_plan(fresh, 'pve-lab', 6100, existing=False, protected_guests=[],
+                        backup_selection={'/srv/example': True})
+        with self.assertRaises(ValueError):
+            plan.check_plan(fresh, 'pve-lab', 6100, existing=False, protected_guests=[],
+                            backup_selection={'/srv/example': False})
+
     def test_compacted_rule_values_keep_the_same_three_owned_resource_ids(self):
         import component_generation
 

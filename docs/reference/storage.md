@@ -10,7 +10,7 @@ A guest selects `root_storage` from its context.
 
 | Guest declaration | Fields | Constraints |
 | --- | --- | --- |
-| volumes.<id> | Required `storage`, `slot`, `path`, `size_gib` | Pool ID; slot integer 0–255 unique within guest; size positive integer; canonical supported data path |
+| volumes.<id> | Required `storage`, `slot`, `path`, `size_gib`; optional presence-based [`backup`](backup.md#syntax) | Pool ID; slot integer 0–255 unique within guest; size positive integer; canonical supported data path |
 | root_paths.<id> | Required `path` only | Canonical data path on root filesystem |
 
 Volume paths match `/srv/<lowercase-name>[/...]` or

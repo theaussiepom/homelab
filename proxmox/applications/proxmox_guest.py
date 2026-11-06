@@ -295,6 +295,8 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None)
         existing=existing,
         serial_device=cfg["guest"].get("serial_device"),
         protected_guests=cfg['deployment']['protected_guests'],
+        **({'backup_selection': {row['path']: row['backup'] for row in cfg['guest'].get('volumes', {}).values()}}
+           if 'backup' in cfg['app'] else {}),
     )
     if state_identity is not None:
         from component_generation import plan_identity

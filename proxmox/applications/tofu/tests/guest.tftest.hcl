@@ -1,5 +1,44 @@
 mock_provider "proxmox" {}
 
+run "explicit_backup_flags_preserve_managed_volume_paths_and_sizes" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node = "practice-pve"
+    guest = merge(jsondecode(file("tests/base-guest.json")), {
+      volumes = {
+        retained = { path = "/srv/retained", size_gib = 8, backup = true }
+        cache    = { path = "/srv/cache", size_gib = 2, backup = false }
+      }
+      volume_order = ["retained", "cache"]
+    })
+  }
+  assert {
+    condition = (
+      proxmox_virtual_environment_container.guest.mount_point[0].backup &&
+      !proxmox_virtual_environment_container.guest.mount_point[1].backup &&
+      proxmox_virtual_environment_container.guest.mount_point[0].path == "/srv/retained" &&
+      proxmox_virtual_environment_container.guest.mount_point[1].path == "/srv/cache" &&
+      proxmox_virtual_environment_container.guest.mount_point[0].size == "8G" &&
+      proxmox_virtual_environment_container.guest.mount_point[1].size == "2G"
+    )
+    error_message = "Only the declared native backup flags change; volume identities, order and sizes stay explicit."
+  }
+}
+
+run "omitted_internal_backup_flag_preserves_the_existing_provider_default" {
+  command = plan
+  module { source = "./guest" }
+  variables {
+    node  = "practice-pve"
+    guest = jsondecode(file("tests/base-guest.json"))
+  }
+  assert {
+    condition     = alltrue([for volume in proxmox_virtual_environment_container.guest.mount_point : volume.backup])
+    error_message = "Existing callers without the root PBS feature retain their previous native volume protection."
+  }
+}
+
 run "ipv6_discovery_mld_and_ipv4_membership_reach_the_pinned_provider" {
   command = plan
   module { source = "./guest" }

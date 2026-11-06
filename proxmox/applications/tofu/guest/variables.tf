@@ -18,7 +18,7 @@ variable "guest" {
       bridge  = string, vlan = optional(number), mac = string, ipv4 = string,
       gateway = optional(string), ipv6 = optional(string)
     })),
-    volumes      = map(object({ path = string, size_gib = number })),
+    volumes      = map(object({ path = string, size_gib = number, backup = optional(bool, true) })),
     volume_order = optional(list(string)),
     rules = list(object({
       direction = string, proto = string, port = optional(string),

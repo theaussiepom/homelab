@@ -1,0 +1,44 @@
+---
+- name: Prepare this guest's PBS client
+  hosts: application
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Check guest identity
+      ansible.builtin.import_tasks: tasks/component-ready.yml
+
+    - name: Inspect backup configuration
+      ansible.builtin.stat:
+        path: /etc/homelab-backup
+        follow: false
+      register: backup_directory
+
+    - name: Preserve configuration ownership
+      ansible.builtin.assert:
+        that:
+          - not backup_directory.stat.exists or (backup_directory.stat.isdir and not backup_directory.stat.islnk and backup_directory.stat.uid == 0)
+
+    - name: Prepare backup configuration
+      ansible.builtin.file:
+        path: /etc/homelab-backup
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Record backup coverage
+      ansible.builtin.copy:
+        content: '{{ backup_agent.inventory }}'
+        dest: /etc/homelab-backup/coverage.json
+        owner: root
+        group: root
+        mode: '0600'
+        follow: false
+
+    - name: Check PBS client
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/proxmox-backup-client
+          - version
+      changed_when: false

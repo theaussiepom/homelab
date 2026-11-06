@@ -20,9 +20,18 @@ from test_plan import fixture as plan_fixture
 
 class InfrastructureNoopTests(unittest.TestCase):
     def test_existing_guest_noop_does_not_apply_or_repin(self):
+        self.existing_noop()
+
+    def test_pbs_preparation_forwards_empty_backup_selection_without_an_apply(self):
+        self.existing_noop(backup=True)
+
+    def existing_noop(self, backup=False):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             cfg = guest(root)
+            if backup:
+                cfg['app']['backup'] = {'profile': 'pbs'}
+                cfg['guest']['volumes'] = {}
             cfg["guest"]["vmid"] = cfg["app"]["vmid"] = 6100
             cfg["site"]["node"] = "pve-lab"
             work = root / "work"

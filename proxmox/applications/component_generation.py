@@ -178,6 +178,8 @@ def previous(attempt):
     require(sha(site)==selected['site_sha256'] and selected['input_hashes'].get(str(runtime))==sha(runtime),
             'Preserve prior sealed component source and runtime')
     cfg=read_json(site,private=True);apps=read_json(runtime,private=True)['applications']
+    from component_guest import phases
+    phases(cfg)
     from component_inputs import static
     hashes=static(cfg,site)
     require(all(selected['input_hashes'].get(path)==value for path,value in hashes.items()),
@@ -193,14 +195,17 @@ def previous(attempt):
             and set(value['phase_inputs'])==set(cfg['deployment']['phases'])
             and cfg['deployment']['payload_phases']=={phase:proof['app']for phase,proof in value['phase_inputs'].items()if proof is not None},
             'Preserve the prior component guest and phase owners')
-    require(set(apps)=={proof['app']for proof in value['phase_inputs'].values()if proof is not None and proof['app']!='agent'},
+    require(set(apps)=={proof['app']for phase,proof in value['phase_inputs'].items()
+                       if proof is not None and phase in cfg['deployment']['applications']},
             'Preserve the complete prior app selection')
     from component_continuity import validate
     for phase,proof in value['phase_inputs'].items():
         if proof is None:continue
         payload=AppPayload.load(Path(selected['app_inputs_directory'])/proof['app'],proof)
         app=read_json(payload.directory/'application.json',private=True)
-        if proof['app']=='agent':
+        if phase == 'pbs-agent':
+            require(app == cfg['app']['backup'], 'Preserve the prior PBS preparation owner')
+        elif proof['app']=='agent':
             require(app=={'schema':'homelab-component-agent-input-v1','monitoring':cfg['app']['monitoring']},
                     'Preserve the prior agent owner')
         else:
