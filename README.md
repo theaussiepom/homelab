@@ -1,33 +1,19 @@
 # HomeLab
 
-HomeLab turns a typed site configuration and reusable application library into
-validated deployment inputs for Debian 13 LXC guests on Proxmox. OpenTofu owns
-infrastructure and state; Ansible owns guest configuration and services.
+HomeLab turns a configuration describing your Proxmox guests and applications into validated deployment inputs for Debian 13 LXC. You choose where services run, how they connect and which resources they use. OpenTofu owns infrastructure and state; Ansible owns guest configuration and services.
 
-**Begin with [your first offline configuration](docs/guides/first-configuration.md).**
-The complete example needs Python and Git; no host, credentials, image pull or
-service startup is involved.
+**Start with [what you want to build](docs/start-here.md).** If you are choosing applications for your own homelab, follow the [HomeLab Stack getting-started route](https://github.com/theaussiepom/homelab-stack/blob/main/docs/start-here.md). It owns the reusable profiles, templates and application choices. Use this framework's [configuration walkthrough](docs/guides/first-configuration.md) to learn how those choices become a complete site and inspect what the compiler produces.
 
-| Your next decision | Documentation |
+| Your next result | Documentation |
 | --- | --- |
-| Understand what a site describes | [Start here](docs/start-here.md) → [Configuration model](docs/concepts.md) |
-| Find an accepted field or relationship | [Contract reference](docs/reference/README.md) |
-| Move from a working example to real inputs | [Prepare a deployment](docs/guides/prepare-deployment.md) |
-| Install or update a supported owned service | [Operations](docs/operations/README.md) and [support limits](docs/reference/support.md) |
-| Change the framework | [Contributing](docs/contributing/README.md) |
+| A personalised configuration you can compile locally | [Write and inspect your first configuration](docs/guides/first-configuration.md) |
+| An explanation of a field or relationship | [Configuration model](docs/concepts.md) and [contract reference](docs/reference/README.md) |
+| Real site inputs ready for review | [Prepare a deployment](docs/guides/prepare-deployment.md) |
+| A supported installation or owned update | [Operations](docs/operations/README.md) and [support limits](docs/reference/support.md) |
+| A reviewed framework change | [Contributing](docs/contributing/README.md) |
 
-A library supplies profiles and defaults; a site places instances and binds
-resources. The framework defines what those declarations mean and which actions
-are allowed. [homelab-stack](https://github.com/theaussiepom/homelab-stack) is the
-reusable profile library; each consumer owns its allocations, protected inputs
-and operating procedure. Cross-repository selections must remain compatible.
+A library supplies profiles and defaults; your site places instances and binds resources. This framework defines accepted fields, resolution and execution boundaries. Keep the framework revision compatible with the selected library; each consumer owns its allocations, protected inputs and operating procedure.
 
-Compilation proves source consistency and packet construction. Installation
-requires supported adapter capability, qualified prerequisites and protected CD.
-A completed deployment still needs [service verification](docs/operations/verify-and-maintain.md).
-The same supported `fresh` source continues through ordinary owned updates;
-`retained` requires genuine HomeLab ownership and is not an import mechanism.
+The local walkthrough needs Git and Python, with no Proxmox access. Compilation checks source consistency and builds packets. Installation also requires a supported adapter, qualified prerequisites and protected CD, followed by [service verification](docs/operations/verify-and-maintain.md). The same supported `fresh` source continues through ordinary owned updates; `retained` requires genuine HomeLab ownership and is not an import mechanism.
 
-[Documentation index](docs/README.md) · [Security](SECURITY.md) ·
-[Lifecycle](docs/reference/lifecycle.md) ·
-[Separate host, installer and recovery subsystems](docs/framework-reference.md)
+[Documentation index](docs/README.md) · [Security](SECURITY.md) · [Lifecycle](docs/reference/lifecycle.md) · [Separate host, installer and recovery subsystems](docs/framework-reference.md)

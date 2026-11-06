@@ -50,6 +50,9 @@ print('Documentation collection: '+str(len(required))+' required cases/classes p
 
 def test_documentation_conformance_remains_in_normal_discovery():
     required = [
+        'test_component_documentation.DocumentationContracts.test_personalised_walkthrough_executes_printed_commands_and_inspects_effects',
+        'test_component_documentation.DocumentationContracts.test_personalised_alternative_decisions_and_typed_extraction_preserve_bindings',
+        'test_component_documentation.DocumentationContracts.test_personalised_refusals_report_documented_cidr_and_memory_failures',
         'test_component_documentation.DocumentationContracts.test_network_nic_documentation_conformance',
         'test_documentation_conformance.DocumentationConformanceMechanism',
         'test_component_reference_examples.ReferenceExamples.test_network_nic_variants_and_exact_refusals',

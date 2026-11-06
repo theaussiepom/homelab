@@ -1,18 +1,15 @@
-# Compile your first configuration
+<a id="compile-your-first-configuration"></a>
+# Write and inspect your first configuration
 
-Build a complete synthetic Unbound configuration, inspect its guest packet and
-make a change that preserves its identity. By the end you will have exercised
-real parsing, validation, reference resolution and lowering. No host, credential
-read, image pull or service startup is needed. The example deliberately cannot
-pass deployment admission.
+Build a complete site for one Proxmox guest, choose its identity, network, storage and memory, and inspect the deployment inputs produced from those choices. You will finish with a configuration you can explain and change yourself. This is an offline language exercise using a small maintained library: its image identity and protected paths are deliberately synthetic, and it cannot be deployed.
+
+If your immediate goal is to choose real applications, start with [HomeLab Stack's practical getting-started route](https://github.com/theaussiepom/homelab-stack/blob/main/docs/start-here.md). That journey owns application profiles and their requirements. This lesson teaches the framework grammar and inspection tools you use with any compatible library.
 
 ## Prepare an isolated workspace
 
-Start at the root of a reviewed framework checkout, using Git and Python 3.12 or
-newer. The example's library, site and image catalogue are the maintained files
-in [first-configuration](../examples/first-configuration/README.md), all at that
-same checkout revision. There is no external library selection for this lesson.
-Install this framework's hash-locked dependencies in a disposable environment:
+You need Git, Python 3.12 or newer and a text editor. Start at the root of a reviewed framework checkout: the directory containing `blueprints/compile.py` and this page. If you do not have a checkout, run `git clone https://github.com/theaussiepom/homelab.git` in your working directory, then `cd homelab`; review or select the revision you intend to learn from and read its copy of this guide. Record `git rev-parse HEAD` so your notes identify that selection. A clone of current main is not a compatibility selection for an existing stack deployment.
+
+Create a disposable working directory and install that checkout's hash-locked dependencies. Keep this shell and its virtual environment active throughout the lesson:
 
 ```sh
 FRAMEWORK="$(pwd -P)"
@@ -24,114 +21,229 @@ python -m pip install --require-hashes -r "$FRAMEWORK/requirements.lock.txt"
 cp -R "$FRAMEWORK/docs/examples/first-configuration" "$WORK/config"
 ```
 
-The starting directory must contain `blueprints/compile.py`. Resolving `WORK`
-physically avoids a symlinked temporary ancestor, including the usual macOS
-`/var` alias; the confined reader still refuses symlink paths. Keep the virtual
-environment active and use the same shell for subsequent commands.
+`WORK` is resolved physically because the confined source reader refuses symlink paths, including a symlinked temporary ancestor such as the usual macOS `/var` alias. You will edit only `$WORK/config/site.yaml`; the framework checkout remains your source of tools and examples.
 
 ## Read the three inputs
 
-| File | What it owns | Reference |
+| File in `$WORK/config` | What it supplies | What you do with it |
 | --- | --- | --- |
-| [stack.json](../examples/first-configuration/stack.json) | Base template, independent Unbound profile and software/runtime/health choices | [Library](../reference/library.md) |
-| [images.json](../examples/first-configuration/images.json) | Synthetic declared image identity; never downloaded by compilation | [Image forms](../reference/supporting-types.md#images) |
-| [site.yaml](../examples/first-configuration/site.yaml) | Context, two networks, storage, one guest and one app | [Site](../reference/site.md) |
+| [stack.json](../examples/first-configuration/stack.json) | Guest template `base`, app profile `recursive`, and their software/runtime/health selections | Keep it unchanged during the lesson; these are library choices |
+| [images.json](../examples/first-configuration/images.json) | Synthetic image catalogue used by `recursive` | Keep it unchanged; compilation reads identity metadata without downloading an image |
+| [site.yaml](../examples/first-configuration/site.yaml) | Context, networks, storage, a guest and the app placed on it | Replace it with your complete site below |
 
-The site is authored YAML. Library/catalogue root filenames are fixed JSON
-indexes; typed definition leaves may use YAML. Runtime packets are JSON outputs.
-[Source documents](../reference/sources.md) explains these distinct contracts.
+The copied site is a maintained two-interface example used throughout the reference. Your new version will use one interface, a different allocation and an explicit memory choice. All three inputs and this lesson belong to the same framework revision; no external library revision is selected.
 
-Trace the configuration in this order:
+The library root filenames are fixed JSON indexes. A site may be YAML or JSON, and supported declarations can later move into typed YAML leaves. A generated packet is JSON containing deployment inputs, not a new file to edit. See [source documents](../reference/sources.md) for the exact format boundaries.
 
-1. `guests.resolver` selects `contexts.lab`, `root_storage: local` and template
-   `base`. Omitted resources/startup/security inherit that template by direct field.
-2. `interfaces.management` selects `networks.primary`, a static address and the
-   only default route. `control_interface: management` identifies its management
-   endpoint. The secondary NIC remains non-default. Read the
-   [network/NIC field records](../reference/networks.md#network-property-index).
-3. `apps.recursive_a` selects profile `recursive` on this guest. Its `private`
-   role binds the app network; its `local` role binds guest loopback. The profile
-   publishes UDP DNS on loopback port 5335. That does not publish DNS externally
-   or add firewall permissions. See [app role branches](../reference/apps.md#interface-roles).
+## Decide what your guest should look like
 
-The `/never-read` private paths and fake image digest are nonfunctional metadata.
-The compiler validates their shape without opening them or obtaining an image.
+For this first pass, choose practice values rather than copying live credentials or allocation data. The “worked choice” column is the configuration printed below; you can choose the alternative values as a complete second exercise. Keep the internal keys `lab`, `primary`, `local`, `resolver` and `recursive_a` so references and inspection commands continue to agree.
+
+| Decision | Worked choice | Another practice choice | Exact field to edit |
+| --- | --- | --- | --- |
+| Which Proxmox node receives the guest? | `practice-pve` | `workshop-pve` | [`contexts.lab.node`](../reference/contexts.md#context-node) |
+| Which API endpoint identifies that authority? | `192.0.2.20` | `192.0.2.30` | `external_endpoints.api.address`; selected by [`contexts.lab.api_endpoint`](../reference/contexts.md#context-api-endpoint) |
+| Which storage pool and template supply the root disk? | Pool `practice-local`, template `practice:vztmpl/debian-13.tar.zst` | Pool `workshop-local`, template `workshop:vztmpl/debian-13.tar.zst` | [`storage.local.pool`](../reference/storage.md#storage-pool), [`guests.resolver.template_file_id`](../reference/guests.md#guest-template-file-id) |
+| What stable guest identity should this new site use? | VMID `620`, hostname `practice-resolver` | VMID `720`, hostname `workshop-resolver` | [`guests.resolver.identity`](../reference/guests.md#guest-identity) |
+| Which subnet, bridge and default gateway? | `198.18.30.0/24`, `practice0`, `198.18.30.1` | `198.18.40.0/24`, `workshop0`, `198.18.40.1` | [`networks.primary`](../reference/networks.md#network-property-index); keep `vlan: null` for this untagged exercise |
+| Which static address and MAC belong to this guest? | `198.18.30.20`, `02:00:00:30:00:20` | `198.18.40.20`, `02:00:00:40:00:20` | [`guests.resolver.interfaces.management`](../reference/networks.md#nic-property-index), `address.value` and `mac` |
+| Which DNS service does the guest use? | `198.18.30.53` | `198.18.40.53` | `external_endpoints.dns.address`; inherited from [`contexts.lab.dns_servers`](../reference/contexts.md#context-dns-servers) |
+| How much guest memory and which timezone? | `1024` MiB, `Etc/UTC` | `1536` MiB, `Australia/Brisbane` | [`guests.resolver.resources.memory_mib`](../reference/guests.md#guest-resources-memory-mib), [`contexts.lab.timezone`](../reference/contexts.md#context-timezone) |
+
+In this exercise, a subnet change means changing its gateway, the guest address and the same-subnet DNS endpoint together. In a real site, DNS may instead remain on another reachable network. A MAC identifies a virtual NIC; it is not the Proxmox host's physical MAC. The declaration checks internal consistency but does not reserve any address, VMID or MAC in your environment. [Preparation](prepare-deployment.md#replace-practice-values-with-known-facts) explains where to obtain real values later.
+
+## Write the complete site
+
+Open `$WORK/config/site.yaml` in your editor and replace its entire contents with this complete site. Apply your worksheet choices in the named fields; do not append a second `guests` or `networks` section. YAML indentation determines which object owns a field.
+
+<!-- example: personalised-site -->
+```yaml
+schema: homelab-components-v1
+kind: site
+contexts:
+  lab:
+    backend: proxmox-lxc
+    node: practice-pve
+    api_endpoint: {external: api}
+    trust:
+      ca_file: /example/ca.pem
+      known_hosts: /example/known_hosts
+    credentials: {api_token: token, ssh_private_key: ssh}
+    paths:
+      state_root: /example/state
+      backup_directory: /example/backup/data
+      backup_mount: /example/backup
+      backup_source: example:/backup
+    protected_guests: [9900]
+    ssh_public_keys: []
+    dns_servers: [{external: dns}]
+    timezone: Etc/UTC
+secret_sources:
+  token: {type: file, path: /never-read/token}
+  ssh: {type: file, path: /never-read/ssh}
+external_endpoints:
+  api: {protocol: https, address: 192.0.2.20, port: 8006}
+  dns: {protocol: udp, address: 198.18.30.53, port: 53}
+networks:
+  primary:
+    context: lab
+    cidr: 198.18.30.0/24
+    bridge: practice0
+    vlan: null
+    gateway: 198.18.30.1
+storage:
+  local: {context: lab, pool: practice-local}
+guests:
+  resolver:
+    context: lab
+    template: base
+    lifecycle: fresh
+    identity: {vmid: 620, hostname: practice-resolver}
+    template_file_id: practice:vztmpl/debian-13.tar.zst
+    root_storage: local
+    resources: {memory_mib: 1024}
+    control_interface: management
+    interfaces:
+      management:
+        network: primary
+        slot: 0
+        mac: 02:00:00:30:00:20
+        address: {mode: static, value: 198.18.30.20}
+        default_route: true
+        ipv6: manual
+apps:
+  recursive_a:
+    profile: recursive
+    guest: resolver
+    lifecycle: fresh
+    interfaces:
+      private: {scope: app-network, network: default}
+      local: {scope: guest-loopback}
+```
+
+Read the result from its goal back to its prerequisites: `apps.recursive_a` selects the library's `recursive` profile and runs on `guests.resolver`; that guest selects the `base` template, the `local` storage declaration and the `lab` context. Its `management` NIC selects the `primary` network and supplies both its control address and its only default route. Map keys are IDs; `profile: recursive` is a reference to a library entry, not an instruction to invent a new profile. The [site reference](../reference/site.md) explains the remaining top-level maps.
+
+You only override memory. CPU 1, root disk 8 GiB and the other resource/startup/security values come from the tutorial's `base` template. These guest objects merge by direct field; other objects have their own rules. The authored OS reserve is 128 MiB, while runtime budgeting applies an effective 256 MiB floor. The app reserves 256 MiB, so the worked guest's 1024 MiB covers both. See [guest defaults](../reference/guests.md#defaults-and-resolution).
+
+The app's `private` interface means its private application network, while `local` means guest loopback. Neither is a second guest NIC. This profile publishes UDP DNS at `127.0.0.1:5335` inside the guest; it does not expose a DNS server to your home network or create firewall permissions. The guest's configured DNS endpoint is a separate existing-service reference. The [app role contract](../reference/apps.md#interface-roles) distinguishes these scopes.
+
+Leave the `/example` and `/never-read` paths, empty key list and synthetic image catalogue in place for the lesson. They are required-shape metadata whose contents are not opened during compilation. Their presence is also why source success cannot make this a prepared installation.
 
 ## Validate, then produce a packet
 
-Run the whole-source check before selecting one output guest:
+Run the whole-site check, then produce a packet for the guest whose source key is `resolver`:
 
+<!-- walkthrough: compile -->
 ```sh
 python "$FRAMEWORK/blueprints/compile.py" --stack "$WORK/config" --site "$WORK/config/site.yaml" --check
 python "$FRAMEWORK/blueprints/compile.py" --stack "$WORK/config" --site-root "$WORK/config" --guest resolver --output "$WORK/resolver.json"
-python -c 'import json,sys; p=json.load(open(sys.argv[1])); c=json.loads(p["files"]["site.json"]); print(p["schema"]); print(c["deployment"]["phases"])' "$WORK/resolver.json"
 ```
 
-Expected result: `All component guests compile offline`, packet schema
-`homelab-component-guest-deployment-v1` and phase list
-`['preparation', 'recursive_a']`. Infrastructure is the separate leading workflow
-phase. The output is private mode 0600 and create-only: a repeated write to the
-same output filename refuses instead of overwriting it.
+The first command prints `All component guests compile offline; no credentials or targets accessed.` The second writes a new private mode-0600 packet. `--site` names one exact source file; `--site-root` discovers the sole `site.yaml`, `site.yml` or `site.json` in that directory. Do not leave a competing same-stem root beside your YAML. The reader also refuses symlink source components. See the [CLI reference](../reference/cli.md#compile-blueprintscompilepy).
 
-This is your first completed result: source has resolved and lowered into the
-expected packet. It is not a guest installation. Do not feed this synthetic
-packet to `deploy.py`; source admission intentionally refuses its example
-bindings and absent genuine SSH public key.
+Inspect the actual lowered values using this local-only command:
 
-## Make one harmless source change
-
-In the copied `$WORK/config/site.yaml`, add this field inside `apps.recursive_a`,
-alongside `profile` and `guest`. This is an **explanatory change fragment**, not a
-standalone site:
-
-```yaml
-display_name: Example recursive resolver
-```
-
-Check again and use a new output filename:
-
+<!-- walkthrough: inspect -->
 ```sh
-python "$FRAMEWORK/blueprints/compile.py" --stack "$WORK/config" --site "$WORK/config/site.yaml" --check
-python "$FRAMEWORK/blueprints/compile.py" --stack "$WORK/config" --site "$WORK/config/site.yaml" --guest resolver --output "$WORK/resolver-labelled.json"
+python - "$WORK/resolver.json" <<'PY'
+import json, sys
+packet = json.load(open(sys.argv[1]))
+config = json.loads(packet['files']['site.json'])
+runtime = json.loads(packet['files']['component-runtime.json'])
+guest = config['guest']
+listener = runtime['applications']['recursive_a']['listeners']['udp']
+print('schema:', packet['schema'])
+print('node:', config['site']['node'])
+print('guest:', guest['vmid'], guest['hostname'])
+print('storage:', guest['storage_id'], guest['template_file_id'])
+print('resources:', guest['cpu'], guest['memory_mib'], guest['root_gib'])
+print('interfaces:', len(guest['interfaces']), guest['interfaces'][0]['ipv4'],
+      guest['interfaces'][0]['bridge'], guest['interfaces'][0]['gateway'])
+print('dns:', guest['dns_servers'])
+print('timezone:', runtime['guest']['timezone'])
+print('app publication:', listener['publication_address'], listener['publish']['port'])
+print('phases:', config['deployment']['phases'])
+PY
 ```
 
-The display name changes while persistent service/project identity stays the
-same. This is the [display-name contract](../reference/apps.md#app-display-name),
-not an app rename or transfer of ownership. The maintained tutorial test compares
-those identities through the real resolver.
+For the worked choices, expect:
+
+<!-- walkthrough: expected -->
+```text
+schema: homelab-component-guest-deployment-v1
+node: practice-pve
+guest: 620 practice-resolver
+storage: practice-local practice:vztmpl/debian-13.tar.zst
+resources: 1 1024 8
+interfaces: 1 198.18.30.20/24 practice0 198.18.30.1
+dns: ['198.18.30.53']
+timezone: Etc/UTC
+app publication: 127.0.0.1 5335
+phases: ['preparation', 'recursive_a']
+```
+
+Compare each line with your worksheet if you chose different values. This verifies that the source choices reached the provider and runtime inputs; it still does not test a host, trust file, image or service. Infrastructure is a separate leading workflow phase, so it does not appear in this packet's application phase list. Keep actual production packets private.
+
+The output is create-only: running the packet command again with the same filename refuses rather than replacing it. For another version, choose a new output name such as `$WORK/resolver-second.json` and inspect that file. Do not feed this synthetic packet to `deploy.py`; deployment admission intentionally refuses its bindings.
+
+<a id="make-one-harmless-source-change"></a>
+## Make the configuration yours
+
+If you used the worked values, now use the alternative column in the worksheet to create a second complete practice selection. Replace the named values in the same `site.yaml`, run `--check` again, then compile to `$WORK/resolver-second.json`. The same inspection command with that filename should show VMID 720, node `workshop-pve`, address `198.18.40.20/24` and memory 1536. You have changed a guest allocation and proved its effective result without changing a profile or a template. In a real owned installation, these identity changes are not ordinary renames; [lifecycle continuity](../reference/lifecycle.md) governs updates.
+
+For a cosmetic change, add `display_name: My practice resolver` inside `apps.recursive_a`, alongside `profile` and `guest`, then check and compile to a third new filename. This changes its display name while persistent service/project identity stays the same. It is the [display-name contract](../reference/apps.md#app-display-name), not a transfer of ownership. The maintained tests check both the meaningful allocation changes and this identity-preserving case.
 
 ## Learn from one refused value
 
-In your copied site, temporarily change `networks.primary.cidr` from
-`198.18.20.0/24` to `198.18.20.10/24`, then repeat only the `--check` command.
-It must fail with `component.invalid at networks.primary`: a CIDR must name the
-canonical network address, not a host within the subnet. Restore the original
-value and check again. [Network diagnostics](../reference/networks.md#network-and-nic-diagnostics)
-explain this and the DHCP/manual branches without weakening validation.
+Use the worked site for this exercise, or substitute your chosen subnet consistently. Change `networks.primary.cidr` from `198.18.30.0/24` to `198.18.30.20/24` and run only `--check`. Expect `component.invalid at networks.primary`: a CIDR must name the network address, not a host within the subnet. Restore `198.18.30.0/24` and check again.
+
+A second useful refusal is `resources: {memory_mib: 256}` on this guest. Although 256 MiB is a structurally accepted guest allocation, it cannot fit this app's 256 MiB reservation plus the 256 MiB effective OS reserve; expect `component.memory-budget`. Restore your chosen memory allocation and check again. This is why schema acceptance and a complete compilation are different checks.
+
+If an error occurs before the expected diagnostic, start with the field path reported by the compiler and compare the complete containing object with this page. Duplicate YAML keys, unknown fields and incorrect indentation are not overrides. [Network diagnostics](../reference/networks.md#network-and-nic-diagnostics) and [troubleshooting](../operations/troubleshooting.md) give the supported correction boundaries.
+
+## Split an app into its own file
+
+When the site becomes harder to navigate, keep the root `site.yaml` and move a complete supported declaration into a typed leaf. Create the directory with `mkdir "$WORK/config/apps"`, create `$WORK/config/apps/recursive.yaml`, and put this complete leaf in it:
+
+<!-- example: personalised-app-leaf -->
+```yaml
+schema: homelab-components-v1
+kind: app
+profile: recursive
+guest: resolver
+lifecycle: fresh
+interfaces:
+  private: {scope: app-network, network: default}
+  local: {scope: guest-loopback}
+```
+
+Replace the entire `recursive_a` value under `apps` in `site.yaml` with this root fragment:
+
+<!-- example: personalised-app-reference -->
+```yaml
+apps:
+  recursive_a:
+    source: apps/recursive.yaml
+```
+
+If you added a display name, move it inside the leaf too. The root map key still owns the identity. The relative path is resolved from the site directory, and the leaf's `schema` and `kind` identify the complete body it contains; the original inline value did not need these two headers. A source reference cannot also contain `display_name` or other overrides. Compile again to a new filename: unchanged app values produce the same packet, although the consumed source paths and hashes change. [Source extraction](../reference/sources.md#worked-extraction-without-an-overlay) covers other supported leaves and confinement rules.
 
 ## First installation and later deployments
 
-The lesson ends at offline compilation. [Prepare a deployment](prepare-deployment.md)
-explains what a real consumer must supply: compatible library/profile selection,
-qualified target/trust/material/capacity/network inputs, protected workflow and
-actual authority. The chosen adapter must implement its first-installation path.
+You now have a complete site, a way to change its decisions and evidence that those changes reach the generated configuration. The next step is [preparing real inputs](prepare-deployment.md), beginning with a compatible library and a profile that supports the installation you intend. Use the [stack design journey](https://github.com/theaussiepom/homelab-stack/blob/main/docs/start-here.md) to choose applications and layouts; do not turn this synthetic lesson's image catalogue into a deployment selection.
 
-Supported `fresh` source continues through ordinary owned updates; do not toggle
-it after a successful install. `retained` requires genuine HomeLab ownership
-and is not an import shortcut. Read [lifecycle](../reference/lifecycle.md), then
-[deployment](../operations/deployment.md) and [service verification](../operations/verify-and-maintain.md).
+Supported `fresh` source continues through ordinary owned updates; do not toggle it after a successful install. `retained` requires genuine HomeLab ownership and is not an import shortcut. Read [lifecycle](../reference/lifecycle.md), then [deployment](../operations/deployment.md) and [service verification](../operations/verify-and-maintain.md).
 
 ## What to learn next
 
 | Next question | Continue with |
 | --- | --- |
-| How can I split this source without changing meaning? | [Typed source extraction](../reference/sources.md#worked-extraction-without-an-overlay) |
+| Where do my real Proxmox, network and credential references belong? | [Prepare a deployment](prepare-deployment.md) |
 | How do apps share values, access and readiness? | [References and reuse](references-and-reuse.md), then [complete relationships](../examples/relationships/README.md) |
 | How do I inspect workflow selection? | [Validate and generate](validate-and-generate.md) |
-| What did the lesson actually verify? | [Evidence levels](../concepts/evidence.md) and [maintained tutorial checks](../../blueprints/test_component_documentation.py) |
-| What is needed before installation? | [Deployment preparation](prepare-deployment.md) |
+| What other field shapes can I use? | [Reference index](../reference/README.md) |
+| What did this lesson verify? | [Evidence levels](../concepts/evidence.md) and [maintained walkthrough tests](../../blueprints/test_component_documentation.py) |
 
-Only `$WORK` is disposable lesson output; keep any real packets private. The
-source-controlled example remains unchanged because you edited its copy.
+Only `$WORK` is disposable lesson output. Save any configuration you want to keep in your own source directory before discarding it; keep real protected material and packets private. The maintained source examples remain unchanged because you edited their copy.
 
 [Documentation index](../README.md) · [Start here](../start-here.md)
