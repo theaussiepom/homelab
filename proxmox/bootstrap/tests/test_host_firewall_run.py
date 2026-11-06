@@ -109,7 +109,7 @@ class Fixture:
 
 class CallerControls(unittest.TestCase):
     def fixture(self,case='',c=None):
-        t=tempfile.TemporaryDirectory(prefix='host-fw-caller-',dir='/private/tmp');self.addCleanup(t.cleanup)
+        t=tempfile.TemporaryDirectory(prefix='host-fw-caller-');self.addCleanup(t.cleanup)
         return Fixture(t.name,case,c)
     def test_actual_caller_saved_apply_private_evidence_and_normal_repeat(self):
         f=self.fixture();self.assertEqual(f.execute(),{'status':'passed','api_verified':True,'provider_noop':True,'kernel_verified':False})
