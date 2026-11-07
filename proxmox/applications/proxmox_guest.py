@@ -295,10 +295,22 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None)
         existing=existing,
         serial_device=cfg["guest"].get("serial_device"),
         protected_guests=cfg['deployment']['protected_guests'],
+        **({'backup_selection': {row['path']: row['backup'] for row in cfg['guest'].get('volumes', {}).values()}}
+           if 'backup' in cfg['app'] else {}),
+        **({'backup_staging': {'path': cfg['app']['backup']['job']['staging']['path'],
+            'size': str(cfg['app']['backup']['job']['staging']['size_bytes']//1024**3)+'G',
+            'volume': cfg['guest']['storage_id']}}
+           if 'job' in cfg['app'].get('backup', {}) else {}),
     )
     if state_identity is not None:
         from component_generation import plan_identity
         plan_identity(value, state_identity)
+    if existing and 'job' in cfg['app'].get('backup', {}):
+        import backup_staging
+        path = cfg['app']['backup']['job']['staging']['path']
+        if backup_staging.newly_allocated(value, path):
+            guest_trust(cfg, work, persist=False)
+            backup_staging.inspect(cfg, path, log)
     require(binding(cfg, site) == expected, "Approved inputs changed while planning")
     changed = any(
         row["change"]["actions"] != ["no-op"] for row in value["resource_changes"]

@@ -30,6 +30,7 @@ example's source boundary does not prove deployment or service readiness.
 | [Policies](policies.md) | Network rules, bindings, transport, TLS, middleware and authentication |
 | [Identity and secrets](identity-and-secrets.md) | Providers, accounts, source roles and material continuity |
 | [Supporting types](supporting-types.md) | Profile listeners/endpoints, resources, software, runtime, images/assets, health/devices/evidence |
+| [PBS backup](backup.md) | Coordinated encrypted jobs, recovery classification and explicit volume selection |
 | [Zabbix](zabbix.md) | Presence/null/server semantics and derived monitoring behavior |
 
 ## Commands and behavior

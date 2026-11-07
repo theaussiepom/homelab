@@ -29,11 +29,12 @@ import component_monitoring
 import component_admission
 import component_accounts
 import component_addresses
+import component_backup
 from component_adapters import adapter
 from component_errors import at, checked
 
 require = sources.require
-RESERVED = {'validate', 'selection', 'infrastructure', 'preparation', 'agent', 'zabbix-agent'}
+RESERVED = {'validate', 'selection', 'infrastructure', 'preparation', 'agent', 'zabbix-agent', 'pbs-agent', 'backup-agent'}
 
 
 def _digest(value):
@@ -66,7 +67,8 @@ class Resolver:
         for collection, check in (('guest_templates', types.template), ('app_profiles', types.profile),
                                   ('software', types.software), ('runtime_profiles', types.runtime),
                                   ('health_profiles', types.health),
-                                  ('monitoring_profiles', component_monitoring.profile)):
+                                  ('monitoring_profiles', component_monitoring.profile),
+                                  ('backup_profiles', component_backup.profile)):
             for name, value in self.library[collection].items():
                 checked(check, value, collection, name)
         for collection, check in (('contexts', types.context), ('networks', types.network),
@@ -556,7 +558,7 @@ class Resolver:
         for guest_id, guest in self.guests.items():
             guest_containers, package_refs, guest_native, reserve, guest_minimums = runtime_values(guest['runtime'], guest)
             require(not guest_containers and guest_native is None and not guest_minimums, 'component.runtime-scope')
-            guest_software = guest['software'] + package_refs
+            guest_software = guest['software'] + package_refs + component_backup.software(self)
             total = 0
             for app in self.apps.values():
                 if app['guest'] != guest_id:
@@ -634,6 +636,7 @@ class Resolver:
         canonical_accounts = component_accounts.bind(self, dependencies['accounts'])
         component_identity.bind(self)
         monitoring = component_monitoring.bind(self, exposure)
+        backup = component_backup.bind(self)
         component_traffic.bind(self, exposure)
         require(disabled is None or isinstance(disabled, list), 'component.disabled')
         disabled = [] if disabled is None else disabled
@@ -655,6 +658,8 @@ class Resolver:
             resolved['address_groups'] = copy.deepcopy(self.address_groups)
         if monitoring is not None:
             resolved['monitoring'] = monitoring
+        if backup is not None:
+            resolved['backup'] = backup
         resolved.update(exposures)
         resolved.update(dependencies)
         resolved['accounts'] = canonical_accounts

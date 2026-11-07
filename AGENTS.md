@@ -30,3 +30,5 @@
   separate from guest/bootstrap state. Normal source describes desired policy;
   environmental imports/recovery are separate operator work. Do not introduce
   migration flags or competing host-rule writers.
+
+- PBS contracts follow [the backup reference](docs/reference/backup.md). Reuse owned path/custody components; keep native producers finite and pause permissions explicit. Test component negatives, coordinated protocol failures and real packet composition separately. Preserve failed protection/history; source tests and archive readback are not service-restore acceptance.

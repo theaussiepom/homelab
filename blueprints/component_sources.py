@@ -18,7 +18,7 @@ SCHEMA = 'homelab-components-v1'
 POLICIES = ('network', 'transport', 'tls', 'middlewares', 'authentication')
 LIBRARY_MAPS = ('guest_templates', 'app_profiles', 'software', 'runtime_profiles',
                 'health_profiles', 'authentication_profiles', 'monitoring_profiles',
-                'assets', 'bundles')
+                'assets', 'bundles', 'backup_profiles')
 SITE_MAPS = ('contexts', 'networks', 'storage', 'guests', 'apps', 'domains',
              'external_endpoints', 'identity_providers', 'secret_sources', 'accounts',
              'devices', 'evidence', 'connections', 'exposures', 'images', 'host_aliases', 'address_groups')
@@ -27,7 +27,7 @@ SITE_DEFINITIONS = {'guests': 'guest', 'apps': 'app',
 KINDS = {'guest_templates': 'guest-template', 'app_profiles': 'app-profile',
          'software': 'software', 'runtime_profiles': 'runtime-profile',
          'health_profiles': 'health-profile', 'authentication_profiles': 'authentication-profile',
-         'monitoring_profiles': 'monitoring-profile', 'bundles': 'bundle'}
+         'monitoring_profiles': 'monitoring-profile', 'bundles': 'bundle', 'backup_profiles': 'backup-profile'}
 ERROR = 'Use confined typed component source definitions'
 
 
@@ -200,7 +200,7 @@ def site(path):
     spec = sources.document(path.name)
     closed(spec, ('schema', 'kind', 'contexts', 'networks', 'storage', 'guests', 'apps'),
            tuple(key for key in SITE_MAPS if key not in ('contexts', 'networks', 'storage', 'guests', 'apps'))
-           + ('policies', 'zabbix'))
+           + ('policies', 'zabbix', 'backup'))
     require(spec['schema'] == SCHEMA and spec['kind'] == 'site')
     result = {'schema': SCHEMA, 'kind': 'site'}
     for kind in SITE_MAPS:
@@ -218,4 +218,6 @@ def site(path):
             closed(spec['zabbix'], ('server',))
             require(identifier(spec['zabbix']['server']))
         result['zabbix'] = copy.deepcopy(spec['zabbix'])
+    if 'backup' in spec:
+        result['backup'] = copy.deepcopy(spec['backup'])
     return result, sources

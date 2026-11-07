@@ -127,3 +127,7 @@ normal continuity. Removing an app does not authorize deleting its data or
 unselected containers. See [Lifecycle](lifecycle.md).
 
 [Reference index](README.md) · [Library](library.md) · [Sources](sources.md)
+
+## PBS client preparation
+
+Optional root [`backup`](backup.md) is enabled by presence. Null/empty selects the only registered backup profile; `{profile: id}` selects it explicitly. It prepares clients and coverage without creating a server or backup schedule.

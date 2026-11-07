@@ -48,6 +48,37 @@ def variables(cfg, phase, *, payload=None, previously_owned=False):
                 'kind':selected['adapter'], 'database':row['identity']})
         result['component_preparation_app']=result.pop('app')
         return result
+    if phase == component_guest.BACKUP_PHASE:
+        import backup_agent
+        require(payload is not None and payload.check()['app'] == 'backup-agent',
+                'Bind the exact selected PBS preparation payload')
+        require(read_json(payload.directory/'application.json', private=True) == cfg['app']['backup'],
+                'Keep PBS preparation bound to the compiled guest coverage')
+        result['backup_agent'] = backup_agent.configuration(cfg)
+        if 'job' in cfg['app']['backup']:
+            import backup_controller
+            from deployment_inputs import source_hash
+            bundle = '/opt/homelab-backup/framework/' + source_hash() + '/proxmox'
+            sources = [path for parent in (SOURCE, SOURCE.parent/'common') for path in parent.rglob('*')
+                if path.is_file() and not any(part in {'.terraform', '__pycache__', '.work'} for part in path.parts)]
+            result['backup_controller_files'] = [{'source': str(path),
+                'destination': str(Path(bundle)/path.relative_to(SOURCE.parent))} for path in sorted(sources)]
+            result['backup_controller_directories'] = sorted({str(parent) for row in result['backup_controller_files']
+                for parent in [Path(row['destination']).parent, *Path(row['destination']).parent.parents]
+                if str(parent).startswith('/opt/homelab-backup/framework/')}, key=lambda path: (path.count('/'), path))
+            result['backup_controller'] = backup_controller.units(read_json(Path(cfg['deployment']['input_directory'])/'backup-group.json', private=True),
+                bundle+'/applications', os.getuid())
+            result['backup_controller']['source_hash'] = source_hash()
+            result['backup_controller']['directory'] = bundle+'/applications'
+            job = cfg['app']['backup']['job']
+            names = ['pbs-password', 'pbs-key'] + (['pbs-key-password'] if 'key_password' in job['secrets'] else [])
+            names += ['influx-'+key for key in job['capture']['influx_tokens']]
+            from private_io import sha
+            result['backup_agent']['credentials'] = [
+                {'source': str(payload.directory/name), 'name': name, 'sha256': sha(payload.directory/name)} for name in names]
+            result['backup_agent']['staging'] = job['staging']['path']+'/.homelab-backup'
+        app['start_services'] = False
+        return result
     if phase==component_guest.AGENT_PHASE:
         import monitoring_agent
         require(payload is not None and payload.check()['app']=='agent',
@@ -69,6 +100,8 @@ def variables(cfg, phase, *, payload=None, previously_owned=False):
         result.update(monitoring_agent_package=monitoring_agent.AGENT_PACKAGE,
             monitoring_postgresql_package=monitoring_agent.POSTGRESQL_PACKAGE,
             monitoring_agent_configuration=monitoring_agent.configuration(cfg,password))
+        import monitoring_paths
+        result['monitoring_agent_paths'] = monitoring_paths.PATHS.copy()
         app['start_services']=False
         return result
     app_id = cfg['deployment']['applications'][phase]['id']
@@ -158,7 +191,7 @@ def variables(cfg, phase, *, payload=None, previously_owned=False):
 def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, previously_owned=False):
     require(component_inputs.binding(cfg,site)==expected, 'Static component inputs changed before Ansible')
     if payload is not None:payload.check()
-    if payload is not None and phase not in ('preparation',component_guest.AGENT_PHASE):
+    if payload is not None and phase not in ('preparation',component_guest.AGENT_PHASE,component_guest.BACKUP_PHASE):
         app=read_json(payload.directory/'application.json',private=True)
         if app['adapter']=='traefik':
             component_discovery.verify(cfg,app,regular(payload.directory/'provider-record.json',private=True))
@@ -173,7 +206,8 @@ def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, prev
     write(phase_work/'inventory.json',{'application':{'hosts':{cfg['app']['hostname']:{
         'ansible_host':cfg['app']['address'],'ansible_user':'root'}}}})
     playbook='component-preparation.yml' if phase=='preparation' else (
-        'component-agent.yml' if phase==component_guest.AGENT_PHASE else 'component-reconcile.yml')
+        'component-agent.yml' if phase==component_guest.AGENT_PHASE else
+        'component-backup.yml' if phase==component_guest.BACKUP_PHASE else 'component-reconcile.yml')
     command=['ansible-playbook','-i',str(phase_work/'inventory.json'),'--private-key',
         cfg['paths']['private_key'],str(SOURCE/'ansible'/playbook),'--extra-vars','@'+str(phase_work/'variables.json')]
     from ansible_guest import ansible_environment

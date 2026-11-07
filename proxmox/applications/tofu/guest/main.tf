@@ -58,7 +58,7 @@ resource "proxmox_virtual_environment_container" "guest" {
       volume    = var.guest.storage_id
       size      = "${mount_point.value.size_gib}G"
       path      = mount_point.value.path
-      backup    = true
+      backup    = mount_point.value.backup
       replicate = true
     }
   }
