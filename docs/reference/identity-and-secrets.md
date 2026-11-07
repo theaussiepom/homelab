@@ -1,7 +1,6 @@
 # Identity, accounts and secrets
 
-Public source contains references and public metadata, never credential values.
-Compilation does not open configured secret paths or contact an identity provider.
+Public configuration contains references and public metadata, never credential values. Compilation does not open configured secret files or contact an identity provider (IdP).
 
 ## Secret sources
 
@@ -9,28 +8,19 @@ Each site `secret_sources.<id>` is exactly one form:
 
 | type | Fields | Constraint |
 | --- | --- | --- |
-| file | path | Canonical absolute path; runtime selected private reader requires owned regular mode-0600 nonempty file, ≤1 MiB |
+| file | path | Canonical absolute path. The runtime private-file reader requires a nonempty regular file owned by the expected Unix user, with mode 0600 and size at most 1 MiB. |
 | environment | name, optional workflow_secret | Each `[A-Z][A-Z0-9_]{0,127}`; workflow_secret defaults to name |
-| generated | credential_id | `[a-z][a-z0-9-]{2,62}`; create-once account source, not app secret bytes |
+| generated | credential_id | `[a-z][a-z0-9-]{2,62}`; identifies a credential created once by an account, not inline app secret bytes |
 
-The `type` field is required in every form. File/generated forms cannot include
-workflow_secret. An app's `secrets` maps declared profile roles to file/environment
-sources. Generated sources belong to the separate [account](connections.md#accounts)
-owner. Scalar inputs are nonempty ≤65536 UTF-8 bytes with no CR/LF/NUL and remain
-unchanged. File-only compound roles still require their exact parser.
+Every form requires `type`. File and generated sources cannot include workflow_secret. An app's `secrets` map connects declared profile roles to file or environment sources. Generated sources belong to the separate [account](connections.md#accounts) that creates and manages the credential. Scalar inputs must be nonempty, at most 65536 UTF-8 bytes and contain no CR/LF/NUL; they are passed through unchanged. Roles requiring a structured file still use their specific parser.
 
-For a complete generated-account use, the
-[relationship example](../examples/relationships/README.md) connects
-`apps.browser` to `apps.broker` using `accounts.client` and
-`secret_sources.browser_password` in its authored site. Existing-credential and
-OIDC values below illustrate their own source/provider validator boundary;
-they do not, by themselves, supply all prerequisites for an app installation.
+The complete [relationship example](../examples/relationships/README.md) shows a generated account: it connects `apps.browser` to `apps.broker` through `accounts.client` and `secret_sources.browser_password`. The existing-credential and OpenID Connect (OIDC) examples below demonstrate their respective validators. They do not supply every prerequisite needed to install an app.
 
 | Adapter | Finite private roles |
 | --- | --- |
 | authentik | secret_key, postgresql_password, smtp_password |
 | traefik | cloudflare_dns_token, proxmox_token |
-| zabbix | database_password is accepted structurally outside root; ordinary preparation requires root-owned monitoring instead, with no selected role |
+| zabbix | database_password passes structural validation without root monitoring, but ordinary preparation requires root monitoring to manage the credential instead, with no selected role |
 | node_red | api_token |
 | bitwarden | runtime_environment |
 | pegaprox | database_key |
@@ -39,62 +29,33 @@ they do not, by themselves, supply all prerequisites for an app installation.
 | cloudbeaver | client_secret, selected through OIDC policy |
 | mqtt_explorer | broker_password, selected through existing connection credential |
 
-Profile declarations contain `{required: Boolean}` per allowed role.
-Cloud/Explorer derive roles from authentication/connection contracts rather than
-ordinary profile secret declarations. Required/conditional adapter checks still
-apply: for example MQTT probe, WiNet options, Pega key and Bitwarden environment
-are files. Context API/SSH credentials use their own protected workflow boundary.
+A profile declares `{required: Boolean}` for each allowed role. CloudBeaver and MQTT Explorer obtain their roles from authentication and connection declarations instead of ordinary profile secret declarations. Adapter requirements still apply even when a profile marks a role optional: MQTT probe, WiNet options, Pega key and Bitwarden environment, for example, must be files. The protected workflow handles context API and SSH credentials separately.
 
 ## Identity providers
 
-Site `identity_providers.<id>` supports three closed forms.
+Each `identity_providers.<id>` value supports one of the following three forms. Use only the fields listed for that form.
 
 ### OIDC
 
-Required: `type: oidc`, `origin`, `issuer_path`, `endpoints`,
-`signing_algorithms`.
-Origin is `{domain: id}` or `{exposure: id, domain?: id}`, resolved to HTTPS.
-`endpoints` requires exactly `authorization`, `token`, `userinfo`, `jwks`,
-each a relative path beginning with one slash. `issuer_path` uses the same rule.
-Paths cannot contain whitespace/control, ?, #, backslash, percent or dot
-traversal. Algorithms are a nonempty unique subset of
-RS256/384/512, PS256/384/512, ES256/384/512, EdDSA.
-No symmetric client-secret signing or inferred discovery URL is accepted.
+OIDC requires `type: oidc`, `origin`, `issuer_path`, `endpoints` and `signing_algorithms`. Set `origin` to `{domain: id}` or `{exposure: id, domain?: id}`; the compiler derives an HTTPS URL. The `endpoints` object requires exactly `authorization`, `token`, `userinfo` and `jwks`. Each endpoint and `issuer_path` must be a relative path beginning with one slash. Paths cannot contain whitespace, control characters, ?, #, backslash, percent or dot traversal. Supply a nonempty, unique selection of RS256/384/512, PS256/384/512, ES256/384/512 or EdDSA. Symmetric client-secret signing is unsupported, and no discovery URL is inferred.
 
 ### Existing Node-RED OIDC strategy
 
-Required: `type: retained-node-red-oidc`, `origin`, `provider_slug`.
-Origin uses the same typed form, with standard HTTPS port.
-Slug matches `[a-z0-9][a-z0-9-]{0,62}`.
-This names an ongoing existing strategy/material contract, not a one-time
-migration admission. Selecting it does not provision an IdP application.
+This form requires `type: retained-node-red-oidc`, `origin` and `provider_slug`. The origin uses the same reference forms as OIDC and requires the standard HTTPS port. The slug must match `[a-z0-9][a-z0-9-]{0,62}`. This declaration continues using an existing strategy and its credentials. It is not a one-time migration exception and does not provision an IdP application.
 
 ### SAML
 
-Required: `type: saml`, `signing_certificate`.
-Certificate is one valid public PEM certificate, ≤65536 UTF-8 bytes, no private
-key. It binds Zabbix's existing identity provider. The policy selects local or
-SAML default login; it does not create users/roles or weaken assertion checks.
+A Security Assertion Markup Language (SAML) provider requires `type: saml` and `signing_certificate`. Supply one valid public PEM certificate of at most 65536 UTF-8 bytes, with no private key. It connects Zabbix to its existing identity provider. The policy selects local or SAML as the default login method; it does not create users or roles, or weaken assertion checks.
 
 ## Protected material continuity
 
-Ordinary app payloads seal private roles. Later source runs may add selected
-roles but cannot remove a sealed role or change its credential material.
-Source-ID rename does not waive role continuity. Compound WiNet/MQTT/provider
-inputs compare credential identity/material through existing parsers, allowing
-unrelated public metadata to evolve. Bitwarden's opaque environment and immutable
-keys keep their exact-byte contract.
+An ordinary app payload is a record of the app's deployment inputs. It seals the app's private roles so later runs can compare them. Later deployments may add selected roles, but cannot remove a sealed role or change its credentials. Renaming the source ID does not bypass those checks. For structured WiNet, MQTT and provider inputs, the existing parsers compare credential identities and values while allowing unrelated public metadata to change. Bitwarden's opaque environment file and immutable keys must remain byte-for-byte identical.
 
-Comparison happens when the selected app's material is available, before that
-app's payload publication, credential writers, STARTED and service executor.
-Infrastructure/preparation may already have completed. There is no implicit
-rotation, reset or authored override. Generated accounts have separate stable
-producer/principal/create-once ownership.
+Once the selected app's private inputs are available, HomeLab compares them before publishing its payload, writing credentials, marking STARTED or running its service executor. Infrastructure and preparation may already have completed. Configuration does not provide an implicit rotation, reset or override. Generated accounts separately preserve their producer, principal and create-once ownership.
 
 ## Worked sources and OIDC combination
 
-These are complete source values placed under separate named `secret_sources`
-keys. They describe where selected material comes from, never its contents.
+Place these complete values under separate named `secret_sources` keys. They describe where to obtain the selected credentials or files without including their contents.
 
 <!-- example: secret-file -->
 ```yaml
@@ -109,13 +70,9 @@ name: EXAMPLE_API_TOKEN
 workflow_secret: EXAMPLE_WORKFLOW_TOKEN
 ```
 
-A file-only role cannot use the environment form. **Invalid variation:** add
-`workflow_secret` to the file source; that key is accepted only for environment
-sources. The source reader does not test runtime mode/owner/contents.
+A file-only role cannot use the environment form. **Invalid variation:** add `workflow_secret` to the file source. That key is accepted only for environment sources. The source reader does not inspect the actual file's permissions, Unix owner or contents.
 
-This complete OIDC provider value requires `domains.login` in the same site.
-A matching app policy still needs its own client ID/secret source and owned
-origin; this object does not provision an IdP application.
+This complete OIDC provider value requires `domains.login` in the same site. A matching app policy still needs its own client ID/secret source and owned origin; this object does not provision an IdP application.
 
 <!-- example: identity-oidc -->
 ```yaml
@@ -130,8 +87,6 @@ endpoints:
 signing_algorithms: [RS256]
 ```
 
-**Invalid variation:** replace RS256 with HS256, or add a query to `issuer_path`.
-Both refuse. Later deployment may change supported public provider metadata, but
-source-ID renaming cannot remove or replace a sealed private role's material.
+**Invalid variation:** replace RS256 with HS256, or add a query to `issuer_path`. Validation rejects both changes. Later deployments may change supported public provider metadata, but renaming a source ID cannot remove or replace a sealed private role's credentials.
 
 [Reference index](README.md) · [Lifecycle](lifecycle.md) · [Policies](policies.md)

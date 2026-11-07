@@ -3,13 +3,13 @@
 
 Build a complete site for one Proxmox guest, choose its identity, network, storage and memory, and inspect the deployment inputs produced from those choices. You will finish with a configuration you can explain and change yourself. This is an offline language exercise using a small maintained library: its image identity and protected paths are deliberately synthetic, and it cannot be deployed.
 
-If your immediate goal is to choose real applications, start with [HomeLab Stack's practical getting-started route](https://github.com/theaussiepom/homelab-stack/blob/main/docs/start-here.md). That journey owns application profiles and their requirements. This lesson teaches the framework grammar and inspection tools you use with any compatible library.
+If your immediate goal is to choose real applications, start with [HomeLab Stack's practical getting-started route](https://github.com/theaussiepom/homelab-stack/blob/main/docs/start-here.md). That guide covers application profiles and their requirements. This lesson teaches the framework grammar and inspection tools you use with any compatible library.
 
 ## Prepare an isolated workspace
 
 You need Git, Python 3.12 or newer and a text editor. Start at the root of a reviewed framework checkout: the directory containing `blueprints/compile.py` and this page. If you do not have a checkout, run `git clone https://github.com/theaussiepom/homelab.git` in your working directory, then `cd homelab`; review or select the revision you intend to learn from and read its copy of this guide. Record `git rev-parse HEAD` so your notes identify that selection. A clone of current main is not a compatibility selection for an existing stack deployment.
 
-Create a disposable working directory and install that checkout's hash-locked dependencies. Keep this shell and its virtual environment active throughout the lesson:
+Create a disposable working directory and install that checkout's hash-locked dependencies, whose versions and file hashes are fixed in the lock file. Keep this shell and its virtual environment active throughout the lesson:
 
 ```sh
 FRAMEWORK="$(pwd -P)"
@@ -33,7 +33,7 @@ cp -R "$FRAMEWORK/docs/examples/first-configuration" "$WORK/config"
 
 The copied site is a maintained two-interface example used throughout the reference. Your new version will use one interface, a different allocation and an explicit memory choice. All three inputs and this lesson belong to the same framework revision; no external library revision is selected.
 
-The library root filenames are fixed JSON indexes. A site may be YAML or JSON, and supported declarations can later move into typed YAML leaves. A generated packet is JSON containing deployment inputs, not a new file to edit. See [source documents](../reference/sources.md) for the exact format boundaries.
+The library root filenames are fixed JSON indexes. A site may be YAML or JSON. You can later move a supported declaration into a separate YAML file containing that complete declaration and its type headers; this is called a **typed leaf**. A generated packet is JSON containing deployment inputs, not a new file to edit. See [source documents](../reference/sources.md) for the exact format boundaries.
 
 ## Decide what your guest should look like
 
@@ -127,7 +127,7 @@ You only override memory. CPU 1, root disk 8 GiB and the other resource/startup/
 
 The app's `private` interface means its private application network, while `local` means guest loopback. Neither is a second guest NIC. This profile publishes UDP DNS at `127.0.0.1:5335` inside the guest; it does not expose a DNS server to your home network or create firewall permissions. The guest's configured DNS endpoint is a separate existing-service reference. The [app role contract](../reference/apps.md#interface-roles) distinguishes these scopes.
 
-Leave the `/example` and `/never-read` paths, empty key list and synthetic image catalogue in place for the lesson. They are required-shape metadata whose contents are not opened during compilation. Their presence is also why source success cannot make this a prepared installation.
+Leave the `/example` and `/never-read` paths, empty key list and synthetic image catalogue in place for the lesson. They provide metadata in the required format; compilation does not open the referenced files. Their presence is also why source success cannot make this a prepared installation.
 
 ## Validate, then produce a packet
 
@@ -139,9 +139,9 @@ python "$FRAMEWORK/blueprints/compile.py" --stack "$WORK/config" --site "$WORK/c
 python "$FRAMEWORK/blueprints/compile.py" --stack "$WORK/config" --site-root "$WORK/config" --guest resolver --output "$WORK/resolver.json"
 ```
 
-The first command prints `All component guests compile offline; no credentials or targets accessed.` The second writes a new private mode-0600 packet. `--site` names one exact source file; `--site-root` discovers the sole `site.yaml`, `site.yml` or `site.json` in that directory. Do not leave a competing same-stem root beside your YAML. The reader also refuses symlink source components. See the [CLI reference](../reference/cli.md#compile-blueprintscompilepy).
+The first command prints `All component guests compile offline; no credentials or targets accessed.` The second writes a new packet with file mode 0600, so only its owner can read or write it. `--site` names one exact source file; `--site-root` discovers the sole `site.yaml`, `site.yml` or `site.json` in that directory. Do not leave another root file named `site` with a different supported extension beside your YAML. The reader also refuses symlink source components. See the [CLI reference](../reference/cli.md#compile-blueprintscompilepy).
 
-Inspect the actual lowered values using this local-only command:
+Inspect the actual generated values using this local-only command:
 
 <!-- walkthrough: inspect -->
 ```sh
@@ -189,7 +189,7 @@ The output is create-only: running the packet command again with the same filena
 <a id="make-one-harmless-source-change"></a>
 ## Make the configuration yours
 
-If you used the worked values, now use the alternative column in the worksheet to create a second complete practice selection. Replace the named values in the same `site.yaml`, run `--check` again, then compile to `$WORK/resolver-second.json`. The same inspection command with that filename should show VMID 720, node `workshop-pve`, address `198.18.40.20/24` and memory 1536. You have changed a guest allocation and proved its effective result without changing a profile or a template. In a real owned installation, these identity changes are not ordinary renames; [lifecycle continuity](../reference/lifecycle.md) governs updates.
+If you used the worked values, now use the alternative column in the worksheet to create a second complete practice selection. Replace the named values in the same `site.yaml`, run `--check` again, then compile to `$WORK/resolver-second.json`. The same inspection command with that filename should show VMID 720, node `workshop-pve`, address `198.18.40.20/24` and memory 1536. You have changed a guest allocation and proved its effective result without changing a profile or a template. In an actual installation managed by HomeLab, these identity changes are more than renames; the [lifecycle rules](../reference/lifecycle.md) govern updates.
 
 For a cosmetic change, add `display_name: My practice resolver` inside `apps.recursive_a`, alongside `profile` and `guest`, then check and compile to a third new filename. This changes its display name while persistent service/project identity stays the same. It is the [display-name contract](../reference/apps.md#app-display-name), not a transfer of ownership. The maintained tests check both the meaningful allocation changes and this identity-preserving case.
 
@@ -199,7 +199,7 @@ Use the worked site for this exercise, or substitute your chosen subnet consiste
 
 A second useful refusal is `resources: {memory_mib: 256}` on this guest. Although 256 MiB is a structurally accepted guest allocation, it cannot fit this app's 256 MiB reservation plus the 256 MiB effective OS reserve; expect `component.memory-budget`. Restore your chosen memory allocation and check again. This is why schema acceptance and a complete compilation are different checks.
 
-If an error occurs before the expected diagnostic, start with the field path reported by the compiler and compare the complete containing object with this page. Duplicate YAML keys, unknown fields and incorrect indentation are not overrides. [Network diagnostics](../reference/networks.md#network-and-nic-diagnostics) and [troubleshooting](../operations/troubleshooting.md) give the supported correction boundaries.
+If an error occurs before the expected diagnostic, start with the field path reported by the compiler and compare the complete containing object with this page. Duplicate YAML keys, unknown fields and incorrect indentation are not overrides. [Network diagnostics](../reference/networks.md#network-and-nic-diagnostics) and [troubleshooting](../operations/troubleshooting.md) explain how to correct the source within the supported rules.
 
 ## Split an app into its own file
 
@@ -232,7 +232,7 @@ If you added a display name, move it inside the leaf too. The root map key still
 
 You now have a complete site, a way to change its decisions and evidence that those changes reach the generated configuration. The next step is [preparing real inputs](prepare-deployment.md), beginning with a compatible library and a profile that supports the installation you intend. Use the [stack design journey](https://github.com/theaussiepom/homelab-stack/blob/main/docs/start-here.md) to choose applications and layouts; do not turn this synthetic lesson's image catalogue into a deployment selection.
 
-Supported `fresh` source continues through ordinary owned updates; do not toggle it after a successful install. `retained` requires genuine HomeLab ownership and is not an import shortcut. Read [lifecycle](../reference/lifecycle.md), then [deployment](../operations/deployment.md) and [service verification](../operations/verify-and-maintain.md).
+Keep supported `fresh` source for later updates to the same installation; do not toggle it after a successful install. `retained` requires an installation already owned by HomeLab and cannot import another installation. Read [lifecycle](../reference/lifecycle.md), then [deployment](../operations/deployment.md) and [service verification](../operations/verify-and-maintain.md).
 
 ## What to learn next
 
@@ -244,6 +244,6 @@ Supported `fresh` source continues through ordinary owned updates; do not toggle
 | What other field shapes can I use? | [Reference index](../reference/README.md) |
 | What did this lesson verify? | [Evidence levels](../concepts/evidence.md) and [maintained walkthrough tests](../../blueprints/test_component_documentation.py) |
 
-Only `$WORK` is disposable lesson output. Save any configuration you want to keep in your own source directory before discarding it; keep real protected material and packets private. The maintained source examples remain unchanged because you edited their copy.
+Only `$WORK` is disposable lesson output. Save any configuration you want to keep in your own source directory before discarding it; keep actual credentials, protected files and deployment packets private. The maintained source examples remain unchanged because you edited their copy.
 
 [Documentation index](../README.md) · [Start here](../start-here.md)

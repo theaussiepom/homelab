@@ -1,23 +1,12 @@
 # Networks and guest NICs
 
-A network is one `networks.<id>` value in a `homelab-components-v1`
-[site](site.md). A guest NIC is one `guests.<id>.interfaces.<id>` value.
-Together they describe the bridge, VLAN, IPv4 allocation and route consumed by
-[guest infrastructure](guests.md). They do not create host bridges, provision
-switch VLANs or reserve DHCP leases.
+A network is one `networks.<id>` value in a `homelab-components-v1` [site](site.md). A guest NIC is one `guests.<id>.interfaces.<id>` value. Together they configure the bridge, VLAN, IPv4 address and route for a [guest](guests.md). You must prepare the host bridges, switch VLANs and any DHCP leases separately.
 
-Start with the [complete offline tutorial](../guides/first-configuration.md) to
-see these values in context. For real changes, review the
-[preparation requirements](../guides/prepare-deployment.md#network-and-control-access)
-and [update policy](lifecycle.md#infrastructure-plan-policy) before execution.
-Identifiers in both maps match `[a-z][a-z0-9_-]{0,62}`; `<id>` denotes a user
-chosen key, not literal YAML. Each named map has at most 1024 entries.
+Start with the [complete offline tutorial](../guides/first-configuration.md) to see these values in context. For real changes, review the [preparation requirements](../guides/prepare-deployment.md#network-and-control-access) and [update policy](lifecycle.md#infrastructure-plan-policy) before execution. Identifiers in both maps match `[a-z][a-z0-9_-]{0,62}`; `<id>` denotes a user chosen key, not literal YAML. Each named map has at most 1024 entries.
 
 ## Network syntax
 
-This is the complete value of `networks.primary`, with required `context: lab`
-supplied by the [complete site](../examples/first-configuration/site.yaml).
-It is synthetic source for offline validation.
+This is the complete value of `networks.primary`, with required `context: lab` supplied by the [complete site](../examples/first-configuration/site.yaml). It is synthetic source for offline validation.
 
 <!-- example: network-minimal -->
 ```yaml
@@ -28,9 +17,7 @@ vlan: null
 gateway: 198.18.20.1
 ```
 
-Network objects are closed. Extra keys refuse `component.fields`; required
-fields have no default. There is no template inheritance or overlay. Null is
-accepted only for `vlan`; empty strings/maps/lists do not replace required values.
+Network objects accept only the listed fields. Extra keys produce `component.fields`, and required fields have no default. Values are not inherited from a template or overlaid from another declaration. Only `vlan` accepts null; empty strings, maps and lists cannot replace required values.
 
 ## Network property index
 
@@ -45,58 +32,31 @@ accepted only for `vlan`; empty strings/maps/lists do not replace required value
 <a id="field-network-context"></a>
 ### Network context
 
-`networks.<id>.context` is a required identifier, with no default. Omission,
-null and empty strings refuse. A consuming guest must declare an existing
-[context](contexts.md) and the network's context must equal that guest context.
-The structural validator checks identifier syntax; the resolver checks the
-relationship when a guest consumes the network. An unused network's context
-existence is not unconditionally checked. A successful compile therefore does
-not establish every unused network's placement.
+`networks.<id>.context` is a required identifier with no default. It cannot be omitted, null or empty. A guest using the network must select an existing [context](contexts.md), and the network must name that same context. The structural validator checks the identifier format; the resolver checks the context relationship when a guest uses the network. It does not always check whether an unused network's context exists, so successful compilation does not validate the placement of every unused network.
 
 <a id="field-network-cidr"></a>
 ### Network CIDR
 
-`networks.<id>.cidr` is a required canonical strict IPv4 network string.
-`198.18.20.0/24` is accepted; `198.18.20.10/24`, IPv6, null and empty values
-refuse. No noncanonical spelling is normalized. The resolver uses the prefix
-for [static NIC output](#field-guest-nic-address-value) and requires static and
-DHCP endpoints to be usable subnet members. The CIDR allocates no external route.
+`networks.<id>.cidr` is a required IPv4 network string in strict canonical form. For example, `198.18.20.0/24` is accepted, but `198.18.20.10/24`, IPv6, null and empty values are rejected. The validator does not normalize noncanonical input. The resolver uses the prefix for [static NIC output](#field-guest-nic-address-value) and requires static addresses and expected DHCP endpoints to be usable members of the subnet. Declaring the CIDR does not create an external route.
 
 <a id="field-network-bridge"></a>
 ### Network bridge
 
-`networks.<id>.bridge` is required text of 1–4096 characters without NUL. It has
-no default and cannot be null or empty. Resolution copies it into the
-provider-facing NIC. The field's structural acceptance does not establish the
-bridge's existence, interface membership or reachability on a host; those are
-[deployment prerequisites](../guides/prepare-deployment.md#network-and-control-access).
+`networks.<id>.bridge` is required text of 1–4096 characters without NUL. It has no default and cannot be null or empty. The compiler copies it into the NIC configuration sent to the provider. Accepting the value does not prove that the bridge exists, has the required interfaces or is reachable on the host. Those are [deployment prerequisites](../guides/prepare-deployment.md#network-and-control-access).
 
 <a id="field-network-vlan"></a>
 ### Network VLAN
 
-`networks.<id>.vlan` is required. Null means no tag; otherwise it is an integer
-1–4094 inclusive. Boolean values, numeric strings, zero and 4095 refuse. There
-is no implicit default or inheritance. The complete tutorial's secondary
-network demonstrates a tagged value. Changing a tag changes desired NIC input;
-it does not configure the corresponding physical network.
+`networks.<id>.vlan` is required. Use null for no VLAN tag, or an integer from 1 through 4094 inclusive. Booleans, numeric strings, zero and 4095 are rejected. There is no implicit default or inherited value. The complete tutorial's secondary network demonstrates a VLAN tag. Changing the tag changes the requested NIC configuration; the corresponding physical network must be configured separately.
 
 <a id="field-network-gateway"></a>
 ### Network gateway
 
-`networks.<id>.gateway` is optional, with no inserted default. If supplied it
-must be a canonical IPv4 address within the CIDR, excluding network and
-broadcast addresses. Null and empty strings refuse. A static NIC with
-[`default_route: true`](#field-guest-nic-default-route) requires it. An explicitly
-selected [source-policy route](guests.md#guest-source-policy-route) also requires
-it and requires that gateway to differ from the NIC address. DHCP uses an
-external lease; this field neither reserves nor proves that lease.
+`networks.<id>.gateway` is optional and has no default. If supplied, it must be a canonical IPv4 address within the CIDR, excluding the network and broadcast addresses. Null and empty strings are rejected. A static NIC with [`default_route: true`](#field-guest-nic-default-route) requires a gateway. An explicitly selected [source-policy route](guests.md#guest-source-policy-route) also requires one, and it must differ from the NIC address. DHCP relies on an externally supplied lease; this field does not reserve or verify that lease.
 
 ## Guest NIC
 
-This complete NIC value belongs at
-`guests.resolver.interfaces.management` in the
-[complete site](../examples/first-configuration/site.yaml). The selected
-`primary` network is the network above.
+This complete NIC value belongs at `guests.resolver.interfaces.management` in the [complete site](../examples/first-configuration/site.yaml). The selected `primary` network is the network above.
 
 <!-- example: nic-minimal -->
 ```yaml
@@ -108,9 +68,7 @@ default_route: true
 ipv6: manual
 ```
 
-The NIC is closed, with no inherited fields. Required keys cannot be omitted,
-null or empty. Network resolution supplies the explicitly described
-bridge/VLAN/prefix/gateway effects; it does not merge the network into the NIC.
+The NIC accepts only the listed fields and does not inherit fields. Required values cannot be omitted, null or empty. The compiler derives the bridge, VLAN, prefix and gateway from the selected network as described below; it does not merge the network object into the NIC.
 
 ## NIC property index
 
@@ -126,45 +84,27 @@ bridge/VLAN/prefix/gateway effects; it does not merge the network into the NIC.
 <a id="field-guest-nic-network"></a>
 ### NIC network reference
 
-`guests.<id>.interfaces.<id>.network` is a required identifier selecting
-`networks.<id>`. Its context must match the guest's declared existing context.
-There is no default. Resolution copies bridge/VLAN and derives address/prefix
-and route output. Unknown selections refuse during resolution; see
-[diagnostics](#network-and-nic-diagnostics).
+`guests.<id>.interfaces.<id>.network` is a required identifier selecting `networks.<id>`, with no default. The selected network's context must match the guest's existing context. The resolver copies the bridge and VLAN, then derives the address, prefix and route. It rejects unknown selections; see [diagnostics](#network-and-nic-diagnostics).
 
 <a id="field-guest-nic-slot"></a>
 ### NIC slot
 
-`guests.<id>.interfaces.<id>.slot` is a required integer 0–31 inclusive.
-Booleans and strings refuse. Across a guest, slots must be exactly contiguous
-from zero, without gaps or duplicates. Provider NIC order follows slot, not
-map order. Reordering can affect reachability; no hot-plug or uninterrupted
-renumbering guarantee follows from source validity.
+`guests.<id>.interfaces.<id>.slot` is a required integer from 0 through 31 inclusive. Booleans and strings are rejected. A guest's slots must start at zero and continue without gaps or duplicates. The provider receives NICs in slot order, regardless of map order. Reordering can affect reachability. Valid configuration does not guarantee hot-plug support or uninterrupted renumbering.
 
 <a id="field-guest-nic-mac"></a>
 ### NIC MAC identity
 
-`guests.<id>.interfaces.<id>.mac` is required text of six hexadecimal octets
-separated by colons. Both letter cases are accepted; collisions are compared
-case-insensitively in provider-address/node scope. The example uses a locally
-administered synthetic value. There is no automatic allocation or search for
-external conflicts. This identity is consumed by control/trust checks and cannot
-waive [owned-update continuity](lifecycle.md#later-deployments-and-ownership-checks).
+`guests.<id>.interfaces.<id>.mac` is required text containing six hexadecimal octets separated by colons. Uppercase and lowercase letters are accepted; collision checks ignore case within the same provider address and node. The example uses a synthetic, locally administered value. HomeLab does not allocate MAC addresses or search for external conflicts. Control and trust checks use this identity, and [ownership checks for later deployments](lifecycle.md#later-deployments-and-ownership-checks) still apply.
 
 <a id="field-guest-nic-ipv6"></a>
 ### NIC IPv6 setting
 
-`guests.<id>.interfaces.<id>.ipv6` is optional. When present its only accepted
-value is the string `manual`; null, empty and other values refuse. Omission
-leaves the field absent from provider output. This is not a general IPv6
-allocation contract. IPv6 literals accepted by [address groups](#address-groups)
-remain policy values, not guest addresses.
+`guests.<id>.interfaces.<id>.ipv6` is optional. If present, it must be the string `manual`; null, empty and other values are rejected. Omitting it leaves the field out of the provider output. This field does not support general IPv6 allocation. IPv6 literals in [address groups](#address-groups) are policy values and do not allocate guest addresses.
 
 <a id="field-guest-nic-address"></a>
 ### NIC address branches
 
-`guests.<id>.interfaces.<id>.address` is a required closed object. Its `mode`
-selects the complete shape below; branch fields are not endpoint references.
+`guests.<id>.interfaces.<id>.address` is required. Its `mode` determines exactly which fields it accepts, as shown below. The address fields contain values, not references to endpoint objects.
 
 | Mode | Exact accepted example | Resolution and restriction |
 | --- | --- | --- |
@@ -183,144 +123,78 @@ selects the complete shape below; branch fields are not endpoint references.
 <a id="field-guest-nic-address-mode"></a>
 #### Address mode
 
-The full path is `guests.<id>.interfaces.<id>.address.mode`. This required
-string is exactly `static`, `dhcp` or `manual`, with no default. Null/empty and
-unknown values refuse. The selected variant determines required/forbidden keys.
-Mode changes also affect the [ordinary route rule](#field-guest-nic-default-route)
-and control reachability; structural acceptance is not a live transition plan.
+The full path is `guests.<id>.interfaces.<id>.address.mode`. This required string must be exactly `static`, `dhcp` or `manual`, with no default. Null, empty and unknown values are rejected. The selected mode determines which keys are required and which are forbidden. Changing mode also affects the [ordinary route rule](#field-guest-nic-default-route) and control reachability. Passing structural validation does not establish a safe transition on the running guest.
 
 <a id="field-guest-nic-address-value"></a>
 #### Static address value
 
-`guests.<id>.interfaces.<id>.address.value` is required only for `static` and
-forbidden otherwise. It is a canonical IPv4 address without prefix or port.
-Omission/null/empty refuse; there is no default. Resolution requires a member
-of the selected subnet other than its network/broadcast address, appends the
-prefix for provider output and checks declared address conflicts in
-provider-address/node/bridge/VLAN scope. It does not discover outside allocations.
+`guests.<id>.interfaces.<id>.address.value` is required for `static` and forbidden in the other modes. It must be a canonical IPv4 address without a prefix or port. There is no default; omitted, null and empty values are rejected. The resolver requires a usable member of the selected subnet, excluding its network and broadcast addresses. It appends the prefix for provider output and checks for duplicate declared addresses within the same provider address, node, bridge and VLAN. It does not discover allocations outside the configuration.
 
 <a id="field-guest-nic-address-endpoint"></a>
 #### DHCP expected endpoint
 
-`guests.<id>.interfaces.<id>.address.endpoint` is required only for `dhcp` and
-forbidden otherwise. Its canonical IPv4, absence/null/empty, usable-subnet and
-conflict rules match [static value](#field-guest-nic-address-value). It names an
-expected lease address, not a lease reservation. Actual DHCP/trust admission
-belongs to the [target preparation boundary](../guides/prepare-deployment.md#network-and-control-access).
+`guests.<id>.interfaces.<id>.address.endpoint` is required for `dhcp` and forbidden in the other modes. It follows the [static value rules](#field-guest-nic-address-value) for canonical IPv4 format, missing or empty values, usable subnet addresses and duplicate addresses. It names the expected lease address without reserving a lease. Check the actual DHCP and trust prerequisites during [target preparation](../guides/prepare-deployment.md#network-and-control-access).
 
 <a id="field-guest-nic-default-route"></a>
 ### NIC default route
 
-`guests.<id>.interfaces.<id>.default_route` is optional Boolean. The validator
-and resolver read omission as false; null, numbers and strings refuse. True is
-accepted only for `static` and requires the selected network's
-[gateway](#field-network-gateway).
+`guests.<id>.interfaces.<id>.default_route` is an optional Boolean. The validator and resolver treat omission as false and reject null, numbers and strings. Only `static` mode accepts true, and the selected network must provide a [gateway](#field-network-gateway).
 
-Each guest must have exactly one effective ordinary route: one DHCP NIC **or**
-one static NIC with `default_route: true`. DHCP already contributes the route;
-retaining that static-only flag refuses. Manual contributes none.
-[Source-policy routing](guests.md#guest-source-policy-route) is separately declared.
+Each guest must have exactly one effective ordinary route: one DHCP NIC **or** one static NIC with `default_route: true`. A DHCP NIC already supplies that route, so setting the static-only flag on it is rejected. A manual NIC supplies no route. Declare [source-policy routing](guests.md#guest-source-policy-route) separately.
 
-For a valid variation, replace management `address` with
-`{mode: dhcp, endpoint: 198.18.20.10}` and remove `default_route` (or set false).
-The tutorial's second NIC stays static and non-default. To exercise manual mode,
-change only that second NIC's address to `{mode: manual}`. Its address then
-becomes unavailable to app roles; the static management NIC remains the control
-and default route. These are independent changes to the complete tutorial.
+For a valid variation, replace management `address` with `{mode: dhcp, endpoint: 198.18.20.10}` and remove `default_route` (or set false). The tutorial's second NIC stays static and non-default. To exercise manual mode, change only that second NIC's address to `{mode: manual}`. Its address then becomes unavailable to app roles; the static management NIC remains the control and default route. These are independent changes to the complete tutorial.
 
 ## Resolution and output
 
-The static example resolves to a provider NIC with `bridge: example0`,
-`vlan: null`, its selected MAC, `ipv4: 198.18.20.10/24` and
-`gateway: 198.18.20.1`. The interface-address lookup yields `198.18.20.10`.
-The selected `ipv6: manual` is copied. Omitting that source key omits it from output.
-DHCP output uses `ipv4: dhcp`, `gateway: null` and a declared `ipv4_endpoint`.
-Manual output uses `ipv4: manual` and has no resolved app address.
+The static example resolves to a provider NIC with `bridge: example0`, `vlan: null`, its selected MAC, `ipv4: 198.18.20.10/24` and `gateway: 198.18.20.1`. The interface-address lookup yields `198.18.20.10`. The selected `ipv6: manual` is copied. Omitting that source key omits it from output. DHCP output uses `ipv4: dhcp`, `gateway: null` and a declared `ipv4_endpoint`. Manual output uses `ipv4: manual` and has no resolved app address.
 
-An [app interface binding](apps.md#interface-roles) consumes these values through
-its accepted profile role. A NIC alone publishes no app endpoint, grants no
-traffic and creates no readiness edge. Those belong to [listeners](supporting-types.md),
-[policies](policies.md), [connections](connections.md) and [exposures](exposures.md).
+An [app interface binding](apps.md#interface-roles) assigns these values to a role accepted by its profile. Configuring a NIC does not publish an app endpoint, grant network access or make execution wait for another app. Configure those relationships through [listeners](supporting-types.md), [policies](policies.md), [connections](connections.md) and [exposures](exposures.md).
 
 ## Network and NIC diagnostics
 
-Each variation starts from the valid complete tutorial and changes one input.
-The relevant error path is available when the owning boundary attaches one;
-a generic `component.invalid` must not be interpreted as a more specific code.
+Each variation starts from the valid complete tutorial and changes one input. The relevant error path is available when the owning boundary attaches one; a generic `component.invalid` must not be interpreted as a more specific code.
 
 | Change | Stage / actual refusal | Supported correction |
 | --- | --- | --- |
 | CIDR `198.18.20.10/24` | Structural; `component.invalid at networks.primary` | Use canonical network address `198.18.20.0/24`. |
 | VLAN `4095` | Structural; `component.integer at networks.primary` | Choose null or integer 1–4094 for the intended network. |
 | Gateway null | Structural; `component.invalid at networks.primary` | Supply a usable IPv4 member, or omit only if no consumer requires it. |
-| DHCP plus `default_route: true` | Structural; `component.invalid at guests.resolver.interfaces.management` | Remove/false the flag; retain exactly one effective route. |
-| Unknown selected network | Resolution; `component.invalid` | Declare/select the network in the guest's context. |
+| DHCP plus `default_route: true` | Structural; `component.invalid at guests.resolver.interfaces.management` | Remove `default_route` or set it to false; retain exactly one effective route. |
+| Unknown selected network | Resolution; `component.invalid` | Declare the required network or select an existing network in the guest's context. |
 | No effective ordinary route | Guest structural rule; `component.default-route` | Supply one DHCP route or one static default route. |
 | Manual control NIC | Guest structural rule; `component.control-interface` | Select a static/DHCP interface with the required management reachability. |
 
-These corrections establish source acceptance only. For later failures use
-[troubleshooting](../operations/troubleshooting.md) and preserve ownership evidence.
+These corrections establish source acceptance only. For later failures use [troubleshooting](../operations/troubleshooting.md) and preserve ownership evidence.
 
 ## First installation
 
-A network has no independent installation action. The [guest](guests.md) consumes
-it through a supported creation path with real host bridge/VLAN/subnet/capacity,
-allocation and trust prerequisites. The tutorial intentionally fails deployment
-admission. Use [preparation](../guides/prepare-deployment.md), the selected profile's
-capability and [deployment procedure](../operations/deployment.md).
+A network is not installed independently. The [guest](guests.md) uses it during a supported installation, which requires the actual host bridge, VLAN, subnet, capacity, address allocation and trust inputs to be ready. The tutorial intentionally fails deployment admission. Follow [preparation](../guides/prepare-deployment.md), check the selected profile's capabilities and use the [deployment procedure](../operations/deployment.md).
 
 ## Later deployments
 
-Bridge/VLAN/address/MAC/slot/route changes affect provider NIC input and can
-interrupt management or service reachability. The saved-plan policy permits
-only its guarded actions and [refuses replacement/import/adoption](lifecycle.md#infrastructure-plan-policy).
-An allowed update is not proof of an interruption-free change. No automatic
-bridge provisioning, lease management, renumbering recovery or rollback is
-provided. Review effective values and the consumer's actual procedure before CD.
+Changing a bridge, VLAN, address, MAC, slot or route changes the NIC configuration sent to the provider and can interrupt management or service access. The saved-plan policy [rejects replacement, import and adoption](lifecycle.md#infrastructure-plan-policy) and permits only the actions it explicitly checks. An allowed update may still cause an interruption. HomeLab does not automatically provision bridges, manage leases, recover from renumbering or roll back these changes. Review the resulting values and your deployment procedure before CD.
 
 ## External endpoints
 
-Site `external_endpoints.<id>` requires `protocol` (`http/https/tcp/udp`),
-`address` (nonempty host/IPv4 text without URL separators or space), and integer
-`port` 1–65535. Optional `transport` is retained endpoint metadata; it does not
-automatically select a connection/route transport policy.
-Alternatively `address: {external: another_id}` reuses only that endpoint's
-address. Unknown references and cycles refuse. No DNS lookup is performed.
+Each site `external_endpoints.<id>` requires `protocol` (`http/https/tcp/udp`), `address` and `port`. The address must be nonempty hostname or IPv4 text without URL separators or spaces. The port must be an integer from 1 through 65535. Optional `transport` is stored as endpoint metadata; it does not automatically select a transport policy for a connection or route. Alternatively, `address: {external: another_id}` reuses only the other endpoint's address. Unknown references and cycles are rejected. The compiler does not perform a DNS lookup.
 
-General endpoint references are exactly `{external: id}` or
-`{app: id, endpoint: name}`. Where a binder needs IPv4, a hostname is insufficient.
+General endpoint references are exactly `{external: id}` or `{app: id, endpoint: name}`. Where a binder needs IPv4, a hostname is insufficient.
 
 ## Domains and host aliases
 
-`domains.<id>` is a hostname of 1–253 characters, labels 1–63 characters,
-letters/digits with internal hyphens. It is not a URL. Exposure hostname
-collisions are case-insensitive.
-`host_aliases.<id>: {hostname: name}` is Docker-local metadata with the same
-label rules plus internal underscores. It does not publish DNS.
+`domains.<id>` is a hostname of 1–253 characters, labels 1–63 characters, letters/digits with internal hyphens. It is not a URL. Exposure hostname collisions are case-insensitive. `host_aliases.<id>: {hostname: name}` is Docker-local metadata with the same label rules plus internal underscores. It does not publish DNS.
 
 ## Address groups
 
-Each object contains only nonempty `members`, an ordered list of literal IPv4 or
-IPv6 addresses/CIDRs, `{network: id}` or `{address_group: id}`.
-Network members expand to the existing canonical CIDR. Group expansion
-preserves duplicates and order; unknown references and cycles refuse even for
-unused groups. No automatic subnet union or deduplication occurs.
-The example below uses `primary` from the [complete tutorial](../examples/first-configuration/site.yaml).
-IPv6 literals are policy values, not IPv6 allocations. Each expanded firewall
-row must keep one address family and a compatible protocol. HTTP IP allowlists
-retain their IPv4-only contract and refuse groups containing IPv6 values.
+An address group contains only `members`: a nonempty, ordered list of literal IPv4 or IPv6 addresses/CIDRs, `{network: id}` references or `{address_group: id}` references. A network reference expands to its canonical CIDR. Group expansion preserves duplicates and order; it does not combine subnets or deduplicate values. Unknown references and cycles are rejected even in unused groups.
 
-Bounds: 256 authored members/group, 4096 expanded values/group, depth 64,
-65,536 aggregate expanded values, 4096 final policy rows/guest.
-Cartesian policy row count is checked before allocating it.
+The example below uses `primary` from the [complete tutorial](../examples/first-configuration/site.yaml). IPv6 literals describe policy and do not allocate IPv6 addresses. Each expanded firewall rule must use one address family and a compatible protocol. HTTP IP allowlists support IPv4 only and reject groups containing IPv6 values.
 
-The address group example below is a map value fragment for `address_groups`.
-It uses `primary` from the complete tutorial. These values neither grant traffic
-nor create endpoints or readiness edges; the consuming [policy](policies.md)
-adds its own restrictions.
+The limits are 256 authored members per group, 4096 expanded values per group, nesting depth 64, 65,536 expanded values in total and 4096 final policy rows per guest. The compiler checks the number of source-and-destination combinations before allocating those rows.
 
-A useful group combination reuses this network and one shared VPN atom without
-changing order or adding a dependency:
+The following fragment supplies map values for `address_groups` using `primary` from the complete tutorial. These values do not grant access, create endpoints or make execution wait for another component. The [policy](policies.md) using them applies its own restrictions.
+
+This example combines the network with a shared VPN subnet while preserving order and adding no execution dependency:
 
 <!-- example: network-groups -->
 ```yaml
@@ -328,19 +202,10 @@ vpn: {members: [198.18.15.0/28]}
 clients: {members: [{network: primary}, {address_group: vpn}]}
 ```
 
-It expands `clients` to `[198.18.20.0/24, 198.18.15.0/28]`. A self-reference
-refuses at group resolution; no automatic union or deduplication occurs.
+The resolver expands `clients` to `[198.18.20.0/24, 198.18.15.0/28]`. It rejects a group that references itself and does not automatically combine or deduplicate the resulting subnets.
 
 ## Verification and navigation
 
-Structural owners are [`network`, `interface` and `guest`](../../blueprints/component_types.py).
-The [`guest_values` resolver](../../blueprints/component_plan.py) owns consumed
-references and output. The maintained [reference examples](../../blueprints/test_component_reference_examples.py)
-parse the named examples through the real authored reader and resolve/lower
-complete sources. The [assurance record](../contributing/documentation-assurance.md)
-states which field records receive additional conformance checks. Source tests
-do not qualify host networking, DHCP leases or live management continuity.
+[`network`, `interface` and `guest`](../../blueprints/component_types.py) validate the input structure. The [`guest_values` resolver](../../blueprints/component_plan.py) checks references and generates the corresponding values. The maintained [reference example tests](../../blueprints/test_component_reference_examples.py) parse the named examples with the actual source reader and compile complete configurations into deployment packets. The [assurance record](../contributing/documentation-assurance.md) lists the field records covered by additional checks against the implementation. These source tests do not verify host networking, DHCP leases or continued management access on a running guest.
 
-[Reference index](README.md) · [Guest contract](guests.md) ·
-[Relationship guide](../guides/references-and-reuse.md) ·
-[Offline tutorial](../guides/first-configuration.md)
+[Reference index](README.md) · [Guest contract](guests.md) · [Relationship guide](../guides/references-and-reuse.md) · [Offline tutorial](../guides/first-configuration.md)

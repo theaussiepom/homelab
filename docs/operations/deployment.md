@@ -1,86 +1,44 @@
 # Deploy and verify
 
-This is the supported deployment path, not an instruction to deploy an arbitrary
-example. Begin with a real consumer site and compatible reviewed immutable
-framework/library selections.
+Use this guide when your configuration is ready to deploy to its intended hosts. Begin with real site inputs and compatible, reviewed framework and library revisions fixed to exact commits. The procedure applies only to installations and changes that the selected adapter supports.
 
 ## Prerequisites
 
-1. Supported Debian13 LXC platform, host/template/storage/network capacity and
-   appropriate provider/SSH permissions.
-2. Correct real endpoint allocations and SSH public keys; source admission
-   rejects known example bindings.
-3. Existing trusted CA/known-host inputs and protected controller paths with
-   their required ownership/modes. Compile does not test those files.
-4. A supported first-installation path or genuine current owned
-   receipt/backend/payload continuation, with no conflicting active/pending marker.
-   A site originally installed with `fresh` keeps that source for later deployments;
-   there is no required lifecycle toggle. `retained` is not an import mechanism.
-5. Declared exact software/artifact selections, app-specific data/credential/
-   database/device prerequisites and required traffic.
-6. Generated library/consumer workflows, selected protected environment and
-   runner labels, named secrets forwarded at every reusable-workflow edge.
-7. Current source tests, security/history/signature gates and the applicable
-   exact-current-head review decision. A skipped review is not acceptance.
-8. Explicit authority for the selected deployment/change, with recovery readiness
-   appropriate to its effects.
+1. A supported Debian 13 LXC platform, a suitable host and template, sufficient storage and network capacity, and appropriate provider and SSH permissions.
+2. Correct real endpoint allocations and SSH public keys. Source admission—the check that source is suitable for deployment—rejects known example bindings.
+3. Existing trusted certificate-authority (CA) and known-host inputs, plus protected controller paths with the required Unix ownership and permissions. Compilation does not test those files.
+4. Either a supported first-installation path, or current receipts, backend state and payloads proving that HomeLab owns the existing installation. There must be no conflicting active or pending marker. A site originally installed with `fresh` keeps that source for later deployments; there is no required lifecycle toggle. `retained` is not an import mechanism.
+5. Exact declared software and artifact selections, the app's required data, credentials, databases and devices, and the required network access.
+6. Generated workflows in the library and your deployment repository, the selected protected environment and runner labels, and named secrets forwarded at every reusable-workflow call.
+7. Current source tests and the required security, history and signature checks and the applicable review decision for the current commit. A skipped review is not acceptance.
+8. Explicit authority for the selected deployment/change, with recovery readiness appropriate to its effects.
 
-The consumer's guide supplies its actual paths and trigger. Public docs do not
-provide a default production repository, runner or credential.
+Your deployment repository's guide supplies the actual paths and trigger. Public docs do not provide a default production repository, runner or credential.
 
 ## First installation
 
-Complete [deployment preparation](../guides/prepare-deployment.md) and select an
-adapter with an actual supported fresh path. The consumer's reviewed procedure
-supplies its real trigger, immutable source selections, target context and
-protected inputs. Public synthetic examples are deliberately inadmissible.
-A valid plan does not create missing trust, data, accounts or vendor commissioning.
+Complete [deployment preparation](../guides/prepare-deployment.md) and choose an adapter that supports first installation. Use your deployment repository's reviewed procedure to supply the actual trigger, fixed source revisions, target context and protected inputs. Deployment admission deliberately rejects the public synthetic examples. A valid plan does not supply missing trust inputs, data or accounts, or perform initial setup that must be completed through the vendor's own process.
 
-Run only that supported procedure under authority for the selected installation.
-The phase contract below explains its effects and stopping boundary. For an
-already owned installation follow [later deployments](verify-and-maintain.md#later-deployments);
-keep supported `fresh` source unchanged rather than toggling lifecycle.
+Run only that supported procedure under authority for the selected installation. The phase contract below explains what the procedure does and when it stops. For an installation already managed by HomeLab follow [later deployments](verify-and-maintain.md#later-deployments); keep supported `fresh` source unchanged rather than toggling lifecycle.
 
 ## Review source before execution
 
-Compile offline, check workflow generation, inspect changed identities, storage,
-policies, private-source metadata and effective defaults.
-A successful check does not approve destructive operations or missing state.
-Keep generated artifacts tied to the same immutable source selections.
+Compile offline and check the generated workflow. Review changes to identities, storage, policies and private-source metadata, including the values inherited from defaults. Passing these checks does not authorize destructive operations or allow deployment with missing state. Generate and review every artifact from the same fixed source revisions.
 
 ## Phases and ordering
 
-Each enabled guest has one generated job, preserving explicit guest dependencies.
-Its ordered phases are infrastructure, preparation, app phases, then an optional
-final monitoring agent. Infrastructure uses the guarded OpenTofu plan/state
-contract. Preparation uses the explicit preparation DTO, then app phases select
-their own immutable payload/material and adapter-owned Ansible tasks.
+The generator creates one job for each enabled guest and preserves the declared dependencies between guests. Each job runs infrastructure, preparation, app phases and, when selected, a final monitoring-agent phase in that order. The infrastructure phase uses OpenTofu with the required plan and state checks. Preparation uses its defined data transfer object (DTO), which contains the inputs for that phase. Each app phase then selects its own fixed payload and protected inputs, plus the Ansible tasks owned by its adapter.
 
-Declared readiness changes ordering. Values alone do not. Required dependency
-or monitoring-server disablement refuses. Failure stops the chain; ordinary CD
-does not retry, release a HOLD or relabel an incomplete phase as success.
+Declared readiness dependencies change the order in which phases run. Value references alone do not. The workflow rejects a selection that disables a required dependency or required monitoring server. Failure stops the chain; the normal CD workflow does not retry, release a HOLD or relabel an incomplete phase as success.
 
 ## Observe and verify
 
-Check the exact workflow/source/run/attempt, every affected guest phase and
-ordinary completion receipt. Preserve generic/redacted failures and use a
-separately reviewed bounded read to establish cause where needed.
-Do not dump private controller files or runtime environment into CI logs.
+Check the exact workflow, source revisions, run and attempt. Confirm the result of every affected guest phase and its completion receipt—the saved record of that successful operation. Preserve generic or redacted failure output. Where needed, use a separately reviewed read-only check limited to the evidence needed to establish the cause. Do not dump private controller files or the runtime environment into CI logs.
 
-After successful CD, verify the intended layer: DNS answer, public TLS,
-backend transport, application health, authentication and data/device behavior.
-For telemetry use fresh observations; a cached healthy value is insufficient.
-Service acceptance and household/device acceptance can require additional checks
-beyond the pipeline. Use the [service verification guide](verify-and-maintain.md#service-verification)
-to define and record the actual outcome.
+After successful CD, verify the intended layer: DNS answer, public TLS, backend transport, application health, authentication and data/device behavior. For telemetry use fresh observations; a cached healthy value is insufficient. Service acceptance and household/device acceptance can require additional checks beyond the pipeline. Use the [service verification guide](verify-and-maintain.md#service-verification) to define and record the actual outcome.
 
 ## Failure and recovery
 
-Preserve prior canonical/immutable success, current HOLD/STARTED/checkpoint and
-input evidence. Do not delete markers or edit state to rerun.
-A recovery/restore or explicitly reviewed operator action has its own authority;
-this guide introduces no generic override.
-[Lifecycle](../reference/lifecycle.md) and [Troubleshooting](troubleshooting.md)
-describe the boundaries.
+Preserve the current pointer to the last successful operation, its immutable receipt, current HOLD and STARTED markers, checkpoints, and input evidence. Do not delete markers or edit state to rerun. Recovery, restore or an explicitly reviewed operator action requires separate authority; this guide introduces no generic override. [Lifecycle](../reference/lifecycle.md) and [Troubleshooting](troubleshooting.md) describe the boundaries.
 
 [Operations index](README.md)

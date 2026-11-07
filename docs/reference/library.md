@@ -1,8 +1,6 @@
 # Library
 
-A library is a versioned set of reusable definitions. Its root is `stack.json`;
-individual definitions may be JSON/YAML typed files. `images.json` is read when
-image selections require it.
+A library is a versioned set of reusable definitions. Its root is `stack.json`; individual definitions may be JSON/YAML typed files. `images.json` is read when image selections require it.
 
 | Property | Type / required / default | Definition |
 | --- | --- | --- |
@@ -19,61 +17,32 @@ image selections require it.
 | <a id="library-policies"></a>`policies` | Optional closed map | `network/transport/tls/middlewares/authentication`, each a named map |
 | <a id="library-bundles"></a>`bundles` | Optional named map, {} | Loaded/pinned reserved definitions; the current compiler does not expand bundle placement or provide a bundle authoring contract |
 
-All maps use the [identifier and size rules](site.md#properties).
-Definitions can use [complete typed sources](sources.md).
-Do not use reserved bundles to recreate the retired fixed guest catalogue.
+All maps use the [identifier and size rules](site.md#properties). Definitions can use [complete typed sources](sources.md). Do not use reserved bundles to recreate the retired fixed guest catalogue.
 
 ## Guest template
 
-Required `resources`, `startup` and `security` are complete
-[guest default objects](guests.md). Optional `software` and `runtime` are unique
-ID lists, default []. Optional `monitoring` is `{profile: monitoring_profile_id}`.
-A template has no VMID, network allocation or private path authority.
+A guest template requires complete [guest default objects](guests.md) for `resources`, `startup` and `security`. The optional `software` and `runtime` lists contain unique IDs and default to []. Optional `monitoring` has the form `{profile: monitoring_profile_id}`. A template does not assign a VMID, allocate a network address or take ownership of private paths.
 
 ## App profile
 
-Required `adapter`, `display_name`, `interfaces`.
-Optional maps default {}: `listeners`, `endpoints`, `storage`, `connections`,
-`health`, `properties`, `devices`, `secrets`.
-Optional unique ID lists `software/runtime` default [].
-Optional `authentication` is an authentication-profile ID.
-Optional `monitoring` is `{profile: monitoring_profile_id}`.
+An app profile requires `adapter`, `display_name` and `interfaces`. The optional maps `listeners`, `endpoints`, `storage`, `connections`, `health`, `properties`, `devices` and `secrets` each default to {}. The optional `software/runtime` lists contain unique IDs and default to []. Optional `authentication` selects an authentication-profile ID, and optional `monitoring` has the form `{profile: monitoring_profile_id}`.
 
-The adapter is one of the [18 registered adapters](support.md).
-Display name is nonempty text up to 4096 characters.
-Every nested profile field is described in [Supporting types](supporting-types.md);
-properties are the adapter's [closed property object](app-properties.md).
-Profiles can provide partial property defaults; the effective merged app
-properties must be complete.
+Select one of the [18 registered adapters](support.md). The display name must be nonempty text of at most 4096 characters. [Supporting types](supporting-types.md) describes every nested profile field, and [Application properties](app-properties.md) lists the properties each adapter accepts. Profiles may provide partial property defaults, but the result after merging app overrides must be complete.
 
 ## First installation
 
-A library is a source selection, not an installed service. Selecting a profile
-chooses its required roles and adapter capability; the consumer must supply
-valid instances and the selected profile's actual prepared inputs. Use the
-[support matrix](support.md) and [deployment preparation](../guides/prepare-deployment.md)
-to determine whether a fresh path exists.
+Selecting a library provides definitions for your configuration; it does not install a service. A profile determines the required roles and supported adapter behavior. Your site must supply valid instances and the prepared inputs that profile needs. Use the [support matrix](support.md) and [deployment preparation](../guides/prepare-deployment.md) to determine whether first installation is supported.
 
 <a id="ownership-and-updates"></a>
 ## Later deployments and effective defaults
 
-The library owns software/image versions, required roles, renderer service roles
-and defaults. The site owns instance bindings and allocations.
-Template resources/startup/security receive explicit guest field overrides.
-Profile properties receive explicit app field overrides. Lists of selected
-software/runtime are concatenated and conflicts refuse; there is no recursive
-merge language.
+The library selects software and image versions, required roles, the service roles used by renderers and default values. Your site supplies instance bindings and allocations. Explicit guest fields override the corresponding template resources, startup and security fields. Explicit app properties override the corresponding profile properties. Software and runtime lists are concatenated, and conflicting selections are rejected. Objects are not merged recursively.
 
-Changing a default can affect every consuming instance. Compare effective
-outputs, budgets and native plans, and document changed support requirements.
-A profile name change does not itself move retained data or transfer ownership.
+Changing a default can affect every consuming instance. Compare effective outputs, budgets and native plans, and document changed support requirements. A profile name change does not itself move retained data or transfer ownership.
 
 ## Worked reusable definition
 
-The library root is still fixed `stack.json`; the following is a complete YAML
-**guest-template leaf**, referenced by
-`guest_templates.base: {source: templates/base.yaml}` in that JSON manifest.
-It contains defaults, not a concrete VMID, host address or credential.
+The library root is still fixed `stack.json`; the following is a complete YAML **guest-template leaf**, referenced by `guest_templates.base: {source: templates/base.yaml}` in that JSON manifest. It contains defaults, not a concrete VMID, host address or credential.
 
 <!-- example: template-minimal -->
 ```yaml
@@ -84,16 +53,8 @@ startup: {started: true, start_on_boot: true, boot_order: 30}
 security: {unprivileged: true, protection: true, nesting: true, keyctl: false}
 ```
 
-Combine this with the tutorial's complete `recursive` app profile, its software,
-image/runtime/health declarations and the worked [guest](guests.md#worked-guest-and-inherited-defaults).
-A site may override only `memory_mib` while inheriting the other template fields.
-**Invalid variation:** omit `security.protection`, or set it false. The template
-must be complete and protected. Do not put an `identity` field here; VMID and
-hostname belong to the guest instance.
+Combine this with the tutorial's complete `recursive` app profile, its software, image/runtime/health declarations and the worked [guest](guests.md#worked-guest-and-inherited-defaults). A site may override only `memory_mib` while inheriting the other template fields. **Invalid variation:** omit `security.protection`, or set it false. The template must be complete and protected. Do not put an `identity` field here; VMID and hostname belong to the guest instance.
 
-See the [complete tutorial library](../examples/first-configuration/stack.json)
-for a minimal useful library that compiles and lowers without an external
-catalogue. Extracting its template into this leaf preserves effective packets;
-changing a default can affect all instances that inherit it.
+See the [complete tutorial library](../examples/first-configuration/stack.json) for a small working library that compiles into deployment packets without an external catalogue. Moving its template into this source file preserves the generated deployment inputs. Changing a default, however, can affect every instance that inherits it.
 
 [Reference index](README.md) · [Supporting types](supporting-types.md)

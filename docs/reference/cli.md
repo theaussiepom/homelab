@@ -1,7 +1,6 @@
 # CLI reference
 
-Run commands from the selected framework checkout with its locked Python
-dependencies. Paths below are arguments, not shell templates embedded in source.
+Run commands from the selected framework checkout with its locked Python dependencies. Paths below are arguments, not shell templates embedded in source.
 
 ## Compile: blueprints/compile.py
 
@@ -13,32 +12,20 @@ dependencies. Paths below are arguments, not shell templates embedded in source.
 | --disabled JSON | Default [] | Unique authored guest IDs excluded from execution |
 | --check | Optional flag | Compile all packets offline and print fixed success message, no packet output |
 | --guest ID | Required without check | Select authored packet |
-| --output FILE | Required without check | New create-only mode0600 JSON packet, parent must exist |
+| --output FILE | Required without check | Writes a new JSON packet with mode 0600. The output file must not already exist, and its parent directory must exist. |
 | --admit | Optional flag | Additional source suitability checks; selected output must be enabled |
 
-Compilation does not access credentials/targets. It rejects known synthetic
-address/domain/SSH/image bindings when admission is requested. Native paths,
-permissions and ownership remain later gates. Runtime packets are private.
+Compilation does not read credentials or contact targets. With admission enabled, it rejects known synthetic addresses, domains, SSH keys and image selections. Deployment checks the actual paths, permissions and ownership later. Keep runtime packets private.
 
-Python APIs: `compile.resolve_plan(stack_root, site_source, disabled=None,
-admit=False)`, `compile.lower_plan(plan)`, `compile.compile_site(...)`.
-A resolved plan seals its source/resolved/pin snapshot; post-resolution mutation
-refuses lowering.
+The Python APIs are `compile.resolve_plan(stack_root, site_source, disabled=None, admit=False)`, `compile.lower_plan(plan)` and `compile.compile_site(...)`. A resolved plan seals a snapshot of its source, resolved values and selected pins. Changing that snapshot causes packet generation to fail.
 
 ## Generate: blueprints/workflows.py
 
-Required `--stack PATH`, `--site FILE`; optional `--disabled JSON` ([])
-and `--check`. Check compares generated files and refuses mismatch.
-Without check, it synchronizes three library workflows and selected composite
-actions from the current framework recipe. It does not execute a workflow.
-Input filename is explicit; this command has no site-root option.
+This command requires `--stack PATH` and `--site FILE`. It also accepts `--disabled JSON` (default []) and `--check`. With `--check`, it compares existing files with the expected generated files and fails if they differ. Otherwise, it synchronizes three library workflows and selected composite actions from the current framework recipe. It generates files without executing a workflow. Supply the input filename explicitly; this command has no site-root option.
 
 ## Consumer wrapper: blueprints/private_workflows.py
 
-Required `--stack PATH`, `--site PATH`; optional `--check`.
-It generates/checks the thin consumer workflow from the selected published
-library/framework workflow references and real site model. Existing CI/security
-policy fields remain guarded. It is not a second parser or deployment engine.
+This command requires `--stack PATH` and `--site PATH`, and optionally accepts `--check`. It generates the consumer workflow, or checks that the existing workflow matches, using the selected published library and framework workflow references and the site configuration. Checks preserve the existing CI and security policy fields. The wrapper uses the existing parser and deployment engine.
 
 ## Coverage: tools/measure_coverage.py
 
@@ -49,20 +36,12 @@ policy fields remain guarded. It is not a second parser or deployment engine.
 | --suite NAME | Repeatable unique suite selection: framework, blueprints, applications, bootstrap, installer, network-recovery, source-tooling, stack, site |
 | --stack PATH | Optional consuming library tests |
 | --site PATH | Optional consuming site tests |
-| --fail-under NUMBER | Required gate convention100; omission permits exploratory measurement only |
+| --fail-under NUMBER | Required coverage checks use --fail-under 100. Omitting the option is only for exploratory measurement. |
 
-See the [verified commands and prerequisites](../contributing/testing.md).
-Reports may be private; do not upload them.
+See the [verified commands and prerequisites](../contributing/testing.md). Reports may be private; do not upload them.
 
 ## Protected execution interfaces
 
-`blueprints/credentials.py --packet FILE` binds the selected provider/SSH
-credential boundary. `proxmox/applications/deploy.py --packet FILE --phase ID`
-executes the current guarded phase.
-These are internal workflow interfaces with real effects, not local authoring,
-recovery, retry or HOLD-clearing commands. Their complete prerequisites include
-the selected workflow provenance, protected environment, controller ownership,
-trust, backend and exact input/phase selection. Use
-[Deployment](../operations/deployment.md); do not try a tutorial packet against them.
+`blueprints/credentials.py --packet FILE` loads and checks the selected provider and SSH credentials. `proxmox/applications/deploy.py --packet FILE --phase ID` executes the selected phase subject to deployment checks. These internal workflow commands have real effects. They are not supported commands for local authoring, recovery, retries or clearing HOLDs. They require the selected workflow provenance, a protected environment, verified controller ownership and trust, the expected backend, and the exact inputs and phase. Follow [Deployment](../operations/deployment.md); do not pass a tutorial packet to them.
 
 [Reference index](README.md)
