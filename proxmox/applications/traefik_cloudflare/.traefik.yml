@@ -6,4 +6,3 @@ testData:
   internalCIDRs:
     - 10.20.0.0/16
   originHeader: x-origin-key
-  originToken: synthetic-origin-value-for-tests

@@ -148,7 +148,11 @@ class TraefikTests(unittest.TestCase):
         for name in ('cloudflare.go', 'go.mod', 'LICENSE', '.traefik.yml'):
             row = mounts['/plugins-local/src/github.com/theaussiepom/homelab-cloudflare/' + name]
             self.assertTrue(row['read_only'])
-        self.assertEqual(len(mounts), len(BASELINE['traefik']['services']['traefik']['volumes']) + 4)
+        self.assertEqual(mounts['/run/secrets/cloudflare-origin-token'], {
+            'type': 'bind', 'source': '/opt/homelab-app/runtime/cloudflare-origin-token',
+            'target': '/run/secrets/cloudflare-origin-token', 'read_only': True,
+            'bind': {'create_host_path': False}})
+        self.assertEqual(len(mounts), len(BASELINE['traefik']['services']['traefik']['volumes']) + 5)
 
     def test_selected_provider_acme_routes_and_certificate_store_mounts_are_exact(self):
         app=descriptor('traefik');app['identity']['runtime_directory']='/opt/homelab-app/runtime/ingress-a'
