@@ -183,8 +183,6 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
         gates = [row['plugin']['cloudflare-source'] for row in shared['middlewares'].values()
                  if 'cloudflare-source' in row.get('plugin', {})]
         require(bool(gates), 'Select an explicit Cloudflare source middleware')
-        for gate in gates:
-            gate['originToken'] = token_value
     expected_ca = {key for key, value in shared['transports'].items() if 'ca_file' in value}
     require(expected_ca == set(route_files), 'Retain exactly the selected route CA mounts')
     rows = [_row('traefik.yml', json.dumps(foundation.ingress_static(selected, token), indent=2)+'\n'),
@@ -199,6 +197,7 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
     rows += [_row('pve-ca.pem', _certificate(public_ca)),
              _row('cloudflare-dns-token', secrets['cloudflare_dns_token'])]
     if cloudflare:
+        rows.append(_row('cloudflare-origin-token', secrets['cloudflare_origin_token']))
         for leaf, name in (('cloudflare.go', 'cloudflare.go'), ('cloudflare-go.mod', 'go.mod'),
                            ('cloudflare-LICENSE', 'LICENSE'), ('cloudflare-manifest.yml', '.traefik.yml')):
             rows.append(_row(leaf, (Path(__file__).with_name('traefik_cloudflare') / name).read_bytes()))

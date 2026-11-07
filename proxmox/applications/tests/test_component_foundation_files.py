@@ -66,7 +66,10 @@ class FoundationFilesTests(unittest.TestCase):
         self.assertEqual(static['experimental']['localPlugins'], {'cloudflare-source': {'moduleName': 'github.com/theaussiepom/homelab-cloudflare'}})
         self.assertFalse(static['entryPoints']['websecure'].get('forwardedHeaders', {}).get('insecure', False))
         self.assertEqual(shared['http']['middlewares']['public']['plugin']['cloudflare-source'], {
-            'internalCIDRs': ['10.0.0.0/8'], 'originHeader': 'x-origin-token', 'originToken': 'synthetic-retained-origin-token'})
+            'internalCIDRs': ['10.0.0.0/8'], 'originHeader': 'x-origin-token'})
+        self.assertEqual(rows['cloudflare-origin-token']['content'], secrets['cloudflare_origin_token'])
+        self.assertEqual(rows['cloudflare-origin-token']['mode'], '0400')
+        self.assertNotIn(secrets['cloudflare_origin_token'].decode(), rows['shared.yml']['content'])
         for name in ('cloudflare.go', 'cloudflare-go.mod', 'cloudflare-LICENSE', 'cloudflare-manifest.yml'):
             self.assertEqual(rows[name]['content'], (F/'proxmox/applications/traefik_cloudflare'/name.replace('cloudflare-go.mod', 'go.mod').replace('cloudflare-LICENSE', 'LICENSE').replace('cloudflare-manifest.yml', '.traefik.yml')).read_bytes())
             self.assertEqual(rows[name]['mode'], '0400')

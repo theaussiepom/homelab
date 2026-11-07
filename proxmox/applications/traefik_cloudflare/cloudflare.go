@@ -1,4 +1,4 @@
-// Package cloudflare adapts the retained Cloudflare middleware to a socket-peer
+// Package homelab_cloudflare adapts the retained Cloudflare middleware to a socket-peer
 // trust boundary, with bounded synchronized refresh and a private origin token.
 package homelab_cloudflare
 
@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -21,15 +22,18 @@ const refreshInterval = 24 * time.Hour
 const retryInterval = 5 * time.Minute
 const maximumAge = 72 * time.Hour
 const maximumBody = 65536
+const originTokenFile = "/run/secrets/cloudflare-origin-token"
 
+// Config declares explicit internal peers and the retained origin-header boundary.
 type Config struct {
 	InternalCIDRs []string `json:"internalCIDRs"`
 	OriginHeader  string   `json:"originHeader"`
-	OriginToken   string   `json:"originToken"`
 }
 
+// CreateConfig starts without any implicit internal trust or origin credential.
 func CreateConfig() *Config { return &Config{} }
 
+// Cloudflare owns an isolated, synchronized address cache for one middleware.
 type Cloudflare struct {
 	next                     http.Handler
 	internal                 []*net.IPNet
@@ -43,13 +47,41 @@ type Cloudflare struct {
 	lastSuccess, nextRefresh time.Time
 }
 
+// New initializes bounded public trust while preserving internal access on feed failure.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
+	token, err := readToken(originTokenFile)
+	if err != nil {
+		return nil, errors.New("invalid retained origin credential")
+	}
+	return newMiddleware(ctx, next, config, name, token)
+}
+
+// readToken reads only a bounded private regular file; the configured middleware never contains its value.
+func readToken(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return "", errors.New("invalid origin credential file")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", errors.New("unreadable origin credential file")
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, 4097))
+	if err != nil || len(raw) < 16 || len(raw) > 4096 || len(strings.TrimSpace(string(raw))) == 0 || strings.ContainsAny(string(raw), "\r\n\x00") {
+		return "", errors.New("invalid origin credential")
+	}
+	return string(raw), nil
+}
+
+// newMiddleware constructs the source boundary from already selected private bytes.
+func newMiddleware(ctx context.Context, next http.Handler, config *Config, name, originToken string) (http.Handler, error) {
 	if config == nil || len(config.InternalCIDRs) == 0 || len(config.InternalCIDRs) > 256 ||
-		!validHeader(config.OriginHeader) || len(config.OriginToken) < 16 || len(config.OriginToken) > 4096 ||
-		strings.ContainsAny(config.OriginToken, "\r\n\x00") {
+		!validHeader(config.OriginHeader) || len(originToken) < 16 || len(originToken) > 4096 ||
+		strings.ContainsAny(originToken, "\r\n\x00") {
 		return nil, errors.New("invalid Cloudflare source configuration")
 	}
-	c := &Cloudflare{next: next, header: config.OriginHeader, token: config.OriginToken,
+	c := &Cloudflare{next: next, header: config.OriginHeader, token: originToken,
 		url: feedURL, now: time.Now, client: &http.Client{Timeout: 5 * time.Second,
 			CheckRedirect: func(r *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}}
 	for _, raw := range config.InternalCIDRs {
@@ -68,10 +100,11 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		c.internal = append(c.internal, network)
 	}
 	// An initial feed outage must not take declared internal access down.
-	c.refresh(ctx)
+	c.refresh()
 	return c, nil
 }
 
+// validHeader restricts the credential field without reusing identity headers.
 func validHeader(value string) bool {
 	if !strings.HasPrefix(value, "x-") || len(value) > 64 || value != strings.ToLower(value) {
 		return false
@@ -84,6 +117,7 @@ func validHeader(value string) bool {
 	return !strings.HasPrefix(value, "x-forwarded-") && value != "x-real-ip"
 }
 
+// contains matches only a parsed socket or visitor address against selected networks.
 func contains(networks []*net.IPNet, ip net.IP) bool {
 	for _, network := range networks {
 		if network.Contains(ip) {
@@ -93,7 +127,8 @@ func contains(networks []*net.IPNet, ip net.IP) bool {
 	return false
 }
 
-func (c *Cloudflare) refresh(ctx context.Context) {
+// refresh serializes shared trust updates independently of visitor cancellation.
+func (c *Cloudflare) refresh() {
 	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
 	now := c.now()
@@ -103,7 +138,7 @@ func (c *Cloudflare) refresh(ctx context.Context) {
 	if !due {
 		return
 	}
-	networks, err := c.fetch(ctx)
+	networks, err := c.fetch(context.Background())
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err != nil {
@@ -118,6 +153,7 @@ func (c *Cloudflare) refresh(ctx context.Context) {
 	c.nextRefresh = now.Add(refreshInterval)
 }
 
+// fetch validates a bounded feed response using the client timeout and TLS policy.
 func (c *Cloudflare) fetch(ctx context.Context) ([]*net.IPNet, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
 	if err != nil {
@@ -163,6 +199,7 @@ func (c *Cloudflare) fetch(ctx context.Context) ([]*net.IPNet, error) {
 	return networks, nil
 }
 
+// ServeHTTP authorizes the original peer before rebuilding trusted forwarding identity.
 func (c *Cloudflare) ServeHTTP(w http.ResponseWriter, original *http.Request) {
 	host, port, err := net.SplitHostPort(original.RemoteAddr)
 	peer := net.ParseIP(host)
@@ -183,7 +220,7 @@ func (c *Cloudflare) ServeHTTP(w http.ResponseWriter, original *http.Request) {
 		c.next.ServeHTTP(w, r)
 		return
 	}
-	c.refresh(r.Context())
+	c.refresh()
 	c.mu.RLock()
 	available := len(c.cidrs) > 0 && c.now().Sub(c.lastSuccess) <= maximumAge
 	trusted := contains(c.cidrs, peer)
@@ -234,10 +271,11 @@ func (c *Cloudflare) ServeHTTP(w http.ResponseWriter, original *http.Request) {
 	c.next.ServeHTTP(w, r)
 }
 
+// scrub removes canonical and aliased identity/credential fields before forwarding.
 func scrub(r *http.Request, tokenHeader string) {
 	blocked := map[string]bool{}
 	for _, name := range []string{"forwarded", "x-forwarded-for", "x-real-ip", "x-forwarded-proto",
-		"x-forwarded-host", "x-forwarded-port", "cf-connecting-ip", "cf-visitor", tokenHeader} {
+		"x-forwarded-host", "x-forwarded-port", "cf-connecting-ip", "cf-connecting-ipv6", "cf-pseudo-ipv4", "cf-visitor", "true-client-ip", "x-client-ip", tokenHeader} {
 		blocked[name] = true
 	}
 	for name := range r.Header {
@@ -248,6 +286,7 @@ func scrub(r *http.Request, tokenHeader string) {
 	}
 }
 
+// setOrigin rebuilds forwarding origin from the validated scheme and routed Host.
 func setOrigin(r *http.Request, scheme string) {
 	r.Header.Set("X-Forwarded-Proto", scheme)
 	r.Header.Set("X-Forwarded-Host", r.Host)

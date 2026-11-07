@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,8 +29,8 @@ func setup(t *testing.T, next http.Handler) *Cloudflare {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(validFeed)), Header: http.Header{}}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
-	config := &Config{InternalCIDRs: []string{"10.0.0.0/8"}, OriginHeader: "x-origin-key", OriginToken: fixtureToken}
-	handler, err := New(context.Background(), next, config, "fixture")
+	config := &Config{InternalCIDRs: []string{"10.0.0.0/8"}, OriginHeader: "x-origin-key"}
+	handler, err := newMiddleware(context.Background(), next, config, "fixture", fixtureToken)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,6 +50,8 @@ func request(peer string) *http.Request {
 	r.Header.Set("X-Real-IP", "10.0.0.1")
 	r.Header.Set("Forwarded", "for=10.0.0.1")
 	r.Header.Set("X_Forwarded_For", "10.0.0.9")
+	r.Header.Set("True-Client-IP", "10.0.0.9")
+	r.Header.Set("CF-Connecting-IPv6", "2001:db8::9")
 	return r
 }
 
@@ -79,7 +83,7 @@ func TestPeerBoundaryAndHeaders(t *testing.T) {
 	if code(c, r) != 204 || got.RemoteAddr != r.RemoteAddr || got.Header.Get("X-Forwarded-For") != "10.0.0.2" || got.Header.Get("X-Real-IP") != "10.0.0.2" || got.Header.Get("X-Forwarded-Proto") != "https" {
 		t.Fatal("internal peer denied or rewritten")
 	}
-	for _, h := range []string{"X-Origin-Key", "CF-Visitor", "CF-Connecting-IP", "Forwarded", "X_Forwarded_For"} {
+	for _, h := range []string{"X-Origin-Key", "CF-Visitor", "CF-Connecting-IP", "Forwarded", "X_Forwarded_For", "True-Client-IP", "CF-Connecting-IPv6"} {
 		if got.Header.Get(h) != "" {
 			t.Fatal("internal spoof survived", h)
 		}
@@ -197,14 +201,71 @@ func TestConfigRefusals(t *testing.T) {
 	if CreateConfig() == nil {
 		t.Fatal("default configuration")
 	}
-	for _, cfg := range []*Config{nil, {}, {InternalCIDRs: []string{"0.0.0.0/0"}, OriginHeader: "x-origin", OriginToken: fixtureToken},
-		{InternalCIDRs: []string{"10.0.0.0/8"}, OriginHeader: "x-forwarded-for", OriginToken: fixtureToken},
-		{InternalCIDRs: []string{"10.0.0.0/8"}, OriginHeader: "x-origin", OriginToken: "short"},
-		{InternalCIDRs: []string{"bad"}, OriginHeader: "x-origin", OriginToken: fixtureToken},
-		{InternalCIDRs: []string{"10.0.0.0/8"}, OriginHeader: "X-Origin", OriginToken: fixtureToken},
-		{InternalCIDRs: []string{"10.0.0.0/8"}, OriginHeader: "x-origin!", OriginToken: fixtureToken}} {
-		if _, err := New(context.Background(), http.NotFoundHandler(), cfg, "fixture"); err == nil {
+	for _, cfg := range []*Config{nil, {}, {InternalCIDRs: []string{"0.0.0.0/0"}, OriginHeader: "x-origin"},
+		{InternalCIDRs: []string{"10.0.0.0/8"}, OriginHeader: "x-forwarded-for"},
+		{InternalCIDRs: []string{"bad"}, OriginHeader: "x-origin"},
+		{InternalCIDRs: []string{"10.0.0.0/8"}, OriginHeader: "X-Origin"},
+		{InternalCIDRs: []string{"10.0.0.0/8"}, OriginHeader: "x-origin!"}} {
+		if _, err := newMiddleware(context.Background(), http.NotFoundHandler(), cfg, "fixture", fixtureToken); err == nil {
 			t.Fatal("invalid config accepted")
 		}
+	}
+}
+
+func TestVisitorCancellationCannotPoisonSharedRefresh(t *testing.T) {
+	c := setup(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
+	c.cidrs = nil
+	c.nextRefresh = time.Time{}
+	c.client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Context().Err() != nil {
+			t.Error("visitor cancellation reached shared fetch")
+			return nil, r.Context().Err()
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(validFeed))}, nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if code(c, request("173.245.48.9:1234").WithContext(ctx)) != 204 {
+		t.Fatal("canceled visitor poisoned cache")
+	}
+	if code(c, request("173.245.48.9:1234")) != 204 {
+		t.Fatal("fresh visitor lost shared trust")
+	}
+}
+
+func TestProtectedOriginFile(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "origin")
+	if err := os.WriteFile(path, []byte(fixtureToken), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if token, err := readToken(path); err != nil || token != fixtureToken {
+		t.Fatal("private token file refused")
+	}
+	for _, raw := range []string{"short", strings.Repeat("x", 4097), strings.Repeat(" ", 16), "synthetic-value-with\nnewline"} {
+		if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readToken(path); err == nil {
+			t.Fatal("invalid private scalar accepted")
+		}
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readToken(path); err == nil {
+		t.Fatal("public token file accepted")
+	}
+	if _, err := readToken(root); err == nil {
+		t.Fatal("directory accepted")
+	}
+	if _, err := readToken(filepath.Join(root, "missing")); err == nil {
+		t.Fatal("missing token accepted")
+	}
+	if _, err := New(context.Background(), http.NotFoundHandler(), CreateConfig(), "missing"); err == nil {
+		t.Fatal("missing fixed token file accepted")
+	}
+	if _, err := newMiddleware(context.Background(), http.NotFoundHandler(), &Config{InternalCIDRs: []string{"10.0.0.0/8"}, OriginHeader: "x-origin"}, "short", "short"); err == nil {
+		t.Fatal("short token accepted")
 	}
 }

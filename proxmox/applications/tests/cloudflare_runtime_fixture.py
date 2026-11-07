@@ -58,6 +58,7 @@ while True:
 
 
 def main():
+    """Run synthetic peer/HTTPS checks and clean only this fixture's resources."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--traefik-image', required=True)
     parser.add_argument('--python-image', required=True)
@@ -67,6 +68,7 @@ def main():
     owned, networks = [], []
 
     def docker(*argv):
+        """Run a bounded disposable Docker command with readable diagnostics."""
         try:
             return subprocess.check_output(['docker', *argv], text=True, stderr=subprocess.STDOUT, timeout=60).strip()
         except subprocess.CalledProcessError as exc:
@@ -82,6 +84,9 @@ def main():
         assert code.count(original) == 1
         (plugin / 'cloudflare.go').write_text(code.replace(original, 'http://10.254.71.3:8080/ips'))
         (root / 'backend.py').write_text(BACKEND)
+        origin = root / 'origin-token'
+        origin.write_text('synthetic-origin-value-for-tests')
+        origin.chmod(0o400)
         subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
             '-keyout', str(root/'key.pem'), '-out', str(root/'cert.pem'), '-subj', '/CN=fixture.example.invalid',
             '-addext', 'subjectAltName=DNS:fixture.example.invalid'], check=True, capture_output=True)
@@ -95,8 +100,7 @@ def main():
                 for key,entry in (('plain','web'),('tls','secure'))},
             'services': {'echo': {'loadBalancer': {'servers': [{'url': 'http://10.254.71.3:8080'}]}}},
             'middlewares': {'boundary': {'plugin': {'cloudflare-source': {
-                'internalCIDRs': ['10.254.71.4/32'], 'originHeader': 'x-origin-key',
-                'originToken': 'synthetic-origin-value-for-tests'}}}}}}
+                'internalCIDRs': ['10.254.71.4/32'], 'originHeader': 'x-origin-key'}}}}}}
         for leaf, model in (('static.yml', static), ('dynamic.yml', dynamic)):
             (root/leaf).write_text(json.dumps(model))
         try:
@@ -110,12 +114,14 @@ def main():
             proxy=name+'-proxy';owned.append(proxy)
             docker('run','-d','--name',proxy,'--platform','linux/amd64','--network',networks[0],'--ip','10.254.71.2',
                 '-v',str(root)+':/fixture:ro','-v',str(plugin)+':/plugins-local/src/github.com/theaussiepom/homelab-cloudflare:ro',
+                '-v',str(origin)+':/run/secrets/cloudflare-origin-token:ro',
                 args.traefik_image,'--configFile=/fixture/static.yml')
             docker('network','connect','--ip','198.18.71.2',networks[1],proxy)
             headers={'X-Origin-Key':'synthetic-origin-value-for-tests','CF-Connecting-IP':'203.0.113.7',
-                'CF-Visitor':'{"scheme":"https"}','X-Forwarded-For':'198.18.71.44','X_Forwarded_For':'10.0.0.9'}
+                'CF-Visitor':'{"scheme":"https"}','X-Forwarded-For':'198.18.71.44','X_Forwarded_For':'10.0.0.9','True-Client-IP':'10.0.0.8'}
 
             def request(network, ip, target, scheme, values, expected):
+                """Check the real proxy from one explicitly selected synthetic peer."""
                 result=docker('run','--rm','--network',network,'--ip',ip,'--add-host','fixture.example.invalid:'+target,
                     '-v',str(root)+':/fixture:ro',args.python_image,'python','-c',CLIENT,target,scheme,json.dumps(values),str(expected))
                 return json.loads(result)
@@ -126,7 +132,7 @@ def main():
                 actual={k.lower():v for k,v in result['headers'].items()}
                 assert actual['x-real-ip']==ip and all(v.strip()==ip for v in actual['x-forwarded-for'].split(',')),actual
                 assert actual['x-forwarded-proto']=='https' and actual['x-forwarded-host'].startswith('fixture.example.invalid') and actual['x-forwarded-port']==port,actual
-                assert 'x-origin-key' not in actual and 'cf-connecting-ip' not in actual and 'x_forwarded_for' not in actual,actual
+                assert 'x-origin-key' not in actual and 'cf-connecting-ip' not in actual and 'x_forwarded_for' not in actual and 'true-client-ip' not in actual,actual
             websocket=request(networks[0],'10.254.71.4','10.254.71.2','https',{**headers,'Upgrade':'websocket','Connection':'Upgrade','Sec-WebSocket-Key':base64.b64encode(os.urandom(16)).decode(),'Sec-WebSocket-Version':'13'},101)
             assert websocket['websocket_proto']=='https'
             request(networks[0],'10.254.71.5','10.254.71.2','http',headers,403)
@@ -138,6 +144,7 @@ def main():
             failed_proxy=name+'-failed-proxy';owned.append(failed_proxy)
             docker('run','-d','--name',failed_proxy,'--platform','linux/amd64','--network',networks[0],'--ip','10.254.71.6',
                 '-v',str(root)+':/fixture:ro','-v',str(failed_plugin)+':/plugins-local/src/github.com/theaussiepom/homelab-cloudflare:ro',
+                '-v',str(origin)+':/run/secrets/cloudflare-origin-token:ro',
                 args.traefik_image,'--configFile=/fixture/static.yml')
             docker('network','connect','--ip','198.18.71.6',networks[1],failed_proxy)
             request(networks[1],'198.18.71.4','198.18.71.6','http',headers,503)

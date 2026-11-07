@@ -638,6 +638,7 @@ def _traefik(app, guest):
     foundation.ingress_service(service, mount=lambda name, target: _runtime_mount(app, name, target),
         certs_source=storage['source'], propagation_timeout_seconds=timeout, route_ca_mounts=route_mounts)
     if settings.get('cloudflare'):
+        service['volumes'].append(_runtime_mount(app, 'cloudflare-origin-token', '/run/secrets/cloudflare-origin-token'))
         for leaf, target in (('cloudflare.go', 'cloudflare.go'), ('cloudflare-go.mod', 'go.mod'),
                              ('cloudflare-LICENSE', 'LICENSE'), ('cloudflare-manifest.yml', '.traefik.yml')):
             service['volumes'].append(_runtime_mount(app, leaf,
