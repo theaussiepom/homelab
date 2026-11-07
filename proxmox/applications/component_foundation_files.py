@@ -178,8 +178,8 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
     shared = routing(app, route_plan)
     if cloudflare:
         selected['cloudflare'] = True
-        token_value = _scalar(secrets['cloudflare_origin_token'])
-        require(16 <= len(token_value) <= 4096, 'Supply the retained bounded origin token')
+        _scalar(secrets['cloudflare_origin_token'])
+        require(16 <= len(secrets['cloudflare_origin_token']) <= 4096, 'Supply the retained bounded origin token')
         gates = [row['plugin']['cloudflare-source'] for row in shared['middlewares'].values()
                  if 'cloudflare-source' in row.get('plugin', {})]
         require(bool(gates), 'Select an explicit Cloudflare source middleware')

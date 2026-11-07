@@ -73,6 +73,11 @@ class FoundationFilesTests(unittest.TestCase):
         for name in ('cloudflare.go', 'cloudflare-go.mod', 'cloudflare-LICENSE', 'cloudflare-manifest.yml'):
             self.assertEqual(rows[name]['content'], (F/'proxmox/applications/traefik_cloudflare'/name.replace('cloudflare-go.mod', 'go.mod').replace('cloudflare-LICENSE', 'LICENSE').replace('cloudflare-manifest.yml', '.traefik.yml')).read_bytes())
             self.assertEqual(rows[name]['mode'], '0400')
+        secrets['cloudflare_origin_token'] = ('é' * 2048).encode()
+        accepted = {row['path']: row for row in self.build((app, secrets, ca, cas, plan))}
+        self.assertEqual(len(accepted['cloudflare-origin-token']['content']), 4096)
+        secrets['cloudflare_origin_token'] += b'x'
+        with self.assertRaises(ValueError): self.build((app, secrets, ca, cas, plan))
         for bad in ('short', 'missing-gate'):
             if bad == 'short': secrets['cloudflare_origin_token'] = b'short'
             else:
