@@ -82,6 +82,7 @@ def runtime_files(app):
         result.update(row['filename'] for row in settings.get('route_ca_files', {}).values())
         if settings.get('cloudflare'):
             result.update({'cloudflare-origin-token', 'cloudflare.go', 'cloudflare-go.mod', 'cloudflare-LICENSE', 'cloudflare-manifest.yml'})
+        result.update(row['filename'] for row in settings.get('route_ca_certificates', {}).values())
     if name == 'zabbix' and app.get('authentication_resolved', {}).get('default_login') == 'saml':
         result.add('saml-login.php')
     if name=='mqtt_explorer':

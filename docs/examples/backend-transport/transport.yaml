@@ -1,0 +1,25 @@
+schema: homelab-components-v1
+kind: transport-policy
+type: tls
+server_name:
+  domain: backend
+certificate: |
+  -----BEGIN CERTIFICATE-----
+  MIIDCDCCAfCgAwIBAgIBATANBgkqhkiG9w0BAQsFADAiMSAwHgYDVQQDDBdiYWNr
+  ZW5kLmV4YW1wbGUuaW52YWxpZDAeFw0yMDAxMDEwMDAwMDBaFw00MDAxMDEwMDAw
+  MDBaMCIxIDAeBgNVBAMMF2JhY2tlbmQuZXhhbXBsZS5pbnZhbGlkMIIBIjANBgkq
+  hkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAu1byZrKMO4Wo3Ze+t/VAaMkhk0LiBJui
+  u4DdYDV1HGi4ddukIPwn17wkZTwg4mki/Ix8e7f6twc6O8WxfPy1i2RO1tSVkc+J
+  2MmAHaUmV/nUR1v7MoraEJIQ3FnzdsG/feoewkr9aFVm19OMS9tSgG8VitXodDht
+  SRbD3W0p48d4n6Hra3/iKXDy5m/IJnoPmOjAvoGKyNXtCBbVHWHnid0hXCqFTMDv
+  ZR+Mh+41Avqz/crnqN6UooQl0l9b64kclsHLFapcMxHg87naMn/NpsBGPqNmnxid
+  biB/apvtfh49SrLRbvk6OlSySeK1XtJe4yTg17Qcwx/ZSes+A/XQIwIDAQABo0kw
+  RzAiBgNVHREEGzAZghdiYWNrZW5kLmV4YW1wbGUuaW52YWxpZDAMBgNVHRMBAf8E
+  AjAAMBMGA1UdJQQMMAoGCCsGAQUFBwMBMA0GCSqGSIb3DQEBCwUAA4IBAQBIkcDf
+  vVEas8X4PqbDBc6JCR/t17y15h1tctrEc/+YxaIhYZ/qJiagNLJVdessE+jUBkn6
+  1ox4qzg+mkvvyIe1K/cm/Z4pijefuBvb+D1bZKPejwlnFqZi839X1A/qL+l1kAts
+  rNj6rorOtSw3i5rufRnpAqd8KpISYIgaP6F1FD+BffaXDyOGmGKFQIAZG3MfuKwR
+  nXlJTl++3XOKfZBSjixLykH4m8MjvodO4P3tQ6dr/WLVioa2kKcUzx+eBD8Pg9B3
+  r47Qhwn7TKOxMir0509LsRM8KbQDJOrTuahn+RtLdiGillAuW0j3f/lauCnbtICj
+  5iMyyg5SuowHQgRj
+  -----END CERTIFICATE-----

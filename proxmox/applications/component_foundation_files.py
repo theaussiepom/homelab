@@ -169,7 +169,11 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
     token = runtime_secrets.retained_provider_token(secrets['proxmox_token'], provider['token_id'])
     _scalar(secrets['cloudflare_dns_token'])
     route_files = settings.get('route_ca_files', {})
+    route_certificates = settings.get('route_ca_certificates', {})
     require(set(route_cas) == set(route_files), 'Supply exactly selected route trust bytes')
+    require(isinstance(route_certificates, dict)
+            and not set(route_certificates) & set(route_files),
+            'Keep selected public certificate and context trust bindings separate')
     selected = {'bind_address': app['role_addresses']['frontend'], 'proxmox_url': provider['url'],
         'proxmox_token_id': provider['token_id'], 'acme_email': acme['email'],
         'acme_dns_resolvers': acme['resolvers'], 'dashboard': app['properties'].get('dashboard', False)}
@@ -183,8 +187,10 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
         gates = [row['plugin']['cloudflare-source'] for row in shared['middlewares'].values()
                  if 'cloudflare-source' in row.get('plugin', {})]
         require(bool(gates), 'Select an explicit Cloudflare source middleware')
-    expected_ca = {key for key, value in shared['transports'].items() if 'ca_file' in value}
-    require(expected_ca == set(route_files), 'Retain exactly the selected route CA mounts')
+    expected_ca = {key for key, value in shared['transports'].items()
+                   if 'ca_file' in value or 'certificate' in value}
+    require(expected_ca == set(route_files) | set(route_certificates),
+            'Retain exactly the selected route CA mounts')
     rows = [_row('traefik.yml', json.dumps(foundation.ingress_static(selected, token), indent=2)+'\n'),
             _row('shared.yml', json.dumps(discovery.shared(shared), indent=2)+'\n')]
     for key, row in route_files.items():
@@ -194,6 +200,13 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
                 and row['source'] == shared['transports'][key]['ca_file'],
                 'Preserve the selected route trust binding')
         rows.append(_row(row['filename'], _certificate(route_cas[key])))
+    for key, row in route_certificates.items():
+        discovery.name(key)
+        require(isinstance(row, dict) and set(row) == {'certificate', 'filename'}
+                and row['filename'] == 'route-'+key+'.pem'
+                and row['certificate'] == shared['transports'][key].get('certificate'),
+                'Preserve the selected public certificate binding')
+        rows.append(_row(row['filename'], discovery.certificate(row['certificate']).encode()))
     rows += [_row('pve-ca.pem', _certificate(public_ca)),
              _row('cloudflare-dns-token', secrets['cloudflare_dns_token'])]
     if cloudflare:

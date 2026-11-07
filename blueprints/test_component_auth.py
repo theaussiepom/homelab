@@ -223,6 +223,31 @@ class AuthenticationUnitTests(unittest.TestCase):
 
 
 class TransportUnitTests(unittest.TestCase):
+    def test_public_trust_delegates_validation_and_preserves_exact_bytes_without_file_reads(self):
+        r, e = fixture()
+        r.policy['transport'] = {'selected': {'type': 'tls', 'certificate': 'public-pem',
+                                             'server_name': {'domain': 'host'}}}
+        with patch.object(auth, 'certificate', return_value='validated-public-pem') as parser, \
+             patch('builtins.open', side_effect=AssertionError('No configured trust file read')):
+            self.assertEqual(auth.transports(r, e), {'selected': {
+                'certificate': 'validated-public-pem', 'server_name': 'host.example.invalid'}})
+        parser.assert_called_once_with('public-pem', 'component.transport')
+
+    def test_real_public_certificate_integration_and_closed_trust_source_conflicts(self):
+        pem = (FRAMEWORK / 'proxmox/applications/tests/transport-synthetic-public-certificate.txt').read_text()
+        r, e = fixture()
+        r.policy['transport'] = {'selected': {'type': 'tls', 'certificate': pem}}
+        self.assertEqual(auth.transports(r, e), {'selected': {'certificate': pem}})
+        for value in ({'type': 'tls', 'context': 'primary', 'certificate': pem},
+                      {'type': 'tls', 'certificate': None}, {'type': 'tls', 'certificate': ''},
+                      {'type': 'tls', 'certificate': 'not-a-certificate'},
+                      {'type': 'tls', 'certificate': pem, 'insecure_skip_verify': True}):
+            with self.subTest(keys=list(value)):
+                r.policy['transport'] = {'selected': value}
+                with self.assertRaises(ComponentError) as raised:
+                    auth.transports(r, e)
+                self.assertNotIn('BEGIN CERTIFICATE', str(raised.exception))
+
     def test_context_ca_and_named_server_name_are_reused_with_no_file_read(self):
         r, e = fixture()
         with patch('builtins.open', side_effect=AssertionError('No trust file is read by source binding')):

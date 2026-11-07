@@ -311,6 +311,22 @@ class FoundationBindingEdges(unittest.TestCase):
         self.assertNotIn('discovery',app['settings']['provider']);self.assertEqual(app['settings']['route_ca_files'],{})
         self.assertEqual(app['settings']['acme']['resolvers'],['198.18.20.53:53','198.18.20.54:53'])
 
+    def test_traefik_binds_only_selected_inline_public_certificates_without_mutating_policy(self):
+        resolver,app=fixture('traefik');app['secret_bindings']={'cloudflare_dns_token':{},'proxmox_token':{}}
+        resolver.exposure_values['routes']['application']={
+            'inline':{'tls':'public','transport':'selected'},
+            'context':{'tls':'public','transport':'existing'}}
+        resolver.authentication_values['transports']={
+            'selected':{'certificate':'validated-public-pem'},
+            'unused':{'certificate':'unused-public-pem'},'existing':{'ca_file':'/selected/context.pem'}}
+        before=copy.deepcopy(resolver.authentication_values)
+        foundation.bind(resolver)
+        self.assertEqual(app['settings']['route_ca_certificates'],{
+            'selected':{'certificate':'validated-public-pem','filename':'route-selected.pem'}})
+        self.assertEqual(app['settings']['route_ca_files'],{
+            'existing':{'source':'/selected/context.pem','filename':'route-existing.pem'}})
+        self.assertEqual(resolver.authentication_values,before)
+
     def test_physical_address_resolution_refuses_unknown_nonphysical_or_unassigned_addresses(self):
         resolver,app=fixture('postgresql');app['properties']['client_access']=[]
         resolver.apps['peer']={'adapter':'node_red','interfaces':{'database':{'interface':'backend'}}}
