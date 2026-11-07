@@ -47,10 +47,10 @@ class ExposurePolicyReview(unittest.TestCase):
         r = fixture()
         r.policy['middlewares'] = {
             'public': {'type': 'cloudflare-source', 'local_allowlist': 'local', 'origin_header': 'x-origin-token'},
-            'local': {'type': 'ip-allow-list', 'ranges': ['10.20.0.0/16', '192.168.10.0/24']}}
+            'local': {'type': 'ip-allow-list', 'ranges': ['10.20.0.1', '192.168.10.15/24']}}
         api = Exposures(r); api.validate_policies()
         self.assertEqual(api.middlewares['public'], {'type': 'cloudflare-source',
-            'ranges': ['10.20.0.0/16', '192.168.10.0/24'], 'origin_header': 'x-origin-token'})
+            'ranges': ['10.20.0.1/32', '192.168.10.0/24'], 'origin_header': 'x-origin-token'})
         self.assertIn('local_allowlist', r.policy['middlewares']['public'])
 
     def test_cloudflare_policy_rejects_public_bypass_unknown_fields_and_unsafe_header(self):

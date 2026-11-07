@@ -98,13 +98,15 @@ class Exposures:
         for name, value in self.middlewares.items():
             if value['type'] == 'cloudflare-source':
                 selected = self.middlewares.get(value['local_allowlist'], {})
-                require(selected.get('type') == 'ip-allow-list' and len(selected['ranges']) <= 256 and
+                require(selected.get('type') == 'ip-allow-list', 'component.middleware')
+                ranges = [str(ipaddress.ip_network(row, strict=False)) for row in selected['ranges']]
+                require(len(ranges) <= 256 and
                         all(any(ipaddress.ip_network(row).subnet_of(ipaddress.ip_network(private))
                                 for private in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
-                            for row in selected['ranges']),
+                            for row in ranges),
                         'component.middleware')
                 self.middlewares[name] = {'type': 'cloudflare-source',
-                    'ranges': copy.deepcopy(selected['ranges']), 'origin_header': value['origin_header']}
+                    'ranges': ranges, 'origin_header': value['origin_header']}
 
     def bind(self):
         self.validate_policies()
