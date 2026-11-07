@@ -56,9 +56,20 @@ A transport policy requires `type: tls` and at least one of `context` or `server
 | default-headers | None | Fixed adapter-owned response headers |
 | forward-auth | endpoint | HTTP/HTTPS endpoint reference to the existing authentication service |
 | ip-allow-list | ranges | Nonempty ordered IPv4/CIDR, `{network: id}` or `{address_group: id}` list; final maximum 4096 values |
+| cloudflare-source | local_allowlist, origin_header | Socket-peer Cloudflare gate with a named internal allowlist and retained origin secret; see below |
 | canonical-home-redirect | app | Existing app with canonical origin; only a separate alias route with exactly canonical middleware list plus this final middleware |
 
 The redirect policy redirects to the canonical root; it does not accept arbitrary regular expressions. It cannot be attached to the canonical route itself. The redirect and canonical routes must use the same target and ingress, with no shared hostnames. Arbitrary Traefik or Compose middleware options are not accepted.
+
+## Cloudflare source boundary
+
+A `cloudflare-source` middleware has exactly `type`, `local_allowlist` and `origin_header`. `local_allowlist` names an `ip-allow-list` middleware whose at most 256 resolved IPv4 ranges lie entirely within RFC1918 networks (10/8, 172.16/12 or 192.168/16). `origin_header` is a lowercase `x-` header name of at most 64 characters; forwarded identity header names are rejected. Bare IPv4 values become `/32` ranges and CIDRs with host bits are normalized, matching the existing allowlist contract. Attach exactly one such middleware first on selected public HTTP exposures. Combining this middleware with `forward-auth` is currently rejected at source because authenticated callback routes have a separate fixed contract. The owning Traefik app must bind the `cloudflare_origin_token` secret role through an existing protected file or scalar source. The token must be 16–4096 UTF-8 bytes with no line breaks. It is placed only in a root-owned mode-0400 runtime secret file, never dynamic configuration or provider discovery annotations, and removed from backend requests.
+
+The framework bundles a reviewed local Traefik plugin adapted from the retained MIT Cloudflare middleware. It authorizes the socket peer, never `X-Forwarded-For`. Declared internal sources bypass Cloudflare verification and have supplied proxy/Cloudflare identity headers removed. A Cloudflare peer must supply one exact origin token and one valid visitor IP. The retained token is mounted as a fixed protected read-only file; its value is absent from the dynamic middleware configuration and Traefik configuration API. A supplied visitor scheme must be `http` or `https`; when omitted the actual incoming TLS state determines it. Forwarded identity is replaced with the validated visitor.
+
+The plugin fetches Cloudflare IPv4 and IPv6 ranges over verified HTTPS, with a five-second timeout, 64 KiB response bound and at most 256 ranges. Refresh is synchronized, normally every 24 hours; failure retries after five minutes and retains the last successful ranges for at most 72 hours. Missing or expired trust denies public requests while declared internal access remains available. Configuration compilation does not fetch ranges or prove plugin/network acceptance.
+
+For first installation, preserve provider/ACME connectivity and provision the retained token through the normal protected input path. For updates, deploy and verify middleware and every internal route restriction before widening frontend firewall reachability: infrastructure applies before application configuration. Keep the firewall opening in a later reviewed deployment. No extra Proxmox Cloudflare feed updater is required.
 
 ## Authentication policies
 

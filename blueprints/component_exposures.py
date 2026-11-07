@@ -85,8 +85,28 @@ class Exposures:
                     closed(value, ('type', 'app'))
                     require(value['app'] in self.resolver.apps, 'component.reference')
                     self.middlewares[name] = copy.deepcopy(value)
+                elif value.get('type') == 'cloudflare-source':
+                    closed(value, ('type', 'local_allowlist', 'origin_header'))
+                    require(identifier(value['local_allowlist']) and
+                            isinstance(value['origin_header'], str) and
+                            re.fullmatch(r'x-[a-z0-9-]{1,62}', value['origin_header']) and
+                            not value['origin_header'].startswith('x-forwarded-') and
+                            value['origin_header'] != 'x-real-ip', 'component.middleware')
+                    self.middlewares[name] = copy.deepcopy(value)
                 else:
                     require(False, 'component.middleware')
+        for name, value in self.middlewares.items():
+            if value['type'] == 'cloudflare-source':
+                selected = self.middlewares.get(value['local_allowlist'], {})
+                require(selected.get('type') == 'ip-allow-list', 'component.middleware')
+                ranges = [str(ipaddress.ip_network(row, strict=False)) for row in selected['ranges']]
+                require(len(ranges) <= 256 and
+                        all(any(ipaddress.ip_network(row).subnet_of(ipaddress.ip_network(private))
+                                for private in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
+                            for row in ranges),
+                        'component.middleware')
+                self.middlewares[name] = {'type': 'cloudflare-source',
+                    'ranges': ranges, 'origin_header': value['origin_header']}
 
     def bind(self):
         self.validate_policies()
@@ -126,6 +146,12 @@ class Exposures:
                             and endpoint.get('protocol') == 'https'), 'component.transport')
                     types.strings(value.get('middlewares', []), ids=True)
                     require(set(value.get('middlewares', [])) <= set(self.middlewares), 'component.reference')
+                    selected_middleware = value.get('middlewares', [])
+                    cloudflare = [index for index, key in enumerate(selected_middleware)
+                                  if self.middlewares[key]['type'] == 'cloudflare-source']
+                    require(not cloudflare or (cloudflare == [0] and not any(
+                        self.middlewares[key]['type'] == 'forward-auth' for key in selected_middleware)),
+                        'component.middleware')
                     require(endpoint.get('internal') == 'dashboard' or endpoint.get('protocol') in ('http', 'https'),
                             'component.exposure')
                     if endpoint.get('internal'):

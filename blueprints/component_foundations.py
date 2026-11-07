@@ -288,6 +288,12 @@ def bind(resolver):
                 values['acme']['resolvers'] = addresses
                 values['route_ca_files'] = {}
                 routes = getattr(resolver, 'exposure_values', {}).get('routes', {}).get(app_id, {})
+                middleware = getattr(resolver, 'exposure_values', {}).get('middlewares', {})
+                cloudflare = any(middleware[key]['type'] == 'cloudflare-source'
+                                 for row in routes.values() for key in row.get('middlewares', []))
+                if cloudflare:
+                    require('cloudflare_origin_token' in app['secret_bindings'], 'component.secret-required')
+                    values['cloudflare'] = True
                 require(all(resolver.policy['tls'][row['tls']]['resolver'] == 'letsencrypt'
                             for row in routes.values()), 'component.tls-resolver-unsupported')
                 transports = getattr(resolver, 'authentication_values', {}).get('transports', {})

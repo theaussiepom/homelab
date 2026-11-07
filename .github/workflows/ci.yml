@@ -37,6 +37,28 @@ jobs:
           image='ghcr.io/theaussiepom/winet-extractor@sha256:82c6b886967995f0a3cfe6fb5e20eeef70d10aa525d5bd824064eb272e1ce51a'
           docker pull "$image"
           python3 proxmox/applications/tests/winet_health_fixture.py "$image"
+  cloudflare-runtime:
+    name: Cloudflare source boundary (race and Traefik)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Test middleware behavior and concurrent refresh
+        run: |
+          image='golang@sha256:4f43b271f9673eb7bd0cb3a49cc17b08d8d6ee110277e26dbacc93c43a5a7793'
+          docker pull "$image"
+          docker run --rm --network none -v "$PWD/proxmox/applications/traefik_cloudflare:/src:ro" \
+            -w /src "$image" go test -race -cover ./...
+      - name: Verify actual Traefik visitor headers, internal HTTPS and websocket
+        run: |
+          traefik='traefik@sha256:1336e85aaed293bd63d005086e0dd013b04078b26aaeb1c18b26a2f928af7e65'
+          python='python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de'
+          docker pull "$traefik"
+          docker pull "$python"
+          python3 proxmox/applications/tests/cloudflare_runtime_fixture.py \
+            --traefik-image "$traefik" --python-image "$python"
   changes:
     name: Detect installer changes
     if: github.event_name != 'schedule'
@@ -415,7 +437,7 @@ jobs:
   validate:
     name: Repository validation
     if: always() && github.event_name != 'schedule'
-    needs: [blueprints, changes, monitoring, bitwarden-runtime, retained-runtimes, applications, iso-unit, python, source-safety, dependency-review, analyze, installer-disk-safety, installer-config-validation]
+    needs: [blueprints, cloudflare-runtime, changes, monitoring, bitwarden-runtime, retained-runtimes, applications, iso-unit, python, source-safety, dependency-review, analyze, installer-disk-safety, installer-config-validation]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:

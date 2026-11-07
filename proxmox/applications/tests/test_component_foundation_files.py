@@ -51,6 +51,40 @@ def ingress():
 
 
 class FoundationFilesTests(unittest.TestCase):
+    def test_cloudflare_owned_plugin_and_origin_token_are_only_in_private_payload(self):
+        app, secrets, ca, cas, plan = ingress()
+        app['settings']['cloudflare'] = True
+        from application_contract import runtime_files
+        self.assertTrue({'cloudflare.go', 'cloudflare-go.mod', 'cloudflare-LICENSE', 'cloudflare-manifest.yml'} <= runtime_files(app))
+        app['input_sources']['cloudflare_origin_token'] = {'type': 'file', 'path': '/protected/origin'}
+        secrets['cloudflare_origin_token'] = b'synthetic-retained-origin-token'
+        plan['middlewares']['public'] = {'type': 'cloudflare-source', 'ranges': ['10.0.0.0/8'], 'origin_header': 'x-origin-token'}
+        plan['routes']['external']['middlewares'].insert(0, 'public')
+        rows = {row['path']: row for row in self.build((app, secrets, ca, cas, plan))}
+        static = json.loads(rows['traefik.yml']['content'])
+        shared = json.loads(rows['shared.yml']['content'])
+        self.assertEqual(static['experimental']['localPlugins'], {'cloudflare-source': {'moduleName': 'github.com/theaussiepom/homelab-cloudflare'}})
+        self.assertFalse(static['entryPoints']['websecure'].get('forwardedHeaders', {}).get('insecure', False))
+        self.assertEqual(shared['http']['middlewares']['public']['plugin']['cloudflare-source'], {
+            'internalCIDRs': ['10.0.0.0/8'], 'originHeader': 'x-origin-token'})
+        self.assertEqual(rows['cloudflare-origin-token']['content'], secrets['cloudflare_origin_token'])
+        self.assertEqual(rows['cloudflare-origin-token']['mode'], '0400')
+        self.assertNotIn(secrets['cloudflare_origin_token'].decode(), rows['shared.yml']['content'])
+        for name in ('cloudflare.go', 'cloudflare-go.mod', 'cloudflare-LICENSE', 'cloudflare-manifest.yml'):
+            self.assertEqual(rows[name]['content'], (F/'proxmox/applications/traefik_cloudflare'/name.replace('cloudflare-go.mod', 'go.mod').replace('cloudflare-LICENSE', 'LICENSE').replace('cloudflare-manifest.yml', '.traefik.yml')).read_bytes())
+            self.assertEqual(rows[name]['mode'], '0400')
+        secrets['cloudflare_origin_token'] = ('é' * 2048).encode()
+        accepted = {row['path']: row for row in self.build((app, secrets, ca, cas, plan))}
+        self.assertEqual(len(accepted['cloudflare-origin-token']['content']), 4096)
+        secrets['cloudflare_origin_token'] += b'x'
+        with self.assertRaises(ValueError): self.build((app, secrets, ca, cas, plan))
+        for bad in ('short', 'missing-gate'):
+            if bad == 'short': secrets['cloudflare_origin_token'] = b'short'
+            else:
+                secrets['cloudflare_origin_token'] = b'synthetic-retained-origin-token'
+                plan['routes']['external']['middlewares'].remove('public')
+            with self.subTest(bad=bad), self.assertRaises(ValueError): self.build((app, secrets, ca, cas, plan))
+
     def setUp(self):
         import component_foundation_files
         self.runtime=runtime_secrets;self.foundation=foundation;self.builder=component_foundation_files

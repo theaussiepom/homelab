@@ -6,6 +6,7 @@ The owning caller verifies discovery custody before supplying the token record.
 import copy
 import json
 import re
+from pathlib import Path
 
 import discovery
 import foundation
@@ -81,6 +82,11 @@ def routing(app, plan):
             require(set(row) == {'type', 'endpoint', 'target'}, 'Use only resolved forward authentication')
             middleware[key] = {'forwardAuth': {'address': _backend(row['target']) + discovery.AUTHENTIK_AUTH_PATH,
                 'trustForwardHeader': True, 'authResponseHeaders': list(AUTH_HEADERS)}}
+        elif kind == 'cloudflare-source':
+            require(set(row) == {'type', 'ranges', 'origin_header'}, 'Use the resolved Cloudflare source policy')
+            if any(key in route.get('middlewares', []) for route in plan['routes'].values()):
+                middleware[key] = {'plugin': {'cloudflare-source': {
+                    'internalCIDRs': copy.deepcopy(row['ranges']), 'originHeader': row['origin_header']}}}
         else:
             require(kind == 'canonical-home-redirect' and set(row) == {'type', 'app'}
                     and key in plan['canonical_middlewares'], 'Preserve the fixed canonical-home redirect')
@@ -151,7 +157,9 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
             rows.append({'path':'identity-callbacks.json','content':json.dumps(callbacks),
                          'uid':0,'gid':0,'mode':'0600'})
         return rows
-    require(set(secrets) == {'cloudflare_dns_token', 'proxmox_token'}
+    cloudflare = app['settings'].get('cloudflare', False)
+    require(set(secrets) == {'cloudflare_dns_token', 'proxmox_token'} |
+            ({'cloudflare_origin_token'} if cloudflare else set())
             and isinstance(route_cas, dict), 'Supply only selected provider, DNS and public trust inputs')
     require(app['input_sources']['proxmox_token'].get('type') == 'file',
             'Read the retained provider record through its selected owner')
@@ -168,6 +176,13 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
     foundation.address(selected['bind_address']); foundation.origin(selected['proxmox_url'], 'provider')
     foundation.dns_resolvers(selected['acme_dns_resolvers'])
     shared = routing(app, route_plan)
+    if cloudflare:
+        selected['cloudflare'] = True
+        _scalar(secrets['cloudflare_origin_token'])
+        require(16 <= len(secrets['cloudflare_origin_token']) <= 4096, 'Supply the retained bounded origin token')
+        gates = [row['plugin']['cloudflare-source'] for row in shared['middlewares'].values()
+                 if 'cloudflare-source' in row.get('plugin', {})]
+        require(bool(gates), 'Select an explicit Cloudflare source middleware')
     expected_ca = {key for key, value in shared['transports'].items() if 'ca_file' in value}
     require(expected_ca == set(route_files), 'Retain exactly the selected route CA mounts')
     rows = [_row('traefik.yml', json.dumps(foundation.ingress_static(selected, token), indent=2)+'\n'),
@@ -181,4 +196,9 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
         rows.append(_row(row['filename'], _certificate(route_cas[key])))
     rows += [_row('pve-ca.pem', _certificate(public_ca)),
              _row('cloudflare-dns-token', secrets['cloudflare_dns_token'])]
+    if cloudflare:
+        rows.append(_row('cloudflare-origin-token', secrets['cloudflare_origin_token']))
+        for leaf, name in (('cloudflare.go', 'cloudflare.go'), ('cloudflare-go.mod', 'go.mod'),
+                           ('cloudflare-LICENSE', 'LICENSE'), ('cloudflare-manifest.yml', '.traefik.yml')):
+            rows.append(_row(leaf, (Path(__file__).with_name('traefik_cloudflare') / name).read_bytes()))
     return rows

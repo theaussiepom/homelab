@@ -89,6 +89,7 @@ def test_public_checks_share_one_entry_and_independent_jobs_have_no_dependencies
     jobs = workflow["jobs"]
     assert set(jobs) == {
         "blueprints",
+        "cloudflare-runtime",
         "changes",
         "monitoring",
         "bitwarden-runtime",
@@ -241,6 +242,7 @@ def test_required_validation_gate_rejects_failures_cancellation_and_unexpected_s
         for result in ("failure", "cancelled", "skipped"):
             for name in (
                 "blueprints",
+                "cloudflare-runtime",
                 "python",
                 "applications",
                 "monitoring",
