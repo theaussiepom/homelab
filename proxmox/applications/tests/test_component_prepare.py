@@ -62,6 +62,9 @@ class RuntimeFileOwnershipTests(unittest.TestCase):
         route={'adapter':'traefik','settings':{'route_ca_files':{
             'selected':{'filename':'route-selected.pem','source':'/never-read/ca'}}}}
         self.assertIn('route-selected.pem',contract.runtime_files(route))
+        route['settings']['route_ca_certificates']={
+            'inline':{'filename':'route-inline.pem','certificate':'validated-public-pem'}}
+        self.assertTrue({'route-selected.pem','route-inline.pem'} <= contract.runtime_files(route))
         monitor=zabbix();monitor['authentication_resolved']={'default_login':'saml'}
         self.assertIn('saml-login.php',contract.runtime_files(monitor))
 

@@ -47,7 +47,143 @@ Changing the destination to `224.0.0.22/32` is rejected because it mixes address
 
 A TLS policy requires `type: acme` and `resolver: identifier`. The current Traefik route adapter requires `letsencrypt` as the resolver.
 
-A transport policy requires `type: tls` and at least one of `context` or `server_name`. The context supplies its trusted CA path. `server_name` must have the form `{domain: site_domain_id}`. An HTTPS exposure can use this policy to verify its backend, independently of public TLS. The compiler does not convert an HTTP backend to HTTPS.
+A backend transport verifies Traefik's connection to an existing HTTPS service.
+It is independent of the ACME certificate presented to a browser. Select the
+policy through an [exposure's `transport` field](exposures.md); the endpoint must
+already declare `protocol: https`. Selecting a transport does not convert HTTP
+to HTTPS, grant [network access](#network-rules), create the external server or
+add a deployment wait.
+
+Declare a complete map value at `policies.transport.<id>` in a library or site,
+or reference a [typed source](sources.md) with `kind: transport-policy`. Library
+and site policies share a namespace; duplicate IDs and unknown fields are
+rejected. The complete [backend transport example](../examples/backend-transport/README.md)
+uses the real public library and a synthetic public certificate.
+
+### Backend transport properties
+
+| Path | Variant | Presence | Type | Record |
+| --- | --- | --- | --- | --- |
+| `policies.transport.<id>.type` | TLS | Required | String | [Type](#transport-type) |
+| `policies.transport.<id>.context` | TLS | Optional; excludes certificate | Context ID | [Context trust](#transport-context) |
+| `policies.transport.<id>.certificate` | TLS | Optional; excludes context | Public PEM string | [Public certificate](#transport-certificate) |
+| `policies.transport.<id>.server_name` | TLS | Optional | Closed map | [Backend name](#transport-server-name) |
+| `policies.transport.<id>.server_name.domain` | TLS | Required when server_name is present | Domain ID | [Domain reference](#transport-server-name-domain) |
+
+At least one of `context`, `certificate` or `server_name` must be present. All
+three are optional individually, have no implicit value and reject null or an
+empty value. A policy with only `type: tls` is rejected. The compiler validates
+declared policies, then emits trust files only for transports selected by this
+ingress's routes. It does not merge two trust sources or modify the system-wide
+certificate store.
+
+<a id="transport-type"></a>
+#### Type
+
+`policies.transport.<id>.type` must be the string `tls`. No default is applied.
+Arbitrary Traefik options, including `insecureSkipVerify`, are not accepted.
+Return to the [property index](#backend-transport-properties).
+
+<a id="transport-context"></a>
+#### Context trust
+
+`policies.transport.<id>.context` references an existing
+[context](contexts.md). Its `trust.ca_file` supplies the public CA path; the
+compiler does not read the file. The normal deployment input boundary later
+supplies the selected file's bytes. Do not invent a provider context solely to
+attach an unrelated backend certificate. Omission supplies no context CA.
+`context` and [certificate](#transport-certificate) cannot coexist.
+
+<a id="transport-certificate"></a>
+#### Public certificate
+
+`policies.transport.<id>.certificate` is a literal UTF-8 string containing
+exactly one parseable X.509 PEM certificate, at most 65,536 bytes. Null, empty
+strings, NUL bytes, private-key material, multiple certificates and text outside
+the PEM markers are rejected. Surrounding whitespace is allowed and the input
+bytes are preserved. This field accepts public material, never a private key,
+secret-source ID, filename, URL or arbitrary certificate bundle.
+
+Use this explicit trust anchor for an independently identified self-signed
+backend or a selected public CA. The compiler checks syntax, not remote
+possession, expiry or hostname validity. The HTTPS handshake must still verify
+the actual peer and effective server name. If both trust fields are omitted,
+the transport uses the existing system trust store instead.
+
+The complete [typed policy](../examples/backend-transport/transport.yaml) uses a
+synthetic public certificate; its private key is not retained. The
+[companion site](../examples/backend-transport/site.yaml) supplies the endpoint,
+domain, ingress and explicit outbound rule. Neither example contacts a service.
+Return to the [property index](#backend-transport-properties).
+
+<a id="transport-server-name"></a>
+#### Backend name
+
+`policies.transport.<id>.server_name` is a closed map containing only `domain`.
+It sets the verified TLS server name and SNI, independently of the backend IP
+address and the browser's route. Omission leaves the endpoint URL's host as the
+TLS name. Empty maps, null and additional fields are rejected.
+
+<a id="transport-server-name-domain"></a>
+#### Domain reference
+
+`policies.transport.<id>.server_name.domain` is an existing ID in the site's
+[domains map](exposures.md). It is a reference, not a literal hostname or URL;
+the resolved hostname must satisfy the normal hostname contract. A missing or
+unknown ID is rejected. In the [complete example](../examples/backend-transport/README.md),
+`domain: backend` resolves to `backend.example.invalid`, which is named in the
+synthetic certificate. Return to [backend name](#transport-server-name).
+
+### Invalid trust combination
+
+This map is intentionally invalid. Even a valid public certificate cannot be
+combined with a context trust source:
+
+<!-- example: transport-conflicting-trust -->
+```yaml
+type: tls
+context: lab
+certificate: replace-with-one-public-PEM
+```
+
+The source binder rejects it with `component.transport` at
+`policies.transport.<id>`, before reading certificate contents. Remove either
+`context` or `certificate` and supply the remaining source in its documented
+form. An unknown field such as `insecure_skip_verify` fails the closed-map
+check; changing a test or disabling verification is not a supported correction.
+
+### Installation, updates and verification
+
+Before first installation, prepare the external HTTPS service and independently
+identify its certificate. A successful source compile does not prove a CA file
+exists, a private network path works or the backend accepts a login. This
+transport supplies trust values to an existing ingress; it does not install a
+server, provision accounts or renew backend certificates.
+
+On an authorised later deployment, normal reconciliation writes the selected
+public certificate to an ingress-owned `route-<id>.pem` file, owned by root with
+mode `0400`, and mounts it read-only for that transport. Changing it changes the
+requested trust; normal protected CD must reconcile and verify the result.
+Existing provider CA input, accounts, data and certificate private keys retain
+their owners. Apply the [ordinary lifecycle](lifecycle.md) and verify browser
+HTTPS, backend hostname/trust and application behavior separately; ingress
+reconciliation can interrupt proxied connections.
+
+The [source validator](../../blueprints/component_auth.py),
+[selected-file binding](../../blueprints/component_foundations.py),
+[runtime transport parser](../../proxmox/applications/discovery.py) and
+[owned-file builder](../../proxmox/applications/component_foundation_files.py)
+share this contract across separate boundaries. The
+[transport units](../../blueprints/test_component_auth.py) mock the certificate
+validator to test delegation; its own units exercise public-PEM refusals.
+[Runtime tests](../../proxmox/applications/tests/test_discovery.py) cover malformed,
+oversized and conflicting trust, and
+[file integration tests](../../proxmox/applications/tests/test_component_foundation_files.py)
+verify exact content, selected scope, modes and preservation. The maintained
+[reference tests](../../blueprints/test_component_reference_examples.py) compile
+the complete example with real components; they do not contact targets or prove
+a native Traefik handshake. Follow the [example check](../examples/backend-transport/README.md)
+and [testing guide](../contributing/testing.md) before publication.
 
 ## Middlewares
 

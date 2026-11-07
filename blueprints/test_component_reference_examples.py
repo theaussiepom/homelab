@@ -41,7 +41,7 @@ EXAMPLES = {
     'storage.md': ['pool-minimal', 'storage-combination'],
     'connections.md': ['connection-managed', 'account-managed', 'account-source'],
     'exposures.md': ['exposure-http'],
-    'policies.md': ['policy-network', 'policy-binding', 'policy-middleware'],
+    'policies.md': ['policy-network', 'policy-binding', 'policy-middleware', 'transport-conflicting-trust'],
     'identity-and-secrets.md': ['secret-file', 'secret-environment', 'identity-oidc'],
     'supporting-types.md': ['profile-minimal', 'runtime-minimal', 'device-minimal'],
     'zabbix.md': ['zabbix-selection', 'zabbix-profile'],
@@ -275,6 +275,48 @@ class ReferenceExamples(unittest.TestCase):
             elif change=='duplicate-domain':wrong['exposures']['browser']['aliases']=['browser']
             else:wrong['exposures']['browser']['tls']='missing'
             with self.subTest(change=change),self.assertRaises(ValueError):self.resolve(wrong,library)
+
+    def test_complete_public_transport_example_reaches_only_its_owned_file_and_read_only_mount(self):
+        import component_foundation_files
+        complete=ROOT/'docs/examples/backend-transport'
+        library=authored_config.read(ROOT/'docs/examples/relationships/stack.json')
+        selected=authored_config.read(complete/'site.yaml')
+        shutil.copyfile(ROOT/'docs/examples/relationships/images.json',self.config/'images.json')
+        shutil.copyfile(complete/'transport.yaml',self.config/'transport.yaml')
+        declared=authored_config.read(complete/'transport.yaml')
+        pem=declared['certificate']
+        self.assertEqual(pem,(ROOT/'proxmox/applications/tests/transport-synthetic-public-certificate.txt').read_text())
+        plan,packets=self.resolve(selected,library)
+        self.assertEqual(set(packets),{'edge'})
+        app=plan.resolved['apps']['ingress']
+        self.assertEqual(app['settings']['route_ca_files'],{})
+        self.assertEqual(app['settings']['route_ca_certificates'],{
+            'backend':{'certificate':pem,'filename':'route-backend.pem'}})
+        self.assertEqual(plan.resolved['transports']['backend']['server_name'],'backend.example.invalid')
+        files=packets['edge']['files'];runtime=json.loads(files['component-runtime.json'])
+        lowered=runtime['applications']['ingress']
+        provider={'schema':'homelab-service-discovery-v1','identity':'fixture@pve!discovery',
+                  'token':'fixture@pve!discovery=synthetic-source-only-value'}
+        rows=component_foundation_files.files(lowered,secrets={
+            'proxmox_token':json.dumps(provider).encode(),'cloudflare_dns_token':b'synthetic-source-only-value'},
+            public_ca=pem.encode(),route_cas={},route_plan=lowered['route_plan'])
+        trust=next(row for row in rows if row['path']=='route-backend.pem')
+        self.assertEqual((trust['content'],trust['uid'],trust['gid'],trust['mode']),(pem.encode(),0,0,'0400'))
+        compose=authored_config.parse(files['compose-ingress.yml'].encode(),'.yaml')
+        service=next(iter(compose['services'].values()))
+        mount=next(row for row in service['volumes'] if row['target']=='/etc/ssl/certs/route-backend.pem')
+        self.assertTrue(mount['read_only'])
+        self.assertEqual(mount['source'],lowered['identity']['runtime_directory']+'/route-backend.pem')
+        shared=json.loads(next(row['content'] for row in rows if row['path']=='shared.yml'))
+        self.assertEqual(shared['http']['serversTransports']['backend'],{
+            'serverName':'backend.example.invalid','rootCAs':['/etc/ssl/certs/route-backend.pem']})
+        self.assertEqual(shared['http']['services']['backend']['loadBalancer']['servers'],[
+            {'url':'https://198.18.25.80:8443'}])
+        wrong=copy.deepcopy(selected)
+        wrong['policies']['transport']['backend']=example('policies.md','transport-conflicting-trust')
+        expect_component_refusal(lambda:self.resolve(wrong,library),'component.transport',('policies','transport','backend'))
+        wrong=copy.deepcopy(selected);wrong['external_endpoints']['backend']['protocol']='http'
+        expect_component_refusal(lambda:self.resolve(wrong,library),'component.transport',('exposures','backend'))
 
     def test_all_adapter_property_objects_validate_and_named_invalid_properties_refuse(self):
         values=example('app-properties.md','properties-adapters')

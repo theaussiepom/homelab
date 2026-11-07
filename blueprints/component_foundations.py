@@ -302,4 +302,8 @@ def bind(resolver):
                     if 'ca_file' in transports[key]:
                         values['route_ca_files'][key] = {
                             'source': transports[key]['ca_file'], 'filename': 'route-' + key + '.pem'}
+                    if 'certificate' in transports[key]:
+                        values.setdefault('route_ca_certificates', {})[key] = {
+                            'certificate': transports[key]['certificate'],
+                            'filename': 'route-' + key + '.pem'}
             app['settings'] = values

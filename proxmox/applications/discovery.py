@@ -5,6 +5,7 @@ import ipaddress
 import network_endpoints
 from pathlib import PurePosixPath
 import re
+import ssl
 from urllib.parse import urlsplit
 
 PRIVATE_BACKENDS = tuple(
@@ -20,6 +21,23 @@ CALLBACK_FIELDS = {"host", "aliases", "middlewares", "authentik_forward_auth"}
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def certificate(value):
+    """Validate one explicit public TLS trust anchor without reading files."""
+    require(isinstance(value, str) and 0 < len(value) <= 65536 and '\x00' not in value,
+            "Declare one bounded public trust certificate")
+    require(len(value.encode()) <= 65536
+            and value.count('-----BEGIN CERTIFICATE-----') == 1
+            and value.count('-----END CERTIFICATE-----') == 1
+            and value.strip().startswith('-----BEGIN CERTIFICATE-----')
+            and value.strip().endswith('-----END CERTIFICATE-----')
+            and 'PRIVATE KEY' not in value, "Declare only one public trust certificate")
+    try:
+        ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).load_verify_locations(cadata=value)
+    except ssl.SSLError:
+        raise ValueError("Declare a valid public trust certificate") from None
+    return value
 
 
 def name(value):
@@ -250,11 +268,14 @@ def validate_ingress(settings):
         require(
             isinstance(definition, dict)
             and definition
-            and not definition.keys() - {"server_name", "ca_file"},
+            and not definition.keys() - {"server_name", "ca_file", "certificate"}
+            and not {'ca_file', 'certificate'} <= definition.keys(),
             "Declare verified TLS transport settings",
         )
         if "server_name" in definition:
             hostname(definition["server_name"])
+        if "certificate" in definition:
+            certificate(definition["certificate"])
         if "ca_file" in definition:
             path = definition["ca_file"]
             require(
@@ -339,7 +360,8 @@ def shared(settings):
                 if "server_name" in definition
                 else {}
             ),
-            **({"rootCAs": [ca_path(key)]} if "ca_file" in definition else {}),
+            **({"rootCAs": [ca_path(key)]}
+               if "ca_file" in definition or "certificate" in definition else {}),
         }
     return {
         "tls": {"options": {"default": {"minVersion": "VersionTLS12"}}},

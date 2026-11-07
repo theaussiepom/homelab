@@ -71,17 +71,17 @@ def _relative_path(value):
     return value
 
 
-def certificate(value):
-    require(isinstance(value, str) and value and '\x00' not in value, 'component.authentication')
+def certificate(value, code='component.authentication'):
+    require(isinstance(value, str) and value and '\x00' not in value, code)
     require(len(value.encode()) <= 65536 and value.count('-----BEGIN CERTIFICATE-----') == 1
             and value.count('-----END CERTIFICATE-----') == 1
             and value.strip().startswith('-----BEGIN CERTIFICATE-----')
             and value.strip().endswith('-----END CERTIFICATE-----')
-            and 'PRIVATE KEY' not in value, 'component.authentication')
+            and 'PRIVATE KEY' not in value, code)
     try:
         ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).load_verify_locations(cadata=value)
     except ssl.SSLError:
-        require(False, 'component.authentication')
+        require(False, code)
     return value
 
 
@@ -124,8 +124,9 @@ def transports(resolver, exposures):
     result = {}
     for key, value in resolver.policy['transport'].items():
         with at('policies', 'transport', key):
-            closed(value, ('type',), ('context', 'server_name'))
+            closed(value, ('type',), ('context', 'server_name', 'certificate'))
             require(value['type'] == 'tls' and set(value) != {'type'}, 'component.transport')
+            require(not ('context' in value and 'certificate' in value), 'component.transport')
             selected = {}
             if 'context' in value:
                 require(identifier(value['context']) and value['context'] in resolver.site['contexts'],
@@ -133,6 +134,8 @@ def transports(resolver, exposures):
                 ca_file = resolver.site['contexts'][value['context']]['trust']['ca_file']
                 types.path(ca_file)
                 selected['ca_file'] = ca_file
+            if 'certificate' in value:
+                selected['certificate'] = certificate(value['certificate'], 'component.transport')
             if 'server_name' in value:
                 closed(value['server_name'], ('domain',))
                 domain = value['server_name']['domain']

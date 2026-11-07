@@ -180,6 +180,35 @@ class FoundationFilesTests(unittest.TestCase):
             elif case=='name':app['settings']['route_ca_files']['verified']['filename']='../escape.pem'
             else:app['settings']['route_ca_files']['verified']['source']='/foreign.pem'
             with self.subTest(case=case),self.assertRaises(ValueError):self.build(args)
+    def test_inline_public_trust_integration_keeps_exact_owned_file_and_existing_context_trust(self):
+        pem=Path(__file__).with_name('transport-synthetic-public-certificate.txt').read_text()
+        args=list(ingress());app,_,_,_,plan=args
+        plan['routes']['external']['transport']='public-anchor'
+        plan['transports']['public-anchor']={'server_name':'host.example.invalid','certificate':pem}
+        app['settings']['route_ca_files']={};args[3]={};plan['transports'].pop('verified')
+        app['settings']['route_ca_certificates']={'public-anchor':{
+            'certificate':pem,'filename':'route-public-anchor.pem'}}
+        before=copy.deepcopy(args)
+        rows={row['path']:row for row in self.build(args)}
+        self.assertEqual(rows['route-public-anchor.pem'],{'path':'route-public-anchor.pem',
+            'content':pem.encode(),'uid':0,'gid':0,'mode':'0400'})
+        transport=json.loads(rows['shared.yml']['content'])['http']['serversTransports']['public-anchor']
+        self.assertEqual(transport,{'serverName':'host.example.invalid',
+            'rootCAs':['/etc/ssl/certs/route-public-anchor.pem']})
+        self.assertEqual(rows['pve-ca.pem']['content'],args[2])
+        self.assertEqual(args,before)
+        for case in ('list','conflict','unused','missing','row','extra','filename','certificate'):
+            changed=copy.deepcopy(args);metadata=changed[0]['settings']['route_ca_certificates']
+            if case=='list':changed[0]['settings']['route_ca_certificates']=[]
+            elif case=='conflict':changed[0]['settings']['route_ca_files']['public-anchor']={
+                'source':'/context.pem','filename':'route-public-anchor.pem'};changed[3]['public-anchor']=args[2]
+            elif case=='unused':metadata['unused']=metadata['public-anchor']
+            elif case=='missing':metadata.clear()
+            elif case=='row':metadata['public-anchor']=[]
+            elif case=='extra':metadata['public-anchor']['extra']=True
+            elif case=='filename':metadata['public-anchor']['filename']='../escape.pem'
+            else:metadata['public-anchor']['certificate']=pem+' '
+            with self.subTest(case=case),self.assertRaises(ValueError):self.build(changed)
     def test_public_certificate_and_scalar_boundaries_reject_private_keys_or_control_bytes(self):
         for raw in (b'',b'PRIVATE KEY',b'-----BEGIN CERTIFICATE-----\nPRIVATE KEY',b'\xff',b'x'*65537):
             args=list(ingress());args[2]=raw

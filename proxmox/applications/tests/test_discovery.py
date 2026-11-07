@@ -16,6 +16,27 @@ def route():
 
 
 class RoutingTests(unittest.TestCase):
+    def test_public_trust_certificate_is_bounded_single_pem_and_never_disables_verification(self):
+        pem = Path(__file__).with_name('transport-synthetic-public-certificate.txt').read_text()
+        self.assertEqual(d.certificate(pem), pem)
+        self.assertEqual(d.certificate(' \n' + pem + '\n '), ' \n' + pem + '\n ')
+        selected = {'server_name': 'backend.example.invalid', 'certificate': pem}
+        actual = d.shared({'transports': {'selected': selected}})['http']['serversTransports']['selected']
+        self.assertEqual(actual, {'serverName': 'backend.example.invalid',
+                                 'rootCAs': ['/etc/ssl/certs/route-selected.pem']})
+        self.assertNotIn('insecureSkipVerify', actual)
+        invalid = (None, b'bytes', '', '\x00', 'x' * 65537, '\u00e9' * 32768 + pem,
+                   pem + pem, pem + '-----END CERTIFICATE-----', 'prefix' + pem,
+                   pem + 'suffix', pem.replace('\n', '\nPRIVATE KEY\n', 1),
+                   '-----BEGIN CERTIFICATE-----\ninvalid-der\n-----END CERTIFICATE-----')
+        for value in invalid:
+            with self.subTest(kind=type(value).__name__), self.assertRaises(ValueError):
+                d.certificate(value)
+        for selected in ({'certificate': None}, {'certificate': pem, 'ca_file': '/context.pem'},
+                         {'certificate': pem, 'insecureSkipVerify': True}):
+            with self.subTest(fields=list(selected)), self.assertRaises(ValueError):
+                d.shared({'transports': {'selected': selected}})
+
     def test_notes_preserve_urls_aliases_order_and_tls_transport(self):
         selected = dict(
             route(),
