@@ -11,7 +11,7 @@ from private_io import regular, require
 
 ROLES = {
     'authentik': {'secret_key', 'postgresql_password', 'smtp_password'},
-    'traefik': {'cloudflare_dns_token', 'proxmox_token'},
+    'traefik': {'cloudflare_dns_token', 'proxmox_token', 'cloudflare_origin_token'},
     'zabbix': {'database_password'}, 'node_red': {'api_token'},
     'bitwarden': {'runtime_environment'}, 'pegaprox': {'database_key'},
     'winet': {'options'}, 'mqtt': {'probe'}, 'cloudbeaver': {'client_secret'},

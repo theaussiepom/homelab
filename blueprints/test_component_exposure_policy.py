@@ -43,6 +43,47 @@ def http(r, **extra):
 
 
 class ExposurePolicyReview(unittest.TestCase):
+    def test_cloudflare_policy_resolves_a_named_internal_allowlist_in_any_order(self):
+        r = fixture()
+        r.policy['middlewares'] = {
+            'public': {'type': 'cloudflare-source', 'local_allowlist': 'local', 'origin_header': 'x-origin-token'},
+            'local': {'type': 'ip-allow-list', 'ranges': ['10.20.0.0/16', '192.168.10.0/24']}}
+        api = Exposures(r); api.validate_policies()
+        self.assertEqual(api.middlewares['public'], {'type': 'cloudflare-source',
+            'ranges': ['10.20.0.0/16', '192.168.10.0/24'], 'origin_header': 'x-origin-token'})
+        self.assertIn('local_allowlist', r.policy['middlewares']['public'])
+
+    def test_cloudflare_policy_rejects_public_bypass_unknown_fields_and_unsafe_header(self):
+        for change in ('missing', 'wrong-type', 'public', 'all', 'partial', 'benchmark', 'too-many', 'extra', 'header', 'header-case', 'header-real', 'bad-ref'):
+            r = fixture()
+            r.policy['middlewares'] = {
+                'public': {'type': 'cloudflare-source', 'local_allowlist': 'local', 'origin_header': 'x-origin-token'},
+                'local': {'type': 'ip-allow-list', 'ranges': ['10.20.0.0/16']}}
+            if change == 'missing': r.policy['middlewares'].pop('local')
+            elif change == 'wrong-type': r.policy['middlewares']['local'] = {'type': 'default-headers'}
+            elif change in ('public', 'all'): r.policy['middlewares']['local']['ranges'] = ['1.1.1.0/24' if change == 'public' else '0.0.0.0/0']
+            elif change in ('partial', 'benchmark'): r.policy['middlewares']['local']['ranges'] = ['10.0.0.0/7' if change == 'partial' else '198.18.0.0/15']
+            elif change == 'too-many': r.policy['middlewares']['local']['ranges'] = ['10.20.0.1/32'] * 257
+            elif change == 'extra': r.policy['middlewares']['public']['raw'] = {}
+            elif change == 'bad-ref': r.policy['middlewares']['public']['local_allowlist'] = '../other'
+            else: r.policy['middlewares']['public']['origin_header'] = {'header': 'x-forwarded-for', 'header-case': 'X-Origin', 'header-real': 'x-real-ip'}[change]
+            with self.subTest(change=change), self.assertRaises(ComponentError): Exposures(r).validate_policies()
+
+    def test_cloudflare_gate_must_be_first_unique_and_without_forward_auth(self):
+        for selected in (['headers', 'public'], ['public', 'public'], ['public', 'login']):
+            r = fixture()
+            r.policy['middlewares'] = {
+                'public': {'type': 'cloudflare-source', 'local_allowlist': 'local', 'origin_header': 'x-origin-token'},
+                'local': {'type': 'ip-allow-list', 'ranges': ['10.0.0.0/8']},
+                'headers': {'type': 'default-headers'},
+                'login': {'type': 'forward-auth', 'endpoint': {'app': 'sso', 'endpoint': 'auth'}}}
+            http(r, middlewares=selected)
+            with self.subTest(selected=selected), self.assertRaises(ComponentError): Exposures(r).bind()
+        r = fixture()
+        r.policy['middlewares'] = {'public': {'type': 'cloudflare-source', 'local_allowlist': 'local', 'origin_header': 'x-origin-token'},
+            'local': {'type': 'ip-allow-list', 'ranges': ['10.0.0.0/8']}}
+        http(r, middlewares=['public']); self.assertIn('web', Exposures(r).bind()['routes']['proxy'])
+
     def test_named_policies_resolve_only_authored_endpoint_network_and_owner(self):
         r = fixture()
         r.policy['middlewares'] = {

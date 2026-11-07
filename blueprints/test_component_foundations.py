@@ -144,6 +144,18 @@ class FoundationBindingTests(unittest.TestCase):
         with self.assertRaisesRegex(ComponentError, 'dns-endpoint'):
             settings.bind(resolver)
 
+    def test_cloudflare_route_requires_its_own_origin_secret_and_selects_runtime(self):
+        resolver = self.fixture('traefik')
+        app = resolver.apps['application']
+        app['secret_bindings'] = {'cloudflare_dns_token': {}, 'proxmox_token': {}}
+        resolver.exposure_values = {'routes': {'application': {'web': {'tls': 'public', 'middlewares': ['cloud']}}},
+                                    'middlewares': {'cloud': {'type': 'cloudflare-source'}}}
+        resolver.policy = {'tls': {'public': {'resolver': 'letsencrypt'}}}
+        with self.assertRaisesRegex(ComponentError, 'secret-required'): settings.bind(resolver)
+        app['secret_bindings']['cloudflare_origin_token'] = {'type': 'file'}
+        settings.bind(resolver)
+        self.assertIs(app['settings']['cloudflare'], True)
+
     def test_database_binding_checks_separate_secret_and_named_connection_contracts(self):
         resolver = self.fixture('zabbix')
         resolver.apps['application']['resolved_connections']['database'] = {

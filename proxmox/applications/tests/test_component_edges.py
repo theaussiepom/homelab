@@ -141,6 +141,15 @@ class PegaProxTests(unittest.TestCase):
 
 
 class TraefikTests(unittest.TestCase):
+    def test_cloudflare_plugin_uses_closed_readonly_runtime_leaf_mounts(self):
+        app = descriptor('traefik'); app['settings']['cloudflare'] = True
+        with units(app): result = core._traefik(app, guest('traefik'))['traefik']
+        mounts = {row['target']: row for row in result['volumes']}
+        for name in ('cloudflare.go', 'go.mod', 'LICENSE', '.traefik.yml'):
+            row = mounts['/plugins-local/src/github.com/theaussiepom/homelab-cloudflare/' + name]
+            self.assertTrue(row['read_only'])
+        self.assertEqual(len(mounts), len(BASELINE['traefik']['services']['traefik']['volumes']) + 4)
+
     def test_selected_provider_acme_routes_and_certificate_store_mounts_are_exact(self):
         app=descriptor('traefik');app['identity']['runtime_directory']='/opt/homelab-app/runtime/ingress-a'
         with units(app):result=core._traefik(app,guest('traefik'))['traefik']

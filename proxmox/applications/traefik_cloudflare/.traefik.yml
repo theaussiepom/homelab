@@ -1,0 +1,9 @@
+displayName: HomeLab Cloudflare source boundary
+summary: Validate socket peers and visitor headers while preserving explicit internal access.
+type: middleware
+import: github.com/theaussiepom/homelab-cloudflare
+testData:
+  internalCIDRs:
+    - 10.20.0.0/16
+  originHeader: x-origin-key
+  originToken: synthetic-origin-value-for-tests

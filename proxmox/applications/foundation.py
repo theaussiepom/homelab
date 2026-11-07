@@ -149,4 +149,7 @@ def ingress_static(selected, token):
         "log": {"level": "INFO"},
         "accessLog": {},
     }
+    if selected.get('cloudflare'):
+        static['experimental']['localPlugins'] = {'cloudflare-source': {
+            'moduleName': 'github.com/theaussiepom/homelab-cloudflare'}}
     return static
