@@ -2,28 +2,28 @@
 
 | Term | Meaning |
 | --- | --- |
-| Adapter | Framework-owned renderer/preparer/executor capability for one application family |
+| Adapter | Framework code that generates configuration, prepares inputs and runs deployment for one application family |
 | App | Named profile instance placed on a guest |
-| AppPayload | Immutable protected selected-app files and private-role proof |
-| Binding | Closed input identity connecting source, VMID and selected static inputs |
-| Canonical receipt | Current pointer to the genuine latest ordinary success |
-| Component | Closed reusable typed contract, with validation and explicit references |
-| Context | Declared provider authority and controller trust/credential/path prerequisites |
+| AppPayload | Protected files for one selected app, fixed for the operation, with evidence identifying its private input roles |
+| Binding | A choice that connects an app's requirement to a resource, such as a storage role to a guest volume. During deployment, a separate binding record connects the exact source, VMID and selected static inputs and accepts only its defined fields. |
+| Canonical receipt | Pointer to the receipt for the latest successful normal operation |
+| Component | A reusable type with defined fields, validation and explicit references |
+| Context | A declaration of the provider endpoint and the controller's required trust inputs, credential references and paths |
 | Exposure | Declared DNS name or HTTPS frontend route |
-| Fresh | Supported first creation with no existing backend or prior owner |
-| Guest | Allocated Debian LXC with stable NIC/storage/identity bindings |
-| HOLD | Protected failure/operation ownership marker; not a retry switch |
-| Immutable receipt | Operation's preserved success evidence, separate from current canonical pointer |
+| Fresh | A lifecycle policy that permits supported creation when no backend or prior owner exists. Keep the same policy for supported later updates to that HomeLab installation; it cannot import another installation. |
+| Guest | An allocated Debian LXC with stable network interfaces, storage and identity |
+| HOLD | A protected marker identifying a failed or active operation; it cannot be cleared simply to retry |
+| Immutable receipt | A preserved record of one successful operation, separate from the pointer to the latest success |
 | Library | Versioned profiles, templates and reusable definitions |
-| Lowering | Converting a sealed resolved plan into engine/receiver packets |
+| Lowering | Converting a completed plan into files containing deployment inputs for engines and receivers |
 | Native | Actual operating-system/service/infrastructure behavior, beyond source compilation |
-| Ordinary run | Current protected phase workflow, preserving ownership rather than importing history |
-| Policy | Explicit named network/transport/TLS/middleware/authentication declaration |
+| Ordinary run | The normal protected deployment workflow, which preserves existing HomeLab ownership and cannot import another installation |
+| Policy | An explicit named declaration for network access, transport, TLS, middleware or authentication |
 | Profile | Library declaration of one adapter's roles and requirements |
-| Readiness | Explicit allowed startup/configuration dependency, separate from a value link |
-| Retained | Continued genuine owned installation, not generic adoption |
-| Site | Consumer's allocations, placements and typed bindings |
-| Source pin | Digest of each actually consumed source snapshot |
+| Readiness | An explicit supported dependency that controls startup or configuration order; a value reference alone creates no dependency |
+| Retained | A lifecycle policy requiring an installation already managed by HomeLab; it cannot adopt another installation |
+| Site | Your configuration of allocations, guest and app placement, and bindings using the defined types |
+| Source pin | A digest identifying the exact source snapshot the compiler read |
 | Template | Complete guest defaults, before explicit guest field overrides |
 
 [Documentation index](README.md)

@@ -1,72 +1,80 @@
-# Apps
+# App instances
 
-An app is an independent profile instance on one named guest.
-Use an inline entry or a complete `kind: app` [source](sources.md).
+An app is one `apps.<id>` value in a [site](site.md). It chooses a library profile, places that instance on one guest and binds the profile's named roles. An inline value and a complete `kind: app` [typed source](sources.md) have the same meaning. A profile's available roles and defaults belong to its selected library; this page defines the framework's instance grammar.
 
-| Field | Type / requirement / default | Constraint and resolution |
+## Instance fields
+
+Use only the fields listed below. IDs and scalar values follow the [shared rules](supporting-types.md#scalar-and-path-types). Required values have no default. Optional maps and lists use the stated defaults; null does not mean an empty collection or an instruction to inherit a value.
+
+| Path under `apps.<id>` | Presence / type | Meaning and resolution |
 | --- | --- | --- |
-| profile | Required ID | Existing library app profile |
-| guest | Required ID | Existing site guest |
-| lifecycle | Required enum | `fresh` or `retained`, subject to adapter support |
-| interfaces | Required named map | Bind only declared roles; required profile roles must be present |
-| display_name | Optional text | Default profile display name |
-| identity | Optional object for fresh; required fields for retained | Persistent runtime names, below |
-| storage | Optional named map, {} | Profile storage role to [binding](storage.md#app-storage-bindings) |
-| properties | Optional object, {} | Profile defaults then explicit app keys; [closed per adapter](app-properties.md) |
-| software / runtime | Optional unique ID lists, [] | Append to profile selections; conflicts refuse |
-| authentication | Optional ID | Named authentication policy; required if profile says so |
-| devices | Optional named map, {} | Profile device role to site device ID; one physical owner |
-| origin | Optional reference | `{exposure: id, domain?: domain_id}`; selected HTTP exposure must target this app |
-| secrets | Optional named map, {} | Declared profile role to secret-source ID |
-| resources | Optional object | Exactly `containers`, a nonempty service-role map of numeric allocation overrides |
+| <a id="app-profile"></a>`profile` | Required ID | Existing library [app profile](library.md#app-profile) |
+| <a id="app-guest"></a>`guest` | Required ID | Existing [site guest](guests.md); names and paths must not conflict, and capacity must suffice |
+| <a id="app-lifecycle"></a>`lifecycle` | Required `fresh` or `retained` | [Creation/continuation policy](lifecycle.md), constrained by adapter support |
+| <a id="app-interfaces"></a>`interfaces` | Required named map | Assign values to profile roles; supply every required role using one of the [accepted forms](#interface-roles) |
+| <a id="app-display-name"></a>`display_name` | Optional nonempty text ≤4096, no NUL | Omission uses profile display name; cosmetic |
+| <a id="app-identity"></a>`identity` | Optional for fresh; retained has required members | [Persistent runtime identity](#runtime-identity) |
+| <a id="app-storage"></a>`storage` | Optional named map, omitted `{}` | Profile role to [storage binding](storage.md#app-storage-bindings) |
+| <a id="app-properties"></a>`properties` | Optional object, omitted `{}` | Apply profile defaults, then explicit app keys; use only the [adapter's accepted fields](app-properties.md) |
+| <a id="app-software"></a>`software` | Optional unique ID list, omitted `[]` | Appends to profile software; conflicting selections are rejected |
+| <a id="app-runtime"></a>`runtime` | Optional unique ID list, omitted `[]` | Appends to profile runtime; all resulting requirements must still be met |
+| <a id="app-authentication"></a>`authentication` | Optional ID | Named [authentication policy](policies.md#authentication-policies); may be required by profile |
+| <a id="app-devices"></a>`devices` | Optional named map, omitted `{}` | Profile role to [site device](supporting-types.md#devices) ID; one physical owner |
+| <a id="app-origin"></a>`origin` | Optional closed reference | `{exposure: id, domain?: id}` selects an owned [HTTP exposure origin](exposures.md#public-origin) |
+| <a id="app-secrets"></a>`secrets` | Optional named map, omitted `{}` | Maps a declared private role to a [secret-source ID](identity-and-secrets.md#secret-sources); adapter requirements for files still apply |
+| <a id="app-resources"></a>`resources` | Optional closed object | Exactly `containers`, a nonempty service-role allocation map; [allocation rules](#allocations) |
 
 ## Interface roles
 
-Each role is exactly one of `{interface: guest_nic_id}`,
-`{scope: guest-loopback}`, `{scope: app-network, network: adapter_network_role}`.
-The profile must accept the selected scope. Physical roles resolve a guest IPv4
-address; loopback resolves 127.0.0.1. App-network roles do not invent host addresses.
-A connection source must be physical, or the supported same-guest loopback case.
+Each `apps.<id>.interfaces.<role>` uses exactly one of the forms below. The selected profile must declare the role and accept the chosen scope.
+
+| Branch | Full nested fields | Effective value and restriction |
+| --- | --- | --- |
+| Guest interface | Required `.interface` identifier only | This guest's NIC; resolves its IPv4 address; manual NICs cannot supply an address |
+| Guest loopback | Required `.scope: guest-loopback` only | `127.0.0.1`; does not reach a different guest |
+| App network | Required `.scope: app-network` and `.network` identifier | Selects a network role owned by the adapter; does not create a host address |
+
+Each branch requires exactly the fields listed; there are no defaults, and missing required fields, null values and unknown keys are rejected. An app interface assigns an existing address or network to a profile role. It does not allocate another NIC. See the [NIC address record](networks.md#field-guest-nic-address) for physical addresses and the [profile listener/endpoint contract](supporting-types.md#profile-interface-listener-and-endpoint-types) for sockets. A [connection](connections.md) must use a physical source or a supported same-guest loopback source. These bindings do not grant network access or make execution wait for another app.
 
 ## Runtime identity
 
-| Identity field | Type / default | Retained requirement |
-| --- | --- | --- |
-| phase | ID, default app key | Required, unique per guest, not reserved stage |
-| runtime_id | ID, default app key | Required |
-| project | ID of guest compose_projects | Required for container adapters |
-| services | Map adapter service role → runtime name | Exact complete adapter role set |
-| networks | Map adapter network role → runtime name | Exact complete adapter role set |
-| runtime_directory | Absolute path under `/opt/homelab-app/runtime` | Required for adapters owning runtime leaves |
-| custody_directory | Adapter-specific absolute path | Required for CloudBeaver/Explorer, under their owned custody roots; forbidden for other adapters |
+The paths below are `apps.<id>.identity.<field>`. Generated identities for a fresh app establish new ownership; they cannot rename or adopt an existing service. Retained configuration must supply the required stable names and genuine runtime evidence that HomeLab already manages the app.
 
-Fresh identities derive missing phase/runtime/service/project names.
-Generated project name is `homelab-<guest-key>-<app-key>`; service name is
-`<app-key>_<service-role>`. Explicit project references must exist.
-Generated defaults establish new ownership; they are not a way to rename an
-existing app. Service names used in execution match
-`[a-z0-9][a-z0-9_-]{0,127}` and are unique in their project.
-Runtime/custody leaf collisions and whole-directory exposure to peer inputs refuse.
+| Field | Accepted type / fresh default | Retained/adapter requirement |
+| --- | --- | --- |
+| <a id="app-identity-phase"></a>`phase` | ID; defaults to app key | Required and unique within the guest; reserved execution stage names are forbidden |
+| <a id="app-identity-runtime-id"></a>`runtime_id` | ID; defaults to app key | Required |
+| <a id="app-identity-project"></a>`project` | Guest compose-project ID; generated selection when missing | Required for container adapters; an explicit reference must select an existing project |
+| <a id="app-identity-services"></a>`services` | Adapter service-role → runtime-name map | For retained apps, supply exactly the adapter's complete set of roles |
+| <a id="app-identity-networks"></a>`networks` | Adapter network-role → runtime-name map | For retained apps, supply exactly the adapter's complete set of roles |
+| <a id="app-identity-runtime-directory"></a>`runtime_directory` | Absolute path under `/opt/homelab-app/runtime` | Required when the adapter manages runtime files |
+| <a id="app-identity-custody-directory"></a>`custody_directory` | Adapter-specific absolute path | Only for CloudBeaver/Explorer directories containing managed private files; forbidden for other adapters |
+
+For a fresh app, the generated project name is `homelab-<guest-key>-<app-key>` and the service name is `<app-key>_<service-role>`. Runtime service names must match `[a-z0-9][a-z0-9_-]{0,127}` and be unique within the project. Paths for runtime and private files must not overlap or expose another app's entire private directory. The complete [relationship composition](../examples/relationships/README.md) shows explicit identities for its selected apps.
 
 ## Allocations
 
-A container allocation contains one or more of `memory_mib` (positive integer),
-`pids_limit` (positive integer), `cpu_limit` (number >0 and ≤256).
-Only selected runtime service roles can be overridden. Profile/runtime minimums
-still apply. Boolean is not accepted as a numeric allocation.
+`apps.<id>.resources.containers.<service-role>` contains one or more of:
 
-Changing placement or any persistent identity is not an automatic move.
-Storage/private role ownership must match genuine prior receipts.
-Removing a sealed private role or changing material refuses; additions are
-checked through that role's normal parser. [Lifecycle](lifecycle.md) describes
-the effect boundary and unsupported deletion/rotation cases.
+| Field | Accepted domain | Resolution |
+| --- | --- | --- |
+| <a id="app-allocation-memory-mib"></a>`memory_mib` | Integer 1–2147483647 MiB | Override selected runtime role allocation, subject to minimums/budget |
+| <a id="app-allocation-pids-limit"></a>`pids_limit` | Integer 1–2147483647 | Override selected role's process limit |
+| <a id="app-allocation-cpu-limit"></a>`cpu_limit` | Number greater than 0 and at most 256 | Override selected role's CPU limit |
+
+An allocation must contain at least one field, name a known service role and use numbers rather than Booleans. Runtime security requirements and profile minimums still apply. The guest must have enough capacity for the selected allocations and its effective OS reserve.
+
+## First installation
+
+Select a supported [adapter creation path](support.md), choose unused names and paths, and prepare the inputs required by the profile. A binding that is optional in the input format can still be required when the compiler connects the declarations or when the adapter runs. Check the [private role contract](identity-and-secrets.md#secret-sources) and compile the complete configuration into a packet. Selecting an image alone does not commission a service.
+
+## Later deployments
+
+Keep the same supported `fresh` configuration for ordinary updates. Deployment checks use genuine receipts to preserve app placement, service and project identities, storage, private files and credentials. Editing configuration does not automatically move or rename an app, transfer accounts, remove private roles or rotate credentials. See [lifecycle](lifecycle.md#change-effects) and any tighter limits in the selected profile. Configuration and software changes can restart services; source checks do not prove that an update will be uninterrupted. Verify the [actual service result](../operations/verify-and-maintain.md).
 
 ## Worked app and combination
 
-This is the complete value of `apps.recursive_a` in the
-[offline tutorial](../examples/first-configuration/site.yaml). It compiles with
-that tutorial's `recursive` profile and `resolver` guest; it is not a standalone
-site or deployment-ready configuration.
+This is the complete value of `apps.recursive_a` in the [offline tutorial](../examples/first-configuration/site.yaml). It compiles with that tutorial's `recursive` profile and `resolver` guest; it is not a standalone site or deployment-ready configuration.
 
 <!-- example: app-minimal -->
 ```yaml
@@ -78,9 +86,7 @@ interfaces:
   local: {scope: guest-loopback}
 ```
 
-For a practical override, add the following fields to this app. The `unbound`
-role comes from its selected runtime; 256 MiB remains within the tutorial guest's
-budget. The display label is independent of its persistent identity.
+For a practical override, add the following fields to this app. The `unbound` role comes from its selected runtime; 256 MiB remains within the tutorial guest's budget. The display label is independent of its persistent identity.
 
 <!-- example: app-overrides -->
 ```yaml
@@ -90,10 +96,10 @@ resources:
     unbound: {memory_mib: 256, cpu_limit: 1, pids_limit: 128}
 ```
 
-**Invalid variation:** change `interfaces.local` to `{scope: app-network,
-network: default}`. This is a valid scope generally, but this profile accepts
-only guest loopback for that role, so real resolution refuses it.
-Keep `lifecycle: fresh` for later ordinary deployments of this owned app; do not
-toggle it after installation. See [First installation and later deployments](lifecycle.md).
+**Invalid variation:** change `interfaces.local` to `{scope: app-network, network: default}`. Although that is a valid scope for some profiles, this profile accepts only guest loopback for the role, so reference resolution rejects it. Keep `lifecycle: fresh` for later ordinary deployments; do not toggle it after installation. See [First installation and later deployments](lifecycle.md).
 
-[Reference index](README.md) · [Properties](app-properties.md)
+## Verification and navigation
+
+[`app` and `role`](../../blueprints/component_types.py) validate the input structure. [`app_values`](../../blueprints/component_plan.py) checks the selected profile, placement, identity and role bindings. The [maintained example tests](../../blueprints/test_component_reference_examples.py) compile the complete example and reject a role scope that its profile does not allow. They do not verify ownership on a target or test the running application.
+
+[Reference index](README.md) · [Adapter properties](app-properties.md) · [Relationship guide](../guides/references-and-reuse.md)

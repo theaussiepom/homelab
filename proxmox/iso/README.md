@@ -30,10 +30,7 @@ flowchart LR
     E --> F[Choose INSTALL at your maintenance window]
 ```
 
-After installation and the host checks below, follow the
-[first deployment guest guide](../bootstrap/README.md). OpenTofu creates that
-guest and Ansible installs its GitHub runner. Other guests and application setup
-follow through later deployment jobs.
+After installation and the host checks below, follow the [first deployment guest guide](../bootstrap/README.md). OpenTofu creates that guest and Ansible installs its GitHub runner. Other guests and application setup follow through later deployment jobs.
 
 ## What you need
 
@@ -43,25 +40,18 @@ follow through later deployment jobs.
 - Internet access for the first download, including a roughly **1.7 GB** vendor ISO. Allow about **40 GB** of free build space for downloads, intermediate images and tests.
 - A USB drive of at least **8 GB** whose contents you are happy to erase, for the real installation stage.
 
-If Docker is not installed, start with the official
-[Docker Desktop setup](https://docs.docker.com/desktop/). Wait until it reports
-that its engine is running before starting the commands below.
+If Docker is not installed, start with the official [Docker Desktop setup](https://docs.docker.com/desktop/). Wait until it reports that its engine is running before starting the commands below.
 
 The documented automatic USB-writing helper currently supports **macOS**. The Docker build can also be used on Linux; this package does not supply a Linux or Windows USB-writing helper. Follow the [vendor's installation-media guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#installation_prepare_media) for those systems. Do not translate a Mac disk name into a Linux command by guesswork.
 
-If you have not downloaded the repository, use the
-[main README's clone commands](../../README.md#1-get-a-copy-on-your-computer).
-Then, from the repository root, run:
+If you have not downloaded the repository, use the [clone instructions in the configuration walkthrough](../../docs/guides/first-configuration.md#prepare-an-isolated-workspace). You only need its clone step for this guide. Then, from the repository root, run:
 
 ```sh
 cd proxmox/iso
 pwd
 ```
 
-The printed path should end in `homelab/proxmox/iso`. **All commands below run
-from this folder**, on your workstation, unless a step says otherwise. You can
-open `.local/` in your file manager or text editor; a leading dot makes it hidden
-in many file managers. On a Mac, Command–Shift–Period shows hidden files in Finder.
+The printed path should end in `homelab/proxmox/iso`. **All commands below run from this folder**, on your workstation, unless a step says otherwise. You can open `.local/` in your file manager or text editor; a leading dot makes it hidden in many file managers. On a Mac, Command–Shift–Period shows hidden files in Finder.
 
 ## 1. Try it safely first
 
@@ -142,11 +132,7 @@ Listing an adapter grants that particular device PCIe/DMA access on the selected
 
 The installed system uses the same check before networking on every boot. If the selected adapter is missing or its MAC does not appear, startup reports a failure instead of treating another adapter as a replacement. The check is required by the networking service, so a failure can leave **both ports without network access**, including the administration port. You will need the host's local keyboard/screen to investigate.
 
-If a newly authorised adapter fails its MAC check, the helper attempts to revoke
-only that new authorisation after checking its identity again. Existing grants
-are preserved. A failed revocation is reported explicitly because access may
-remain. Revocation disconnects the device, so select a dedicated Ethernet
-adapter rather than a dock carrying storage; see the [kernel's explanation](https://docs.kernel.org/admin-guide/thunderbolt.html#de-authorizing-devices).
+If a newly authorised adapter fails its MAC check, the helper attempts to revoke only that new authorisation after checking its identity again. Existing grants are preserved. A failed revocation is reported explicitly because access may remain. Revocation disconnects the device, so select a dedicated Ethernet adapter rather than a dock carrying storage; see the [kernel's explanation](https://docs.kernel.org/admin-guide/thunderbolt.html#de-authorizing-devices).
 
 ## 3. Fill in your local settings
 
@@ -168,23 +154,11 @@ Addresses use the form `192.0.2.10/24`: the `/24` is the network size. Example a
 
 ### Sign-in details
 
-If you do not already have a suitable SSH key, follow
-[prepare your SSH key](../host-access.md#1-have-a-key-ready-before-building-the-iso)
-first. It explains the public/private files and the current bootstrap's
-non-interactive key requirement. Use that same public key for the ISO and the
-later deployment guest.
+If you do not already have a suitable SSH key, follow [prepare your SSH key](../host-access.md#1-have-a-key-ready-before-building-the-iso) first. It explains the public/private files and the current bootstrap's non-interactive key requirement. Use that same public key for the ISO and the later deployment guest.
 
-Save the recovery password and your SSH private key in your password manager.
-Keep the private key outside this folder; the ISO build uses only the public
-key. The shared host/guest public key is intentional for this initial bootstrap.
-During that later step, the launcher mounts the private key read-only into
-Docker for non-interactive SSH; it is not installed in the guest or runner.
+Save the recovery password and your SSH private key in your password manager. Keep the private key outside this folder; the ISO build uses only the public key. The shared host/guest public key is intentional for this initial bootstrap. During that later step, the launcher mounts the private key read-only into Docker for non-interactive SSH; it is not installed in the guest or runner.
 
-**Check access before switching off your old system.** If that system hosts your
-password manager, make sure the saved recovery password and private SSH key are
-available from an unlocked offline vault or another protected copy. Test that
-access now; needing the old server to retrieve its replacement's key will stop
-you halfway through installation.
+**Check access before switching off your old system.** If that system hosts your password manager, make sure the saved recovery password and private SSH key are available from an unlocked offline vault or another protected copy. Test that access now; needing the old server to retrieve its replacement's key will stop you halfway through installation.
 
 1. Copy your existing **public** SSH key into `.local/root-ssh.pub`. This version requires the single line beginning `ssh-ed25519`. Copy the key type and long key value; omit any trailing comment. Do not copy a file beginning `BEGIN … PRIVATE KEY`.
 2. Create a strong recovery password in your password manager, then run:
@@ -267,32 +241,21 @@ Building or testing the ISO does not shut down the target computer. Plan that in
 
 Before booting the USB, check your cables and switch settings:
 
-- Plug each cable into the exact switch port you configured, and label the
-  administration cable so the two ports are easy to distinguish.
-- Carry the management VLAN **tagged** on that port and every connecting
-  switch/router uplink. A cable link can be up while the VLAN path is wrong.
-- Make sure your workstation's network can reach Proxmox on TCP **8006** for the
-  web interface and TCP **22** for SSH. It can stay on your normal home network
-  if your routing/firewall permits that access.
+- Plug each cable into the exact switch port you configured, and label the administration cable so the two ports are easy to distinguish.
+- Carry the management VLAN **tagged** on that port and every connecting switch/router uplink. A cable link can be up while the VLAN path is wrong.
+- Make sure your workstation's network can reach Proxmox on TCP **8006** for the web interface and TCP **22** for SSH. It can stay on your normal home network if your routing/firewall permits that access.
 
-The ISO creates the host-side network configuration. It does not configure any
-switch or router for you. See the [network settings reference](docs/configuration.md).
+The ISO creates the host-side network configuration. It does not configure any switch or router for you. See the [network settings reference](docs/configuration.md).
 
 1. Boot the USB in **UEFI** mode.
 2. Use its default **CHECK ONLY** entry first. Read the listed new-disk serial numbers and the protected original. A successful check ends at a stop screen; it does not install anything.
 3. When you are ready to erase the two new SSDs, reboot the USB and select **INSTALL**. Confirm that the displayed serials are the intended new drives. Type the exact phrase requested on screen, including those serial numbers. A wrong answer or five-minute timeout stops the operation.
 4. Successful installation powers the machine off. Remove the USB, select the new Proxmox boot entry, and start the machine.
-5. Follow [host access and checks](../host-access.md) for the console commands,
-   fingerprint comparison and workstation SSH test. Check both wired ports,
-   management/storage addresses, the new mirror and the preserved original disk
-   before moving on to guests or applications.
+5. Follow [host access and checks](../host-access.md) for the console commands, fingerprint comparison and workstation SSH test. Check both wired ports, management/storage addresses, the new mirror and the preserved original disk before moving on to guests or applications.
 
-The typed confirmation in step 3 is expected. This is an attended installation:
-having your settings on the USB does not remove that final drive check.
+The typed confirmation in step 3 is expected. This is an attended installation: having your settings on the USB does not remove that final drive check.
 
-If you plan to return to the preserved original system between stages, use your
-firmware's boot menu to select it. While Proxmox is running, applications that
-only exist on the original system are off; installing Proxmox does not move them.
+If you plan to return to the preserved original system between stages, use your firmware's boot menu to select it. While Proxmox is running, applications that only exist on the original system are off; installing Proxmox does not move them.
 
 The first-start network script checks both expected port identities before writing its configuration. It preserves the vendor-created interfaces file and refuses a repeated run. It does not configure switch ports or firewalls.
 
@@ -320,12 +283,7 @@ Raw logs can include private settings. Redact them before sharing; the `verifica
 
 ## What has actually been verified?
 
-See [verification status](verification/README.md) for the separate virtual-test
-and physical-installation results. A physical installation and first-start access
-were checked on the maintainer's host on **25 October 2026**. Switch-port and
-uplink VLAN corrections were needed; those are documented as setup issues, not
-proof that the installer configures your network. Your own computer still needs
-its disk, network and access checks.
+See [verification status](verification/README.md) for the separate virtual-test and physical-installation results. A physical installation and first-start access were checked on the maintainer's host on **25 October 2026**. Switch-port and uplink VLAN corrections were needed; those are documented as setup issues, not proof that the installer configures your network. Your own computer still needs its disk, network and access checks.
 
 The download and build steps check exact supported inputs, but different build times and Debian package updates can produce a different final ISO checksum. This is a repeatable workflow, not a promise of byte-identical builds. Each resulting image gets its own checksum, readback and tests.
 
@@ -333,10 +291,6 @@ For maintainers: [technical design and supported version pins](docs/technical-re
 
 ## Next: create the deployment guest
 
-Once installation is complete and the host checks in step 6 pass, continue to
-the [bootstrap guide](../bootstrap/README.md). It takes you from the installed
-Proxmox host to one deployment guest and a private GitHub runner, including the
-job that confirms the handover.
+Once installation is complete and the host checks in step 6 pass, continue to the [bootstrap guide](../bootstrap/README.md). It takes you from the installed Proxmox host to one deployment guest and a private GitHub runner, including the job that confirms the handover.
 
-For the full sequence and current readiness status, return to the
-[combined Proxmox guide](../README.md).
+For the full sequence and current readiness status, return to the [combined Proxmox guide](../README.md).

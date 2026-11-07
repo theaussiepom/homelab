@@ -1,43 +1,35 @@
 # Template: task guide
 
-**Reusable template, not an executable procedure.** Replace every bracketed
-instruction. Follow the [documentation standard](../contributing/documentation.md).
+**Reusable template, not an executable procedure.** Replace these authoring instructions with the finished guide and follow the [documentation standard](../contributing/documentation-standard.md).
 
 ## Outcome and boundary
 
-[Name the one task, its intended result and exact evidence level. State what
-does not become true from a successful source check, including native limits.]
+Name the task, its intended result and the evidence needed to establish that result. Explain what successful configuration checks cannot prove about a target or running service.
 
 ## Prerequisites
 
-[Define source owner and compatible revision, working directory, interpreter and
-locked dependencies, input files, trust/data/credential prerequisites and any
-required authority. Never include real private values.]
+Identify the source repository and compatible revision, working directory, interpreter, locked dependencies and input files. State prerequisites for trust, data and credentials, and any required authorisation. Never include actual private values.
 
 ## Perform the task
 
-[Provide ordered, concrete commands or source edits. Define every variable and
-path before use. Use a nonexistent output child; physically resolve temporary
-source paths. Explain each step's purpose and expected output.]
+Give concrete commands or configuration edits in order. Define every variable and path before use. Put outputs in a new child path that does not yet exist, and resolve symlinks in temporary source paths first. Explain each step's purpose and expected output.
 
 ## Verify the result
 
-[Give the actual source/compiler/service checks needed for the stated outcome.
-Name test fakes and platform limits. A zero exit code is not all evidence levels.]
+Give the configuration, compiler or service checks needed for the stated outcome. Identify test fakes and platform limits. Explain what a successful exit code proves and which further observations are needed.
 
 ## First installation and later deployments
 
-[Explain whether the task supports each situation. Keep fresh source unchanged
-for ordinary owned updates; do not tell users to toggle lifecycle or import an
-unowned installation using retained. State persistent identity/material limits.]
+Explain whether the task supports first installation, later deployments or both. Keep fresh configuration for ordinary updates. Do not instruct users to toggle lifecycle or use retained to import an installation HomeLab does not own. State which persistent identities, files and credentials must remain unchanged.
 
 ## Failure and recovery boundary
 
-[Explain a meaningful failure, what evidence to preserve and the supported next
-diagnostic. Do not invent an automatic retry, deletion, rollback or HOLD release.
-Keep separately authorised operating procedures separate.]
+Explain a meaningful failure, the evidence to preserve and the supported next diagnostic step. Do not invent automatic retries, deletion, rollback or HOLD release. Link to separately authorised operating procedures where needed.
 
 ## Related contracts
 
-[Link canonical fields, complete maintained example, lifecycle/support and the
-owning contributor or operations index. Remove this instruction in the real page.]
+Link to canonical field records, a complete maintained example, lifecycle and support guidance, and the relevant contributor or operations index.
+
+## Author review before publication
+
+Connect named examples to complete canonical files and the existing parser, validator and compiler tests. Record compatible source selections, evidence obtained and any hosted or target checks not performed. Follow the [assurance guide](../contributing/documentation-assurance.md), check local link destinations and read the full rendered guide. Use ordinary verbs, name who performs each action and explain project-specific terms at first use. Preserve exact requirements and evidence limits. Remove all authoring instructions and placeholders before publication.

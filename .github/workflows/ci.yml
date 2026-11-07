@@ -25,11 +25,12 @@ jobs:
           python-version: '3.12'
       - name: Install pinned source tooling
         run: python3 -m pip install --require-hashes -r requirements.lock.txt
-      - name: Check coverage measurement against known paths
+      - name: Check coverage measurement and required documentation collection
         run: python3 -m pytest -q .github/scripts/test_coverage_metrics.py
       - name: Check repository boundaries
         run: python3 tools/check_boundaries.py --mode framework --root .
       - name: Measure blueprint unit coverage
+        # Discovers the source-backed documentation and navigation checks too.
         run: python3 tools/measure_coverage.py --suite blueprints --output "$RUNNER_TEMP/blueprint-coverage"
       - name: WiNet health
         run: |

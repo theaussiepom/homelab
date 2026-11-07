@@ -1,6 +1,6 @@
 # Configuration reference
 
-All real settings go in the ignored `.local/` folder. The files under `config/` remain redacted examples. JSON requires double quotes around names and text, commas between entries, and no trailing comma after the final entry.
+All real settings go in the ignored `.local/` folder. The files under `config/` remain examples with no real private settings. JSON requires double quotes around names and text, commas between entries, and no trailing comma after the final entry.
 
 ## Hardware: `.local/hardware.json`
 
@@ -47,7 +47,7 @@ flowchart TB
     F --> H[Other selected VLANs: guest attachments]
 ```
 
-The native installer initially identifies the administration NIC from its MAC-based device property. The after-install hook replaces that initial configuration with the tagged bridges above, before normal networking starts. Upstream cabling and switch trunks must match at first start.
+The Proxmox installer initially identifies the administration network interface (NIC) from its MAC-based device property. The after-install hook replaces that initial configuration with the tagged bridges above, before normal networking starts. Cabling and the VLANs carried by the connected switch ports must match this configuration at first start.
 
 ## Credentials and preparation decision
 

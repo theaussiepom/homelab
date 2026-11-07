@@ -1,19 +1,9 @@
 # Existing Authentik callbacks
 
-Current authored routing uses [exposures](reference/exposures.md) and typed
-[forward-auth middleware](reference/policies.md#middlewares), not raw route or
-Traefik configuration bags. The middleware endpoint binds the existing outpost.
-Selected routing remains owned by the fixed adapter.
+Routing declarations use [exposures](reference/exposures.md) and typed [forward-auth middleware](reference/policies.md#middlewares), rather than arbitrary route or Traefik settings. The middleware endpoint binds the existing outpost. The selected adapter still controls how those routes are generated.
 
-Authentik's separate callback additions use
-[callbacks.evidence](reference/app-properties.md#authentik-and-zabbix), whose
-[closed records](reference/supporting-types.md#evidence-and-assets) bind existing
-provider/application/policy metadata, exact redirects and the fixed
-/oauth2/callback additions. Existing metadata guards still apply at execution.
-It does not provision new IdP accounts/applications/providers/outposts.
+Authentik's separate callback additions use [callbacks.evidence](reference/app-properties.md#authentik-and-zabbix), whose [records](reference/supporting-types.md#evidence-and-assets) accept only the defined fields for existing provider, application and policy metadata, exact redirects and the fixed /oauth2/callback additions. Execution still checks the existing metadata. These additions do not provision new identity-provider (IdP) accounts, applications, providers or outposts.
 
-Preserve normal route host/backend/middleware ownership and verify real browser
-login/callback behavior separately from source and synthetic routing fixtures.
-Opaque callback/priority/TLS overrides are not accepted source properties.
+Keep the existing ownership of route hosts, backends and middleware. Verify real browser login and callback behavior separately from source checks and synthetic routing tests. The source does not accept arbitrary overrides for callbacks, priorities or TLS.
 
 [Documentation index](README.md)

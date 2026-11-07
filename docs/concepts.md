@@ -1,13 +1,13 @@
-# Concepts
+# The configuration model
 
-HomeLab compiles an explicit site. It has no fixed catalogue of guests.
+A site chooses reusable definitions and binds them to concrete resources. HomeLab checks these choices, resolves their relationships and produces a plan containing only the fields its contracts allow. It has no fixed inventory of guests and no implicit application bundle.
 
 ```mermaid
 flowchart LR
   library[Library: profiles and defaults] --> plan[Resolved typed plan]
   site[Site: instances and bindings] --> plan
-  plan --> packet[Closed guest packets]
-  plan --> graph[Generated workflow graph]
+  plan --> packet[Guest packets]
+  plan --> graph[Workflow dependencies]
   packet --> infra[OpenTofu infrastructure]
   infra --> preparation[Ansible preparation]
   preparation --> apps[Selected app phases]
@@ -16,53 +16,35 @@ flowchart LR
 
 ## Definitions and instances
 
-A template supplies guest resource/startup/security defaults. A profile declares
-one adapter's interface, storage, listener, software and health roles.
-A site guest allocates a stable VMID, hostname, NICs and storage. A site app
-selects a profile and binds its roles to that guest. Multiple apps can share a
-guest only when their owned namespaces, listeners and resource budgets agree.
+A [guest template](reference/library.md) supplies complete defaults for resources, startup and security. A [profile](reference/supporting-types.md) selects an adapter and names its interface, storage, software, runtime and health roles. These are library choices. A [site guest](reference/guests.md) allocates identity, context, network interfaces (NICs) and storage; an [app](reference/apps.md) selects a profile, chooses its guest and binds those roles. Two app instances may share a guest only if their listeners, owned paths, service identities and budgets are compatible.
 
-Complete source files are a way to organise a declaration. They do not add a
-layer of configuration merging. [Sources](reference/sources.md) defines the
-allowed files; [Guest defaults](reference/guests.md#defaults-and-resolution)
-defines the few actual field-level inheritance rules.
+For example, the [offline resolver](examples/first-configuration/README.md) selects profile `recursive` on guest `resolver`. Its `local` role binds guest loopback, the address used to reach services within that guest; its `private` role selects an app network. Neither binding creates a public route. Follow the [app interface records](reference/apps.md#interface-roles) and [NIC address records](reference/networks.md#field-guest-nic-address) to see which address each scope can produce.
 
-## Three separate relationships
+## Values, waits and permissions
 
-| Relationship | Example | Effect |
+| Relationship | What it provides | Owner |
 | --- | --- | --- |
-| Value reference | Connection targets an app endpoint | Reuses its declared address, port and protocol |
-| Readiness | Connection has `readiness: start` | Adds an allowed explicit dependency |
-| Network policy | Ordered guest ACCEPT rules | Declares permissions; required cross-guest flows must match |
+| Value reference | A declared address, port, protocol or other typed value | [Endpoints and connections](reference/connections.md) |
+| Readiness | An explicit allowed dependency and order | [Connection readiness](reference/connections.md), [guest readiness](reference/guests.md#guest-readiness) |
+| Access policy | Ordered rules allowing a required flow | [Network policies](reference/policies.md) |
+| Publication | A declared DNS/HTTPS route and its ownership | [Exposures](reference/exposures.md) |
 
-A value reference alone creates neither wait nor grant. An app-local network or
-same-guest connection has different reachability from a cross-guest socket.
-The [reference guide](guides/references-and-reuse.md) walks through these cases.
-The explicit root [Zabbix feature](reference/zabbix.md) is an exception with its
-own documented derived monitoring grants.
+A value reference alone does not make deployment wait or grant network access. A loopback address reaches only the same guest; a connection between guests must use an address reachable from the other guest. The [relationship guide](guides/references-and-reuse.md) and [complete broker/browser example](examples/relationships/README.md) demonstrate these distinctions. Root [Zabbix selection](reference/zabbix.md) derives its specific monitoring access rules through an explicit feature; it is not a general exception for arbitrary references.
+
+## Defaults and source reuse
+
+Complete [typed source files](reference/sources.md) organize declarations; they do not merge fragments. For guest defaults, only resources, startup and security merge by direct field. Software and runtime lists append to the template selections. App properties combine selected profile defaults with explicit app keys using only the fields accepted by the adapter. Consult each owner before treating omission, null, an empty map or an empty list as interchangeable.
+
+The [guest inheritance example](reference/guests.md#defaults-and-resolution) shows input and effective values. A library default change reaches inheriting instances, while an explicit guest override remains authoritative for that field.
 
 ## Resolution and execution
 
-The compiler reads bounded snapshots, validates shapes and references, resolves
-identities and graphs, checks budgets/traffic and lowers a sealed plan.
-Source pins record the actual consumed bytes. Runtime packets and receipts are
-JSON even when authored source is YAML.
+The compiler reads source snapshots within fixed limits, validates components, resolves names and bindings, and checks dependencies, resource budgets and traffic rules. It then converts the completed plan into deployment inputs, a step called **lowering**. Source pins identify the exact bytes it read. Runtime packets and receipts use JSON even when authored configuration is YAML.
 
-Compilation does not open declared private files. The phase runner later selects
-only that phase's protected inputs. OpenTofu owns infrastructure/state; Ansible
-owns guest configuration. A canonical ordinary receipt, immutable operation
-receipt, sealed payloads and backend identity together establish normal retained
-ownership. They are not an import mechanism. [Lifecycle](reference/lifecycle.md)
-describes what a subsequent run may change.
+Compilation checks private-source metadata without opening the declared files. The phase runner later selects only the inputs needed by its phase. OpenTofu owns infrastructure and state; Ansible owns guest configuration and services. Receipts from successful operations, payloads sealed against changes, and the backend identity establish whether HomeLab owns the installation. They do not provide a general import mechanism. See [lifecycle](reference/lifecycle.md) and [evidence](concepts/evidence.md).
 
 ## First installation and later deployments
 
-For a supported new guest/app, `fresh` permits creation when there is no existing
-owner or backend. Keep that same source for later ordinary deployments: runtime
-ownership proofs distinguish updates from first creation. You do not toggle a
-lifecycle field after a successful run.
+When a guest or app does not yet exist and its adapter supports creation, `fresh` permits first installation. Keep that source for later updates; deployment checks the actual ownership records to distinguish creation from an update. `retained` requires an existing installation owned by HomeLab and rejects missing ownership. An adapter may support updates to an existing installation without supporting its initial setup. Check its [support limits](reference/support.md), then follow [preparation](guides/prepare-deployment.md) → [deployment](operations/deployment.md) → [service verification](operations/verify-and-maintain.md).
 
-`retained` means an already HomeLab-owned installation whose genuine prior
-receipt, backend and app proofs must match. It does not import a manually created
-installation. An adapter may support owned updates without supporting first
-installation; consult [Support](reference/support.md) before choosing a profile.
+[Documentation index](README.md) · [Contract reference](reference/README.md)

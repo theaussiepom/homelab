@@ -1,15 +1,16 @@
 # Operations
 
-Use these guides after understanding the selected site's configuration and
-supported lifecycle. Public documentation describes the reusable procedure;
-the consumer owns real prerequisites, runner/environment policy and allocations.
+Use these guides to prepare, deploy and maintain a configuration through its supported operations. Your deployment setup supplies real allocations, trust inputs, protected files, runner and environment policy, and authority to act. These docs explain the reusable requirements it must satisfy.
 
-- [Deploy and observe](deployment.md): review, protected phases and verification.
-- [Troubleshoot](troubleshooting.md): compiler, workflow, ownership and service symptoms.
-- [Lifecycle reference](../reference/lifecycle.md): supported updates and refusals.
-- [Separate host/installer/recovery guides](../framework-reference.md):
-  deliberately operated subsystems, not ordinary application recovery shortcuts.
+| Situation | Route |
+| --- | --- |
+| A synthetic example compiles; real prerequisites are next | [Prepare a deployment](../guides/prepare-deployment.md) |
+| A supported new installation is ready to execute | [Deploy and verify](deployment.md#first-installation) |
+| An existing service managed by HomeLab needs a declared change | [Later deployments](verify-and-maintain.md#later-deployments) and [lifecycle](../reference/lifecycle.md) |
+| The workflow completed and the service needs verification | [Service verification](verify-and-maintain.md#service-verification) |
+| Source, admission, a phase or the service failed | [Troubleshooting](troubleshooting.md) |
+| Host installation/bootstrap or a specific recovery subsystem is needed | [Separate subsystem contracts](../framework-reference.md) |
 
-A source check is local. Workflow generation writes source artifacts.
-Protected deployment changes infrastructure/services. Keep those boundaries
-visible in change descriptions and operational evidence.
+Compilation, workflow generation, protected deployment and service acceptance have different effects and [evidence boundaries](../concepts/evidence.md). Choose the procedure that matches the observed stage; successful source checks cannot establish ownership on the target or supply an initial setup procedure that the adapter does not support.
+
+[Documentation index](../README.md) · [Supported adapters](../reference/support.md)

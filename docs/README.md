@@ -1,33 +1,33 @@
 # HomeLab documentation
 
-HomeLab's public language, compiler and deployment contracts live here.
-Application profile choices belong to the selected library; real allocations
-and operating procedures belong to the consumer site.
+Use these docs to write a configuration, understand the settings it produces and take it through the supported preparation and execution stages. These docs define the framework's `homelab-components-v1` language and deployment contracts. The selected library owns application choices and defaults; you supply real allocations and authority to operate the site.
 
-## Learn
+**New here? [Choose what you want to build](start-here.md).** For a practical application design, continue with [HomeLab Stack](https://github.com/theaussiepom/homelab-stack/blob/main/docs/start-here.md). For hands-on language learning, [write your first configuration](guides/first-configuration.md): choose a guest identity, network, storage and memory, then inspect the generated result.
 
-1. [Start here](start-here.md): prerequisites and vocabulary.
-2. [Concepts](concepts.md): source, guest, app and service relationships.
-3. [First configuration](guides/first-configuration.md): a complete offline tutorial.
-4. [Validate and generate](guides/validate-and-generate.md): commands and outputs.
-5. [References and reuse](guides/references-and-reuse.md): separate values, waits and permissions.
+<a id="build-your-first-understanding"></a>
+## Follow a configuration from idea to service
 
-## Look up a contract
+| Stage | What you finish with | Start here |
+| --- | --- | --- |
+| 1. Write and inspect | A complete practice site with your choices, accepted source and an inspectable guest packet | [First configuration](guides/first-configuration.md), with the [model](concepts.md) alongside if needed |
+| 2. Prepare real inputs | Your site directory, a compatible library selection, and checked prerequisites for the platform and protected inputs | [Prepare a deployment](guides/prepare-deployment.md) |
+| 3. Install through the supported path | Evidence for the exact source, workflow and affected phases | [Deployment](operations/deployment.md), [adapter support](reference/support.md) |
+| 4. Verify and maintain | Fresh service observations and a reviewed process for later updates | [Verify and maintain](operations/verify-and-maintain.md), [lifecycle](reference/lifecycle.md) |
 
-[Configuration reference](reference/README.md) covers every public section and
-nested type. Start with [Site](reference/site.md) or [Library](reference/library.md).
-Use [Application properties](reference/app-properties.md) for adapter-specific fields,
-[Lifecycle](reference/lifecycle.md) for update limits and
-[Support](reference/support.md) for platform and commissioning boundaries.
-The [Glossary](glossary.md) explains recurring terms.
+A stage does not establish the next one. The [evidence guide](concepts/evidence.md) distinguishes source checks, controller tests, deployment and service acceptance.
 
-## Operate and extend
+## Author or review a configuration
 
-- [Operations](operations/README.md), [Deployment](operations/deployment.md)
-  and [Troubleshooting](operations/troubleshooting.md).
-- [Contributing](contributing/README.md), [Components](contributing/components.md)
-  and [Testing](contributing/testing.md), plus the
-  [documentation standard and templates](contributing/documentation.md).
-- [Security and signing](contributing-safely.md).
-- [Host/bootstrap, installer and recovery](framework-reference.md) are separate
-  subsystems, with their own prerequisites and authority.
+The [reference index](reference/README.md) groups pages by the component responsible for each setting and the task you want to perform. Start with [site structure](reference/site.md), then follow a declaration to its nested type. The detailed [network and guest NIC reference](reference/networks.md) shows exact field records, all address branches, resolution and diagnostics.
+
+To combine objects, use [references and reuse](guides/references-and-reuse.md) and the [complete broker/browser/HTTPS example](examples/relationships/README.md). To inspect generated results use [validate and generate](guides/validate-and-generate.md) and the [CLI contract](reference/cli.md). The [glossary](glossary.md) defines recurring terms.
+
+## Operate or extend
+
+[Operations](operations/README.md) links preparation, first installation, verification, updates and [troubleshooting](operations/troubleshooting.md). [Host bootstrap, installer and recovery](framework-reference.md) have separate contracts and are not application recovery shortcuts.
+
+Contributors start with the [change workflow](contributing/README.md), then [component boundaries](contributing/components.md), [testing](contributing/testing.md) and the [canonical documentation standard](contributing/documentation-standard.md). The [assurance record](contributing/documentation-assurance.md) states the exact automated documentation scope and what still requires review. It does not claim that automated checks cover every rule in the public contract.
+
+## Existing entry links
+
+Earlier links to [component configuration](components.md) and [testing](testing.md) remain supported navigation pointers. Focused [Authentik callbacks](authentik-callback.md), [WiNet behavior](winet.md) and [Zabbix integration](zabbix-blueprint.md) notes connect to the current canonical field records and preserve their specific operating limits.

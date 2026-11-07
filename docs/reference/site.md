@@ -1,7 +1,6 @@
 # Site
 
-A site declares concrete allocations and relationships. The library supplies
-profiles and templates, but never a fixed guest inventory.
+Your site declares the guests, apps, allocations and relationships you want. The library supplies reusable profiles and templates; you choose the guests that use them.
 
 ```yaml
 schema: homelab-components-v1
@@ -13,15 +12,11 @@ guests: {}
 apps: {}
 ```
 
-This shows the required sections, not a deployable installation.
-The [tutorial](../guides/first-configuration.md) supplies complete useful values.
+This shows the required sections, not a deployable installation. The [tutorial](../guides/first-configuration.md) supplies complete useful values.
 
 ## Minimal useful worked site
 
-The following is a complete synthetic site for the [tutorial library](../examples/first-configuration/stack.json)
-(and its adjacent images.json). It compiles offline without any target or private
-input read. It is deliberately not deployment-admissible. The library is a
-prerequisite: `base` and `recursive` are actual definitions, not magic defaults.
+The following complete synthetic site uses the [tutorial library](../examples/first-configuration/stack.json) and its adjacent images.json. It compiles offline without contacting a target or reading private inputs, and deliberately fails deployment admission. You need the library because it defines `base` and `recursive`; those names are not built-in defaults.
 
 <!-- example: site-worked -->
 ```yaml
@@ -74,60 +69,52 @@ apps:
       local: {scope: guest-loopback}
 ```
 
-For a practical extension, put `apps.recursive_a` in the complete typed leaf shown
-on [Sources](sources.md#worked-extraction-without-an-overlay). The effective app
-and graph remain the same. **Invalid variation:** change its guest to an unknown
-ID; parsing succeeds but real reference resolution refuses.
+To split the configuration into files, move `apps.recursive_a` into the complete typed source shown on [Sources](sources.md#worked-extraction-without-an-overlay). The resulting app and dependency graph stay the same. **Invalid variation:** change its guest to an unknown ID. Parsing succeeds, but reference resolution rejects the unknown guest.
 
 ## Properties
 
-Each named map contains at most 1024 entries. IDs match
-`[a-z][a-z0-9_-]{0,62}`. References use those keys. Lists and maps must have the
-documented type; null does not stand for an empty map.
+Each named map contains at most 1024 entries. IDs match `[a-z][a-z0-9_-]{0,62}`. References use those keys. Lists and maps must have the documented type; null does not stand for an empty map.
 
 | Property | Type / required / default | Meaning and constraints |
 | --- | --- | --- |
-| schema | String, required | Exactly `homelab-components-v1` |
-| kind | String, required | Exactly `site` |
-| contexts | Named map, required | [Contexts](contexts.md) |
-| networks | Named map, required | [Networks](networks.md) |
-| storage | Named map, required | Context/pool [storage declarations](storage.md) |
-| guests | Named map, required | Complete inline [guest](guests.md) or `{source: path}` |
-| apps | Named map, required | Complete inline [app](apps.md) or `{source: path}` |
-| connections | Named map, optional, {} | Complete [connection](connections.md) or typed source |
-| exposures | Named map, optional, {} | Complete [exposure](exposures.md) or typed source |
-| domains | Named map of host strings, optional, {} | Valid DNS labels, total length 1–253; no URL/path |
-| external_endpoints | Named map, optional, {} | Protocol/address/port [endpoints](networks.md#external-endpoints) |
-| host_aliases | Named map, optional, {} | Docker-local `{hostname: text}`; underscores allowed in labels |
-| address_groups | Named map, optional, {} | Bounded ordered [address groups](networks.md#address-groups) |
-| secret_sources | Named map, optional, {} | [File/environment/generated metadata](identity-and-secrets.md#secret-sources), never secret values |
-| accounts | Named map, optional, {} | [Create-once account declarations](connections.md#accounts) |
-| identity_providers | Named map, optional, {} | [OIDC/SAML declarations](identity-and-secrets.md#identity-providers) |
-| devices | Named map, optional, {} | [Serial declarations](supporting-types.md#devices) |
-| images | Named map, optional, {} | Only declared custom archive replacement bindings; normal image versions belong to library software |
-| evidence | Named map, optional, {} | Ongoing callback records or raw UTF-8 [evidence](supporting-types.md#evidence-and-assets) |
-| policies | Closed map, optional | Submaps `network/transport/tls/middlewares/authentication`, each defaults {} |
-| zabbix | Optional null or `{server: app_id}` | Absent disables root monitoring expansion; [Zabbix](zabbix.md) |
+| <a id="site-schema"></a>`schema` | String, required | Exactly `homelab-components-v1` |
+| <a id="site-kind"></a>`kind` | String, required | Exactly `site` |
+| <a id="site-contexts"></a>`contexts` | Named map, required | [Contexts](contexts.md) |
+| <a id="site-networks"></a>`networks` | Named map, required | [Networks](networks.md) |
+| <a id="site-storage"></a>`storage` | Named map, required | Context/pool [storage declarations](storage.md) |
+| <a id="site-guests"></a>`guests` | Named map, required | Complete inline [guest](guests.md) or `{source: path}` |
+| <a id="site-apps"></a>`apps` | Named map, required | Complete inline [app](apps.md) or `{source: path}` |
+| <a id="site-connections"></a>`connections` | Named map, optional, {} | Complete [connection](connections.md) or typed source |
+| <a id="site-exposures"></a>`exposures` | Named map, optional, {} | Complete [exposure](exposures.md) or typed source |
+| <a id="site-domains"></a>`domains` | Named map of host strings, optional, {} | Valid DNS labels, total length 1–253; no URL/path |
+| <a id="site-external-endpoints"></a>`external_endpoints` | Named map, optional, {} | Protocol/address/port [endpoints](networks.md#external-endpoints) |
+| <a id="site-host-aliases"></a>`host_aliases` | Named map, optional, {} | Docker-local `{hostname: text}`; underscores allowed in labels |
+| <a id="site-address-groups"></a>`address_groups` | Named map, optional, {} | Bounded ordered [address groups](networks.md#address-groups) |
+| <a id="site-secret-sources"></a>`secret_sources` | Named map, optional, {} | [File/environment/generated metadata](identity-and-secrets.md#secret-sources), never secret values |
+| <a id="site-accounts"></a>`accounts` | Named map, optional, {} | [Create-once account declarations](connections.md#accounts) |
+| <a id="site-identity-providers"></a>`identity_providers` | Named map, optional, {} | [OIDC/SAML declarations](identity-and-secrets.md#identity-providers) |
+| <a id="site-devices"></a>`devices` | Named map, optional, {} | [Serial declarations](supporting-types.md#devices) |
+| <a id="site-images"></a>`images` | Named map, optional, {} | Only declared custom archive replacement bindings; normal image versions belong to library software |
+| <a id="site-evidence"></a>`evidence` | Named map, optional, {} | Ongoing callback records or raw UTF-8 [evidence](supporting-types.md#evidence-and-assets) |
+| <a id="site-policies"></a>`policies` | Closed map, optional | Submaps `network/transport/tls/middlewares/authentication`, each defaults {} |
+| <a id="site-backup"></a>`backup` | Optional null or closed object | Presence selects [PBS client preparation and recovery coverage](backup.md); add `job` to install the coordinated schedule. |
+| <a id="site-zabbix"></a>`zabbix` | Optional null or `{server: app_id}` | Absent disables root monitoring expansion; [Zabbix](zabbix.md) |
 
-Unknown fields, former fixed-bundle configuration and authored migration
-admissions refuse. Library and site policy names may not collide: the site
-adds named policies, not overrides. A source reference does not recursively
-merge sections.
+Validation rejects unknown fields, the former fixed-bundle configuration and migration exceptions written into configuration. Library and site policy names must not collide; your site can add policies but cannot override library policies. A source reference loads a complete declaration without recursively merging sections.
 
-## Resolution and changes
+## First installation
 
-The compiler validates every declared component, including disabled guests.
-It resolves values, then exposure/auth/connection bindings, ordered policies,
-software budgets, owned files, monitoring and required traffic.
-Disabled selection changes execution, not source validity.
+A complete site describes your desired allocations and relationships. Passing configuration checks does not establish target trust, available capacity, prepared credentials or files, or support for commissioning a service. After the offline checks, follow [preparation](../guides/prepare-deployment.md) and check [support for each selected adapter](support.md).
 
-Guest/app keys and persistent identities should remain stable. Changing a
-domain, value or display name still produces a new source snapshot and must pass
-normal continuity. Removing an app does not authorize deleting its data or
-unselected containers. See [Lifecycle](lifecycle.md).
+<a id="resolution-and-changes"></a>
+## Resolution and later deployments
 
-[Reference index](README.md) · [Library](library.md) · [Sources](sources.md)
+The compiler validates every declared component, including disabled guests. It resolves values first, then checks exposures, authentication and connections, ordered policies, software budgets, managed files, monitoring, backup coverage and required traffic. Disabling a guest excludes it from ordinary deployment but does not exempt it from configuration checks.
+
+Keep guest and app keys and persistent identities stable. Even a change to a domain, value or display name produces a new configuration snapshot and must pass the normal ownership checks. Removing an app declaration does not authorise deletion of its data or unselected containers. See [Lifecycle](lifecycle.md).
 
 ## PBS client preparation
 
-Optional root [`backup`](backup.md) is enabled by presence. Null/empty selects the only registered backup profile; `{profile: id}` selects it explicitly. It prepares clients and coverage without creating a server or backup schedule.
+Enable the root [`backup`](backup.md) feature by adding the property. Null or an empty object selects the sole registered backup profile; `{profile: id}` selects one explicitly. These forms prepare client software and recovery coverage without creating a server or schedule. Add the closed [`backup.job`](backup.md#operational-job) object to install a coordinated encrypted backup schedule. Its membership includes every configured guest, even when deployment to a guest is disabled.
+
+[Reference index](README.md) · [Library](library.md) · [Sources](sources.md)

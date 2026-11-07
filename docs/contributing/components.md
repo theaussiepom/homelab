@@ -1,44 +1,23 @@
 # Extend a component
 
-A component change needs a finite public contract, not a generic options bag.
+A component must define exactly which inputs it accepts and what they do. Do not add an unrestricted options object.
 
 ## Contract and resolution
 
-Reuse an existing component if it expresses the requirement.
-Define closed fields, defaults, bounds and safe diagnostics at the owning
-validator. Keep source parsing in the existing confined reader.
-Resolve references centrally, then test global placement, namespace, resource,
-identity/readiness and traffic relationships.
+Reuse an existing component when it can express the requirement. In the responsible validator, define the accepted fields, reject unknown keys, and specify defaults, limits and diagnostics that do not disclose private values. Keep parsing in the existing reader and preserve its filesystem restrictions. Resolve references centrally, then test placement, names, resources, identities, readiness dependencies and traffic relationships across the configuration.
 
-Whole-source files add a kind to the existing definition mechanism; they do not
-create includes, recursive defaults or alternate parsers. A renderer receives
-resolved contracts, never arbitrary author commands or Compose overrides.
+Support a complete source file by adding its kind to the existing definition mechanism. Do not add includes, recursive defaults or another parser. Renderers receive validated, resolved values; they must not accept arbitrary user commands or Compose overrides.
 
 ## Adapter ownership
 
-Declare only supported service/native/network/private-file roles.
-Register every runtime leaf in the existing application contract.
-Reserve its ownership before rendering and verify actual emitted files against
-that authority. Do not expose a peer's private directory through a broad mount.
-Native account/unit/config paths and numeric IDs must be checked collectively
-where co-location can conflict.
+Declare only the service, native, network and private-file roles the adapter supports. Register every generated runtime file in the existing application contract and reserve its owner before rendering. Check the files actually emitted against those reservations. Do not mount a path that exposes another app's private directory. Check native accounts, units, configuration paths and numeric IDs across apps that may share a guest.
 
-Preserve stable storage, process identities, generated-account ownership,
-private-role continuity, locks/HOLDs and receipts. A fresh capability needs
-create-only initialization, exact owned repeat behavior and explicit limits.
-Vendor startup alone does not establish commissioning support.
+Preserve storage, process identities, generated-account ownership, existing private roles and credentials, locks, HOLDs and receipts. First-installation support needs initialization that only creates new resources, defined behavior for repeating an operation on HomeLab-managed resources, and explicit limits. Starting the vendor service alone does not prove that commissioning is supported.
 
 ## Required examples and evidence
 
-Add direct component success/default/optional/refusal units; app/guest units
-mock conforming contracts. Add real source→resolve→packet/receiver integration
-for the new boundary. Use real local receipt/Git/state/payload paths for
-controller continuity tests, mocking native bodies only.
-Name any provider/parser/credential fakes and their limits.
+Test the component directly with valid values, defaults, optional fields and intended failures. App and guest unit tests should mock the component using its accepted inputs and outputs. Add integration tests from real source through resolution, packet generation and the receiver for the changed behavior. Controller ownership tests must use real local receipts, Git history, state and app payloads, replacing only native operations with fakes. Identify any provider, parser or credential fakes and explain what they leave untested.
 
-Update [reference](../reference/README.md), complete examples and support/update
-behavior. Rehearse documented commands from a disposable environment.
-For native qualification, keep exact source pins and the separately authorised
-target/service evidence. Full source gates remain required.
+Update the [reference](../reference/README.md), complete examples and descriptions of installation and update support. Rehearse documented commands in a disposable environment. For target validation, retain exact source pins and the evidence from separately authorised target and service checks. The full source checks remain required.
 
 [Contributor index](README.md) · [Testing](testing.md)

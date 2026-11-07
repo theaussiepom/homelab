@@ -1,57 +1,19 @@
 # HomeLab
 
-Compose Debian LXC guests from reusable application profiles, then compile their
-infrastructure, configuration and ordered deployment phases. HomeLab uses
-OpenTofu for infrastructure and Ansible for packages and services.
+HomeLab turns a configuration describing your Proxmox guests and applications into validated deployment inputs for Debian 13 LXC. You choose where services run, how they connect and which resources they use. OpenTofu owns infrastructure and state; Ansible owns guest configuration and services.
 
-**Start with a successful offline compilation:** [First configuration](docs/guides/first-configuration.md).
-It needs no host, credentials, Docker or private repository.
+**Start with [what you want to build](docs/start-here.md).** If you are choosing applications for your own homelab, follow the [HomeLab Stack getting-started route](https://github.com/theaussiepom/homelab-stack/blob/main/docs/start-here.md). The stack library supplies the reusable profiles, templates and application choices. Use this framework's [configuration walkthrough](docs/guides/first-configuration.md) to learn how those choices become a complete site and inspect what the compiler produces.
 
-## Choose your path
-
-| I want to… | Start here |
+| Your next result | Documentation |
 | --- | --- |
-| Understand the model | [Start here](docs/start-here.md) and [Concepts](docs/concepts.md) |
-| Configure a field | [Configuration reference](docs/reference/README.md) |
-| Select an application | [homelab-stack library](https://github.com/theaussiepom/homelab-stack) at your compatible selected revision; [framework support limits](docs/reference/support.md) |
-| Validate or generate workflows | [Validate and generate](docs/guides/validate-and-generate.md) |
-| Deploy or investigate a failure | [Operations](docs/operations/README.md) |
-| Extend a component | [Contributing](docs/contributing/README.md) |
+| A personalised configuration you can compile locally | [Write and inspect your first configuration](docs/guides/first-configuration.md) |
+| An explanation of a field or relationship | [Configuration model](docs/concepts.md) and [contract reference](docs/reference/README.md) |
+| Real site inputs ready for review | [Prepare a deployment](docs/guides/prepare-deployment.md) |
+| A supported installation or update to an existing HomeLab installation | [Operations](docs/operations/README.md) and [support limits](docs/reference/support.md) |
+| A reviewed framework change | [Contributing](docs/contributing/README.md) |
 
-## A small example
+A library supplies profiles and defaults; your site places instances and binds resources. This framework defines which fields are accepted, how references are resolved and which operations are supported. Keep the framework revision compatible with the selected library; you supply your own allocations, protected inputs and operating procedure.
 
-An app selects a library profile and binds its roles to a guest. This is a
-fragment; the [complete tutorial source](docs/examples/first-configuration/site.yaml)
-also declares the context, networks, storage and guest.
+The local walkthrough needs Git and Python, with no Proxmox access. Compilation checks that the source is consistent and builds deployment packets: files containing generated deployment inputs. Installation also requires an adapter that supports the operation, verified prerequisites and a protected continuous deployment (CD) workflow, followed by [service verification](docs/operations/verify-and-maintain.md). Keep supported `fresh` source for later updates to the same HomeLab installation. `retained` requires an installation already owned by HomeLab; it cannot import another installation.
 
-```yaml
-apps:
-  recursive_a:
-    profile: recursive
-    guest: resolver
-    lifecycle: fresh
-    interfaces:
-      private: {scope: app-network, network: default}
-      local: {scope: guest-loopback}
-```
-
-A site can split complete guests, apps, connections and exposures into confined
-typed files. Named address groups reuse ordered network values. References do
-not implicitly grant access or create startup waits.
-
-## Three source owners
-
-| Owner | Responsibility |
-| --- | --- |
-| This framework | Configuration grammar, compilation, phase runner, infrastructure and tests |
-| homelab-stack application library | Profiles, templates, software versions, runtime defaults and synthetic compositions |
-| Consumer site | Allocations, placement, bindings, protected input references and deployment policy |
-
-The executable platform is **Debian 13 LXC on Proxmox**. A valid configuration is
-not a deployment or a working service. Fresh commissioning depends on the
-adapter; retained continuation requires genuine owned receipts and state.
-[Lifecycle](docs/reference/lifecycle.md) explains these limits.
-
-[All documentation](docs/README.md) · [Security](SECURITY.md) ·
-[Testing](docs/contributing/testing.md) ·
-[Separate host, ISO and recovery subsystems](docs/framework-reference.md)
+[Documentation index](docs/README.md) · [Security](SECURITY.md) · [Lifecycle](docs/reference/lifecycle.md) · [Separate host, installer and recovery subsystems](docs/framework-reference.md)

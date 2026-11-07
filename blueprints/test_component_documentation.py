@@ -4,6 +4,7 @@ import contextlib
 import copy
 import io
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -20,6 +21,7 @@ import authored_config
 import compile as compiler
 import component_packet
 from component_errors import ComponentError
+from test_documentation_contract_helpers import PAGE, SOURCE, check_contract, expect_component_refusal
 
 
 class DocumentationContracts(unittest.TestCase):
@@ -30,6 +32,98 @@ class DocumentationContracts(unittest.TestCase):
         self.config = self.root / 'config'
         shutil.copytree(ROOT / 'docs/examples/first-configuration', self.config)
         self.site = self.config / 'site.yaml'
+
+    def walkthrough_block(self, marker, language):
+        text = (ROOT / 'docs/guides/first-configuration.md').read_text()
+        blocks = re.findall(r'<!-- ' + re.escape(marker) + r' -->\n```' + language + r'\n(.*?)\n```',
+                            text, re.S)
+        self.assertEqual(len(blocks), 1, marker)
+        return blocks[0] + '\n'
+
+    def personalised_site(self):
+        self.site.write_text(self.walkthrough_block('example: personalised-site', 'yaml'))
+        return authored_config.read(self.site)
+
+    def test_personalised_walkthrough_executes_printed_commands_and_inspects_effects(self):
+        self.personalised_site()
+        environment = dict(os.environ, FRAMEWORK=str(ROOT), WORK=str(self.root),
+                           PATH=str(Path(sys.executable).parent) + os.pathsep + os.environ['PATH'])
+        checked = subprocess.run(['/bin/sh', '-eu', '-c', self.walkthrough_block('walkthrough: compile', 'sh')],
+                                 cwd=ROOT, env=environment, capture_output=True, text=True, timeout=30)
+        self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+        self.assertIn('All component guests compile offline', checked.stdout)
+        inspected = subprocess.run(['/bin/sh', '-eu', '-c', self.walkthrough_block('walkthrough: inspect', 'sh')],
+                                   cwd=ROOT, env=environment, capture_output=True, text=True, timeout=30)
+        self.assertEqual(inspected.returncode, 0, inspected.stdout + inspected.stderr)
+        self.assertEqual(inspected.stdout, self.walkthrough_block('walkthrough: expected', 'text'))
+        packet = json.loads((self.root / 'resolver.json').read_text())
+        config = json.loads(packet['files']['site.json'])
+        runtime = json.loads(packet['files']['component-runtime.json'])
+        guest = config['guest']
+        self.assertEqual(config['site'], {'node': 'practice-pve', 'api_endpoint': 'https://192.0.2.20:8006/'})
+        self.assertEqual((guest['vmid'], guest['hostname'], guest['memory_mib']), (620, 'practice-resolver', 1024))
+        self.assertEqual(guest['interfaces'], [{'bridge': 'practice0', 'vlan': None,
+            'mac': '02:00:00:30:00:20', 'ipv4': '198.18.30.20/24', 'gateway': '198.18.30.1', 'ipv6': 'manual'}])
+        self.assertEqual((guest['cpu'], guest['root_gib'], runtime['guest']['os_reserve_mib']), (1, 8, 256))
+        self.assertEqual(runtime['applications']['recursive_a']['interfaces']['local'], {'scope': 'guest-loopback'})
+        expect_component_refusal(lambda: compiler.resolve_plan(self.config, self.site, admit=True),
+                                 'component.synthetic-binding', ('guests', 'resolver', 'admission'))
+
+    def test_personalised_alternative_decisions_and_typed_extraction_preserve_bindings(self):
+        selected = self.personalised_site()
+        selected['contexts']['lab'].update(node='workshop-pve', timezone='Australia/Brisbane')
+        selected['external_endpoints']['api']['address'] = '192.0.2.30'
+        selected['external_endpoints']['dns']['address'] = '198.18.40.53'
+        selected['storage']['local']['pool'] = 'workshop-local'
+        selected['networks']['primary'].update(cidr='198.18.40.0/24', bridge='workshop0', gateway='198.18.40.1')
+        guest = selected['guests']['resolver']
+        guest.update(identity={'vmid': 720, 'hostname': 'workshop-resolver'},
+                     template_file_id='workshop:vztmpl/debian-13.tar.zst', resources={'memory_mib': 1536})
+        guest['interfaces']['management'].update(mac='02:00:00:40:00:20',
+                                                address={'mode': 'static', 'value': '198.18.40.20'})
+        self.site.write_text(json.dumps(selected))
+        with patch('subprocess.run', side_effect=AssertionError('No process or target')), \
+             patch('socket.create_connection', side_effect=AssertionError('No network')):
+            plan = compiler.resolve_plan(self.config, self.site)
+            before = component_packet.lower_plan(plan)
+        config = json.loads(before['resolver']['files']['site.json'])
+        runtime = json.loads(before['resolver']['files']['component-runtime.json'])
+        self.assertEqual(config['site'], {'node': 'workshop-pve', 'api_endpoint': 'https://192.0.2.30:8006/'})
+        lowered = config['guest']
+        self.assertEqual((lowered['vmid'], lowered['hostname'], lowered['storage_id'], lowered['template_file_id']),
+                         (720, 'workshop-resolver', 'workshop-local', 'workshop:vztmpl/debian-13.tar.zst'))
+        self.assertEqual(lowered['interfaces'], [{'bridge': 'workshop0', 'vlan': None,
+            'mac': '02:00:00:40:00:20', 'ipv4': '198.18.40.20/24', 'gateway': '198.18.40.1', 'ipv6': 'manual'}])
+        self.assertEqual(lowered['dns_servers'], ['198.18.40.53'])
+        self.assertEqual(runtime['guest'], {'id': 'resolver', 'memory_mib': 1536,
+                                           'os_reserve_mib': 256, 'timezone': 'Australia/Brisbane'})
+        self.assertEqual(plan.resolved['apps']['recursive_a']['profile'], 'recursive')
+        # Execute the exact complete leaf and parent reference printed in the guide.
+        (self.config / 'apps').mkdir()
+        (self.config / 'apps/recursive.yaml').write_text(self.walkthrough_block('example: personalised-app-leaf', 'yaml'))
+        reference = authored_config.parse(self.walkthrough_block('example: personalised-app-reference', 'yaml').encode(), '.yaml')
+        selected['apps'] = reference['apps']
+        self.site.write_text(json.dumps(selected))
+        extracted = compiler.resolve_plan(self.config, self.site)
+        self.assertEqual(component_packet.lower_plan(extracted), before)
+        self.assertEqual(extracted.resolved['guest_dependencies'], {'resolver': []})
+        self.assertNotEqual(extracted.pins, plan.pins)
+
+    def test_personalised_refusals_report_documented_cidr_and_memory_failures(self):
+        selected = self.personalised_site()
+        compiler.compile_site(self.config, self.site)
+        wrong = copy.deepcopy(selected)
+        wrong['networks']['primary']['cidr'] = '198.18.30.20/24'
+        self.site.write_text(json.dumps(wrong))
+        expect_component_refusal(lambda: compiler.resolve_plan(self.config, self.site),
+                                 'component.invalid', ('networks', 'primary'))
+        wrong = copy.deepcopy(selected)
+        wrong['guests']['resolver']['resources']['memory_mib'] = 256
+        self.site.write_text(json.dumps(wrong))
+        expect_component_refusal(lambda: compiler.resolve_plan(self.config, self.site),
+                                 'component.memory-budget', ())
+        self.site.write_text(json.dumps(selected))
+        self.assertEqual(set(compiler.compile_site(self.config, self.site)), {'resolver'})
 
     def test_documented_cli_check_packet_mode_phases_and_create_only_output(self):
         with patch('sys.argv', ['compile.py', '--stack', str(self.config), '--site', str(self.site), '--check']), \
@@ -50,6 +144,11 @@ class DocumentationContracts(unittest.TestCase):
         with patch('sys.argv', argv), self.assertRaises(FileExistsError):
             compiler.main()
         self.assertEqual(target.read_bytes(), original)
+
+    def test_network_nic_documentation_conformance(self):
+        count = check_contract((ROOT / SOURCE).read_text(), (ROOT / PAGE).read_text(),
+                               read_text=lambda path: (ROOT / path).read_text())
+        self.assertGreater(count, 0)
 
     def test_tutorial_is_source_only_and_refuses_real_deployment_admission(self):
         with patch('subprocess.run', side_effect=AssertionError('No process or target')), \
@@ -122,7 +221,8 @@ class DocumentationContracts(unittest.TestCase):
         fields = set()
         for name in ('component_types', 'component_sources', 'component_connections',
                      'component_exposures', 'component_secrets', 'component_auth',
-                     'component_properties', 'component_foundations', 'component_monitoring'):
+                     'component_properties', 'component_foundations', 'component_monitoring',
+                     'component_backup', 'component_backup_job'):
             tree = ast.parse((ROOT / 'blueprints' / (name + '.py')).read_text())
             for node in ast.walk(tree):
                 if isinstance(node, ast.Call) and ((isinstance(node.func, ast.Name) and node.func.id == 'closed')
@@ -135,7 +235,7 @@ class DocumentationContracts(unittest.TestCase):
         self.assertEqual(sorted(field for field in fields
                                 if not re.search(r'\b' + re.escape(field) + r'\b', reference)), [])
         for relative in ('site.md', 'library.md', 'sources.md', 'connections.md', 'exposures.md',
-                         'guests.md', 'apps.md', 'app-properties.md', 'lifecycle.md', 'support.md', 'cli.md'):
+                         'guests.md', 'apps.md', 'app-properties.md', 'backup.md', 'lifecycle.md', 'support.md', 'cli.md'):
             self.assertIn('(' + relative + ')', (ROOT / 'docs/reference/README.md').read_text())
 
 
