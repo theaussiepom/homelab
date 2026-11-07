@@ -91,7 +91,7 @@ The selected template supplies defaults; it does not provision a guest by itself
 <a id="changes"></a>
 ## Later deployments
 
-Keep the supported `fresh` configuration for ordinary updates. Ownership checks preserve the VMID, hostname, provider, storage and app names and paths; changing a label does not establish new ownership. CPU, memory, startup and NIC changes must pass the [saved-plan policy](lifecycle.md#infrastructure-plan-policy). That policy rejects disk and mount-point changes, replacement, import, adoption and an inactive planned guest. It does not guarantee online resizing, relocation or rollback.
+Keep the supported `fresh` configuration for ordinary updates. Ownership checks preserve the VMID, hostname, provider, storage and app names and paths; changing a label does not establish new ownership. CPU, memory, startup and NIC changes must pass the [saved-plan policy](lifecycle.md#infrastructure-plan-policy). That policy rejects disk and mount-point changes except for the exact [PBS backup-flag and staging-volume changes](backup.md#syntax). It also rejects replacement, import, adoption and an inactive planned guest. It does not guarantee online resizing, relocation or rollback.
 
 ## Worked guest and inherited defaults
 

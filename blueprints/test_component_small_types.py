@@ -167,7 +167,7 @@ class DeviceRequirementUnitTests(unittest.TestCase):
  def test_compiler_validator_propagates_mocked_device_refusal_with_safe_subject_path(self):
   from component_plan import Resolver
   resolver=Resolver.__new__(Resolver)
-  resolver.library={key:{}for key in('guest_templates','app_profiles','software','runtime_profiles','health_profiles','monitoring_profiles')}
+  resolver.library={key:{}for key in('guest_templates','app_profiles','software','runtime_profiles','health_profiles','monitoring_profiles','backup_profiles')}
   resolver.site={key:{}for key in('contexts','networks','guests','apps','storage','secret_sources')}
   resolver.policy={'network':{}}
   resolver.site['devices']={'coordinator':{'type':'serial','context':'primary','path':'/dev/serial/by-id/usb-synthetic','capability':'registered'}}

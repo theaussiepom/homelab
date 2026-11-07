@@ -177,6 +177,13 @@ jobs:
             -v "$PWD:/src:ro" -v "$RUNNER_TEMP/application-coverage:/coverage" \
             -e HOME=/tmp -e HOMELAB_COVERAGE_OUTPUT=/coverage/report -e GITHUB_SHA homelab-app-test \
             sh /src/proxmox/applications/tests/check.sh
+      - name: Verify PBS archive exclusions with GNU tar
+        run: python3 proxmox/applications/tests/backup_tar_fixture.py
+      - name: Verify Linux PBS staging preimages
+        run: |
+          docker run --rm --platform linux/amd64 --network none \
+            -v "$PWD:/src:ro" homelab-app-test \
+            python3 /src/proxmox/applications/tests/backup_staging_fixture.py
       - name: Community sign-in
         run: |
           community='dbeaver/cloudbeaver:26.2.3@sha256:a537c60a7ca98d8d791c11c01172c1354e8dedfe222d04a54795ceeb32f12bbc'

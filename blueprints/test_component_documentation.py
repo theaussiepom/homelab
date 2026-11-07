@@ -221,7 +221,8 @@ class DocumentationContracts(unittest.TestCase):
         fields = set()
         for name in ('component_types', 'component_sources', 'component_connections',
                      'component_exposures', 'component_secrets', 'component_auth',
-                     'component_properties', 'component_foundations', 'component_monitoring'):
+                     'component_properties', 'component_foundations', 'component_monitoring',
+                     'component_backup', 'component_backup_job'):
             tree = ast.parse((ROOT / 'blueprints' / (name + '.py')).read_text())
             for node in ast.walk(tree):
                 if isinstance(node, ast.Call) and ((isinstance(node.func, ast.Name) and node.func.id == 'closed')
@@ -234,7 +235,7 @@ class DocumentationContracts(unittest.TestCase):
         self.assertEqual(sorted(field for field in fields
                                 if not re.search(r'\b' + re.escape(field) + r'\b', reference)), [])
         for relative in ('site.md', 'library.md', 'sources.md', 'connections.md', 'exposures.md',
-                         'guests.md', 'apps.md', 'app-properties.md', 'lifecycle.md', 'support.md', 'cli.md'):
+                         'guests.md', 'apps.md', 'app-properties.md', 'backup.md', 'lifecycle.md', 'support.md', 'cli.md'):
             self.assertIn('(' + relative + ')', (ROOT / 'docs/reference/README.md').read_text())
 
 

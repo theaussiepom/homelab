@@ -9,7 +9,7 @@ Each site `storage.<id>` accepts exactly two required fields: `context`, an iden
 
 ## Guest volume fields
 
-Each `guests.<id>.volumes.<id>` value requires exactly the fields below, with no inheritance. Omitted, null or empty values and unknown fields are rejected.
+Each `guests.<id>.volumes.<id>` value requires `storage`, `slot`, `path` and `size_gib`, with no inheritance. These required fields reject omitted, null or empty values. The optional `backup` field accepts null or an empty object; unknown fields are rejected.
 
 | Path within the volume | Type / inclusive domain | Resolution and effect |
 | --- | --- | --- |
@@ -17,6 +17,7 @@ Each `guests.<id>.volumes.<id>` value requires exactly the fields below, with no
 | <a id="volume-slot"></a>`slot` | Integer 0–255 | Unique and contiguous from zero across the guest's volumes |
 | <a id="volume-path"></a>`path` | Canonical absolute data path | Provider mount target using a supported form below; must not overlap other managed roots |
 | <a id="volume-size-gib"></a>`size_gib` | Integer 1–2147483647 GiB | Requested allocation; a valid value does not permit changing an existing mount |
+| <a id="volume-backup"></a>`backup` | Optional null or empty object | With site-root backup enabled, presence includes this managed volume in native full-guest backup; omission excludes it. Without the root feature, existing provider defaults remain unchanged. See [backup selection](backup.md#syntax). |
 
 Volume paths match `/srv/<lowercase-name>[/...]` or `/var/lib/mysql`, `/var/lib/postgresql`, `/var/lib/influxdb` with lowercase subdirectories. Data paths cannot be `/`, contain traversal or overlap each other as parent/child. They cannot overlap OS/framework control roots such as `/etc`, `/usr`, `/dev`, `/run`, the defined `/var/lib/homelab*` roots or `/opt/homelab-app`. See [canonical path rules](supporting-types.md#scalar-and-path-types) and the actual [`data_path`/`volume` owner](../../blueprints/component_types.py).
 
@@ -56,7 +57,7 @@ A supported guest or app installation uses these declarations. The actual pools,
 
 ## Later deployments
 
-The ordinary infrastructure plan preserves the existing guest's complete disk and mount-point blocks. It rejects size increases, decreases and other changes to these blocks even when individual values pass validation. Editing paths or owners does not relocate or adopt data. There is no general procedure for retiring, importing, replacing, restoring or rolling back data. See [Lifecycle](lifecycle.md#infrastructure-plan-policy) for these restrictions. Any separately supported procedure would need its own evidence and authorisation.
+The ordinary infrastructure plan preserves the existing guest's disk and mount-point blocks, including their sizes and order. The [PBS backup contract](backup.md#syntax) permits only two specific mount changes: backup flags that exactly match the compiled selection, and one new, empty, unprotected staging volume appended after the existing slots. The staging path must pass the read-only check before apply. Other changes, including size increases and decreases, are rejected even when individual values pass validation. Editing paths or owners does not relocate or adopt data. There is no general procedure for retiring, importing, replacing, restoring or rolling back data. See [Lifecycle](lifecycle.md#infrastructure-plan-policy) for these restrictions. Any separately supported procedure would need its own evidence and authorisation.
 
 ## Worked pool and data bindings
 
@@ -90,7 +91,7 @@ app_binding:
 
 Use the `volume` value at `guests.<id>.volumes.data`, the `profile_role` value at `app_profiles.<id>.storage.data`, and `app_binding` at `apps.<id>.storage.data`. The three wrapper labels explain the parts of this example; they are not accepted configuration fields. The example demonstrates the volume, role and binding validators, rather than a complete app profile or an actual mount operation. Select a library profile that explicitly supports the storage target and initializer, and follow its complete example. Do not add them to an arbitrary profile.
 
-**Invalid variation:** set the volume path to `/etc/example-data`, or add `initialize` to a read-only role. Both are rejected before execution. Reusing a volume slot or overlapping another selected root is also rejected. Later deployments preserve data: the ordinary plan requires the existing guest's complete disk and mount-point blocks to stay unchanged. A larger valid integer therefore does not make resizing supported.
+**Invalid variation:** set the volume path to `/etc/example-data`, or add `initialize` to a read-only role. Both are rejected before execution. Reusing a volume slot or overlapping another selected root is also rejected. Later deployments preserve data: apart from the [specific PBS changes](#later-deployments), the existing guest's disk and mount-point blocks must stay unchanged. A larger valid integer does not make resizing supported.
 
 ## Verification and navigation
 

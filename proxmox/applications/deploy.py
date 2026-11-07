@@ -21,7 +21,8 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
     bootstrap_closed()
     cfg, directory = component_guest.packet(read_json(packet, private=True), inputs)
     phases = component_guest.phases(cfg)
-    if phase == component_guest.AGENT_PHASE and 'monitoring' not in cfg['app']:
+    if (phase == component_guest.AGENT_PHASE and 'monitoring' not in cfg['app']
+            or phase == component_guest.BACKUP_PHASE and 'backup' not in cfg['app']):
         return {'status':'not_selected','vmid':cfg['guest']['vmid'],
                 'changed':False,'target_contacted':False}
     require(phase == 'infrastructure' or phase in phases, 'Select this component guest phase')
@@ -45,7 +46,9 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
             payload=None
             previously_owned=False
             if phase != 'preparation':
-                if phase==component_guest.AGENT_PHASE:
+                if phase == component_guest.BACKUP_PHASE:
+                    payload = component_prepare.prepare_backup(cfg, environment)
+                elif phase==component_guest.AGENT_PHASE:
                     payload=component_prepare.prepare_agent(cfg,environment)
                 else:
                     app_id=cfg['deployment']['payload_phases'][phase]

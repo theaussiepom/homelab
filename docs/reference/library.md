@@ -12,6 +12,7 @@ A library is a versioned set of reusable definitions. Its root is `stack.json`; 
 | <a id="library-runtime-profiles"></a>`runtime_profiles` | Optional named map, {} | Limits/security and native memory reservations |
 | <a id="library-health-profiles"></a>`health_profiles` | Optional named map, {} | Adapter readiness checks |
 | <a id="library-authentication-profiles"></a>`authentication_profiles` | Optional named map, {} | `{type, required}`; type is `cloudbeaver-oidc`, `node-red-retained-oidc` or `zabbix-saml`; required is Boolean |
+| <a id="library-backup-profiles"></a>`backup_profiles` | Optional named map, {} | [PBS client software and configuration to protect](backup.md#backup-profiles) |
 | <a id="library-monitoring-profiles"></a>`monitoring_profiles` | Optional named map, {} | `{type: zabbix-agent, profiles: [...]}` |
 | <a id="library-assets"></a>`assets` | Optional named map, {} | Hash-pinned raw UTF-8 files |
 | <a id="library-policies"></a>`policies` | Optional closed map | `network/transport/tls/middlewares/authentication`, each a named map |
@@ -28,6 +29,8 @@ A guest template requires complete [guest default objects](guests.md) for `resou
 An app profile requires `adapter`, `display_name` and `interfaces`. The optional maps `listeners`, `endpoints`, `storage`, `connections`, `health`, `properties`, `devices` and `secrets` each default to {}. The optional `software/runtime` lists contain unique IDs and default to []. Optional `authentication` selects an authentication-profile ID, and optional `monitoring` has the form `{profile: monitoring_profile_id}`.
 
 Select one of the [18 registered adapters](support.md). The display name must be nonempty text of at most 4096 characters. [Supporting types](supporting-types.md) describes every nested profile field, and [Application properties](app-properties.md) lists the properties each adapter accepts. Profiles may provide partial property defaults, but the result after merging app overrides must be complete.
+
+An app profile may also declare the [backup coverage object](backup.md#application-recovery-declarations). It classifies every storage role as included or excluded and can list native configuration paths. These declarations reuse guest storage bindings rather than repeating their allocations. When the site enables backup, every selected app profile must supply this coverage.
 
 ## First installation
 

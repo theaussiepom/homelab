@@ -15,6 +15,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'proxmox/applications'
 import component_plan
 import component_types as types
 import component_monitoring
+import component_backup
 import component_secrets
 import component_foundations
 import component_properties
@@ -22,10 +23,10 @@ from component_errors import ComponentError
 import test_component_small_types as small
 
 
-LIBRARY=('guest_templates','app_profiles','software','runtime_profiles','health_profiles','monitoring_profiles')
+LIBRARY=('guest_templates','app_profiles','software','runtime_profiles','health_profiles','monitoring_profiles','backup_profiles')
 SITE=('contexts','networks','guests','apps','storage','secret_sources','devices')
 ROOTS=((types,'template'),(types,'profile'),(types,'software'),(types,'runtime'),(types,'health'),
-       (component_monitoring,'profile'),(types,'context'),(types,'network'),(types,'guest'),
+       (component_monitoring,'profile'),(component_backup,'profile'),(types,'context'),(types,'network'),(types,'guest'),
        (types,'app'),(types,'network_policy'),(component_secrets,'source'),(types,'device'))
 CHILDREN=('resource','startup','security','interface','volume','root_path','storage_layout',
           'policy_binding','timezone','role','storage_role','allocation')
@@ -60,6 +61,16 @@ def case(collection,name,value,target,*,child=None):
 
 
 class CompilerValidationDispatchTests(unittest.TestCase):
+    def test_backup_profile_dispatch_preserves_typed_source_errors_without_executing_a_client(self):
+        value = {'type': 'pbs-client', 'software': ['pbs-client'],
+                 'configuration': {'ssh': {'path': '/etc/ssh', 'kind': 'directory'}}}
+        spec = case('backup_profiles', 'pbs', value, ('component_backup', 'profile'))
+        self.matrix(spec, [
+            ('empty-software', lambda x: x.update(software=[])),
+            ('wrong-client', lambda x: x.update(type='shell')),
+            ('whole-root', lambda x: x['configuration']['ssh'].update(path='/')),
+            ('unknown-key', lambda x: x.update(command='PRIVATE_SENTINEL'))])
+
     def dispatch(self,spec,value):
         r=resolver();collection,name=spec['collection'],spec['name']
         if collection in LIBRARY:r.library[collection][name]=value

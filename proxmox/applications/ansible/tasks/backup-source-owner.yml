@@ -1,0 +1,48 @@
+---
+- name: Inspect backup source directory
+  ansible.builtin.stat:
+    path: /opt/homelab-backup
+    follow: false
+  register: backup_source_before
+
+- name: Inspect backup source owner
+  ansible.builtin.stat:
+    path: /opt/homelab-backup/OWNER.json
+    follow: false
+  register: backup_source_owner_before
+
+- name: Refuse foreign backup source paths
+  ansible.builtin.assert:
+    that:
+      - backup_source_before.stat.exists == backup_source_owner_before.stat.exists
+      - not backup_source_before.stat.exists or (backup_source_before.stat.isdir and not backup_source_before.stat.islnk and backup_source_before.stat.uid == 0)
+      - not backup_source_owner_before.stat.exists or (backup_source_owner_before.stat.isreg and not backup_source_owner_before.stat.islnk and backup_source_owner_before.stat.uid == 0 and backup_source_owner_before.stat.mode == '0600' and backup_source_owner_before.stat.nlink == 1)
+
+- name: Read backup source ownership
+  ansible.builtin.slurp:
+    src: /opt/homelab-backup/OWNER.json
+  register: backup_source_owner
+  when: backup_source_owner_before.stat.exists
+
+- name: Verify backup source ownership
+  ansible.builtin.assert:
+    that: (backup_source_owner.content | b64decode | from_json) == {'schema':'homelab-backup-source-v1'}
+  when: backup_source_owner_before.stat.exists
+
+- name: Prepare the backup source directory
+  ansible.builtin.file:
+    path: /opt/homelab-backup
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Record backup source ownership
+  ansible.builtin.copy:
+    content: '{"schema":"homelab-backup-source-v1"}'
+    dest: /opt/homelab-backup/OWNER.json
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
+    follow: false

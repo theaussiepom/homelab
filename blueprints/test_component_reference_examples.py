@@ -16,6 +16,8 @@ import authored_config
 import component_addresses
 import component_accounts
 import component_auth
+import component_backup
+import component_backup_job
 import component_foundations
 import component_monitoring
 import component_packet
@@ -43,6 +45,8 @@ EXAMPLES = {
     'identity-and-secrets.md': ['secret-file', 'secret-environment', 'identity-oidc'],
     'supporting-types.md': ['profile-minimal', 'runtime-minimal', 'device-minimal'],
     'zabbix.md': ['zabbix-selection', 'zabbix-profile'],
+    'backup.md': ['backup-selection', 'backup-profile-selection', 'backup-profile',
+                  'backup-application', 'backup-job'],
     'lifecycle.md': ['lifecycle-fresh'],
 }
 
@@ -331,6 +335,45 @@ class ReferenceExamples(unittest.TestCase):
         _,before=self.resolve(selected);_,after=self.resolve(selected)
         self.assertEqual(before,after)
         with self.assertRaises(ValueError):types.app(dict(fresh,lifecycle='update'))
+
+    def test_backup_reference_fragments_use_actual_owners_and_refuse_documented_invalid_values(self):
+        # These are documented fragments, not a complete site. The library's
+        # operational example supplies the integration and packet evidence.
+        profile = example('backup.md', 'backup-profile')
+        self.assertEqual((profile.pop('schema'), profile.pop('kind')),
+                         ('homelab-components-v1', 'backup-profile'))
+        component_backup.profile(profile)
+        resolver = SimpleNamespace(site=example('backup.md', 'backup-selection'),
+                                   library={'backup_profiles': {'pbs-client': profile}})
+        for selection in (resolver.site, {'backup': {}},
+                          example('backup.md', 'backup-profile-selection')):
+            resolver.site = selection
+            self.assertEqual(component_backup.selected(resolver), 'pbs-client')
+        resolver.site = {}
+        self.assertIsNone(component_backup.selected(resolver))
+        for value in (True, False, {'enabled': True}):
+            expect_component_refusal(lambda: component_backup.presence(value),
+                                     'component.backup-presence', ())
+        for value in (None, {}):
+            component_backup.presence(value)
+            volume = dict(example('storage.md', 'storage-combination')['volume'], backup=value)
+            types.volume(volume)
+        rule = example('backup.md', 'backup-application')['backup']
+        component_backup.application(rule, {'data': {}, 'logs': {}})
+        expect_component_refusal(lambda: component_backup.application(rule, {'data': {}, 'logs': {}, 'new': {}}),
+                                 'component.backup-coverage', ())
+        wrong = copy.deepcopy(rule)
+        wrong['include']['data']['capture'] = 'files'
+        expect_component_refusal(lambda: component_backup.application(wrong, {'data': {}, 'logs': {}}),
+                                 'component.backup-consistency', ('include', 'data'))
+        job = example('backup.md', 'backup-job')['backup']['job']
+        component_backup_job.job(job)
+        missing = copy.deepcopy(job)
+        del missing['clients']
+        expect_component_refusal(lambda: component_backup_job.job(missing), 'component.fields', ())
+        invalid = copy.deepcopy(job)
+        invalid['schedule']['calendar'] = '24:00'
+        expect_component_refusal(lambda: component_backup_job.job(invalid), 'component.backup-schedule', ())
 
     def test_all_named_configuration_examples_are_in_the_explicit_execution_inventory(self):
         for page,names in EXAMPLES.items():

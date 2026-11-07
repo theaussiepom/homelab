@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+import component_backup
 from component_plan import Resolver
 from component_errors import ComponentError
 
@@ -26,6 +27,10 @@ def fixture():
 
 
 class PlacementTests(unittest.TestCase):
+    def setUp(self):
+        backup = patch.object(component_backup, 'software', return_value=[])
+        backup.start(); self.addCleanup(backup.stop)
+
     def test_runtime_os_requirement_is_shared_headroom_not_per_app_free_space(self):
         resolver = fixture()
         resolver.library['runtime_profiles']['dns']['requirements'] = {'os_reserve_mib': 512}

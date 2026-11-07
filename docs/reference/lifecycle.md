@@ -48,9 +48,9 @@ Historical sealed v1 component configurations may contain retired fields. HomeLa
 
 ## Infrastructure plan policy
 
-The ordinary [saved-plan guard](../../proxmox/applications/plan_policy.py) admits exactly the selected guest and its two firewall resources. Fresh creation needs three creates with absent prior resources. Existing resources allow only update or no-op, preserving node, VMID, disk, mount points, operating system, unprivileged/protection flags and purge-on-destroy policy. The planned guest must be active. Import, move, adoption and replacement are refused.
+The ordinary [saved-plan guard](../../proxmox/applications/plan_policy.py) admits exactly the selected guest and its two firewall resources. Fresh creation needs three creates with absent prior resources. Existing resources allow only update or no-op, preserving node, VMID, disk, operating system, unprivileged/protection flags and purge-on-destroy policy. Mount-point changes are limited to the PBS exceptions below. The planned guest must be active. Import, move, adoption and replacement are refused.
 
-For an existing guest, the complete disk and mount-point blocks must remain unchanged, including size increases and decreases. A valid numeric resource value or an action proposed by the provider does not bypass this restriction. Device attachment follows its separate host-capability procedure. These execution checks apply after the compiler validates the configuration and generates a packet. Passing them does not guarantee that an allowed update will be uninterrupted.
+For an existing guest, the disk and mount-point blocks must remain unchanged, including size increases and decreases, except for the [specific PBS backup changes](backup.md#syntax). The saved plan may update backup flags to exactly the compiled selection and append one new, empty, unprotected staging volume after existing mount slots. Before apply, a read-only check must establish that the staging path has no foreign mount, symlink or existing contents. Existing mount paths, sizes, volume identities and ordering remain unchanged. A valid numeric resource value or an action proposed by the provider does not bypass this restriction. Device attachment follows its separate host-capability procedure. These execution checks apply after the compiler validates the configuration and generates a packet. Passing them does not guarantee that an allowed update will be uninterrupted.
 
 ## Change effects
 
@@ -58,7 +58,7 @@ For an existing guest, the complete disk and mount-point blocks must remain unch
 | --- | --- |
 | Display name | Cosmetic; must not rename persistent resources |
 | CPU/memory/startup | Changes desired infrastructure; planned guest must be active; permitted updates still need actual native and service verification |
-| Disk/mount-point block | Immutable on an existing guest, including size increases; no ordinary resize or move |
+| Disk/mount-point block | No resize or move. Only the exact [PBS backup-flag and staging-volume changes](backup.md#syntax) may alter an existing guest's mount blocks. |
 | NIC/address/gateway | Changes reachability and desired infrastructure; management/identity/traffic checks apply |
 | Template/profile default | Affects inheriting instances; compare effective output before adoption |
 | Software/image/runtime | Changes selected packages or services; checks still protect health, process identity and managed data |

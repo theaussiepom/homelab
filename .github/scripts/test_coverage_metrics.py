@@ -57,6 +57,7 @@ def test_documentation_conformance_remains_in_normal_discovery():
         'test_documentation_conformance.DocumentationConformanceMechanism',
         'test_component_reference_examples.ReferenceExamples.test_network_nic_variants_and_exact_refusals',
         'test_component_reference_examples.ReferenceExamples.test_unused_network_context_is_only_checked_when_consumed',
+        'test_component_reference_examples.ReferenceExamples.test_backup_reference_fragments_use_actual_owners_and_refuse_documented_invalid_values',
         'test_documentation_navigation.DocumentationNavigation',
         'test_documentation_navigation.NavigationMechanism',
     ]

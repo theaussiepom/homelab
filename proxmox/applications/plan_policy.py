@@ -2,6 +2,7 @@
 
 from private_io import require
 from host_device_helper import device_spec
+import re
 
 GUEST_RESOURCE = "module.guest.proxmox_virtual_environment_container.guest"
 RESOURCES = {
@@ -100,7 +101,64 @@ def allowed_guest_drift(rows, node, vmid, serial_device):
 
 
 
-def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=None):
+def staging_mount(row, selected):
+    """Only a new empty provider allocation in the selected pool is admitted."""
+    return (isinstance(row, dict) and isinstance(selected, dict)
+        and set(selected) == {'path', 'size', 'volume'}
+        and isinstance(selected['path'], str) and re.fullmatch(r'/srv/[a-z0-9][a-z0-9_/-]*', selected['path'])
+        and '..' not in selected['path'].split('/') and '//' not in selected['path']
+        and isinstance(selected['size'], str) and re.fullmatch(r'[1-9][0-9]*G', selected['size'])
+        and isinstance(selected['volume'], str) and re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,62}', selected['volume'])
+        and set(row) <= {'path', 'size', 'volume', 'backup', 'replicate', 'acl', 'quota',
+                         'read_only', 'shared', 'mount_options', 'path_in_datastore'}
+        and all(row.get(key) == value for key, value in selected.items())
+        and row.get('backup') is False and row.get('replicate') is True
+        and all(row.get(key) in (None, False) for key in ('acl', 'quota', 'read_only', 'shared'))
+        and row.get('mount_options') in (None, []))
+
+
+def backup_flags(before, after, selection, staging=None):
+    """Only explicit backup metadata may change; volume identity stays exact."""
+    if selection is None:
+        return before == after
+    if not isinstance(selection, dict) or not all(isinstance(key, str) and key.startswith('/')
+            and type(value) is bool for key, value in selection.items()):
+        return False
+    if (staging is not None and isinstance(before, (list, type(None))) and isinstance(after, list)
+            and len(after) == len(before or [])+1):
+        if not staging_mount(after[-1], staging) or selection.get(staging['path']) is not False:
+            return False
+        return backup_flags(before or [], after[:-1], {key: value for key, value in selection.items()
+                            if key != staging['path']})
+    if not selection and before in (None, []) and after in (None, []):
+        return True
+    if not isinstance(before, list) or not isinstance(after, list) or len(before) != len(after):
+        return False
+    if not all(isinstance(row, dict) and isinstance(row.get('path'), str) for row in [*before, *after]):
+        return False
+    if len(after) != len(selection) or {row['path'] for row in after} != set(selection):
+        return False
+    return all({key: value for key, value in old.items() if key != 'backup'} ==
+               {key: value for key, value in new.items() if key != 'backup'}
+               and type(old.get('backup')) is bool and type(new.get('backup')) is bool
+               and new['backup'] == selection[new['path']]
+               for old, new in zip(before, after, strict=True))
+
+
+def backup_unknowns(before, after, unknown, staging):
+    """Only the provider's allocated-name metadata may be new/unknown."""
+    if not has_unknown(unknown):
+        return True
+    if (staging is None or not isinstance(before, (list, type(None))) or not isinstance(after, list)
+            or len(after) != len(before or [])+1 or not staging_mount(after[-1], staging)
+            or not isinstance(unknown, list) or len(unknown) != len(after)
+            or any(has_unknown(row) for row in unknown[:-1]) or not isinstance(unknown[-1], dict)):
+        return False
+    return not has_unknown({key: value for key, value in unknown[-1].items() if key != 'path_in_datastore'})
+
+
+def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=None,
+               backup_selection=None, backup_staging=None):
     """Validate the exact saved plan under an explicit backend custody decision."""
     require(type(existing) is bool, "Select creation or reconciliation explicitly")
     protected = protected_guests
@@ -178,6 +236,10 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
                 and not has_unknown(unknown.get("device_passthrough")),
                 "The host capability owns coordinator attachment; API plans cannot change it",
             )
+            if not existing and backup_selection is not None:
+                require(not has_unknown(unknown.get('mount_point'))
+                        and backup_flags(after.get('mount_point'), after.get('mount_point'), backup_selection),
+                        'Bind native backup flags to the exact compiled volume selection')
         if existing:
             require(
                 change.get("actions") in (["update"], ["no-op"])
@@ -190,7 +252,10 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
             ):
                 require(
                     all(
-                        before.get(key) == after.get(key)
+                        (backup_flags(before.get(key), after.get(key), backup_selection, backup_staging)
+                         and (backup_selection is None or backup_unknowns(before.get(key), after.get(key),
+                              unknown.get(key), backup_staging)))
+                        if key == 'mount_point' else before.get(key) == after.get(key)
                         for key in IMMUTABLE_GUEST_FIELDS
                     ),
                     "Preserve the guest identity and managed application data",

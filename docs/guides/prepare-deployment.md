@@ -62,6 +62,8 @@ Supply genuine SSH public keys, trusted CA and known-host inputs. Source admissi
 
 Select [storage pools, volumes and bindings](../reference/storage.md) consistent with the adapter's owned paths and first-installation support. Supply the required existing databases, accounts, configuration and device inputs. A software image alone does not perform a service's initial setup. Use the chosen library profile for exact roles, versions, runtime reserves and health requirements.
 
+If you select [PBS backup](../reference/backup.md), also prepare the declared recovery coverage and native volume markers. An operational job needs the existing PBS destination, certificate fingerprint, scoped token files, independently recoverable encryption keys, network policy and a dedicated staging volume for every configured guest. Review and authorise the declared service pauses, database locks and unattended SSH use before rollout. Installing the client or reading an archive back does not establish that an application can be restored.
+
 ## Check the source you will review
 
 With the example directory layout above, start inside `homelab-work/homelab` and activate the hash-locked environment for this selected framework, as in [the walkthrough setup](first-configuration.md#prepare-an-isolated-workspace). These commands use the existing sibling directories; change the two directory names if you chose different ones:

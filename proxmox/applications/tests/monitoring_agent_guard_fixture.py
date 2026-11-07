@@ -11,6 +11,7 @@ import yaml
 
 def main():
     assert Path('/.dockerenv').is_file() and os.geteuid()==0
+    os.umask(0o077)
     source=Path(__file__).resolve().parents[1]/'ansible/tasks/monitoring-agent.yml'
     tasks=yaml.safe_load(source.read_text())
     names=[t['name'] for t in tasks]
@@ -23,24 +24,29 @@ def main():
     selected=[t for t in selected if not any(k in t for k in ('ansible.builtin.file','ansible.builtin.copy'))]
     assert all(set(t)&{'ansible.builtin.stat','ansible.builtin.assert','ansible.builtin.slurp'} for t in selected)
     owner={'hostname':'fixture-216','psk_identity':'fixture-216','version':'fixture-version'}
-    for case in ('first','retained','interrupted','foreign','wrong-owner','public-receipt','linked-receipt','linked-config'):
+    for case in ('first','retained','interrupted','foreign','wrong-owner','public-receipt','linked-receipt','linked-config','linked-state','public-state','foreign-state'):
         with tempfile.TemporaryDirectory() as td:
-            root=Path(td);cfg=root/'agent.conf';receipt=root/'agent.json';hold=root/'AGENT-HOLD'
+            root=Path(td);cfg=root/'agent.conf';receipt=root/'agent.json';hold=root/'AGENT-HOLD';state=root/'state'
             if case!='first':cfg.write_text('synthetic owned configuration')
-            if case in {'retained','wrong-owner','public-receipt','linked-receipt','linked-config'}:
+            if case in {'retained','wrong-owner','public-receipt','linked-receipt','linked-config','linked-state','public-state','foreign-state'}:
                 receipt.write_text(json.dumps(owner if case!='wrong-owner' else dict(owner,hostname='foreign')));receipt.chmod(0o600)
             if case=='interrupted':hold.write_text('preserve this interrupted attempt')
             if case=='public-receipt':receipt.chmod(0o644)
             if case=='linked-receipt':os.link(receipt,root/'extra-name')
             if case=='linked-config':cfg.unlink();cfg.symlink_to(receipt)
-            raw=json.dumps(selected).replace('/etc/zabbix/zabbix_agent2.conf',str(cfg)).replace('/var/lib/homelab-monitoring/agent.json',str(receipt)).replace('/var/lib/homelab-monitoring/AGENT-HOLD',str(hold))
+            if case in {'public-state','foreign-state'}:
+                state.mkdir(mode=0o755 if case=='public-state' else 0o700)
+                if case=='public-state':state.chmod(0o755)
+                if case=='foreign-state':os.chown(state,1000,1000)
+            if case=='linked-state':state.symlink_to(root)
+            raw=json.dumps(selected)
             play=root/'play.json';play.write_text(json.dumps([{'hosts':'all','connection':'local','gather_facts':False,
-                'vars':{'app':{'monitoring':{'hostname':owner['hostname'],'psk_identity':owner['psk_identity']}},'monitoring_agent_package':{'version':owner['version']}},'tasks':json.loads(raw)}]))
+                'vars':{'monitoring_agent_paths':{'configuration':str(cfg),'receipt':str(receipt),'hold':str(hold),'state':str(state)},'app':{'monitoring':{'hostname':owner['hostname'],'psk_identity':owner['psk_identity']}},'monitoring_agent_package':{'version':owner['version']}},'tasks':json.loads(raw)}]))
             before={p.name:p.read_bytes() for p in (cfg,receipt,hold) if p.exists()}
             run=subprocess.run([str(Path(sys.executable).with_name('ansible-playbook')),'-i','localhost,',str(play)],capture_output=True,text=True,timeout=45)
             assert (run.returncode==0)==(case in {'first','retained'}),case+': '+run.stdout[-1200:]
             assert before=={p.name:p.read_bytes() for p in (cfg,receipt,hold) if p.exists()}
-    print('Agent admission: fresh/retained pass; interrupted, foreign, wrong owner, unsafe mode and links refuse before mutations.')
+    print('Agent admission: fresh/retained pass; interrupted, foreign, wrong owner, unsafe mode, state ownership and links refuse before mutations.')
 
 
 if __name__=='__main__':main()

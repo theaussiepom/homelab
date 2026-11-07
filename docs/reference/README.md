@@ -18,6 +18,7 @@ This reference describes configuration written with `homelab-components-v1`. Dec
 | Declare access, trust or authentication | [Policies](policies.md) | [Identity and secrets](identity-and-secrets.md) |
 | Select protected material or provider identity | [Identity and secrets](identity-and-secrets.md) | [Material continuity](identity-and-secrets.md#protected-material-continuity) |
 | Choose runtime settings, software, health checks, devices or assets | [Supporting types](supporting-types.md) | [Library selection](library.md), [adapter support](support.md) |
+| Configure backup coverage and coordinated encrypted archives | [PBS backup](backup.md) | [Protected volumes](storage.md#volume-backup), [backup profiles](backup.md#backup-profiles) |
 | Enable the explicit monitoring feature | [Zabbix](zabbix.md) | [Guest monitoring](guests.md#guest-monitoring) |
 
 ## Read acceptance at the right stage

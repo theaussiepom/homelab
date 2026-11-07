@@ -59,7 +59,8 @@ def prior(attempt, app):
     operation = Path(receipt['operation']) if isinstance(receipt.get('operation'), str) else None
     if operation is None or not component_generation.component_success(receipt, operation):
         return False
-    proofs=[proof for proof in receipt['phase_inputs'].values()if proof is not None and proof['app']!='agent']
+    proofs=[proof for proof in receipt['phase_inputs'].values()
+            if proof is not None and proof['app'] not in ('agent', 'backup-agent')]
     selected = [proof for proof in proofs if proof['app'] == app['id']]
     require(len(selected) <= 1, 'Preserve one prior app identity per completed ordinary run')
     previous = Path(receipt['binding']['app_inputs_directory'])

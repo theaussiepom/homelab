@@ -19,6 +19,7 @@ FLAT_INPUTS = {'HOMELAB_STACK_SOURCE', 'HOMELAB_ENVIRONMENT_PREFIX', 'HOMELAB_RU
                'HOMELAB_REPOSITORY', 'HOMELAB_DISABLED'}
 REUSABLE_INPUTS = {'disabled', 'runner_labels', 'environment_name'}
 AGENT_PHASE = 'zabbix-agent'
+BACKUP_PHASE = 'pbs-agent'
 
 
 def label(value):
@@ -167,7 +168,7 @@ def model(plan):
         guest_title = label(guests[guest]['display_name'])
         phases = [{'id': 'infrastructure', 'name': 'Infrastructure', 'application': None, 'inputs': {}},
                   {'id': 'preparation', 'name': 'Prepare', 'application': None, 'inputs': {}}]
-        ids, secrets = {'infrastructure', 'preparation', AGENT_PHASE}, []
+        ids, secrets = {'infrastructure', 'preparation', AGENT_PHASE, BACKUP_PHASE}, []
         for app_id in _ordered_apps(apps, app_dependencies, guest):
             app = apps[app_id]; phase, title = app['identity']['phase'], app['display_name']
             require(identifier(phase) and phase not in RESERVED and phase not in ids, 'component.workflow-phase-id')
@@ -185,6 +186,8 @@ def model(plan):
             phases.append({'id': phase, 'name': title, 'application': app_id, 'inputs': inputs})
         if monitored is not None:
             phases.append({'id': AGENT_PHASE, 'name': 'Zabbix agent', 'application': None, 'inputs': {}})
+        if 'backup' in resolved:
+            phases.append({'id': BACKUP_PHASE, 'name': 'PBS agent', 'application': None, 'inputs': {}})
         result['guests'][guest] = {'name': guest_title, 'needs': ['selection', *dependencies[guest]],
                                   'phases': phases, 'workflow_secrets': secrets}
     plan.check()

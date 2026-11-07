@@ -1,0 +1,278 @@
+---
+- name: Verify guest backup source ownership
+  ansible.builtin.import_tasks: backup-source-owner.yml
+
+- name: Install the finite guest worker
+  ansible.builtin.copy:
+    src: '{{ playbook_dir }}/../{{ item }}'
+    dest: '/opt/homelab-backup/{{ item }}'
+    owner: root
+    group: root
+    mode: '0444'
+    follow: false
+  loop: [backup_worker.py, backup_capture.py, backup_policy.py, backup_group.py, private_io.py]
+
+- name: Validate mounted staging before enabling a schedule
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - >-
+        import sys; sys.path.insert(0, '/opt/homelab-backup');
+        import backup_worker, backup_policy;
+        from private_io import read_json;
+        value=read_json('/etc/homelab-backup/coverage.json', private=True);
+        backup_policy.validate(value['job']); backup_worker.staging(value);
+        from pathlib import Path;
+        from private_io import private_directory;
+        path=Path(value['job']['staging']['path'])/'.homelab-backup';
+        private_directory(path) if path.exists() or path.is_symlink() else None
+  changed_when: false
+
+- name: Prepare private recovery staging
+  ansible.builtin.file:
+    path: '{{ backup_agent.staging }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install selected backup credentials without rotation
+  ansible.builtin.copy:
+    src: '{{ item.source }}'
+    dest: '/etc/homelab-backup/{{ item.name }}'
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
+    follow: false
+  loop: '{{ backup_agent.credentials }}'
+  no_log: true
+
+- name: Read back selected backup credential metadata
+  ansible.builtin.stat:
+    path: '/etc/homelab-backup/{{ item.name }}'
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: '{{ backup_agent.credentials }}'
+  register: backup_credential_readback
+  no_log: true
+
+- name: Preserve existing backup credential identity and exact bytes
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg and not item.stat.islnk and item.stat.nlink == 1
+      - item.stat.uid == 0 and item.stat.mode == '0600'
+      - item.stat.checksum == item.item.sha256
+  loop: '{{ backup_credential_readback.results }}'
+  no_log: true
+
+- name: Install the owned controller schedule
+  delegate_to: localhost
+  become: true
+  block:
+    - name: Verify controller backup source ownership
+      ansible.builtin.import_tasks: backup-source-owner.yml
+
+    - name: Verify existing public source ancestors before copying
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - "{{ lookup('file', playbook_dir + '/../backup_source.py') }}"
+          - '{{ backup_controller.directory }}'
+      changed_when: false
+
+    - name: Inspect the selected immutable controller source
+      ansible.builtin.stat:
+        path: '{{ backup_controller.directory }}'
+        follow: false
+      register: backup_bundle_before
+
+    - name: Refuse an unexpected existing controller bundle
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - "{{ lookup('file', playbook_dir + '/../backup_source.py') }}"
+          - '{{ backup_controller.directory }}'
+          - '{{ backup_controller.source_hash }}'
+      environment:
+        PYTHONDONTWRITEBYTECODE: '1'
+      when: backup_bundle_before.stat.exists
+      changed_when: false
+
+    - name: Prepare immutable framework directories
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop: '{{ backup_controller_directories }}'
+
+    - name: Copy the selected public framework generation
+      ansible.builtin.copy:
+        src: '{{ item.source }}'
+        dest: '{{ item.destination }}'
+        owner: root
+        group: root
+        mode: '0444'
+        follow: false
+      loop: '{{ backup_controller_files }}'
+      when: not backup_bundle_before.stat.exists
+
+    - name: Verify the complete installed framework source
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - "{{ lookup('file', playbook_dir + '/../backup_source.py') }}"
+          - '{{ backup_controller.directory }}'
+          - '{{ backup_controller.source_hash }}'
+      environment:
+        PYTHONDONTWRITEBYTECODE: '1'
+      changed_when: false
+
+    - name: Inspect existing schedule ownership
+      ansible.builtin.stat:
+        path: '/etc/systemd/system/{{ backup_controller.name }}.service'
+        follow: false
+      register: backup_service_before
+
+    - name: Inspect schedule ownership record
+      ansible.builtin.stat:
+        path: '/etc/homelab-backup-schedules/{{ backup_controller.name }}.owner.json'
+        follow: false
+      register: backup_schedule_owner_before
+
+    - name: Inspect the existing timer
+      ansible.builtin.stat:
+        path: '/etc/systemd/system/{{ backup_controller.name }}.timer'
+        follow: false
+      register: backup_timer_before
+
+    - name: Inspect the group configuration
+      ansible.builtin.stat:
+        path: '/etc/homelab-backup-schedules/{{ backup_controller.name }}.json'
+        follow: false
+      register: backup_group_before
+
+    - name: Refuse an unowned existing schedule
+      ansible.builtin.assert:
+        that:
+          - backup_service_before.stat.exists == backup_schedule_owner_before.stat.exists
+          - backup_timer_before.stat.exists == backup_schedule_owner_before.stat.exists
+          - backup_group_before.stat.exists == backup_schedule_owner_before.stat.exists
+          - not backup_group_before.stat.exists or (backup_group_before.stat.isreg and not backup_group_before.stat.islnk and backup_group_before.stat.nlink == 1 and backup_group_before.stat.uid == backup_controller.user and backup_group_before.stat.mode == '0600')
+          - not backup_service_before.stat.islnk | default(false)
+          - not backup_timer_before.stat.islnk | default(false)
+          - not backup_schedule_owner_before.stat.islnk | default(false)
+
+    - name: Read an existing schedule owner
+      ansible.builtin.slurp:
+        src: '/etc/homelab-backup-schedules/{{ backup_controller.name }}.owner.json'
+      register: backup_schedule_owner
+      when: backup_schedule_owner_before.stat.exists
+      no_log: true
+
+    - name: Preserve schedule owner identity
+      ansible.builtin.assert:
+        that: (backup_schedule_owner.content | b64decode | from_json) == backup_controller.owner
+      when: backup_schedule_owner_before.stat.exists
+      no_log: true
+
+    - name: Prepare protected schedule ownership
+      ansible.builtin.file:
+        path: /etc/homelab-backup-schedules
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Record schedule ownership
+      ansible.builtin.copy:
+        content: '{{ backup_controller.owner | to_json }}'
+        dest: '/etc/homelab-backup-schedules/{{ backup_controller.name }}.owner.json'
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+        follow: false
+
+    - name: Prepare the proposed group for membership validation
+      ansible.builtin.tempfile:
+        state: file
+        prefix: homelab-backup-group-
+      register: backup_group_candidate
+
+    - name: Validate and install the coordinated membership
+      block:
+        - name: Write the private group candidate
+          ansible.builtin.copy:
+            content: '{{ backup_controller.configuration | to_json }}'
+            dest: '{{ backup_group_candidate.path }}'
+            owner: root
+            group: root
+            mode: '0600'
+          no_log: true
+
+        - name: Refuse silent removal or movement of protected members
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - -c
+              - >-
+                import sys; sys.path.insert(0, sys.argv[1]);
+                import backup_controller;
+                from private_io import read_json;
+                backup_controller.continuity(read_json(sys.argv[2]), read_json(sys.argv[3]))
+              - '{{ backup_controller.directory }}'
+              - '/etc/homelab-backup-schedules/{{ backup_controller.name }}.json'
+              - '{{ backup_group_candidate.path }}'
+          when: backup_group_before.stat.exists
+          changed_when: false
+          environment:
+            PYTHONDONTWRITEBYTECODE: '1'
+          no_log: true
+
+        - name: Install the private group descriptor for the existing CD actor
+          ansible.builtin.copy:
+            src: '{{ backup_group_candidate.path }}'
+            remote_src: true
+            dest: '/etc/homelab-backup-schedules/{{ backup_controller.name }}.json'
+            owner: '{{ backup_controller.user }}'
+            mode: '0600'
+            follow: false
+          no_log: true
+      always:
+        - name: Remove only the own group candidate
+          ansible.builtin.file:
+            path: '{{ backup_group_candidate.path }}'
+            state: absent
+
+    - name: Install the bounded recovery service
+      ansible.builtin.copy:
+        content: '{{ backup_controller.service }}'
+        dest: '/etc/systemd/system/{{ backup_controller.name }}.service'
+        owner: root
+        group: root
+        mode: '0644'
+        follow: false
+
+    - name: Install the recovery timer
+      ansible.builtin.copy:
+        content: '{{ backup_controller.timer }}'
+        dest: '/etc/systemd/system/{{ backup_controller.name }}.timer'
+        owner: root
+        group: root
+        mode: '0644'
+        follow: false
+
+    - name: Enable the declared schedule without running a backup during CD
+      ansible.builtin.systemd_service:
+        name: '{{ backup_controller.name }}.timer'
+        daemon_reload: true
+        enabled: true
+        state: started

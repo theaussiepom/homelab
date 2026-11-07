@@ -14,6 +14,7 @@ The configuration format, validators, resolver and runtime checks define the act
 | Reviewed procedural rules | Five pointers locate checks for network context, the ordinary route, contiguous slots, usable addresses and control-interface addressing | Pointers locate implementation and tests; they do not automatically discover every behavior change |
 | Examples and refusals | Checks exact named network/NIC excerpts, compiles complete static/DHCP/manual variants and tests intended failures | No target commands, credential reads, lease reservation or service startup |
 | Maintained wider reference examples | Continues to run the existing complete site, template, profile, app, relationship and other named examples | These useful examples do not inventory every accepted field and variant |
+| PBS reference fields and examples | The broad field-name inventory includes the backup validators; five named PBS snippets run through their actual selection, profile, coverage and job validators, with representative invalid cases | These checks do not add PBS to the network/NIC structural-record pilot or prove complete procedural coverage, scheduled capture or restoration |
 | Local navigation/structure | Checks the root README, AGENTS and Markdown beneath docs for local files and anchors, table and code-block structure, and incoming links | Handles a supported subset of Markdown; people must still review rendering and whether links are useful in context |
 | Required test collection | The normal CI harness independently checks that required test cases and classes exist, are discovered, and are neither skipped nor marked as expected failures | Local collection checks do not prove a hosted run or branch protection enforcement |
 
@@ -33,6 +34,8 @@ The 16 checked rows include optional `gateway`, `default_route` and `ipv6`, the 
 | Local navigation checks and tests of those checks | [`test_documentation_navigation.py`](../../blueprints/test_documentation_navigation.py) |
 | Independent checks of required test discovery and workflow failure propagation | [Normal coverage-metrics harness](../../.github/scripts/test_coverage_metrics.py) |
 | Normal source tests and the job that combines their required results | [CI workflow](../../.github/workflows/ci.yml) |
+
+The [PBS reference](../reference/backup.md) also has maintained examples for root selection, a backup profile, application coverage and an operational job. Their tests reject unsupported presence values, incomplete storage classification, inconsistent capture types and invalid job fields. The field-name test includes `component_backup.py` and `component_backup_job.py`; it remains a basic inventory check, not an independently extracted record for every nested PBS rule.
 
 The existing field-name test remains useful for detecting broad regressions, but finding a word in the reference does not prove that a nested field is explained correctly. The pilot additionally checks both directions: implementation fields must have records, and documentation records must match the implementation. It preserves the wider example checks and does not increase what the field-name test proves.
 

@@ -29,6 +29,7 @@ This example still requires compatible profile roles and policy in the surroundi
 | Library `guest_templates`, `app_profiles` | `guest-template`, `app-profile` |
 | Library `software`, `runtime_profiles`, `health_profiles` | `software`, `runtime-profile`, `health-profile` |
 | Library `authentication_profiles`, `monitoring_profiles`, `bundles` | `authentication-profile`, `monitoring-profile`, `bundle` |
+| Library `backup_profiles` | [`backup-profile`](backup.md#backup-profiles) |
 | Any policies submap | `network-policy`, `transport-policy`, `tls-policy`, `middlewares-policy`, `authentication-policy` |
 
 Every typed source file requires `schema: homelab-components-v1` and the matching `kind`. The reader removes those two header fields, then passes the complete body to the same validator used for inline values. Inline values do not include these headers. The parent map key remains the declaration's stable identity.
