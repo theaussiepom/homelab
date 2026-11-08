@@ -14,7 +14,7 @@ If old backup settings were never commissioned, prepare the new inputs and verif
 
 You need the real PBS HTTPS endpoint and its certificate fingerprint, the existing verified datastore and its filesystem/path, the public recovery PEM, the protected `PBS_API_TOKEN`, and the existing guest interface/staging bindings. Do not paste secrets into YAML. Keep the recovery private key outside the checkout and runners.
 
-Create a site-relative public-key location, for example `assets/backup/master-public.pem`, and copy only the verified public PEM there. Compare its public-key fingerprint with the [generation record](recovery-key.md#generate-the-pair-once). Its public nature does not make changes harmless: review replacement just like a trust-anchor change.
+Copy the verified public key to a site-relative repository location such as `assets/backup/pbs-recovery-public.pub`. The `.pub` file contains the exact same PEM-encoded RSA public key produced as `master-public.pem`; keep that encoding rather than converting it to SSH public-key format. The repository destination uses `.pub` so it can be staged normally under the existing ignore and private-path rules. Keep the private PEM outside Git; do not force-add a `.pem` file or weaken those rules. Compare the public-key fingerprint with the [generation record](recovery-key.md#generate-the-pair-once). Its public nature does not make changes harmless: review replacement just like a trust-anchor change.
 
 ### Prepare an existing InfluxDB operator token when selected
 

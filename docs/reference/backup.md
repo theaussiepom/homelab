@@ -47,7 +47,7 @@ These root objects accompany `job`; neither belongs inside an individual client.
 | <a id="backup-management-credential"></a>`backup.management.credential` | Secret-source identifier | Required | Environment source selecting `PBS_API_TOKEN`, whose value is `user@pbs!token:secret`. Only the management job receives it. |
 | <a id="backup-management-datastore-path"></a>`backup.management.datastore_path` | Absolute canonical path | Required | Expected path of the existing datastore prepared and verified during server setup. CD compares the API configuration with this value and refuses a missing or mismatched datastore. This field neither creates storage nor proves that its filesystem is mounted; `/` is not an accepted datastore path. |
 | <a id="backup-recovery-public-key"></a>`backup.recovery_public_key` | Closed source object | Required with `job` | The shared RSA recovery public key; never a client key or private PEM. |
-| <a id="backup-recovery-public-key-source"></a>`backup.recovery_public_key.source` | Confined site-relative file path | Required | A public PEM containing an RSA-4096 public key. Absolute paths, symlinks/escapes and private-key content are rejected. Its validated bytes are included in the deployment packet. |
+| <a id="backup-recovery-public-key-source"></a>`backup.recovery_public_key.source` | Confined site-relative file path | Required | A PEM-encoded RSA-4096 public key; use a repository destination such as `assets/backup/pbs-recovery-public.pub` under the normal ignore/private-path rules. The `.pub` suffix does not change the PEM encoding to SSH format. Absolute paths, symlinks/escapes and private-key content are rejected. Its validated bytes are included in the deployment packet. |
 
 The management connection reuses `job.destination.endpoint` and its certificate fingerprint. A second endpoint or trust fallback is not accepted. Define the management source in the site's [secret sources](identity-and-secrets.md#secret-sources):
 
@@ -141,7 +141,7 @@ backup:
     credential: pbs-management
     datastore_path: /mnt/backup/recovery
   recovery_public_key:
-    source: assets/backup/master-public.pem
+    source: assets/backup/pbs-recovery-public.pub
   job:
     name: example-recovery
     destination:

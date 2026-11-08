@@ -1,6 +1,7 @@
 """The complete documented composition exercises real compiler boundaries."""
 import copy
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -74,6 +75,39 @@ class BackupDocumentation(unittest.TestCase):
         self.assertEqual(private['jobs']['_backup']['environment'],'backup')
         self.assertEqual(private['jobs']['_backup']['needs'],['selection','resolver'])
         self.assertNotIn('inputs.',json.dumps(private['jobs']['_backup']))
+
+    def test_documented_public_key_handoff_stages_normally_and_preserves_compiled_identity(self):
+        """Compile the documented PEM-in-.pub handoff after real Git and private-path checks."""
+        page = (ROOT/'docs/reference/backup.md').read_text()
+        fragment = yaml.safe_load(page.split('<!-- example: backup-job -->\n```yaml\n', 1)[1].split('\n```', 1)[0])
+        binding = fragment['backup']['recovery_public_key']
+        relative = binding['source']
+        self.assertEqual(relative, 'assets/backup/pbs-recovery-public.pub')
+        self.assertIn('`'+relative+'`', (ROOT/'docs/backup/configure.md').read_text())
+        before = json.loads(component_packet.lower_plan(self.plan())['resolver']['files']['site.json'])['app']['backup']['job']
+        public = (self.root/'assets/master-public.pem.fixture').read_bytes()
+        target = self.root/relative;target.parent.mkdir(parents=True);target.write_bytes(public)
+        shutil.copyfile(ROOT/'.gitignore', self.root/'.gitignore')
+        env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
+        def git(*args, check=True):
+            return subprocess.run(['git', '-C', str(self.root), *args], env=env,
+                                  capture_output=True, check=check, timeout=10)
+        git('init', '-q', '-b', 'fixture')
+        git('config', 'core.excludesFile', '/dev/null')
+        self.assertEqual(git('check-ignore', '--no-index', '--', relative, check=False).returncode, 1)
+        self.assertEqual(git('check-ignore', '--no-index', '--', 'assets/backup/master-public.pem', check=False).returncode, 0)
+        spec = importlib.util.spec_from_file_location('backup_handoff_staged_guard', ROOT/'.githooks/staged_guard.py')
+        guard = importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
+        self.assertFalse(guard.private_path(relative))
+        self.assertTrue(guard.private_path('assets/backup/master-public.pem'))
+        git('add', '--', relative)
+        self.assertEqual(git('diff', '--cached', '--name-only').stdout.decode().splitlines(), [relative])
+        self.site['backup']['recovery_public_key'] = binding
+        plan = self.plan()
+        after = json.loads(component_packet.lower_plan(plan)['resolver']['files']['site.json'])['app']['backup']['job']
+        self.assertEqual(after, before)
+        self.assertEqual(plan.pins['site'][relative], hashlib.sha256(public).hexdigest())
+        self.assertEqual(after['recovery_public_key']['pem'].encode(), public)
 
     def test_documented_shared_only_variation_does_not_enroll_guests(self):
         self.site['guests']['resolver'].pop('backup')
