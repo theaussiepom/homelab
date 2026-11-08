@@ -187,6 +187,8 @@ def run(path, *, launch=subprocess.Popen, admission=admit):
         admitted = {name: admission(name, row) for name, row in group['members'].items()}
         require(all(cfg['app']['backup']['job']['group']['name'] == group['name']
                 for cfg, _ in admitted.values()), 'Preserve the root recovery group identity')
+        import backup_activation
+        backup_activation.verify(value, admitted)
         root = Path(scopes[0][0]); private_directory(root)
         attempts = root/'backup-groups'; private_directory(attempts, create=not attempts.exists())
         operation = attempts/generation; private_directory(operation, create=True)

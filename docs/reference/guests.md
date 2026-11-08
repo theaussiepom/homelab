@@ -78,6 +78,10 @@ Full paths are `guests.<id>.security.<field>`. All fields are required in the te
 
 Each `guests.<id>.compose_projects.<id>` requires `name`, nonempty text of at most 4096 characters without NUL, and optionally accepts `file`. The file defaults to `compose-<map-key>.yml` and must match `[a-z][a-z0-9_-]{0,62}.yaml` or `.yml`. Filenames must be unique within the guest. Null and empty values do not request the default. Execution also checks the allowed runtime identity fields and values. [App identity](apps.md#runtime-identity) references the project by its map key.
 
+## Backup enrollment
+
+The optional guest-level `backup` accepts null or an empty object; omission leaves the guest unenrolled. Root shared backup settings are required. This selects client preparation for this guest without duplicating paths or credentials. See the [canonical guest backup field](backup.md#backup-guest), [volume selection](backup.md#backup-volume) and [setup guide](../backup/README.md). Boolean values and unknown fields are rejected.
+
 ## Resolution and relationships
 
 VMIDs are unique within API address/port scope, including different nodes. [NIC identity conflicts](networks.md#field-guest-nic-mac), ports, devices and owned paths have separate collision scopes. Provider NIC order follows slots; volume slots are contiguous from zero. App placement contributes software and runtime requirements and must fit the guest's effective budget.

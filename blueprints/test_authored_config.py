@@ -125,19 +125,20 @@ class AuthoredConfigTests(unittest.TestCase):
         with patch.object(sys,'argv',['compile','--stack',str(self.root),'--check','--site',str(path),'--site-root',str(self.root)]),self.assertRaises(SystemExit):c.main()
 
 
-    def test_selected_lock_extractor_uses_only_exact_pyyaml_hashblock(self):
+    def test_selected_lock_extractor_keeps_only_required_compiler_packages(self):
+        import config_environment
         script=workflows.phase_recipe()[0]['steps'][6]['run']
-        source=script.split("<<'PYCODE'\n",1)[1].split('\nPYCODE',1)[0]
-        lock=self.root/'framework-source/requirements.lock.txt';lock.parent.mkdir();original=(c.ROOT/'requirements.lock.txt').read_text()
-        output=self.root/'pyyaml.lock'
-        def run(raw):
+        lock=self.root/'requirements.lock.txt';original=(c.ROOT/'requirements.lock.txt').read_text()
+        lock.write_text(original);result=config_environment.selected(lock)
+        self.assertEqual([line.split('==')[0] for line in result.splitlines() if not line.startswith(' ')],
+                         ['pyyaml','cryptography','cffi','pycparser'])
+        self.assertNotIn('# via',result)
+        for raw in ('',original+original,original.replace('pyyaml==','pyyaml>=',1),
+                    original.replace('cryptography==','cryptography>=',1),
+                    original.replace('    --hash=sha256:', '    --other=sha256:')):
             lock.write_text(raw)
-            return subprocess.run([sys.executable,'-c',source,str(output)],cwd=self.root,capture_output=True,text=True)
-        result=run(original);self.assertEqual(result.returncode,0,result.stderr)
-        lines=output.read_text().splitlines();self.assertTrue(lines[0].startswith('pyyaml=='))
-        self.assertTrue(all(line.startswith('    --hash=sha256:') for line in lines[1:]));self.assertNotIn('# via',output.read_text())
-        for raw in ('',original+original,original.replace('pyyaml==','pyyaml>=',1),original.replace('pyyaml==6.0.3 \\','pyyaml==6.0.3 --index-url private-sentinel \\',1),original.replace('    --hash=sha256:', '    --other=sha256:')):
-            with self.subTest(raw=raw[:30]):self.assertNotEqual(run(raw).returncode,0)
-        lock.unlink();lock.symlink_to(self.root/'missing');self.assertNotEqual(subprocess.run([sys.executable,'-c',source,str(output)],cwd=self.root,capture_output=True).returncode,0)
+            with self.subTest(raw=raw[:30]),self.assertRaises(ValueError):config_environment.selected(lock)
+        lock.unlink();lock.symlink_to(self.root/'missing')
+        with self.assertRaises(ValueError):config_environment.selected(lock)
         self.assertIn('--require-hashes --no-deps',script);self.assertIn('-m pip --isolated install',script)
         self.assertNotIn('APPLICATION_SSH_KEY',script);self.assertNotIn('PROXMOX_APP_TOKEN',script)

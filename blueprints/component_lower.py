@@ -23,7 +23,7 @@ def provider_config(plan, guest_id):
         'dns_servers': copy.deepcopy(guest['dns_servers']),
         'interfaces': copy.deepcopy(guest['provider_interfaces']),
         'volumes': {key: {'path': row['path'], 'size_gib': row['size_gib'],
-                         **({'backup': 'backup' in row} if 'backup' in plan.site else {})}
+                         **({'backup': 'backup' in row} if 'backup' in guest else {})}
                     for key, row in sorted(guest.get('volumes', {}).items(), key=lambda pair: pair[1]['slot'])},
         'volume_order': [key for key, _ in sorted(guest.get('volumes', {}).items(), key=lambda pair: pair[1]['slot'])],
         'rules': copy.deepcopy(guest['rules'])}

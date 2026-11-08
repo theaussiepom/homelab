@@ -62,7 +62,11 @@ Supply genuine SSH public keys, trusted CA and known-host inputs. Source admissi
 
 Select [storage pools, volumes and bindings](../reference/storage.md) consistent with the adapter's owned paths and first-installation support. Supply the required existing databases, accounts, configuration and device inputs. A software image alone does not perform a service's initial setup. Use the chosen library profile for exact roles, versions, runtime reserves and health requirements.
 
-If you select [PBS backup](../reference/backup.md), also prepare the declared recovery coverage and native volume markers. An operational job needs the existing PBS destination, certificate fingerprint, scoped token files, independently recoverable encryption keys, network policy and a dedicated staging volume for every configured guest. Review and authorise the declared service pauses, database locks and unattended SSH use before rollout. Installing the client or reading an archive back does not establish that an application can be restored.
+### Set up backups before the first deployment
+
+Follow [Set up backups](../backup/README.md) during initial preparation. It walks through generic PBS installation and storage, recovery-key creation and independent storage, creation of the PBS API token, and the exact GitHub Environment secret to add. You then return to the [backup configuration](../reference/backup.md) to bind the shared settings and enroll individual guests with `backup:`.
+
+Complete that setup before enabling an operational job. Review its declared service pauses, database locks, transport policy and staging capacity. CD installs and maintains the declared backup configuration; the guide's [first backup, restore rehearsal and maintenance checklist](../backup/operations.md) establishes when it is ready to run unattended. No recovery private key or password-manager login is required by CD.
 
 ## Check the source you will review
 

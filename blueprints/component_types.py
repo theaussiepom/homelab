@@ -241,7 +241,10 @@ def guest(value):
     closed(value, ('context', 'template', 'lifecycle', 'identity', 'template_file_id',
                    'root_storage', 'interfaces', 'control_interface'),
            ('display_name', 'resources', 'startup', 'security', 'ssh_public_keys', 'dns_servers',
-            'volumes', 'root_paths', 'compose_projects', 'software', 'runtime', 'network_policy', 'timezone', 'readiness', 'source_policy_route', 'monitoring'))
+            'volumes', 'root_paths', 'compose_projects', 'software', 'runtime', 'network_policy', 'timezone', 'readiness', 'source_policy_route', 'monitoring', 'backup'))
+    if 'backup' in value:
+        from component_backup import presence
+        presence(value['backup'])
     require(all(identifier(value[key]) for key in ('context', 'template', 'root_storage', 'control_interface')))
     require(value['lifecycle'] in ('fresh', 'retained'))
     closed(value['identity'], ('vmid', 'hostname'))

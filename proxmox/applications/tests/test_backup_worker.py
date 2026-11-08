@@ -27,6 +27,7 @@ class FakeEngine:
         action = ('route' if argv[0] == 'ip' else 'preflight' if argv[:3] == ['proxmox-backup-client', 'snapshot', 'list'] and self.upload is None
             else 'snapshot' if argv[:3] == ['proxmox-backup-client', 'snapshot', 'list']
             else 'upload' if argv[:2] == ['proxmox-backup-client', 'backup']
+            else 'envelope' if argv[:2] == ['proxmox-backup-client', 'restore'] and argv[3] == 'rsa-encrypted.key'
             else 'restore' if argv[:2] == ['proxmox-backup-client', 'restore']
             else 'health' if 'ps' in argv and '--format' in argv else 'ps' if '--services' in argv else 'start' if restore
             else 'stop' if 'stop' in argv else 'tar' if argv[0] == 'tar' else 'database')
@@ -42,6 +43,8 @@ class FakeEngine:
             output.write_text(json.dumps([] if action == 'preflight' else [{
                 'backup-id': 'example-node-610', 'backup-type': 'host',
                 'backup-time': self.stamp if self.failure != 'wrong_snapshot' else self.stamp-1}]))
+        elif action == 'envelope':
+            output.write_bytes(b'e' * (511 if self.failure == 'short_envelope' else 513 if self.failure == 'oversize_envelope' else 512))
         elif action == 'restore':
             shutil.copytree(self.upload, Path(argv[4]))
             if self.failure == 'corrupt_readback': (Path(argv[4])/'inventory.json').write_text('corrupt')
@@ -62,7 +65,11 @@ class WorkerTests(unittest.TestCase):
         self.root.mkdir(mode=0o700); self.config.mkdir(mode=0o700)
         for name in ('pbs-password', 'pbs-key', 'pbs-key-password', 'influx-app'):
             write_new(self.config/name, b'synthetic-private-input\n')
+        import backup_recovery
+        public = (Path(__file__).parent/'backup-synthetic-recovery-public.pem.fixture').read_bytes()
+        write_new(self.config/'pbs-recovery-public.pem', public)
         value = operational()
+        value['job']['recovery_public_key'] = backup_recovery.public_key(public)
         value['configuration'] = {}
         app = value['applications']['app']; app['configuration'] = {}; app['runtime_files'] = []
         app['storage'] = {'state': {'path': str(self.tmp/'data'), 'kind': 'directory', 'include': True,
@@ -84,11 +91,30 @@ class WorkerTests(unittest.TestCase):
         return worker.run(self.value if value is None else value, root=self.root, config=self.config,
                           engine=FakeEngine() if engine is None else engine, generation=generation)
 
+    def test_missing_public_key_refuses_before_service_pause(self):
+        (self.config/'pbs-recovery-public.pem').unlink()
+        engine = FakeEngine()
+        with self.assertRaises(FileNotFoundError): self.run_worker(engine)
+        self.assertEqual(engine.calls, [])
+
+    def test_changed_public_key_refuses_before_service_pause(self):
+        (self.config/'pbs-recovery-public.pem').write_bytes(b'wrong public key')
+        engine = FakeEngine()
+        with self.assertRaisesRegex(ValueError, 'public-key identity'): self.run_worker(engine)
+        self.assertEqual(engine.calls, [])
+
     def test_upload_requires_immutable_complete_encrypted_readback_and_keeps_history(self):
         engine = FakeEngine(); result = self.run_worker(engine)
+        upload = next(argv for argv, _, _ in engine.calls if argv[:2] == ['proxmox-backup-client', 'backup'])
+        self.assertEqual(upload[upload.index('--master-pubkey-file')+1], str(self.config/'pbs-recovery-public.pem'))
         self.assertEqual(result['status'], 'uploaded'); self.assertFalse(result['restore_verified'])
         receipt = json.loads((self.root/('a'*32)/'complete.json').read_text())
         self.assertTrue(receipt['archive_readback_verified']); self.assertFalse(receipt['cross_guest_transaction'])
+        self.assertEqual(receipt['recovery_public_fingerprint'], self.value['job']['recovery_public_key']['fingerprint'])
+        self.assertEqual(receipt['recovery_envelope_sha256'], worker.digest(b'e'*512))
+        envelope = next(argv for argv, _, _ in engine.calls if argv[:2] == ['proxmox-backup-client', 'restore'] and argv[3] == 'rsa-encrypted.key')
+        self.assertEqual(envelope[4], '-')
+        self.assertIn('--keyfile', envelope)
         self.assertFalse((self.root/'PENDING').exists())
         self.assertEqual(engine.calls[0][0][:3], ['ip', '-j', 'route'])
         self.assertTrue(any(restored for _, _, restored in engine.calls))
@@ -99,7 +125,8 @@ class WorkerTests(unittest.TestCase):
 
     def test_every_controlled_failure_preserves_evidence_and_restarts_only_prior_running_services(self):
         for failure in ('preflight', 'not_running', 'stop', 'tar', 'start', 'upload',
-                        'snapshot', 'wrong_snapshot', 'restore', 'corrupt_readback', 'unhealthy'):
+                        'snapshot', 'wrong_snapshot', 'envelope', 'short_envelope', 'oversize_envelope',
+                        'restore', 'corrupt_readback', 'unhealthy'):
             with self.subTest(failure=failure):
                 self.root = self.tmp/failure; self.root.mkdir(mode=0o700)
                 engine = FakeEngine(failure)

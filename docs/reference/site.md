@@ -97,7 +97,7 @@ Each named map contains at most 1024 entries. IDs match `[a-z][a-z0-9_-]{0,62}`.
 | <a id="site-images"></a>`images` | Named map, optional, {} | Only declared custom archive replacement bindings; normal image versions belong to library software |
 | <a id="site-evidence"></a>`evidence` | Named map, optional, {} | Ongoing callback records or raw UTF-8 [evidence](supporting-types.md#evidence-and-assets) |
 | <a id="site-policies"></a>`policies` | Closed map, optional | Submaps `network/transport/tls/middlewares/authentication`, each defaults {} |
-| <a id="site-backup"></a>`backup` | Optional null or closed object | Presence selects [PBS client preparation and recovery coverage](backup.md); add `job` to install the coordinated schedule. |
+| <a id="site-backup"></a>`backup` | Optional null or closed object | Defines [shared PBS settings](backup.md); guests enroll individually. Add management/recovery inputs and `job` for the coordinated schedule. |
 | <a id="site-zabbix"></a>`zabbix` | Optional null or `{server: app_id}` | Absent disables root monitoring expansion; [Zabbix](zabbix.md) |
 
 Validation rejects unknown fields, the former fixed-bundle configuration and migration exceptions written into configuration. Library and site policy names must not collide; your site can add policies but cannot override library policies. A source reference loads a complete declaration without recursively merging sections.
@@ -115,6 +115,6 @@ Keep guest and app keys and persistent identities stable. Even a change to a dom
 
 ## PBS client preparation
 
-Enable the root [`backup`](backup.md) feature by adding the property. Null or an empty object selects the sole registered backup profile; `{profile: id}` selects one explicitly. These forms prepare client software and recovery coverage without creating a server or schedule. Add the closed [`backup.job`](backup.md#operational-job) object to install a coordinated encrypted backup schedule. Its membership includes every configured guest, even when deployment to a guest is disabled.
+Enable the root [`backup`](backup.md) feature by adding the property. Null or an empty object selects the sole registered backup profile; `{profile: id}` selects one explicitly. Only guests with their own [`backup:` marker](backup.md#backup-guest) receive client software and recovery coverage. Add the closed [`backup.job`](backup.md#operational-job) object and its management/recovery inputs for a coordinated encrypted backup schedule. Its membership includes exactly the enrolled guests, even when deployment to an enrolled guest is disabled. Complete [backup setup](../backup/README.md) before deployment.
 
 [Reference index](README.md) · [Library](library.md) · [Sources](sources.md)

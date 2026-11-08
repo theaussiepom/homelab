@@ -222,7 +222,7 @@ class DocumentationContracts(unittest.TestCase):
         for name in ('component_types', 'component_sources', 'component_connections',
                      'component_exposures', 'component_secrets', 'component_auth',
                      'component_properties', 'component_foundations', 'component_monitoring',
-                     'component_backup', 'component_backup_job'):
+                     'component_backup', 'component_backup_job', 'component_backup_management', 'component_backup_key'):
             tree = ast.parse((ROOT / 'blueprints' / (name + '.py')).read_text())
             for node in ast.walk(tree):
                 if isinstance(node, ast.Call) and ((isinstance(node.func, ast.Name) and node.func.id == 'closed')

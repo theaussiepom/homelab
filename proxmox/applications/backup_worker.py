@@ -203,6 +203,9 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
         password = regular(config/'pbs-password', private=True).decode().strip()
         require(password and not any(char in password for char in '\r\n\x00'), 'Use a private PBS token secret')
         regular(config/'pbs-key', private=True)
+        recovery = regular(config/'pbs-recovery-public.pem', private=True, limit=4096)
+        require(digest(recovery) == value['job']['recovery_public_key']['sha256'],
+                'Preserve the selected recovery public-key identity')
         env = {'PBS_PASSWORD': password, 'PBS_FINGERPRINT': dest['fingerprint']}
         if 'key_password' in value['job']['secrets']:
             env['PBS_ENCRYPTION_PASSWORD'] = regular(config/'pbs-key-password', private=True).decode().strip()
@@ -294,6 +297,7 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
         engine.run(['proxmox-backup-client', 'backup', 'recovery.pxar:'+str(payload),
             '--backup-time', str(backup_time),
             '--backup-id', backup_id, '--crypt-mode', 'encrypt', '--keyfile', str(config/'pbs-key'),
+            '--master-pubkey-file', str(config/'pbs-recovery-public.pem'),
             *common], environment=env)
         engine.run(['proxmox-backup-client', 'snapshot', 'list', '--output-format', 'json', *common],
             output=operation/'snapshots.json', environment=env)
@@ -303,6 +307,12 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
                 for row in snapshots), 'PBS did not report the selected backup group')
         readback = operation/'readback'
         stamp = datetime.datetime.fromtimestamp(backup_time, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        envelope = operation/'rsa-encrypted.key'
+        engine.run(['proxmox-backup-client', 'restore', 'host/'+backup_id+'/'+stamp,
+            'rsa-encrypted.key', '-', '--keyfile', str(config/'pbs-key'), *common],
+            output=envelope, environment=env)
+        wrapped = regular(envelope, private=True, limit=512)
+        require(len(wrapped) == 512, 'The snapshot is missing its complete RSA-4096 recovery envelope')
         engine.run(['proxmox-backup-client', 'restore', 'host/'+backup_id+'/'+stamp,
             'recovery.pxar', str(readback), '--keyfile', str(config/'pbs-key'), *common], environment=env)
         require(manifest(readback, limits) == expected_files and manifest(payload, limits) == expected_files,
@@ -312,7 +322,9 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
         release_copy(readback, expected_files, limits)
         release_copy(payload, expected_files, limits)
         receipt.update(status='uploaded', backup_time=backup_time, namespace=namespace, finished_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            archive_readback_verified=True, restore_verified=False, cross_guest_transaction=False,
+            archive_readback_verified=True, recovery_envelope_sha256=digest(wrapped),
+            recovery_public_fingerprint=value['job']['recovery_public_key']['fingerprint'],
+            restore_verified=False, cross_guest_transaction=False,
             coordinated_window=barrier is not None, data_manifest_sha256=data_sha)
         write_new(operation/'complete.json', encoded(receipt))
         # Keep every earlier receipt/manifest and every failed payload. Remote

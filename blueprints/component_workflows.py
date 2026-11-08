@@ -186,9 +186,12 @@ def model(plan):
             phases.append({'id': phase, 'name': title, 'application': app_id, 'inputs': inputs})
         if monitored is not None:
             phases.append({'id': AGENT_PHASE, 'name': 'Zabbix agent', 'application': None, 'inputs': {}})
-        if 'backup' in resolved:
+        if 'backup' in guests[guest]:
             phases.append({'id': BACKUP_PHASE, 'name': 'PBS agent', 'application': None, 'inputs': {}})
         result['guests'][guest] = {'name': guest_title, 'needs': ['selection', *dependencies[guest]],
                                   'phases': phases, 'workflow_secrets': secrets}
+    if resolved.get('backup', {}).get('mode') == 'scheduled-recovery':
+        result['backup'] = {'name':'Backup', 'needs':['selection', *active],
+                            'environment':'backup', 'workflow_secrets':['PBS_API_TOKEN']}
     plan.check()
     return result

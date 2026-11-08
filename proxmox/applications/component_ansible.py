@@ -27,7 +27,10 @@ HELPERS = {'pihole': [('dns_records.py','dns_records.py')],
     'music_assistant': [('music_assistant.py','music_assistant.py')]}
 
 
-def variables(cfg, phase, *, payload=None, previously_owned=False):
+def variables(cfg, phase, *, payload=None, previously_owned=False, activate_backup=False, backup_schedule=False):
+    require(type(activate_backup) is bool and type(backup_schedule) is bool
+            and (not backup_schedule or activate_backup)
+            and (not activate_backup or phase == component_guest.BACKUP_PHASE), 'Keep backup activation separate from guest deployment')
     phases = component_guest.phases(cfg)
     require(phase in phases and type(previously_owned) is bool, 'Select one actual component phase')
     app = copy.deepcopy(cfg['app'])
@@ -55,7 +58,8 @@ def variables(cfg, phase, *, payload=None, previously_owned=False):
         require(read_json(payload.directory/'application.json', private=True) == cfg['app']['backup'],
                 'Keep PBS preparation bound to the compiled guest coverage')
         result['backup_agent'] = backup_agent.configuration(cfg)
-        if 'job' in cfg['app']['backup']:
+        if activate_backup:
+            require('job' in cfg['app']['backup'], 'Activate only a declared recovery job')
             import backup_controller
             from deployment_inputs import source_hash
             bundle = '/opt/homelab-backup/framework/' + source_hash() + '/proxmox'
@@ -71,12 +75,15 @@ def variables(cfg, phase, *, payload=None, previously_owned=False):
             result['backup_controller']['source_hash'] = source_hash()
             result['backup_controller']['directory'] = bundle+'/applications'
             job = cfg['app']['backup']['job']
-            names = ['pbs-password', 'pbs-key'] + (['pbs-key-password'] if 'key_password' in job['secrets'] else [])
+            names = ['pbs-password', 'pbs-key', 'pbs-recovery-public.pem'] + (['pbs-key-password'] if 'key_password' in job['secrets'] else [])
             names += ['influx-'+key for key in job['capture']['influx_tokens']]
             from private_io import sha
             result['backup_agent']['credentials'] = [
                 {'source': str(payload.directory/name), 'name': name, 'sha256': sha(payload.directory/name)} for name in names]
             result['backup_agent']['staging'] = job['staging']['path']+'/.homelab-backup'
+            if not backup_schedule:
+                for key in ('backup_controller', 'backup_controller_files', 'backup_controller_directories'):
+                    result.pop(key)
         app['start_services'] = False
         return result
     if phase==component_guest.AGENT_PHASE:
@@ -188,7 +195,7 @@ def variables(cfg, phase, *, payload=None, previously_owned=False):
     return result
 
 
-def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, previously_owned=False):
+def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, previously_owned=False, activate_backup=False, backup_schedule=False):
     require(component_inputs.binding(cfg,site)==expected, 'Static component inputs changed before Ansible')
     if payload is not None:payload.check()
     if payload is not None and phase not in ('preparation',component_guest.AGENT_PHASE,component_guest.BACKUP_PHASE):
@@ -199,7 +206,8 @@ def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, prev
     proxmox_guest.guest_trust(cfg,work)
     phase_work=operation/phase
     private_directory(phase_work,create=True)
-    selected=variables(cfg,phase,payload=payload,previously_owned=previously_owned)
+    selected=variables(cfg,phase,payload=payload,previously_owned=previously_owned,
+        activate_backup=activate_backup,backup_schedule=backup_schedule)
     phase_app=selected['component_preparation_app'] if phase=='preparation' else selected['app']
     phase_app['render_dir']=str(phase_work/'rendered')
     write(phase_work/'variables.json',selected)

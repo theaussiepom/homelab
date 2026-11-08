@@ -26,6 +26,10 @@ To combine objects, use [references and reuse](guides/references-and-reuse.md) a
 
 [Operations](operations/README.md) links preparation, first installation, verification, updates and [troubleshooting](operations/troubleshooting.md). [Host bootstrap, installer and recovery](framework-reference.md) have separate contracts and are not application recovery shortcuts.
 
+## Set up and operate backups
+
+Start with [Set up backups](backup/README.md): install PBS, prepare storage, create and safely store the recovery pair, add the management API token to GitHub, enroll guests, then verify a backup and isolated restore. The guide includes the maintenance and alerting checklist for unattended operation and links to the [configuration reference](reference/backup.md).
+
 Contributors start with the [change workflow](contributing/README.md), then [component boundaries](contributing/components.md), [testing](contributing/testing.md) and the [canonical documentation standard](contributing/documentation-standard.md). The [assurance record](contributing/documentation-assurance.md) states the exact automated documentation scope and what still requires review. It does not claim that automated checks cover every rule in the public contract.
 
 ## Existing entry links

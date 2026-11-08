@@ -558,7 +558,7 @@ class Resolver:
         for guest_id, guest in self.guests.items():
             guest_containers, package_refs, guest_native, reserve, guest_minimums = runtime_values(guest['runtime'], guest)
             require(not guest_containers and guest_native is None and not guest_minimums, 'component.runtime-scope')
-            guest_software = guest['software'] + package_refs + component_backup.software(self)
+            guest_software = guest['software'] + package_refs + component_backup.software(self, guest)
             total = 0
             for app in self.apps.values():
                 if app['guest'] != guest_id:

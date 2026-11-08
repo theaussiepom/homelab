@@ -14,8 +14,16 @@ def exact(value, fields, optional=()):
 
 def validate(value):
     """Check the finite destination, transport, credentials and capture contract."""
-    exact(value, ('destination', 'schedule', 'limits', 'secrets', 'capture', 'staging', 'transport', 'group'))
+    exact(value, ('destination', 'schedule', 'limits', 'secrets', 'capture', 'staging', 'transport', 'group', 'recovery_public_key'))
     import backup_group
+    public = value['recovery_public_key']
+    exact(public, ('pem', 'sha256', 'fingerprint'))
+    require(isinstance(public['pem'], str) and len(public['pem']) <= 4096
+            and all(isinstance(public[key], str) and re.fullmatch('[0-9a-f]{64}', public[key])
+                    for key in ('sha256', 'fingerprint')), 'Bind the validated recovery public key')
+    import hashlib
+    require(hashlib.sha256(public['pem'].encode()).hexdigest() == public['sha256'],
+            'Preserve recovery public-key bytes')
     backup_group.member(value['group'])
     limits(value['limits'])
     exact(value['transport'], ('device', 'address'))
@@ -30,15 +38,12 @@ def validate(value):
         'Bind a dedicated, bounded managed staging volume')
     dest = value['destination']
     exact(dest, ('server', 'port', 'datastore', 'namespace', 'fingerprint', 'auth_id', 'backup_id'))
-    require(backup_group.identifier(dest['backup_id']) and dest['backup_id'] == value['group']['member'],
+    require(backup_group.identifier(dest['backup_id']) and len(dest['backup_id']) <= 32 and dest['backup_id'] == value['group']['member'],
             'Preserve the stable backup group identity')
     require(isinstance(dest['server'], str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]*', dest['server'])
             and type(dest['port']) is int and 1 <= dest['port'] <= 65535,
             'Use the selected PBS endpoint')
-    for field in ('datastore', 'namespace'):
-        require(isinstance(dest[field], str) and len(dest[field]) <= 128 and re.fullmatch(
-            r'[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*', dest[field]), 'Use literal PBS datastore and namespace names')
-    require(len(dest['namespace'].split('/')) <= 6 and '/' not in dest['datastore'] and isinstance(dest['auth_id'], str) and re.fullmatch(
+    require(destination_names(dest) and isinstance(dest['auth_id'], str) and re.fullmatch(
         r'[A-Za-z0-9_.-]+@pbs![A-Za-z0-9_.-]+', dest['auth_id']), 'Use the selected scoped PBS token identity')
     require(isinstance(dest['fingerprint'], str) and re.fullmatch(
         r'[0-9a-f]{2}(?::[0-9a-f]{2}){31}', dest['fingerprint']), 'Pin the PBS certificate fingerprint')
@@ -60,6 +65,16 @@ def validate(value):
                 and not any(part in ('.', '..') for part in source['path'].split('/'))
                 and not any(ord(char) < 32 for char in source['path']), 'Use canonical protected controller input references')
     return value
+
+
+def destination_names(value):
+    """PBS datastore names and namespace segments, before any remote mutation."""
+    safe = r'[A-Za-z0-9_][A-Za-z0-9._-]*'
+    store, namespace = value.get('datastore'), value.get('namespace')
+    return (isinstance(store, str) and 3 <= len(store) <= 32 and bool(re.fullmatch(safe, store))
+        and isinstance(namespace, str) and len(namespace) <= 128
+        and 1 <= len(namespace.split('/')) <= 6
+        and all(1 <= len(part) <= 32 and re.fullmatch(safe, part) for part in namespace.split('/')))
 
 
 def owner(value):

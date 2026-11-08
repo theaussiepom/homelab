@@ -162,11 +162,19 @@ def binding(value):
 
 
 def backup_continuity(previous, current):
-    """Omission is not retirement of a commissioned recurring protection job."""
+    """Omission, new destinations and implicit key rotation are not routine updates."""
     old = previous.get('backup', {}).get('job')
-    require(old is None or ('job' in current.get('backup', {})
-            and old['group'] == current['backup']['job']['group']),
+    if old is None:
+        return
+    new = current.get('backup', {}).get('job')
+    require(new is not None and old['group'] == new['group'],
             'Retire existing backup protection explicitly; ordinary deployment cannot disable it')
+    # Scheduling/capture and the independently verified TLS certificate can change.
+    # Account ownership, private key locations and recovery recipients cannot drift.
+    require(old['secrets'] == new['secrets'] and old['recovery_public_key'] == new['recovery_public_key']
+            and {k:v for k,v in old['destination'].items() if k != 'fingerprint'} ==
+                {k:v for k,v in new['destination'].items() if k != 'fingerprint'},
+            'Preserve backup destination and encryption ownership; rotation needs an explicit handover')
 
 
 def previous(attempt):

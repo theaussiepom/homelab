@@ -12,6 +12,8 @@ from component_errors import at, checked
 from component_sources import closed, identifier, named, require
 import component_types as types
 import component_backup_job
+import component_backup_key
+import component_backup_management
 import monitoring_paths
 import component_native
 
@@ -76,28 +78,38 @@ def selected(resolver):
         require(len(resolver.library['backup_profiles']) == 1, 'component.backup-profile-selection')
         name = next(iter(resolver.library['backup_profiles']))
     else:
-        closed(value, (), ('profile', 'job'))
+        closed(value, (), ('profile', 'job', 'recovery_public_key', 'management'))
+        require(('job' in value) == ('recovery_public_key' in value) == ('management' in value),
+                'component.backup-recovery-key')
+        if 'recovery_public_key' in value:
+            component_backup_key.source(value['recovery_public_key'])
         require('profile' in value or len(resolver.library['backup_profiles']) == 1,
                 'component.backup-profile-selection')
         name = value.get('profile', next(iter(resolver.library['backup_profiles']), None))
         if 'job' in value:
             component_backup_job.job(value['job'])
+            component_backup_management.source(value['management'])
     require(identifier(name) and name in resolver.library['backup_profiles'],
             'component.backup-profile-selection')
     return name
 
 
-def software(resolver):
+def software(resolver, guest):
+    require('backup' not in guest or 'backup' in resolver.site, 'component.backup-root-required')
     name = selected(resolver)
-    return [] if name is None else list(resolver.library['backup_profiles'][name]['software'])
+    return [] if name is None or 'backup' not in guest else list(resolver.library['backup_profiles'][name]['software'])
 
 
 def bind(resolver):
     name = selected(resolver)
     if name is None:
+        require(not any('backup' in row for row in resolver.guests.values()),
+                'component.backup-root-required')
         return None
     client = resolver.library['backup_profiles'][name]
     for guest_id, guest in resolver.guests.items():
+        if 'backup' not in guest:
+            continue
         packages = [item for item in guest['software_selection']['packages']
                     if item.startswith('proxmox-backup-client=')]
         require(len(packages) == 1 and re.fullmatch(
@@ -174,5 +186,6 @@ def bind(resolver):
         guest['backup'] = document
     result = {'profile': name, 'mode': 'client-preparation'}
     if isinstance(resolver.site['backup'], dict) and 'job' in resolver.site['backup']:
+        result.update(management=component_backup_management.bind(resolver, resolver.site['backup']['management']))
         result.update(mode='scheduled-recovery', group=component_backup_job.bind(resolver, resolver.site['backup']['job']))
     return result

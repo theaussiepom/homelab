@@ -4,9 +4,11 @@ import re
 
 from component_sources import closed, identifier, named, require
 import component_types as types
+import component_backup_key
 import backup_group
 import backup_capture
 import backup_policy
+import backup_identity
 from component_errors import ComponentError
 
 
@@ -18,12 +20,7 @@ def job(value):
     closed(destination, ('endpoint', 'datastore', 'namespace', 'fingerprint'))
     closed(destination['endpoint'], ('external',))
     require(identifier(destination['endpoint']['external']), 'component.backup-destination')
-    for field in ('datastore', 'namespace'):
-        require(isinstance(destination[field], str) and re.fullmatch(
-            r'[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*', destination[field])
-            and len(destination[field]) <= 128, 'component.backup-destination')
-    require('/' not in destination['datastore'] and len(destination['namespace'].split('/')) <= 6,
-            'component.backup-destination')
+    require(backup_policy.destination_names(destination), 'component.backup-destination')
     require(isinstance(destination['fingerprint'], str) and re.fullmatch(
         r'[0-9a-f]{2}(?::[0-9a-f]{2}){31}', destination['fingerprint']),
         'component.backup-fingerprint')
@@ -35,11 +32,9 @@ def job(value):
         'component.backup-schedule')
     types.integer(schedule['jitter_seconds'], 0, 3600)
     for row in named(value['clients']).values():
-        closed(row, ('auth_id', 'password', 'encryption_key', 'staging_volume', 'interface'), ('key_password', 'backup_id'))
-        require(isinstance(row['auth_id'], str) and re.fullmatch(
-            r'[A-Za-z0-9_.-]+@pbs![A-Za-z0-9_.-]+', row['auth_id']), 'component.backup-client')
-        require(all(identifier(row[key]) for key in set(row) - {'auth_id', 'backup_id'})
-                and ('backup_id' not in row or backup_group.identifier(row['backup_id'])),
+        closed(row, ('staging_volume', 'interface'), ('backup_id',))
+        require(all(identifier(row[key]) for key in set(row) - {'backup_id'})
+                and ('backup_id' not in row or backup_group.identifier(row['backup_id']) and len(row['backup_id']) <= 32),
                 'component.backup-secret')
     capture = value['capture']
     closed(capture, ('pause', 'database_lock', 'influx_tokens'))
@@ -57,16 +52,17 @@ def job(value):
 def bind(resolver, value):
     """Resolve endpoint/credential references and explicit capture permissions."""
     job(value)
-    require(set(value['clients']) == set(resolver.guests), 'component.backup-client-coverage')
-    ids = [row['auth_id'] for row in value['clients'].values()]
-    require(len(set(ids)) == len(ids), 'component.backup-client-identity')
+    enrolled = {key: row for key, row in resolver.guests.items() if 'backup' in row}
+    require(set(value['clients']) == set(enrolled), 'component.backup-client-coverage')
+    recovery = component_backup_key.bind(resolver, resolver.site['backup']['recovery_public_key'])
     endpoint = resolver.endpoint(value['destination']['endpoint'])
     require(endpoint['protocol'] == 'https', 'component.backup-destination')
     capture = value['capture']
-    require(set(capture['pause']) <= set(resolver.apps)
-            and set(capture['database_lock']) == {key for key, app in resolver.apps.items()
+    apps = {key: app for key, app in resolver.apps.items() if app['guest'] in enrolled}
+    require(set(capture['pause']) <= set(apps)
+            and set(capture['database_lock']) == {key for key, app in apps.items()
                 if app['adapter'] == 'mariadb'}
-            and set(capture['influx_tokens']) == {key for key, app in resolver.apps.items()
+            and set(capture['influx_tokens']) == {key for key, app in apps.items()
                 if app['adapter'] == 'influxdb'}, 'component.backup-capture-selection')
 
     def secret(ref):
@@ -75,7 +71,7 @@ def bind(resolver, value):
         require(source['type'] == 'file', 'component.backup-file-secret')
         return copy.deepcopy(source)
 
-    for guest_id, guest in resolver.guests.items():
+    for guest_id, guest in enrolled.items():
         client = value['clients'][guest_id]
         stage = client['staging_volume']
         require(stage in guest.get('volumes', {}), 'component.backup-staging-volume')
@@ -89,13 +85,19 @@ def bind(resolver, value):
                 and not any(binding.get('volume') == stage for app in resolver.apps.values()
                     if app['guest'] == guest_id for binding in app.get('storage', {}).values()),
                 'component.backup-staging-volume')
+        context = resolver.site['contexts'][guest['context']]
+        destination = {**{key: copy.deepcopy(row) for key, row in value['destination'].items()
+            if key != 'endpoint'}, 'server': endpoint['address'], 'port': endpoint['port'],
+            'backup_id': client.get('backup_id', 'guest-'+str(guest['identity']['vmid']))}
+        require(len('/datastore/' + destination['datastore'] + '/' + destination['namespace']
+                    + '/' + destination['backup_id']) <= 128, 'component.backup-namespace-path')
+        managed = backup_identity.binding(destination, {'node': context['node'], **guest['identity']},
+            value['name'], context['paths']['state_root'])
         guest['backup']['job'] = {
-            'destination': {**{key: copy.deepcopy(row) for key, row in value['destination'].items()
-                if key != 'endpoint'}, 'server': endpoint['address'], 'port': endpoint['port'],
-                'auth_id': client['auth_id'], 'backup_id': client.get('backup_id', 'guest-'+str(guest['identity']['vmid']))},
+            'recovery_public_key': copy.deepcopy(recovery),
+            'destination': {**destination, 'auth_id': managed['auth_id']},
             'schedule': copy.deepcopy(value['schedule']), 'limits': copy.deepcopy(value['limits']),
-            'secrets': {key: secret(ref) for key, ref in client.items()
-                if key not in ('auth_id', 'staging_volume', 'interface', 'backup_id')},
+            'secrets': managed['secrets'],
             'staging': {'path': volume['path'], 'size_bytes': volume['size_gib']*1024**3},
             'transport': {'device': 'eth'+str(guest['interfaces'][interface]['slot']),
                 'address': guest['interface_addresses'][interface]},
@@ -113,7 +115,8 @@ def bind(resolver, value):
             for relation in app['databases']:
                 target = relation['target']
                 require('app' in target and target['app'] in resolver.apps
-                        and resolver.apps[target['app']]['adapter'] == relation['type'],
+                        and resolver.apps[target['app']]['adapter'] == relation['type']
+                        and resolver.apps[target['app']]['guest'] in enrolled,
                         'component.backup-database-producer')
         try:
             backup_capture.normalize(guest['backup'])
@@ -121,7 +124,7 @@ def bind(resolver, value):
         except ValueError:
             raise ComponentError('component.backup-capture-binding') from None
     members = {}
-    for guest_id, guest in resolver.guests.items():
+    for guest_id, guest in enrolled.items():
         context = resolver.site['contexts'][guest['context']]
         api = resolver.endpoint(context['api_endpoint'])
         owner = guest['identity']

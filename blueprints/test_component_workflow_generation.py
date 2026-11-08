@@ -52,6 +52,19 @@ class WorkflowIntegrationTests(unittest.TestCase):
         resolver.assert_called_once_with(self.stack, self.site, None)
         return result
 
+    def test_backup_management_is_separate_and_receives_only_its_admin_token(self):
+        value=graph();value['backup']={'name':'Backup','needs':['selection','store','viewer'],
+                                     'environment':'backup','workflow_secrets':['PBS_API_TOKEN']}
+        result=self.model(value)
+        self.assertEqual(result['deploy.yml']['jobs']['_backup']['needs'],['selection','store','viewer'])
+        self.assertIn("needs.selection.result == 'success'",result['deploy.yml']['jobs']['_backup']['if'])
+        job=result['backup.yml']['jobs']['deploy']
+        self.assertEqual(job['environment'],'backup');self.assertEqual(job['if'],w.PRIVATE_MAIN)
+        self.assertEqual(set(job['steps'][1]['env']),{'DISABLED','PBS_API_TOKEN',*w.COMMON_SECRETS})
+        for guest in ('store','viewer'):
+            self.assertNotIn('PBS_API_TOKEN',json.dumps(result['guest-'+guest+'.yml']))
+        self.assertNotIn('secrets: inherit',json.dumps(result))
+
     def test_phase_recipe_and_composites_preserve_setup_and_separate_credential_scopes(self):
         job, defaults = w.phase_recipe()
         import hashlib
