@@ -48,8 +48,9 @@ def refresh_values(value):
     return result
 
 
-def allowed_guest_drift(rows, node, vmid, serial_device):
-    """Reconcile active/device drift and bpg 0.117.0 top-level computed IP maps."""
+def allowed_guest_drift(rows, node, vmid, serial_device, *, backup_selection=None,
+                        backup_staging=None):
+    """Reconcile bounded active/device/IP drift and exactly declared backup mounts."""
     if rows is None or rows == []:
         return True
     if not isinstance(rows, list) or len(rows) != 1:
@@ -69,11 +70,13 @@ def allowed_guest_drift(rows, node, vmid, serial_device):
         or {
             k: v
             for k, v in old.items()
-            if k not in {"started", "device_passthrough", "ipv4", "ipv6"}
+            if k not in {"started", "device_passthrough", "ipv4", "ipv6", "mount_point"}
         }
         != {
-            k: v for k, v in new.items() if k not in {"started", "device_passthrough", "ipv4", "ipv6"}
+            k: v for k, v in new.items() if k not in {"started", "device_passthrough", "ipv4", "ipv6", "mount_point"}
         }
+        or not declared_backup_drift(old.get('mount_point'), new.get('mount_point'),
+                                    backup_selection, backup_staging, vmid)
     ):
         return False
     old_devices, new_devices = (
@@ -95,6 +98,7 @@ def allowed_guest_drift(rows, node, vmid, serial_device):
         or old_devices != new_devices
         or before.get("ipv4") != after.get("ipv4")
         or before.get("ipv6") != after.get("ipv6")
+        or old.get('mount_point') != new.get('mount_point')
         or (before != after and old == new)
     )
 
@@ -115,6 +119,35 @@ def staging_mount(row, selected):
         and row.get('backup') is False and row.get('replicate') is True
         and all(row.get(key) in (None, False) for key in ('acl', 'quota', 'read_only', 'shared'))
         and row.get('mount_options') in (None, []))
+
+
+def prepared_staging_mount(row, selected, vmid):
+    """A known subvolume is only eligible; trusted API/filesystem proof is separate."""
+    if not isinstance(row, dict) or not isinstance(selected, dict):
+        return False
+    volume = row.get('volume')
+    if (not isinstance(volume, str) or type(vmid) is not int
+            or not re.fullmatch(re.escape(str(selected.get('volume'))) +
+                                r':subvol-' + str(vmid) + r'-[A-Za-z0-9_-]{1,128}', volume)
+            or row.get('path_in_datastore') != volume):
+        return False
+    return staging_mount(dict(row, volume=selected.get('volume')), selected)
+
+
+def declared_backup_drift(before, after, selection, staging, vmid):
+    """Reconcile only declared metadata and one identity-verified staging append."""
+    if before == after:
+        return True
+    if (not isinstance(staging, dict) or not isinstance(selection, dict) or not isinstance(after, list)
+            or selection.get(staging.get('path')) is not False
+            or sum(prepared_staging_mount(row, staging, vmid) for row in after) != 1):
+        return False
+    if (staging is not None and isinstance(before, (list, type(None)))
+            and isinstance(after, list) and len(after) == len(before or []) + 1):
+        return (prepared_staging_mount(after[-1], staging, vmid)
+                and backup_flags(before or [], after[:-1],
+                                 {key: value for key, value in selection.items() if key != staging['path']}))
+    return backup_flags(before, after, selection)
 
 
 def backup_flags(before, after, selection, staging=None):
@@ -157,6 +190,14 @@ def backup_unknowns(before, after, unknown, staging):
     return not has_unknown({key: value for key, value in unknown[-1].items() if key != 'path_in_datastore'})
 
 
+def fresh_mount_unknowns(after, unknown):
+    """New allocations may defer only their provider-computed datastore names."""
+    return (not has_unknown(unknown)
+            or isinstance(after, list) and isinstance(unknown, list) and len(after) == len(unknown)
+            and all(isinstance(row, dict) and not has_unknown({key: value for key, value in row.items()
+                    if key != 'path_in_datastore'}) for row in unknown))
+
+
 def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=None,
                backup_selection=None, backup_staging=None):
     """Validate the exact saved plan under an explicit backend custody decision."""
@@ -174,7 +215,8 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
         and value.get("errored") is not True
         and value.get("complete") is not False
         and not value.get("deferred_changes")
-        and allowed_guest_drift(value.get("resource_drift"), node, vmid, serial_device),
+        and allowed_guest_drift(value.get("resource_drift"), node, vmid, serial_device,
+                                backup_selection=backup_selection, backup_staging=backup_staging),
         "Review incomplete, deferred or drifted plans before deployment",
     )
     rows = value.get("resource_changes", [])
@@ -237,7 +279,7 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
                 "The host capability owns coordinator attachment; API plans cannot change it",
             )
             if not existing and backup_selection is not None:
-                require(not has_unknown(unknown.get('mount_point'))
+                require(fresh_mount_unknowns(after.get('mount_point'), unknown.get('mount_point'))
                         and backup_flags(after.get('mount_point'), after.get('mount_point'), backup_selection),
                         'Bind native backup flags to the exact compiled volume selection')
         if existing:

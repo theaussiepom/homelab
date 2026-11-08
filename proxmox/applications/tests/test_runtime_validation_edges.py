@@ -77,9 +77,19 @@ class ValidationEdges(unittest.TestCase):
                     pve.api_get(cfg, "/nodes/fixture/lxc"), [{"vmid": 200}]
                 )
                 context.assert_called_once_with(cafile="/synthetic/ca")
+                context.reset_mock()
+                opener.open.return_value.__enter__.return_value = io.StringIO('{"data":[]}')
+                self.assertEqual(pve.api_get(cfg, '/storage?type=zfspool'), [])
+                context.assert_called_once_with(cafile='/synthetic/ca')
+                request = opener.open.call_args.args[0]
+                self.assertEqual(request.full_url, 'https://198.18.0.1:8006/api2/json/storage?type=zfspool')
             for endpoint, path in [
                 ("http://198.18.0.1:8006/", "/nodes/x"),
                 (cfg["site"]["api_endpoint"], "/access/users"),
+                (cfg["site"]["api_endpoint"], "/storage"),
+                (cfg["site"]["api_endpoint"], "/storage/local-zfs"),
+                (cfg["site"]["api_endpoint"], "/storage?type=dir"),
+                (cfg["site"]["api_endpoint"], "/storage?type=zfspool&other=1"),
             ]:
                 cfg["site"]["api_endpoint"] = endpoint
                 with self.assertRaises(ValueError):

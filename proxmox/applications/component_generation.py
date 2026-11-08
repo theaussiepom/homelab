@@ -235,6 +235,7 @@ def current(attempt):
     """Admit normal ownership or one exact held continuation, never old adoption."""
     attempt._select_run()
     old=previous(attempt)
+    attempt.previous_configuration = None if old is None else old[1]
     if old is None:
         require(attempt.cfg['deployment']['lifecycle']=='fresh'
                 and all(row['lifecycle']=='fresh'for row in attempt.cfg['deployment']['applications'].values()),
