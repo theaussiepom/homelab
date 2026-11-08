@@ -5,6 +5,7 @@ from pathlib import Path
 import backup_recovery
 import unittest
 from unittest.mock import patch
+import yaml
 
 import component_backup_job as subject
 from component_errors import ComponentError
@@ -165,6 +166,83 @@ class BackupJobTests(unittest.TestCase):
         for field in ('auth_id', 'password', 'encryption_key', 'key_password'):
             value, _ = fixture(); value['clients']['one'][field] = 'obsolete'
             with self.subTest(field=field), self.assertRaises(ComponentError): subject.job(value)
+
+    def test_client_capacity_overrides_inherit_defaults_and_remain_isolated(self):
+        """Resolve each client independently without changing authored defaults or identities."""
+        value, resolver = fixture()
+        resolver.guests['two'] = copy.deepcopy(resolver.guests['one'])
+        resolver.guests['two']['identity'] = {'vmid': 611, 'hostname': 'two'}
+        value['clients']['two'] = copy.deepcopy(value['clients']['one'])
+        before = copy.deepcopy(value)
+        baseline = subject.bind(resolver, value)
+        old_jobs = {name: copy.deepcopy(guest['backup']['job']) for name, guest in resolver.guests.items()}
+        for override in ({'max_bytes': 64*1024**2}, {'max_files': 2000},
+                         {'max_bytes': 16*1024**2, 'max_files': 500}):
+            selected = copy.deepcopy(value)
+            selected['clients']['two']['limits'] = override
+            with self.subTest(override=override):
+                self.assertEqual(subject.bind(resolver, selected), baseline)
+                self.assertEqual(resolver.guests['one']['backup']['job'], old_jobs['one'])
+                expected = {**old_jobs['two'], 'limits': {**value['limits'], **override}}
+                self.assertEqual(resolver.guests['two']['backup']['job'], expected)
+                self.assertEqual(selected['limits'], before['limits'])
+                self.assertEqual(selected['clients']['two']['limits'], override)
+        resolver.guests['two']['backup']['job']['limits']['max_files'] = 1
+        self.assertEqual(value, before)
+        self.assertEqual(resolver.guests['one']['backup']['job']['limits'], before['limits'])
+        explicit = copy.deepcopy(value)
+        explicit['clients']['two']['limits'] = {key: value['limits'][key] for key in ('max_bytes', 'max_files')}
+        self.assertEqual(subject.bind(resolver, explicit), baseline)
+        self.assertEqual(resolver.guests['two']['backup']['job'], old_jobs['two'])
+
+    def test_client_capacity_shape_and_strict_numeric_bounds_refuse(self):
+        """An override is a nonempty capacity-only object with the existing strict ranges."""
+        cases = [None, True, False, [], 'PRIVATE_SENTINEL', {}, {'timeout_seconds': 300},
+                 {'command': 'PRIVATE_SENTINEL'}, {'max_bytes': {'value': 1048576}}]
+        for field, low, high in [('max_bytes', 1024**2, 2**50), ('max_files', 1, 1000000)]:
+            cases += [{field: item} for item in (True, False, None, 'PRIVATE_SENTINEL', 1.5, 0, -1, low-1, high+1)]
+            for item in (low, high):
+                value, _ = fixture(); value['clients']['one']['limits'] = {field: item}
+                subject.job(value)
+        for index, override in enumerate(cases):
+            value, _ = fixture(); value['clients']['one']['limits'] = override
+            with self.subTest(case=index), self.assertRaises(ComponentError) as caught:
+                subject.job(value)
+            self.assertNotIn('PRIVATE_SENTINEL', str(caught.exception))
+        for invalid in (None, {}, {'max_bytes': True, 'max_files': 100, 'timeout_seconds': 300}):
+            value, _ = fixture(); value['limits'] = invalid
+            value['clients']['one']['limits'] = {'max_bytes': 1048576, 'max_files': 100}
+            with self.subTest(root=invalid), self.assertRaises(ComponentError): subject.job(value)
+
+    def test_staging_floor_uses_effective_client_bytes_in_both_directions(self):
+        """Overrides neither evade the volume floor nor force another client's larger default."""
+        value, resolver = fixture()
+        value['limits']['max_bytes'] = 512*1024**2
+        value['clients']['one']['limits'] = {'max_bytes': 256*1024**2}
+        subject.bind(resolver, value)  # Exactly four times the effective bound.
+        value['clients']['one']['limits']['max_bytes'] += 1
+        with self.assertRaisesRegex(ComponentError, 'backup-staging-volume'): subject.bind(resolver, value)
+        value['clients']['one']['limits'] = {'max_files': 100}
+        with self.assertRaisesRegex(ComponentError, 'backup-staging-volume'): subject.bind(resolver, value)
+        value['limits']['max_bytes'] = 32*1024**2
+        value['clients']['one']['limits'] = {'max_bytes': 256*1024**2}
+        resolver.guests['one']['volumes']['stage']['backup'] = None
+        with self.assertRaisesRegex(ComponentError, 'backup-staging-volume'): subject.bind(resolver, value)
+
+    def test_documented_influx_token_binding_resolves_a_file_without_opening_it(self):
+        """Validate the named custody snippet through its owning binding component."""
+        from test_documentation_contract_helpers import named_example
+        page = Path(__file__).resolve().parents[1]/'docs/backup/configure.md'
+        snippet = yaml.safe_load(named_example(page.read_text(), 'backup-influx-token-reference'))
+        value, resolver = fixture()
+        resolver.site['secret_sources'].update(snippet['secret_sources'])
+        resolver.apps['metrics'] = {'adapter': 'influxdb', 'guest': 'one'}
+        value['capture']['influx_tokens'] = snippet['backup']['job']['capture']['influx_tokens']
+        subject.bind(resolver, value)
+        selected = resolver.guests['one']['backup']['job']['capture']['influx_tokens']['metrics']
+        self.assertEqual(selected, snippet['secret_sources']['influx-operator'])
+        resolver.site['secret_sources']['influx-operator'] = {'type': 'environment', 'name': 'INFLUX_TOKEN'}
+        with self.assertRaisesRegex(ComponentError, 'backup-file-secret'): subject.bind(resolver, value)
 
 
 if __name__ == '__main__': unittest.main()

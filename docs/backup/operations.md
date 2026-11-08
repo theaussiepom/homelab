@@ -148,11 +148,17 @@ If a required box is unchecked, identify that limit explicitly. Do not describe 
 
 ### Rehearse an amended guide from a clean setup
 
-When a setup instruction fails, stop at that step and correct the guide before continuing the rehearsal. Record the cause, the corrected instruction and its expected result. Repeat the complete revised sequence on an isolated disposable setup, including first deployment, repeated deployment, backup and independent restore.
+When a setup instruction fails, stop at that step and correct the guide before continuing the rehearsal. Record the cause, the corrected instruction and its expected result. Choose a clean rehearsal at the boundary changed by that instruction.
 
-Keep a manifest of exactly which test objects were created: server or datastore, namespaces, API users/tokens, client keys, test guests and test snapshots. Reset only those disposable objects after preserving the rehearsal results. Never use a blanket cleanup against a production datastore, revoke an existing deployment token, delete recovery keys, or remove failed-operation records merely to obtain a clean run. If any object is shared or its ownership is uncertain, use a fresh isolated setup instead.
+For a **server or storage installation change**, repeat the affected installation sequence on an authorised isolated disposable server/storage setup. A later client-enrollment rehearsal against an existing server does not prove a fresh server installation.
 
-The successful rehearsal must start without relying on credentials, accounts, configuration files or manual fixes left behind by the failed pass. Retain the corrected guide and its tests; resetting the test environment does not mean reverting those corrections.
+For a **client-enrollment change**, explicitly inventoried and independently verified PBS/datastore, controller/toolchain, repository, recovery-key/custody and management-credential prerequisites may remain in place. Record their identities, readiness evidence and the fact that they are retained prerequisites. A second PBS server, controller or repository is not required solely to rehearse this client lifecycle. Preserve existing application data and ordinary deployment receipts; a clean backup enrollment does not require recreating the application.
+
+Start that client lifecycle without silently adopting prior enrollment, activation or failed-operation state. Use new enrollment objects or reset only explicitly inventoried disposable test objects with authority. Prove first CD, a backup, repeated CD preserving the same identities and keys, a subsequent backup, then independent isolated file and database restores where applicable. Restore into the reviewed isolated destination, never over production application data. The retained foundation must be distinguished from installation steps actually replayed.
+
+Keep a manifest of exactly which test objects were created: server or datastore, namespaces, API users/tokens, client keys, test guests and test snapshots. Reset only those disposable objects after preserving the rehearsal results. Never use a blanket cleanup against a production datastore, revoke an existing deployment token, delete recovery keys, or remove failed-operation records merely to obtain a clean run. If an object proposed for reset is shared or its ownership is uncertain, leave it intact and use a fresh isolated test object instead.
+
+The successful rehearsal must not rely on undocumented or unverified credentials, accounts, configuration files or manual fixes left behind by the failed pass. Explicitly verified retained prerequisites are different from such leftovers. Retain the corrected guide and its tests; resetting the test environment does not mean reverting those corrections.
 
 Maintain guest coverage and schedules through reviewed site configuration. Keep the existing client keys and stable namespace/backup IDs. Removing a guest from a CD run is not retirement of its backups. Loss of a token secret, a foreign owner or a failed-operation record needs its specific recovery procedure, not generic cleanup.
 

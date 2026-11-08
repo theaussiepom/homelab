@@ -47,7 +47,7 @@ These root objects accompany `job`; neither belongs inside an individual client.
 | <a id="backup-management-credential"></a>`backup.management.credential` | Secret-source identifier | Required | Environment source selecting `PBS_API_TOKEN`, whose value is `user@pbs!token:secret`. Only the management job receives it. |
 | <a id="backup-management-datastore-path"></a>`backup.management.datastore_path` | Absolute canonical path | Required | Expected path of the existing datastore prepared and verified during server setup. CD compares the API configuration with this value and refuses a missing or mismatched datastore. This field neither creates storage nor proves that its filesystem is mounted; `/` is not an accepted datastore path. |
 | <a id="backup-recovery-public-key"></a>`backup.recovery_public_key` | Closed source object | Required with `job` | The shared RSA recovery public key; never a client key or private PEM. |
-| <a id="backup-recovery-public-key-source"></a>`backup.recovery_public_key.source` | Confined site-relative file path | Required | A public PEM containing an RSA-4096 public key. Absolute paths, symlinks/escapes and private-key content are rejected. Its validated bytes are included in the deployment packet. |
+| <a id="backup-recovery-public-key-source"></a>`backup.recovery_public_key.source` | Confined site-relative file path | Required | A PEM-encoded RSA-4096 public key; use a repository destination such as `assets/backup/pbs-recovery-public.pub` under the normal ignore/private-path rules. The `.pub` suffix does not change the PEM encoding to SSH format. Absolute paths, symlinks/escapes and private-key content are rejected. Its validated bytes are included in the deployment packet. |
 
 The management connection reuses `job.destination.endpoint` and its certificate fingerprint. A second endpoint or trust fallback is not accepted. Define the management source in the site's [secret sources](identity-and-secrets.md#secret-sources):
 
@@ -141,7 +141,7 @@ backup:
     credential: pbs-management
     datastore_path: /mnt/backup/recovery
   recovery_public_key:
-    source: assets/backup/master-public.pem
+    source: assets/backup/pbs-recovery-public.pub
   job:
     name: example-recovery
     destination:
@@ -154,6 +154,7 @@ backup:
       resolver:
         staging_volume: backup-stage
         interface: primary
+        limits: {max_bytes: 67108864}
     capture: {pause: [], database_lock: [], influx_tokens: {}}
     limits: {max_bytes: 33554432, max_files: 10000, timeout_seconds: 300}
 ```
@@ -175,7 +176,7 @@ All six top-level job fields are required when `job` is present. Validation reje
 | <a id="backup-job-schedule-jitter-seconds"></a>`schedule.jitter_seconds` | Integer | Required | 0–3600; randomized timer delay. Missed runs are not replayed on restart. |
 | <a id="backup-job-clients"></a>`clients` | Named map | Required | Must include exactly the enrolled configured guests, including enrolled guests disabled for CD; the group has 1–64 members. |
 | <a id="backup-job-capture"></a>`capture` | Closed object | Required | Declares permission to pause apps and the inputs required by native database export commands; see below. |
-| <a id="backup-job-limits"></a>`limits` | Closed object | Required | Bounds capture size, entry count and the duration of each phase. |
+| <a id="backup-job-limits"></a>`limits` | Closed object | Required | Supplies the default capture-size and entry-count bounds, plus the shared duration of each phase. A client may override only its byte/file bounds below. |
 | <a id="backup-job-limits-max-bytes"></a>`limits.max_bytes` | Integer | Required | 1 MiB through 1 PiB. Bounds native command output, the complete recovery files and readback, and the selected source files. Metadata counts toward the budget. |
 | <a id="backup-job-limits-max-files"></a>`limits.max_files` | Integer | Required | 1–1,000,000 selected entries or artifacts. |
 | <a id="backup-job-limits-timeout-seconds"></a>`limits.timeout_seconds` | Integer | Required | 60–86,400 seconds for each preflight, capture or upload phase. The coordinator also limits the total run duration. |
@@ -186,9 +187,18 @@ Each `clients.<guest-id>` selects an enrolled guest. CD creates and preserves it
 
 | Field | Type | Required/default | Constraints and effect |
 | --- | --- | --- | --- |
-| <a id="backup-client-staging-volume"></a>`staging_volume` | Guest volume identifier | Required | Dedicated managed volume, no app binding and no `backup:` marker. Size must be at least four times `max_bytes`. Its path is reused from the volume declaration. |
+| <a id="backup-client-staging-volume"></a>`staging_volume` | Guest volume identifier | Required | Dedicated managed volume, no app binding and no `backup:` marker. Size must be at least four times this client's effective `max_bytes`. Its path is reused from the volume declaration. |
 | <a id="backup-client-interface"></a>`interface` | Guest interface identifier | Required | Selects an existing interface with a resolved static IPv4 address. Before capture, the route check on the guest must report that exact device and source address. |
 | <a id="backup-client-backup-id"></a>`backup_id` | String | Optional; `guest-<VMID>` | Uses 1–32 ASCII letters, digits, dots, underscores or hyphens, starting with a letter or digit. The 32-character bound is the PBS namespace-leaf limit. It must be unique in the group. Set it explicitly when contexts reuse a VMID. Changing it requires explicit handover of protection. |
+| <a id="backup-client-limits"></a>`limits` | Closed object | Optional; omitted fields inherit `job.limits` | At least one of `max_bytes` or `max_files`; no other fields, null or empty object. Overrides affect this client only and may be above or below the root defaults. |
+| <a id="backup-client-limits-max-bytes"></a>`limits.max_bytes` | Integer | Optional; inherit `job.limits.max_bytes` | Same 1 MiB–1 PiB bound. The dedicated staging volume must still be at least four times this effective value; runtime requires three times it free before capture. |
+| <a id="backup-client-limits-max-files"></a>`limits.max_files` | Integer | Optional; inherit `job.limits.max_files` | Same 1–1,000,000 bound for this client's selected entries and artifacts. |
+
+The complete [mixed-client source](../examples/backup/client-limits.yaml) and its [compile-and-inspect commands](../examples/backup/README.md#size-clients-independently) exercise both branches: `resolver` overrides its byte/file limits, while `replica` inherits the root defaults. Both retain the same timeout and one coordinated group. Each 1 GiB staging volume exceeds its effective minimum. Omitting `limits` preserves the previous generated values. An unknown field, zero byte bound or undersized staging volume is refused.
+
+Keep `timeout_seconds` only in the root `job.limits`: all members share a coordinated paused capture window, and each worker's existing barrier deadline uses that duration. Per-client timeout overrides are not accepted. This extension does not add schedules, change group membership, reserve host pool space or prune retained staging history. Size from actual complete native exports plus that client's file archive and metadata, with growth and pool reserve; engine-directory usage is not an export measurement.
+
+For later deployments, a root-default change affects only clients inheriting that field; removing an override makes that field inherit again. A changed effective limit requires the affected guest's matching ordinary deployment with that guest enabled, followed by successful whole-group activation. A disabled member's old coverage cannot stand in for a changed limit. Namespace, token and client-key identities stay unchanged by a limit edit; do not recreate credentials or remove failure records. See [capacity preparation and updates](../backup/configure.md#size-each-client-and-review-later-changes).
 
 The final namespace is `<namespace>/<backup_id>` and the snapshot is `host/<backup_id>/<UTC capture time>`. CD creates each namespace and its dedicated user/token with `DatastoreBackup` access there. Both user and token grants are required. The worker can back up and restore its owned archives, but cannot administer PBS or prune snapshots. Its protected controller record and guest files contain the same stable client identity and encryption key. See [API access and permissions](../backup/access.md).
 
@@ -200,7 +210,7 @@ The native client uses the explicitly installed recovery public key on every enc
 | --- | --- | --- | --- |
 | <a id="backup-job-capture-pause"></a>`capture.pause` | Unique app-ID list | Required; may be empty | Permits stopping and restarting only the listed apps' already-running Compose services. Every `application-export` dataset requires its app in this list. |
 | <a id="backup-job-capture-database-lock"></a>`capture.database_lock` | Unique app-ID list | Required; may be empty | Must list exactly the enrolled MariaDB apps. Authorises their all-table read lock while exporting all databases, routines, events and triggers. |
-| <a id="backup-job-capture-influx-tokens"></a>`capture.influx_tokens` | App-ID → secret-source map | Required; may be empty | Must include exactly the enrolled InfluxDB apps, each selecting its existing operator-token file. |
+| <a id="backup-job-capture-influx-tokens"></a>`capture.influx_tokens` | App-ID → secret-source map | Required; may be empty | Must include exactly the enrolled InfluxDB apps, each selecting its existing operator-token file. Follow [operator-token custody and file ownership](../backup/configure.md#prepare-an-existing-influxdb-operator-token-when-selected). |
 
 PostgreSQL uses the `pg_dumpall` for its installed major version with local peer authentication. The export includes global objects and roles, with an individual snapshot for each database. MariaDB uses its native logical dump of all databases while holding the explicitly authorised all-table read lock. Influx uses its native full backup command. Raw database engine directories never enter the selected-file archive. These native formats still need a compatible restore environment, including the required extensions and plugins. Producing them does not prove that a restored service works.
 

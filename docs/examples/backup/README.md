@@ -47,3 +47,35 @@ Copy this directory to a new disposable location before editing it. Remove the g
 These edits teach source selection only. Removing protection from a real installation needs the [retirement procedure](../../reference/backup.md#later-deployments-and-retirement); this exercise grants no permission to delete credentials or backups.
 
 Continue with [real input preparation](../../backup/configure.md). Replace synthetic allocations, use compatible published source selections, verify storage and trust, and create the operator recovery pair before a real deployment.
+
+## Size clients independently
+
+[client-limits.yaml](client-limits.yaml) is a second complete site using this directory's same library, catalogue and public-key fixture. It adds `replica` and a second DNS app. `resolver` has a 64 MiB/20,000-entry override; `replica` inherits 32 MiB/10,000 entries from the root. Both inherit the 300-second timeout, use one schedule and group, and have distinct guest identities. The numbers teach resolution; they are not real sizing recommendations.
+
+From the repository root with the prepared Python environment, compile both guests into a new private output directory:
+
+<!-- example: backup-client-limits-compile -->
+```bash
+FRAMEWORK=$(pwd -P)
+PBS_LIMITS_WORK=$(mktemp -d)
+PBS_LIMITS_WORK=$(cd "$PBS_LIMITS_WORK" && pwd -P)
+python3 "$FRAMEWORK/blueprints/compile.py" \
+  --stack "$FRAMEWORK/docs/examples/backup" \
+  --site "$FRAMEWORK/docs/examples/backup/client-limits.yaml" \
+  --guest resolver --output "$PBS_LIMITS_WORK/resolver.json"
+python3 "$FRAMEWORK/blueprints/compile.py" \
+  --stack "$FRAMEWORK/docs/examples/backup" \
+  --site "$FRAMEWORK/docs/examples/backup/client-limits.yaml" \
+  --guest replica --output "$PBS_LIMITS_WORK/replica.json"
+python3 - "$PBS_LIMITS_WORK/resolver.json" "$PBS_LIMITS_WORK/replica.json" <<'PY_LIMITS'
+import json, sys
+jobs = [json.loads(json.load(open(path))['files']['site.json'])['app']['backup']['job']
+        for path in sys.argv[1:]]
+assert jobs[0]['limits'] == {'max_bytes': 67108864, 'max_files': 20000, 'timeout_seconds': 300}
+assert jobs[1]['limits'] == {'max_bytes': 33554432, 'max_files': 10000, 'timeout_seconds': 300}
+assert jobs[0]['group']['name'] == jobs[1]['group']['name'] == 'example-recovery'
+print('resolver: overridden; replica: inherited; one group and timeout')
+PY_LIMITS
+```
+
+The last line must match the printed text above. To test refusal, edit a disposable copy: adding `timeout_seconds` under a client's `limits` fails with `component.fields`. Setting `resolver.limits.max_bytes` to `268435457` exceeds one quarter of its 1 GiB staging volume and fails with `component.backup-staging-volume`. Exactly `268435456` is accepted. A changed effective limit in a real installation needs an enabled deployment and [whole-group activation](../../backup/configure.md#size-each-client-and-review-later-changes); compilation performs neither.

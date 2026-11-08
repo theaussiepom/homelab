@@ -115,4 +115,38 @@ class ActivationTests(unittest.TestCase):
         root,_=subject.location(self.schedule,self.admitted)
         self.assertTrue((root/'failed.json').exists());self.assertFalse((root/'complete.json').exists())
 
+    def test_changed_client_limits_need_matching_enabled_deployment_and_group_activation(self):
+        """Use real activation records to refuse stale or disabled changed client coverage."""
+        import backup_identity
+        second = self.second_member()
+        self.activate()
+        old_root, _ = subject.location(self.schedule, self.admitted)
+        old_bytes = (old_root/'complete.json').read_bytes()
+        old_inode = (old_root/'complete.json').stat().st_ino
+        cfg = self.admitted[second][0]
+        job = cfg['app']['backup']['job']
+        identity = backup_identity.binding(job['destination'], cfg['app']['backup']['owner'],
+                                           self.group['name'], str(self.root))
+        self.api.reset_mock(); self.deploy.reset_mock(); self.provision.reset_mock()
+        self.descriptor['coverage'] = copy.deepcopy(self.descriptor['coverage'])
+        self.descriptor['coverage'][second]['job']['limits'].update(max_bytes=2*1024**2, max_files=200)
+        with self.assertRaisesRegex(ValueError, 'exact declared'): self.activate()
+        self.api.datastore.assert_not_called(); self.deploy.assert_not_called()
+        cfg['app']['backup'] = copy.deepcopy(self.descriptor['coverage'][second])
+        self.admitted[second] = (cfg, 'f'*64)
+        self.descriptor['enabled'] = [self.name]
+        with self.assertRaisesRegex(ValueError, 'Enable this guest'): self.activate()
+        self.api.datastore.assert_not_called(); self.deploy.assert_not_called()
+        self.descriptor['enabled'].append(second)
+        self.assertEqual(self.activate()['status'], 'activated')
+        self.assertEqual(self.deploy.call_count, 2)
+        subject.verify(self.schedule, self.admitted)
+        job = cfg['app']['backup']['job']
+        self.assertEqual(backup_identity.binding(job['destination'], cfg['app']['backup']['owner'],
+                         self.group['name'], str(self.root)), identity)
+        self.assertEqual((old_root/'complete.json').read_bytes(), old_bytes)
+        self.assertEqual((old_root/'complete.json').stat().st_ino, old_inode)
+        job['limits']['max_files'] += 1
+        with self.assertRaises((ValueError, FileNotFoundError)): subject.verify(self.schedule, self.admitted)
+
 if __name__=='__main__':unittest.main()

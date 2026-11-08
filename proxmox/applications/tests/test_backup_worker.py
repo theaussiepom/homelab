@@ -196,5 +196,21 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.run_worker()
         self.assertFalse((self.root/'PENDING').exists())
 
+    def test_each_effective_capacity_retains_exact_three_times_free_space_gate(self):
+        """Exercise both sides of the unchanged worker gate for different complete budgets."""
+        for index, limit in enumerate((1024**2, 2*1024**2)):
+            value = copy.deepcopy(self.value); value['job']['limits']['max_bytes'] = limit
+            self.root = self.tmp/('capacity-'+str(index)); self.root.mkdir(mode=0o700)
+            engine = FakeEngine()
+            with patch.object(worker.shutil, 'disk_usage', return_value=type('Disk', (), {'free': 3*limit-1})()):
+                with self.assertRaisesRegex(ValueError, 'Reserve capacity'): self.run_worker(engine, value)
+            self.assertEqual(engine.calls, [])
+            self.assertEqual(list(self.root.iterdir()), [])
+            with patch.object(worker.shutil, 'disk_usage', return_value=type('Disk', (), {'free': 3*limit})()):
+                self.assertEqual(self.run_worker(FakeEngine(), value)['status'], 'uploaded')
+            self.assertFalse((self.root/('a'*32)/'payload').exists())
+            self.assertFalse((self.root/('a'*32)/'readback').exists())
+            self.assertTrue((self.root/('a'*32)/'complete.json').is_file())
+
 
 if __name__ == '__main__': unittest.main()

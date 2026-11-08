@@ -14,7 +14,29 @@ If old backup settings were never commissioned, prepare the new inputs and verif
 
 You need the real PBS HTTPS endpoint and its certificate fingerprint, the existing verified datastore and its filesystem/path, the public recovery PEM, the protected `PBS_API_TOKEN`, and the existing guest interface/staging bindings. Do not paste secrets into YAML. Keep the recovery private key outside the checkout and runners.
 
-Create a site-relative public-key location, for example `assets/backup/master-public.pem`, and copy only the verified public PEM there. Compare its public-key fingerprint with the [generation record](recovery-key.md#generate-the-pair-once). Its public nature does not make changes harmless: review replacement just like a trust-anchor change.
+Copy the verified public key to a site-relative repository location such as `assets/backup/pbs-recovery-public.pub`. The `.pub` file contains the exact same PEM-encoded RSA public key produced as `master-public.pem`; keep that encoding rather than converting it to SSH public-key format. The repository destination uses `.pub` so it can be staged normally under the existing ignore and private-path rules. Keep the private PEM outside Git; do not force-add a `.pem` file or weaken those rules. Compare the public-key fingerprint with the [generation record](recovery-key.md#generate-the-pair-once). Its public nature does not make changes harmless: review replacement just like a trust-anchor change.
+
+### Prepare an existing InfluxDB operator token when selected
+
+For an enrolled InfluxDB OSS 2.x producer, identify the exact existing instance and installed versions first. Native full backup requires its existing root/Operator authorization token. An organization's All Access token or a bucket read/write token is a different permission scope; a metrics integration credential is not sufficient evidence. See the [native backup requirements](https://docs.influxdata.com/influxdb/v2/admin/backup-restore/backup/) and [token types](https://docs.influxdata.com/influxdb/v2/admin/tokens/).
+
+Have the authorized credential owner locate that existing token in its protected setup/password-manager record or the exact installed CLI configuration, normally `~/.influxdbv2/configs` unless a different location was selected. The [CLI configuration](https://docs.influxdata.com/influxdb/v2/reference/cli/influx/config/) can contain the URL, organization and token. Verify instance identity and authorization scope privately. Do not print the configuration, dump authorization records, screenshot the token or put it in a logged `--token` argument. If the token is missing, unknown or insufficient, stop: this procedure does not authorize setup, recovery-auth commands, new grants or token creation/rotation.
+
+Through the separately approved credential-transfer procedure, place only the existing raw token in a new canonical controller file outside Git and CI workspaces. Use a private `0700` directory and a `0600` regular file owned by the **actual CD/Backup process account**. A file readable only by root is insufficient when that account is not root. Inspect the exact destination first; do not overwrite, follow a symlink or adopt an uncertain existing file. Then declare a file reference, not the token itself. This is a site fragment for an already declared Influx app named `metrics`; retain the rest of your existing job and capture permissions:
+
+<!-- example: backup-influx-token-reference -->
+```yaml
+secret_sources:
+  influx-operator:
+    type: file
+    path: /var/lib/homelab-private/influx-operator-token
+backup:
+  job:
+    capture:
+      influx_tokens: {metrics: influx-operator}
+```
+
+An environment source or the PBS API token cannot replace this file binding. During capture, the worker supplies the token as `INFLUX_TOKEN` only to its native Influx backup child, rather than in argv; sufficiently privileged local processes can inspect runtime environments. Protect both controller and guest accordingly. Keep independent recovery custody: with token hashing enabled, the original token cannot be recovered from its stored hash, and a full restore may require the separately retained operator token and compatible CLI. Do not disable hashing to bypass missing custody. Credential presence and source validation do not prove a successful export or restore.
 
 ## Declare shared backup settings
 
@@ -30,11 +52,19 @@ Use the [canonical backup syntax and field reference](../reference/backup.md#syn
 | `backup.recovery_public_key.source` | Site-relative verified public PEM |
 | `backup.job.destination` | One declared PBS HTTPS endpoint, datastore, namespace and actual certificate fingerprint |
 | `backup.job.schedule` | Your permitted backup interval and jitter; use the reference's UTC semantics |
-| `backup.job.clients` | Staging and transport bindings for exactly the enrolled guests |
+| `backup.job.clients` | Staging and transport bindings for exactly the enrolled guests; optional client byte/file limits |
 | `backup.job.capture` | Explicitly reviewed application pauses, database locking and export inputs |
-| `backup.job.limits` | Bounds sized from the included data, files, temporary staging and expected duration |
+| `backup.job.limits` | Default byte/file bounds and one shared phase timeout |
 
 Declare the endpoint once and reference it. The management job uses the same destination identity; do not maintain a second address or fingerprint for it. The secret source selects `PBS_API_TOKEN` without containing its value. The [identity/secrets reference](../reference/identity-and-secrets.md#secret-sources) describes the source forms.
+
+## Size each client and review later changes
+
+Use `backup.job.limits` for common defaults. A client's optional [capacity override](../reference/backup.md#backup-client-limits) may contain `max_bytes`, `max_files` or both; omitted fields inherit their root defaults. `timeout_seconds` remains root-only because every member participates in the same coordinated pause window. Work through the complete [mixed-client example](../examples/backup/README.md#size-clients-independently) before selecting real values.
+
+Size each byte bound from that guest's complete native database exports, selected-file archive and metadata, with measured growth allowance. Live database-directory usage is not an export size. The [staging volume](../reference/backup.md#backup-client-staging-volume) must be at least four times the effective byte bound; the worker checks three times that bound free before starting. These are per-filesystem checks, not host thin-pool reservations. Review the combined allocations, other workload growth and pool reserve separately. A successful run releases its verified payload/readback copies but retains operation records and logs; failures preserve remaining artifacts. There is no automatic local history pruning to make an undersized allocation pass.
+
+A limit change is an ordinary configuration update. Enable each affected guest for its matching deployment, then complete the Backup job's whole-group activation before relying on the new configuration. An unchanged disabled member may retain its prior activated coverage; a changed disabled member is refused. Root-default edits affect inheriting clients, and removing an override restores inheritance. Keep existing namespace/token/client-key identities and failed evidence; increasing a bound does not authorize replay or cleanup.
 
 ## Enroll guests and select data
 
