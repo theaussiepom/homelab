@@ -52,6 +52,12 @@ class BackupJobTests(unittest.TestCase):
         value['destination']['namespace'] = 'a'*32
         subject.job(value)
 
+    def test_invalid_client_identifiers_report_client_diagnostic(self):
+        for field in ('staging_volume','interface','backup_id'):
+            value,_=fixture();value['clients']['one'][field]='invalid/path'
+            with self.subTest(field=field),self.assertRaisesRegex(ComponentError,'component.backup-client'):
+                subject.job(value)
+
     def test_each_closed_field_rejects_unsafe_unknown_or_unbounded_values(self):
         mutations = [lambda v: v.update(command='PRIVATE_SENTINEL'),
             lambda v: v['destination'].update(datastore='nested/path'),

@@ -4,6 +4,12 @@
 
 This step connects the prepared PBS server to your site, enrolls guests and deploys backup services. Work in your deployment repository using the compatible framework and library selected during [initial preparation](../guides/prepare-deployment.md#select-compatible-source).
 
+## Check whether this is a new managed enrollment
+
+This procedure supports first managed enrollment and subsequent deployments using the same managed ownership records. Earlier manually configured backup jobs used different client fields (`auth_id`, `password`, `encryption_key` and `key_password`) and root-wide enrollment; they are not accepted by this contract. New jobs use guest markers, a management credential and a recovery public key instead.
+
+If old backup settings were never commissioned, prepare the new inputs and verify the intended member set before selecting this release. If an old job is running or owns credentials/records, keep its working source, schedule, keys and namespaces intact. There is no automatic conversion or supported in-place import of its keys here. Remain on the previous compatible source until an explicit environmental handover preserves old recovery access and proves replacement protection. Do not clear ownership or generate replacement keys merely to make the new configuration pass. This guide does not authorize retiring an existing backup system.
+
 ## Gather the prepared inputs
 
 You need the real PBS HTTPS endpoint and its certificate fingerprint, the existing verified datastore and its filesystem/path, the public recovery PEM, the protected `PBS_API_TOKEN`, and the existing guest interface/staging bindings. Do not paste secrets into YAML. Keep the recovery private key outside the checkout and runners.

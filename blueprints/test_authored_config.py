@@ -127,7 +127,6 @@ class AuthoredConfigTests(unittest.TestCase):
 
     def test_selected_lock_extractor_keeps_only_required_compiler_packages(self):
         import config_environment
-        script=workflows.phase_recipe()[0]['steps'][6]['run']
         lock=self.root/'requirements.lock.txt';original=(c.ROOT/'requirements.lock.txt').read_text()
         lock.write_text(original);result=config_environment.selected(lock)
         self.assertEqual([line.split('==')[0] for line in result.splitlines() if not line.startswith(' ')],
@@ -140,5 +139,11 @@ class AuthoredConfigTests(unittest.TestCase):
             with self.subTest(raw=raw[:30]),self.assertRaises(ValueError):config_environment.selected(lock)
         lock.unlink();lock.symlink_to(self.root/'missing')
         with self.assertRaises(ValueError):config_environment.selected(lock)
+
+    def test_prepare_config_workflow_preserves_isolated_hash_locked_install(self):
+        script=next(step['run'] for step in workflows.phase_recipe()[0]['steps'] if step.get('name') == 'Prepare config')
+        composite=yaml.safe_load((c.ROOT/'.github/actions/guest-setup/action.yml').read_text())
+        paired=next(step['run'] for step in composite['runs']['steps'] if step.get('name') == 'Prepare config')
+        self.assertEqual(script.strip(),paired.strip())
         self.assertIn('--require-hashes --no-deps',script);self.assertIn('-m pip --isolated install',script)
         self.assertNotIn('APPLICATION_SSH_KEY',script);self.assertNotIn('PROXMOX_APP_TOKEN',script)

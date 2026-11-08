@@ -35,7 +35,7 @@ def job(value):
         closed(row, ('staging_volume', 'interface'), ('backup_id',))
         require(all(identifier(row[key]) for key in set(row) - {'backup_id'})
                 and ('backup_id' not in row or backup_group.identifier(row['backup_id']) and len(row['backup_id']) <= 32),
-                'component.backup-secret')
+                'component.backup-client')
     capture = value['capture']
     closed(capture, ('pause', 'database_lock', 'influx_tokens'))
     types.strings(capture['pause'], ids=True)

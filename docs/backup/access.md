@@ -14,7 +14,7 @@ The examples use PBS user `homelab-cd@pbs`, token name `deployment`, GitHub Envi
 
 The bootstrap procedure below assigns PBS **Admin at `/`** to the dedicated user and its management token. This is broad server administration, including destructive capabilities. It is intended for an explicitly approved PBS-management job; it is not a backup-only grant. PBS permission-management authority itself can grant wider access, so a source allowlist is not an independent server-enforced security boundary.
 
-Review this trust decision before creating the credential. If your organisation requires a narrower role matrix, qualify the exact API operations and effective permissions before use; do not weaken checks until deployment works. Ordinary guest tokens receive only their own namespace's backup/restore permissions and never this management credential. See [PBS roles and token permission intersection](https://pbs.proxmox.com/docs/user-management.html#api-token-permissions).
+Before creating the identity or token, the installation owner (or their designated security administrator) must approve the specific Admin-at-`/` grant to this automation identity. Record who approved it and its intended use in the private installation notes. If your organisation requires a narrower role matrix, qualify the exact API operations and effective permissions before use; do not weaken checks until deployment works. Ordinary guest tokens receive only their own namespace's backup/restore permissions and never this management credential. See [PBS roles and token permission intersection](https://pbs.proxmox.com/docs/user-management.html#api-token-permissions).
 
 ## Create the user and token
 
@@ -27,7 +27,11 @@ In the **PBS web interface**:
 
 The equivalent **first-installation commands** below run in an interactive root Bash shell on the trusted PBS server, from any private working directory. They change accounts and permissions. Check that the names are unused first, run once, and stop on errors. The token-generation command displays a secret: capture it privately before closing the session. Do not run these through CI or an output-recording helper.
 
+Confirm that terminal/session recording is disabled before continuing. Shell settings cannot turn off an external recorder. In this private interactive Bash session, disable tracing and history before generating the secret; restore your normal shell policy after transfer. The following settings prevent shell tracing/history capture, but do not make an otherwise recorded terminal safe.
+
 ```bash
+set +x
+set +o history
 proxmox-backup-manager user list
 proxmox-backup-manager user create homelab-cd@pbs --comment 'HomeLab backup management'
 proxmox-backup-manager user generate-token homelab-cd@pbs deployment

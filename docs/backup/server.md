@@ -48,9 +48,42 @@ In the PBS interface:
 
 A proxy and browser FQDN are optional conveniences. Keep a verified direct PBS route for backup and recovery that does not require a working guest DNS, SSO or proxy deployment.
 
+### Check the installed network and service identity
+
+From the trusted PBS root console, record these read-only results before changing storage or enrolling clients:
+
+```bash
+ip -brief address
+ip route show
+timedatectl status
+id backup
+lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINTS
+proxmox-backup-manager datastore list
+```
+
+Match addresses and routes to the installation plan, confirm synchronized time and record the actual numeric backup-service UID/GID. An empty datastore list is expected on a new server. A remote storage export must grant the service identity the required access; do not assume the administrator's ability to browse a directory proves the backup service can use it.
+
+### Configure the update repository
+
+In **Administration → Repositories**, retain the Debian base/security repositories and the official signing key. Use the enterprise PBS repository when you have an active subscription. Without one, the enabled enterprise repository cannot supply updates: select its row and choose **Disable**, then **Add → No-Subscription** for the installed release. Do not select the test repository or disable package-signature validation. If the correct repository already exists, verify it rather than adding a duplicate.
+
+The no-subscription repository is an official option but has a lower validation level than enterprise; Proxmox recommends enterprise for production. Make that operating choice explicitly for your installation. See the [repository descriptions and signing requirements](https://pbs.proxmox.com/docs/installation.html#debian-package-repositories).
+
+Under **Administration → Updates**, run **Refresh** and wait for its task to finish successfully. Inspect the offered changes before **Upgrade**. Stop on repository/authentication/signature errors or unexpected removals; do not treat an empty list after a failed refresh as up to date. Complete any required PBS restart before client enrollment, then verify normal administrator login, package versions, networking and storage mounts again. This updates the PBS server, not its hypervisor or other guests.
+
+For a new server with no enrolled clients or active backup tasks, perform the planned restart from the trusted console:
+
+```bash
+systemctl reboot
+```
+
+Wait for the normal login interface, sign in again, and repeat the version, network and service-identity checks above. Do not issue another restart merely because the browser console disconnected; that is expected during reboot.
+
 ## Prepare the backup filesystem
 
 PBS stores backups in a **datastore**, a named directory on a suitable filesystem. Preparing the filesystem and creating and verifying the datastore are **one-time server setup steps completed before CD**. CD uses that existing datastore and manages the declared namespaces and client access; it does not create, relocate or reformat the datastore.
+
+Choose the storage path from your installation plan. A local data disk and a NAS-exported filesystem are different choices: an OS-only VM is normal for the latter. Do not attach a replacement data disk merely because the PBS disk list contains only its OS disk. For a NAS/NFS design, complete [Prepare remote backup storage](remote-storage.md) before returning to datastore creation below. Keep separate full-guest and application-recovery stores when your retention or offsite-copy design requires that separation.
 
 1. Attach or allocate the storage through its owner: the hypervisor, physical storage configuration or existing storage service.
 2. Use the [PBS disk/filesystem guide](https://pbs.proxmox.com/docs/storage.html#disk-management) for a new local disk or ZFS pool. Formatting is destructive: positively identify the intended empty device first. For remotely backed storage, qualify its durability, mount semantics and performance before using it for a production datastore.

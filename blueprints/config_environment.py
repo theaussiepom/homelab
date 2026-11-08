@@ -1,6 +1,8 @@
 """Extract the finite hash-locked compiler dependencies; never resolve floating packages."""
 from pathlib import Path
+import os
 import re
+import stat
 import sys
 
 PACKAGES = ('pyyaml', 'cryptography', 'cffi', 'pycparser')
@@ -9,9 +11,20 @@ MARKERS = {'pyyaml':'', 'cryptography':'', 'cffi':" ; platform_python_implementa
 
 
 def selected(lock):
-    if lock.is_symlink() or not lock.is_file() or lock.stat().st_size > 1024*1024:
-        raise ValueError('Use the selected bounded framework dependency lock')
-    lines = lock.read_text().splitlines(); blocks = []
+    error = 'Use the selected bounded framework dependency lock'
+    try:
+        fd = os.open(lock, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, 'rb') as stream:
+            metadata = os.fstat(stream.fileno())
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 1024*1024:
+                raise ValueError(error)
+            raw = stream.read(1024*1024+1)
+        if len(raw) > 1024*1024:
+            raise ValueError(error)
+        lines = raw.decode('utf-8').splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(error) from exc
+    blocks = []
     for package in PACKAGES:
         starts = [i for i,line in enumerate(lines) if line.startswith(package+'==')]
         if len(starts) != 1:
