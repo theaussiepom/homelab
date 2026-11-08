@@ -12,6 +12,14 @@ import backup_identity
 from component_errors import ComponentError
 
 
+def _limits(value):
+    """Validate a complete effective worker budget with the existing bounds."""
+    closed(value, ('max_bytes', 'max_files', 'timeout_seconds'))
+    types.integer(value['max_bytes'], 1024*1024, 2**50)
+    types.integer(value['max_files'], 1, 1000000)
+    types.integer(value['timeout_seconds'], 60, 86400)
+
+
 def job(value):
     """Validate the closed public job shape before resolving any references."""
     closed(value, ('name', 'destination', 'schedule', 'clients', 'capture', 'limits'))
@@ -31,22 +39,22 @@ def job(value):
         and (':' not in schedule['calendar'] or int(schedule['calendar'][:2]) < 24),
         'component.backup-schedule')
     types.integer(schedule['jitter_seconds'], 0, 3600)
+    _limits(value['limits'])
     for row in named(value['clients']).values():
-        closed(row, ('staging_volume', 'interface'), ('backup_id',))
-        require(all(identifier(row[key]) for key in set(row) - {'backup_id'})
+        closed(row, ('staging_volume', 'interface'), ('backup_id', 'limits'))
+        require(all(identifier(row[key]) for key in ('staging_volume', 'interface'))
                 and ('backup_id' not in row or backup_group.identifier(row['backup_id']) and len(row['backup_id']) <= 32),
                 'component.backup-client')
+        if 'limits' in row:
+            closed(row['limits'], (), ('max_bytes', 'max_files'))
+            require(row['limits'], 'component.backup-client-limits')
+            _limits({**value['limits'], **row['limits']})
     capture = value['capture']
     closed(capture, ('pause', 'database_lock', 'influx_tokens'))
     types.strings(capture['pause'], ids=True)
     types.strings(capture['database_lock'], ids=True)
     require(all(identifier(ref) for ref in named(capture['influx_tokens']).values()),
             'component.backup-secret')
-    limits = value['limits']
-    closed(limits, ('max_bytes', 'max_files', 'timeout_seconds'))
-    types.integer(limits['max_bytes'], 1024*1024, 2**50)
-    types.integer(limits['max_files'], 1, 1000000)
-    types.integer(limits['timeout_seconds'], 60, 86400)
 
 
 def bind(resolver, value):
@@ -73,6 +81,7 @@ def bind(resolver, value):
 
     for guest_id, guest in enrolled.items():
         client = value['clients'][guest_id]
+        limits = {**value['limits'], **client.get('limits', {})}
         stage = client['staging_volume']
         require(stage in guest.get('volumes', {}), 'component.backup-staging-volume')
         volume = guest['volumes'][stage]
@@ -81,7 +90,7 @@ def bind(resolver, value):
                 and guest['interfaces'][interface].get('address', {}).get('mode') == 'static'
                 and guest['interface_addresses'].get(interface) is not None,
                 'component.backup-interface')
-        require('backup' not in volume and volume['size_gib']*1024**3 >= 4*value['limits']['max_bytes']
+        require('backup' not in volume and volume['size_gib']*1024**3 >= 4*limits['max_bytes']
                 and not any(binding.get('volume') == stage for app in resolver.apps.values()
                     if app['guest'] == guest_id for binding in app.get('storage', {}).values()),
                 'component.backup-staging-volume')
@@ -96,7 +105,7 @@ def bind(resolver, value):
         guest['backup']['job'] = {
             'recovery_public_key': copy.deepcopy(recovery),
             'destination': {**destination, 'auth_id': managed['auth_id']},
-            'schedule': copy.deepcopy(value['schedule']), 'limits': copy.deepcopy(value['limits']),
+            'schedule': copy.deepcopy(value['schedule']), 'limits': copy.deepcopy(limits),
             'secrets': managed['secrets'],
             'staging': {'path': volume['path'], 'size_bytes': volume['size_gib']*1024**3},
             'transport': {'device': 'eth'+str(guest['interfaces'][interface]['slot']),

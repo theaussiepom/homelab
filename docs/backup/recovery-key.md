@@ -8,6 +8,7 @@ Use this guide to create a Proxmox Backup Server (PBS) recovery key pair once, k
 
 - [Understand the three credentials](#understand-the-three-credentials)
 - [Prepare the generation environment](#prepare-the-generation-environment)
+- [Select the right field and native prompt](#select-the-right-field-and-native-prompt)
 - [Generate the pair once](#generate-the-pair-once)
 - [Store independent recovery copies](#store-independent-recovery-copies)
 - [Verify an exported copy](#verify-an-exported-copy)
@@ -26,7 +27,7 @@ Use this guide to create a Proxmox Backup Server (PBS) recovery key pair once, k
 | Recovery private key and its passphrase | Unlock that stored copy if the original client key is lost | An operator performing recovery |
 | PBS API token | Authenticates to PBS and authorizes access to specified backups | The client or recovery operator, according to its permissions |
 
-The recovery public/private pair is one credential, distinct from the client encryption key and API token. It does not replace either. The recovery private key cannot log in to PBS; a working API token cannot decrypt encrypted backup contents by itself. See [PBS authentication and permissions](https://pbs.proxmox.com/docs/user-management.html#api-tokens).
+The PBS administrator login password is separate from the recovery private-key passphrase: one signs in to PBS or its operating system; the other opens an encrypted PEM. The recovery public/private pair is one credential, distinct from the client encryption key and API token. It does not replace either. The recovery private key cannot log in to PBS; a working API token cannot decrypt encrypted backup contents by itself. See [PBS authentication and permissions](https://pbs.proxmox.com/docs/user-management.html#api-tokens).
 
 For a backup configured with a recovery public key, PBS's native client writes the encrypted client-key copy as `rsa-encrypted.key`. Recovery uses the matching private key to recover the client key, then uses that client key to decrypt data. The private key itself is never embedded in the backup. See the [upstream recovery-key procedure](https://pbs.proxmox.com/docs/backup-client.html#using-a-master-key-to-store-and-recover-encryption-keys).
 
@@ -52,6 +53,16 @@ openssl version
 
 Confirm that the native `key create-master-key` command is available. If the installed release differs, review its [client command reference](https://pbs.proxmox.com/docs/proxmox-backup-client/man1.html) before using the procedure. Do not install unreviewed packages as an incidental step on a managed machine.
 
+## Select the right field and native prompt
+
+Keep the PBS login password and recovery private-key passphrase clearly labelled. You may use separate password-manager items, for example **PBS login — installation label** and **PBS recovery key — installation label**. If one item holds both, keep the PBS login password in its normal password field and the recovery passphrase in a distinct **hidden** field clearly labelled for recovery, for example **Recovery private-key passphrase**. Keep the encrypted PEM attached and its public fingerprint recorded. A generic **Copy password** button or login autofill selects the item's normal password; it does not select that additional recovery field. Inspect the exact field's label before retrieving a value. Never replace one credential with the other or put the recovery passphrase in ordinary notes.
+
+Prepare the exact non-secret command before retrieving a secret. During a secret-entry session, do not use a browser-console clipboard to paste shell commands: clipboard synchronization can provide a different value from the one expected. Type the command manually from this guide and run it by itself. Do not copy a credential in order to paste a command. A separately authorized trusted terminal may avoid the browser clipboard, but this guide does not grant new access.
+
+**Before typing the existing recovery passphrase, visually confirm the native prompt and intended private-key filename.** For the OpenSSL checks below, expect an input-key prompt naming `master-private.pem` or the specified private PEM path. The PBS key command instead uses `Master Key Password:`. An ordinary Bash prompt ending in `$` or `#`, or a PBS login prompt, is not a recovery-key passphrase prompt. Retrieve the explicitly labelled recovery field; do not use generic password-copy/autofill. Prefer typing the existing passphrase manually. If you use password-manager paste, first verify the native hidden-input prompt, then copy only that exact named recovery field and use a separately verified direct terminal paste action at that prompt once. Do not use a browser clipboard helper or paste a shell command while a credential is copied. If clipboard behavior is uncertain, stop and use manual entry. Stop if input echoes, the prompt differs, or the command has returned to the shell; do not repeat a paste, use a secret as a diagnostic command, or record/screenshot secret input.
+
+OpenSSL prompts interactively when no password-source option is supplied. Do not add a literal passphrase, `-passin pass:...`, a secret environment variable or a shell pipeline to these operator checks. See [OpenSSL's terminal and password-source behavior](https://docs.openssl.org/3.0/man1/openssl-passphrase-options/). Verification checks the existing key; it does not change the PBS login password, recovery passphrase or RSA identity. A credential-field mix-up is not a reason to regenerate or re-encrypt the pair.
+
 ## Generate the pair once
 
 The following **operator commands** require the prepared interactive Bash shell. They create a new private working directory and leave it available for verified export. Run each command only after the preceding command succeeds; stop on any error.
@@ -67,11 +78,11 @@ chmod 644 master-public.pem
 stat -c '%a %n' master-private.pem master-public.pem
 ```
 
-Enter and confirm the passphrase at the native prompt. Never supply it in command arguments, source files or chat. The expected files are `master-private.pem`, protected by that passphrase, and `master-public.pem`. The expected modes are `600` for the private file and `644` for the public file; their containing directory remains private. The upstream tool creates an RSA-4096 pair.
+Confirm that the native prompt says `Master Key Password:`, then enter and confirm the recovery passphrase using the [field and prompt checks](#select-the-right-field-and-native-prompt). Never supply it in command arguments, source files or chat. The expected files are `master-private.pem`, protected by that passphrase, and `master-public.pem`. The expected modes are `600` for the private file and `644` for the public file; their containing directory remains private. The upstream tool creates an RSA-4096 pair.
 
 The generation command must not be rerun in this directory: it can replace the named output files. If interrupted, preserve the directory and inspect whether either file exists before deciding how to proceed. Do not label a second pair as the original.
 
-Verify that the private file opens and corresponds to the public file. These **local verification commands** run in the same directory and prompt for the passphrase:
+Verify that the private file opens and corresponds to the public file. Run these **local verification commands** individually in the same directory, checking success before the next command. Follow the [field and prompt checks](#select-the-right-field-and-native-prompt) before each secret entry; type the existing recovery passphrase only when OpenSSL asks for the intended private PEM:
 
 <!-- example: pbs-recovery-key-pair-check -->
 ```bash
@@ -88,7 +99,7 @@ The private-key check must succeed. `cmp` must exit zero with no difference. Rec
 
 Keep the encrypted `master-private.pem` and its passphrase recoverable without the services being backed up. Recommended custody is:
 
-1. **Convenient copy:** an encrypted password-manager item, for example a Bitwarden item with the PEM attached, the passphrase and the recovery-pair identifier. If attachments are unavailable, use another protected file store that preserves the exact file; do not assume a subscription feature exists.
+1. **Convenient copy:** an encrypted password-manager item, for example a Bitwarden item with the PEM attached, the passphrase in its explicitly labelled hidden field and the recovery-pair identifier. If attachments are unavailable, use another protected file store that preserves the exact file; do not assume a subscription feature exists.
 2. **Independent offline copy:** the same encrypted PEM on a securely stored USB drive. Keep its passphrase separately accessible, such as a sealed record in a different secure location.
 3. **Offsite copy:** another protected copy outside the location containing the servers and first offline copy, if recovery must survive loss of that location.
 
@@ -119,7 +130,7 @@ openssl pkey -pubin -in master-public.pem -outform DER -out public-key.der
 sha256sum public-key.der
 ```
 
-The passphrase retrieved from the recovery instructions must open the file. The public-key digest must match the identifier recorded during generation. This proves that this exported copy contains the matching usable private key. It does not yet prove that a backup contains a wrapped client key or that an application can be restored.
+Retrieve the exact recovery-passphrase field and follow the [native prompt check](#select-the-right-field-and-native-prompt) for each OpenSSL command. That passphrase must open the file; the PBS login password is not a substitute. The public-key digest must match the identifier recorded during generation. This proves that this exported copy contains the matching usable private key. It does not yet prove that a backup contains a wrapped client key or that an application can be restored.
 
 Once all required copies pass, export the public PEM for deployment preparation and remove only the temporary private-key files created for generation/export checks, after confirming their exact paths. Do not use wildcard or recursive cleanup. Normal file deletion does not guarantee erasure of filesystem snapshots, SSD remnants or previous backups; use an appropriately protected generation environment from the beginning. Keep the independent recovery copies and verification record.
 
@@ -282,6 +293,7 @@ If both the live estate and all backup media are lost, possession of the recover
 | --- | --- |
 | Generation says `unable to create master key - no tty` | Use an interactive terminal. Do not turn the process into a CI job or place the passphrase in arguments. |
 | One output file exists after an interrupted generation | Preserve it and inspect the pair. Do not rerun in the same directory or assume the private copy was exported. |
+| A secret appears at an ordinary shell prompt or input echoes | Stop without resubmitting it. Follow the affected credential owner's exposure procedure; do not assume it was the recovery passphrase or replace the key pair. |
 | OpenSSL cannot open the exported PEM | Check that the intended complete file and passphrase were retrieved. Preserve the originals; do not generate a replacement. |
 | Derived public key or fingerprint differs | This is the wrong pair or a damaged copy. Stop and locate the copy matching the recorded identifier. |
 | The snapshot has no `rsa-encrypted.key` | It may not have been backed up with a recovery public key. Preserve the original client key and inspect the producer's configuration; adding a public key later does not repair old snapshots. |

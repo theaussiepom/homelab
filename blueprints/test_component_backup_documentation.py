@@ -2,8 +2,11 @@
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 import yaml
@@ -92,6 +95,79 @@ class BackupDocumentation(unittest.TestCase):
         for mutate, code in cases:
             self.site = copy.deepcopy(original); mutate(self.site)
             with self.subTest(code=code), self.assertRaisesRegex(ComponentError, code): self.plan()
+
+    def test_complete_mixed_client_example_compiles_with_one_group_and_inherited_timeout(self):
+        """Read the maintained two-client source through the real compiler and runtime validator."""
+        self.path = self.root/'client-limits.yaml'
+        plan = component_plan.resolve(self.root, self.path)
+        packets = component_packet.lower_plan(plan)
+        expected = {'resolver': {'max_bytes': 64*1024**2, 'max_files': 20000, 'timeout_seconds': 300},
+                    'replica': {'max_bytes': 32*1024**2, 'max_files': 10000, 'timeout_seconds': 300}}
+        import backup_policy
+        for guest, limits in expected.items():
+            cfg = json.loads(packets[guest]['files']['site.json'])
+            job = backup_policy.validate(cfg['app']['backup']['job'])
+            self.assertEqual(job['limits'], limits)
+            self.assertEqual(job['staging']['size_bytes'], 1024**3)
+            self.assertFalse(cfg['guest']['volumes']['backup-stage']['backup'])
+            self.assertEqual(job['group']['name'], 'example-recovery')
+        schedule = plan.resolved['backup']['group']
+        self.assertEqual(schedule['limits'], expected['replica'])
+        self.assertEqual(set(schedule['group']['members']), {'guest-610', 'guest-611'})
+        self.assertEqual(component_packet.lower_plan(component_plan.resolve(self.root, self.path)), packets)
+        disabled = component_plan.resolve(self.root, self.path, ['replica'])
+        self.assertEqual(disabled.resolved['guests']['replica']['backup']['job']['limits'], expected['replica'])
+        self.assertEqual(disabled.resolved['backup']['group'], schedule)
+
+    def test_actual_client_limit_source_refusals_include_disabled_members_and_four_times_floor(self):
+        """Closed overrides and effective volume limits refuse at source resolution."""
+        self.path = self.root/'client-limits.yaml'
+        self.site = yaml.safe_load(self.path.read_text())
+        self.site['backup']['job']['clients']['resolver']['limits']['max_bytes'] = 256*1024**2
+        self.plan()
+        original = copy.deepcopy(self.site)
+        cases = [({'max_bytes': 256*1024**2+1}, 'backup-staging-volume'),
+                 ({'timeout_seconds': 300}, 'fields'), (None, 'fields'), ({}, 'backup-client-limits'),
+                 ({'max_files': True}, 'integer'), ({'max_bytes': 0}, 'integer')]
+        for override, code in cases:
+            self.site = copy.deepcopy(original)
+            self.site['backup']['job']['clients']['resolver']['limits'] = override
+            with self.subTest(override=override), self.assertRaisesRegex(ComponentError, code):
+                self.plan(['resolver'])
+
+    def test_documented_mixed_client_cli_commands_compile_the_canonical_source(self):
+        """Run the maintained non-native shell example with the selected source interpreter."""
+        marker = '<!-- example: backup-client-limits-compile -->\n```bash\n'
+        page = (EXAMPLE/'README.md').read_text()
+        self.assertEqual(page.count(marker), 1)
+        source = page.split(marker, 1)[1].split('\n```', 1)[0]
+        outputs = self.root/'cli-output'; outputs.mkdir(mode=0o700)
+        commands = self.root/'commands'; commands.mkdir(mode=0o700)
+        # Some execution contexts ignore TMPDIR. Delegate to real mktemp with
+        # an explicit owned template; the documented compiler commands stay exact.
+        temporary = commands/'mktemp'
+        temporary.write_text('#!/bin/sh\nexec "$PBS_DOC_REAL_MKTEMP" "$@" "$PBS_DOC_TEST_OUTPUT/packet.XXXXXXXX"\n')
+        temporary.chmod(0o700)
+        real_mktemp = shutil.which('mktemp')
+        self.assertIsNotNone(real_mktemp)
+        trace = self.root/'cli-directory.txt'
+        source += '\nprintf "%s\\n" "$PBS_LIMITS_WORK" > "$PBS_DOC_TEST_TRACE"\n'
+        env = dict(os.environ, PBS_DOC_TEST_OUTPUT=str(outputs), PBS_DOC_REAL_MKTEMP=real_mktemp,
+                   PBS_DOC_TEST_TRACE=str(trace),
+                   PATH=os.pathsep.join((str(commands), str(Path(sys.executable).parent), os.environ['PATH'])))
+        result = subprocess.run(['bash', '-eu'], input=source, text=True, cwd=ROOT,
+                                env=env, capture_output=True, timeout=30, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'resolver: overridden; replica: inherited; one group and timeout')
+        generated = Path(trace.read_text().strip())
+        self.assertEqual(generated.resolve(), generated)
+        self.assertTrue(generated.is_relative_to(outputs), str(generated))
+        self.assertEqual(sorted(path.name for path in generated.iterdir()), ['replica.json', 'resolver.json'])
+        for guest, size, files in [('resolver', 64*1024**2, 20000), ('replica', 32*1024**2, 10000)]:
+            packet = json.loads((generated/(guest+'.json')).read_text())
+            cfg = json.loads(packet['files']['site.json'])
+            self.assertEqual(cfg['app']['backup']['job']['limits'],
+                             {'max_bytes': size, 'max_files': files, 'timeout_seconds': 300})
 
 
 if __name__ == '__main__': unittest.main()
