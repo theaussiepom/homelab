@@ -6,7 +6,7 @@ Use this procedure when your installation plan places the PBS datastore on an NF
 
 ## Before you start
 
-Have a working PBS console, administrator access to the storage owner and an approved storage network. Record the following for **each** mount and datastore in your private installation plan:
+Have administrator access to the storage owner, an approved storage network and a verified access route that survives stopping both PBS services. Use a hypervisor/physical console, or separately authorized and verified SSH access that does not depend on the PBS web services. **The PBS web Shell is not an independent console:** stopping its services can disconnect it. Establish and test the independent route before the service-stop, restart or missing-mount checks below. Record the following for **each** mount and datastore in your private installation plan:
 
 | Fact | What must be known |
 | --- | --- |
@@ -26,11 +26,13 @@ This page's complete mount example uses the documentation address `192.0.2.20`, 
 On the storage server, using its supported administration tools:
 
 1. Create the dedicated empty backing directory/share on the intended persistent filesystem. Set the admitted capacity/quota; preserve other shares and their snapshots, permissions and backup jobs.
-2. Grant the verified PBS backup-service numeric identity access to this directory, with only the traversal needed through its parents. Retain restrictive directory/file permissions. Do not assume a NAS account with the same name has the same numeric ID.
+2. Select the supported way to give the verified PBS backup-service numeric UID/GID access, with only the traversal needed through its parents. A NAS named-account UI may not support that numeric identity. Where supported, set **only this new empty directory** to the approved UID/GID and mode `0700` through storage-owner tools. Otherwise, the owner may approve that same nonrecursive change through the exact mounted PBS client after export and mount qualification, using the procedure below. Do not change unrelated parents, use recursive ownership/permission changes or alter an existing datastore. A NAS account with the same name is not sufficient identity proof.
 3. Export only this path to the exact PBS storage client address, using NFSv4 over TCP and synchronous writes. Select and record the identity-mapping policy explicitly. Prefer root squashing where the native datastore operations support the resulting non-admin mapping; do not map all clients to administrator or grant Everyone access to solve a permission failure. Preserve reserved-port restrictions when the client supports them.
 4. Record the exact resulting export and access policy. Confirm other clients have not gained access. Network grants, account mapping and export administration are security changes requiring the installation owner's authority.
 
-NAS products differ in their path syntax, ACLs, UID mapping and quota units. Use the vendor's documented controls for those steps and record the actual results; the Linux client commands below do not configure a NAS. If the required numeric service access cannot be expressed, stop and resolve that constraint before creating a datastore. The privileged PBS datastore-creation operation must also be able to create directories with the backup identity and set their ownership. A successful write as `backup` alone does not establish that this operation can work through root squashing. Qualify the supported server-side identity mapping for your installed PBS release; mapping root to an unrelated anonymous account can prevent ownership changes. Some NFS servers support a non-admin anonymous UID/GID mapping matching `backup`, but do not assume a NAS exposes it. If supported controls cannot express the required root-squashed mapping, record the constraint and obtain an explicit storage/access decision. A native-ID policy (often called “No mapping” or `no_root_squash`) allows root on the admitted PBS client to act as root within the export. It is a broader trust decision, not an equivalent spelling of root squashing: only use it after the owner approves that exact client/export scope. It must not grant other clients or unrelated shares access. Do not hand-edit vendor-managed exports, map all users to administrator, or manually fabricate a PBS chunk tree.
+NAS products differ in their path syntax, ACLs, UID mapping and quota units. Do not assume that a quota UI value is in GiB: confirm its documented units and verify the resulting byte limit through a supported storage-owner readback. For example, `512 GiB` is `549755813888` bytes; `512 GB` in decimal units is `512000000000` bytes. Record the effective limit and free space, rather than the entered number alone. The Linux client commands below do not configure a NAS.
+
+If the required numeric service access cannot be expressed, stop and resolve that constraint before creating a datastore. The privileged PBS datastore-creation operation must also be able to create directories with the backup identity and set their ownership. A successful write as `backup` alone does not establish that this operation can work through root squashing. Qualify the supported server-side identity mapping for your installed PBS release; mapping root to an unrelated anonymous account can prevent ownership changes. Some NFS servers support a non-admin anonymous UID/GID mapping matching `backup`, but do not assume a NAS exposes it. If supported controls cannot express the required root-squashed mapping, record the constraint and obtain an explicit storage/access decision. A native-ID policy (often called “No mapping” or `no_root_squash`) allows root on the admitted PBS client to act as root within the export. It is a broader trust decision, not an equivalent spelling of root squashing: only use it after the owner approves that exact client/export scope. It must not grant other clients or unrelated shares access. Do not hand-edit vendor-managed exports, map all users to administrator, or manually fabricate a PBS chunk tree.
 
 ## Configure the PBS mount
 
@@ -106,6 +108,8 @@ PY_ROUTE
 options=$(findmnt -rn --mountpoint "$mountpoint" -o OPTIONS)
 case ",$options," in *,rw,*) ;; *) exit 1 ;; esac
 case ",$options," in *,hard,*) ;; *) exit 1 ;; esac
+case ",$options," in *,vers=4.1,*) ;; *) exit 1 ;; esac
+case ",$options," in *,proto=tcp,*) ;; *) exit 1 ;; esac
 case ",$options," in *,noatime,*) exit 1 ;; esac
 ```
 
@@ -121,13 +125,54 @@ BindsTo=mnt-backup.mount
 ExecStartPre=/usr/local/sbin/pbs-storage-ready
 ```
 
-`After` plus `BindsTo` ties service availability to the mount; the additional check rejects a wrong source at the same path or a route using the wrong interface/source address. It does not configure routes or provide network isolation; establish those through the network owner before mounting. This example makes both services unavailable if this mount is absent, including the web UI. Preserve independent console access. For multiple required mounts, name every mount in the dependencies and check every exact source in the helper. See [systemd dependency behavior](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#BindsTo=).
+`After` plus `BindsTo` ties service availability to the mount; the additional check rejects a wrong source, NFS minor version or transport at the same path, or a route using the wrong interface/source address. It does not configure routes or provide network isolation; establish those through the network owner before mounting. This example makes both services unavailable if this mount is absent, including the web UI and its Shell. Preserve the independent access route established above. For multiple required mounts, name every mount in the dependencies and check every exact source in the helper. See [systemd dependency behavior](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#BindsTo=).
 
 From the console, validate the helper with `sh -n`, run it once, reload systemd and inspect the effective units. On this new server with **no active clients or backups**, restart both services and verify the web interface returns. Do not perform a disruption test on an active backup system without its maintenance procedure.
 
 ## Qualify the actual filesystem before reliance
 
 These procedures require the verified empty export, the approved identity mapping and no active clients or backup jobs. They are first-installation checks, not a production outage procedure. Preserve failed results and partially created objects for inspection; do not rerun into an existing directory.
+
+### Set the new empty export's numeric ownership when needed
+
+Skip this change if storage-owner tools already established and verified the intended numeric ownership and mode. If they cannot express it, use this route **only after the storage owner approves the exact client/export and numeric ownership change**. It depends on the admitted mapping allowing the PBS root client to perform ownership changes; do not broaden mapping or permissions merely to make it work. The mount and readiness helper above must already pass. No datastore, qualification files or other contents may exist yet.
+
+In this example the reviewed service identity is `34:34`. Substitute both numbers only from the recorded `id backup` result and approved mapping; do not assume those IDs on another installation. Run from the independently verified PBS root access route:
+
+```bash
+/usr/local/sbin/pbs-storage-ready &&
+PBS_OWNER_UID=34 PBS_OWNER_GID=34 python3 - <<'PY_OWNER'
+import os
+import pwd
+import stat
+
+owner = pwd.getpwnam('backup')
+expected = (int(os.environ['PBS_OWNER_UID']), int(os.environ['PBS_OWNER_GID']))
+if (owner.pw_uid, owner.pw_gid) != expected:
+    raise SystemExit('Backup numeric identity differs from the approved mapping')
+path = '/mnt/backup'
+fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    before = os.fstat(fd)
+    if os.listdir(fd):
+        raise SystemExit('Export is not empty; ownership change refused')
+    os.fchown(fd, *expected)
+    os.fchmod(fd, 0o700)
+    after = os.fstat(fd)
+    current = os.stat(path, follow_symlinks=False)
+    if not (stat.S_ISDIR(current.st_mode)
+            and (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
+            == (current.st_dev, current.st_ino)
+            and (after.st_uid, after.st_gid) == expected
+            and stat.S_IMODE(after.st_mode) == 0o700):
+        raise SystemExit('Export ownership readback failed; preserve and inspect')
+finally:
+    os.close(fd)
+print('Verified numeric ownership and 0700 on the empty export root only')
+PY_OWNER
+```
+
+This changes only the opened export root, with no recursion. A failure or uncertain outcome requires inspection, not repetition. Next verify the service-identity file operations below and confirm an unrelated anonymous identity cannot traverse the export through the storage owner's supported access check. These access checks do not grant permission to create a datastore until its other prerequisites pass.
 
 ### Check service-identity file operations
 
@@ -180,7 +225,7 @@ Expected: one success line naming the new directory. An exception is a failed ch
 
 ### Prove an absent mount cannot receive backups
 
-Use the trusted console, which remains available while both PBS services and their web interface are stopped. Run each block only after the preceding result matches its description. Never force or lazily unmount a busy datastore.
+Use the verified hypervisor/physical console or separately authorized SSH session that remains available while both PBS services and their web interface are stopped. Do not use the PBS web Shell for this test. Run the commands below **individually**, checking each expected result and recording its status immediately with `echo "$?"` before entering the next command. Some commands intentionally return nonzero: do not paste the whole negative-test sequence into a shell with `set -e`, or join it with `&&`. Never force or lazily unmount a busy datastore.
 
 ```bash
 systemctl stop proxmox-backup-proxy.service proxmox-backup.service
@@ -191,7 +236,7 @@ runuser -u backup -- test -w /mnt/backup
 /usr/local/sbin/pbs-storage-ready
 ```
 
-Expected: both services are `inactive`; `findmnt` finds no mount; the write-access test and helper both return nonzero. Stop if any check disagrees. Record the return status immediately after each command with `echo "$?"`.
+Expected: both stop commands succeed; both services are `inactive` (`is-active` returns nonzero); `findmnt` finds no mount and returns nonzero; the write-access test and helper both return nonzero. Stop if any check disagrees.
 
 Prevent automatic mounting only during this negative check using a new runtime condition drop-in. A runtime whole-unit mask is unsuitable here because the mount unit in `/etc` takes precedence over `/run`. In the **same root Bash session**, use these exact commands:
 
@@ -203,10 +248,57 @@ PBS_MOUNT_DROPIN="/run/systemd/system/mnt-backup.mount.d/$(basename "$PBS_MOUNT_
 ( set -C; printf '[Unit]\nConditionPathExists=%s/allow\n' "$PBS_MOUNT_TEST" > "$PBS_MOUNT_DROPIN" )
 systemctl daemon-reload
 systemctl cat mnt-backup.mount
-systemctl show mnt-backup.mount -p DropInPaths -p Conditions
+systemctl show mnt-backup.mount -p DropInPaths
 ```
 
-Inspect the effective condition: it must reference the absent marker in the recorded test directory, with no later reset or override. Record these two exact paths for cleanup. Then attempt each service start and inspect its resulting state, regardless of the command's exit status:
+`systemctl show` can render `Conditions=[unprintable]`; that is not proof that a condition is absent or correct. Inspect the typed systemd D-Bus values instead. In the same session, run this complete read-only check before attempting either service start:
+
+```bash
+PBS_MOUNT_TEST="$PBS_MOUNT_TEST" PBS_MOUNT_DROPIN="$PBS_MOUNT_DROPIN" python3 - <<'PY_CONDITION'
+import json
+import os
+import subprocess
+
+def bus(*args):
+    return json.loads(subprocess.check_output(
+        ['busctl', '--system', '--json=short', *args], text=True))
+
+marker = os.environ['PBS_MOUNT_TEST'] + '/allow'
+dropin = os.environ['PBS_MOUNT_DROPIN']
+unit = bus('call', 'org.freedesktop.systemd1', '/org/freedesktop/systemd1',
+           'org.freedesktop.systemd1.Manager', 'GetUnit', 's', 'mnt-backup.mount')
+if not (unit.get('type') == 'o' and isinstance(unit.get('data'), list)
+        and len(unit['data']) == 1 and isinstance(unit['data'][0], str)
+        and unit['data'][0].startswith('/org/freedesktop/systemd1/unit/')):
+    raise SystemExit('Unexpected mount unit object')
+
+def prop(name):
+    return bus('get-property', 'org.freedesktop.systemd1', unit['data'][0],
+               'org.freedesktop.systemd1.Unit', name)
+
+paths = prop('DropInPaths')
+if not (paths.get('type') == 'as' and isinstance(paths.get('data'), list)
+        and all(isinstance(path, str) for path in paths['data'])
+        and paths['data'].count(dropin) == 1):
+    raise SystemExit('Test drop-in is not loaded exactly once')
+conditions = prop('Conditions')
+rows = conditions.get('data')
+if not (conditions.get('type') == 'a(sbbsi)' and isinstance(rows, list)
+        and all(isinstance(row, list) and len(row) == 5
+                and isinstance(row[0], str) and type(row[1]) is bool
+                and type(row[2]) is bool and isinstance(row[3], str)
+                and type(row[4]) is int for row in rows)):
+    raise SystemExit('Unexpected typed condition data')
+selected = [row for row in rows if row[3] == marker]
+if not (len(selected) == 1
+        and selected[0][:4] == ['ConditionPathExists', False, False, marker]
+        and not os.path.lexists(marker)):
+    raise SystemExit('Required absent-marker condition is missing or optional')
+print('Loaded mandatory, non-trigger, non-negated absent-marker condition')
+PY_CONDITION
+```
+
+The last integer is the condition's evaluation result; it may still be untested before a start attempt. The check requires the exact loaded drop-in and one matching **mandatory, non-trigger, non-negated** condition, with the marker still absent. If it refuses or `busctl` is unavailable, stop; do not proceed using the rendered string alone. Record the two exact test paths for cleanup. Then run each command below individually, record its status immediately and inspect each service's resulting state regardless of the start command's exit status:
 
 ```bash
 systemctl start proxmox-backup.service
@@ -232,8 +324,10 @@ Expected: the helper succeeds and both services are `active`; the web interface 
 
 ### Verify persistence
 
-Perform the [planned PBS setup reboot](server.md#configure-the-update-repository). After normal login, run the identity helper and inspect both service states and the datastore's backing filesystem. Confirm the expected network, exact mount, service ordering and datastore identity all return. A mount entry in a file is not evidence of successful reboot behavior.
+First return to [create and verify the datastore](server.md#create-and-verify-the-datastore-once). Create separate `full` and `recovery` child directories through the supported datastore operation where your plan requires them, and wait for each creation task to finish successfully. Record their identities before rebooting; there is no datastore identity to verify before creation.
+
+Then perform the [one planned persistence reboot](server.md#verify-the-completed-storage-setup-after-reboot), after mount/service qualification and datastore creation. After normal login through your independent access route, run the identity helper and inspect both service states and each datastore's backing filesystem. Confirm the expected network, exact mount, service ordering and datastore identities all return. A mount entry in a file is not evidence of successful reboot behavior.
 
 Keep the qualification directory until its evidence and cleanup scope are reviewed. Never delete existing data to repeat a test. Only explicitly inventoried disposable test objects may be reset for the [clean rehearsal](operations.md#rehearse-an-amended-guide-from-a-clean-setup).
 
-When these checks pass, return to [create and verify the datastore](server.md#create-and-verify-the-datastore-once). Create separate `full` and `recovery` child directories through the supported datastore operation where your plan requires them, then complete [encrypted backup and independent restore verification](operations.md). Neither successful NFS mounting nor a green CD run establishes recoverability.
+When these checks pass, continue with [encrypted backup and independent restore verification](operations.md). Neither successful NFS mounting nor a green CD run establishes recoverability.
