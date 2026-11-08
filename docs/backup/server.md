@@ -71,24 +71,18 @@ The no-subscription repository is an official option but has a lower validation 
 
 Under **Administration → Updates**, run **Refresh** and wait for its task to finish successfully. Inspect the offered changes before **Upgrade**. Stop on repository/authentication/signature errors or unexpected removals; do not treat an empty list after a failed refresh as up to date. Complete any required PBS restart before client enrollment, then verify normal administrator login, package versions, networking and storage mounts again. This updates the PBS server, not its hypervisor or other guests.
 
-For a new server with no enrolled clients or active backup tasks, perform the planned restart from the trusted console:
-
-```bash
-systemctl reboot
-```
-
-Wait for the normal login interface, sign in again, and repeat the version, network and service-identity checks above. Do not issue another restart merely because the browser console disconnected; that is expected during reboot.
+For a new server with no enrolled clients or active backup tasks, normally combine the planned persistence restart with the completed mount and datastore setup [below](#verify-the-completed-storage-setup-after-reboot). If an update requires an earlier restart before setup can continue, follow that requirement and verify normal login afterward; it does not establish persistence for storage configured later. Do not issue another restart merely because a browser console disconnects.
 
 ## Prepare the backup filesystem
 
 PBS stores backups in a **datastore**, a named directory on a suitable filesystem. Preparing the filesystem and creating and verifying the datastore are **one-time server setup steps completed before CD**. CD uses that existing datastore and manages the declared namespaces and client access; it does not create, relocate or reformat the datastore.
 
-Choose the storage path from your installation plan. A local data disk and a NAS-exported filesystem are different choices: an OS-only VM is normal for the latter. Do not attach a replacement data disk merely because the PBS disk list contains only its OS disk. For a NAS/NFS design, complete [Prepare remote backup storage](remote-storage.md) before returning to datastore creation below. Keep separate full-guest and application-recovery stores when your retention or offsite-copy design requires that separation.
+Choose the storage path from your installation plan. A local data disk and a NAS-exported filesystem are different choices: an OS-only VM is normal for the latter. Do not attach a replacement data disk merely because the PBS disk list contains only its OS disk. For a NAS/NFS design, follow [Prepare remote backup storage](remote-storage.md) through its mount, service and missing-mount checks, then return here to create the datastore before the persistence reboot. Keep separate full-guest and application-recovery stores when your retention or offsite-copy design requires that separation.
 
 1. Attach or allocate the storage through its owner: the hypervisor, physical storage configuration or existing storage service.
 2. Use the [PBS disk/filesystem guide](https://pbs.proxmox.com/docs/storage.html#disk-management) for a new local disk or ZFS pool. Formatting is destructive: positively identify the intended empty device first. For remotely backed storage, qualify its durability, mount semantics and performance before using it for a production datastore.
 3. Mount the filesystem persistently. For the synthetic example in this section, the mount is `/mnt/backup` and the datastore will be the new child `/mnt/backup/recovery`.
-4. Check the mounted source, capacity and options, then verify that the same mount returns after a planned restart. An ordinary empty directory on the OS disk must not masquerade as an absent backup disk.
+4. Check the mounted source, capacity and options. Create and verify the datastore below before the planned persistence restart. An ordinary empty directory on the OS disk must not masquerade as an absent backup disk.
 
 The following are **read-only Linux checks**, from any directory on PBS. Replace the example mount with your reviewed mount before running:
 
@@ -111,7 +105,7 @@ Complete the filesystem checks above first. In this synthetic example the datast
 2. For a new datastore, use **Datastore → Add Datastore** in the PBS web interface. Enter the selected **Name** and **Backing Path** on the verified filesystem. Review any offered prune or garbage-collection schedules before saving; those are separate [maintenance decisions](operations.md#configure-server-maintenance).
 3. Wait for the creation task to finish with **OK**. Open the datastore and check that its name, path and reported capacity match the intended storage. A task that is merely running is not completion.
 4. On the trusted PBS console, repeat `findmnt --mountpoint /mnt/backup` using your actual mount. Check `findmnt --target /mnt/backup/recovery` and `df -h -- /mnt/backup/recovery`: the datastore must resolve to the same expected backup filesystem, not the OS disk.
-5. During the planned setup restart, verify that the mount and datastore return with the same identities and capacity. Complete this before scheduling production backups. Preserve the results in your installation notes.
+5. Complete the [planned persistence restart](#verify-the-completed-storage-setup-after-reboot) after all intended datastores have been created, and verify their mount, identities and capacity before scheduling production backups. Preserve the results in your installation notes.
 
 For administrators using the trusted PBS console, the following is an **alternative to UI creation**, not an additional step. First inspect `proxmox-backup-manager datastore list` and confirm the selected name is unused. Run this once only for a new, absent child path on the already verified mount:
 
@@ -132,6 +126,16 @@ For administrators using the trusted PBS console, the following is an **alternat
 The subshell stops on an error. It does not format a disk or establish mount identity for you. Check the task result and complete steps 3–5 regardless of which creation route you use. If creation fails or its outcome is uncertain, inspect the task and retained configuration before doing anything else; do not blindly repeat creation or remove the directory. See the [native datastore commands](https://pbs.proxmox.com/docs/proxmox-backup-manager/man1.html) and [PBS storage guide](https://pbs.proxmox.com/docs/storage.html).
 
 CD checks the existing datastore name and path against configuration. A missing datastore or a different path stops backup provisioning; CD does not repair it by creating a directory on whatever filesystem is available. Ongoing mount availability and storage health remain server-operation responsibilities.
+
+## Verify the completed storage setup after reboot
+
+Once the declared mount, service guards and datastore creation checks have passed, perform one planned persistence restart from a hypervisor/physical console or separately authorized SSH route that does not depend on the PBS web services. PBS web Shell is not that independent route. This first-installation procedure requires no enrolled clients or active backup tasks:
+
+```bash
+systemctl reboot
+```
+
+Wait for normal login, sign in again and repeat the version, network and service-identity checks above. For remote storage, run `/usr/local/sbin/pbs-storage-ready`, check both PBS services are active and repeat the mount and datastore readbacks from [the remote-storage persistence check](remote-storage.md#verify-persistence). Confirm every intended datastore still uses the expected backing filesystem and capacity; do not recreate a missing datastore or continue onto an ordinary OS-directory path. A disconnected console during reboot is expected and is not a reason for another reboot.
 
 ## Server preparation is complete when
 
