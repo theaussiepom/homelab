@@ -2,9 +2,9 @@
 
 [Reference index](README.md) · [Storage](storage.md) · [Library](library.md) · [Workflow and lifecycle](lifecycle.md)
 
-Add the site-root `backup` property to select the Proxmox Backup Client and derive recovery paths from your existing guest and app bindings. Add its `job` object to install a coordinated schedule that encrypts and backs up the selected data. The feature uses the normal continuous deployment (CD) inputs, completion receipts, deployment locks and holds that record failed operations.
+Define shared settings with site-root `backup`, then add `backup:` to each guest that needs the Proxmox Backup Client. Recovery paths come from existing guest and app bindings. Follow [the complete backup setup guide](../backup/README.md) before your first deployment. Add its `job` object to install a coordinated schedule that encrypts and backs up the selected data. The feature uses the normal continuous deployment (CD) inputs, completion receipts, deployment locks and holds that record failed operations.
 
-There are two recovery tiers. Native Proxmox full-guest backups contain the operating system and selected managed volumes. Guest-client archives contain configuration, application state captured while its writers are paused, and native database exports. This contract implements the guest-client tier and selects volumes for native backup. Setting up the NAS-hosted Proxmox Backup Server (PBS), Proxmox Virtual Environment (PVE) full-guest jobs and server maintenance remains separate site integration work. Uploading an archive and reading it back successfully does not prove that an application can be restored.
+There are two recovery tiers. Native Proxmox full-guest backups contain the operating system and selected managed volumes. Guest-client archives contain configuration, application state captured while its writers are paused, and native database exports. This contract implements the guest-client tier and selects volumes for native backup. Install Proxmox Backup Server (PBS), then [create and verify its datastore](../backup/server.md#create-and-verify-the-datastore-once) before CD. CD uses that existing datastore and manages declared namespaces and client access. Proxmox Virtual Environment (PVE) full-guest jobs and server maintenance have separate setup steps in [backup operations](../backup/operations.md). Uploading an archive and reading it back successfully does not prove that an application can be restored.
 
 ## Syntax
 
@@ -25,16 +25,41 @@ backup:
 
 | Property | Type | Required/default | Meaning and constraints |
 | --- | --- | --- | --- |
-| <a id="backup-site"></a>Site `backup` | Null or closed object | Optional; omission adds no client phase | Presence selects client preparation for every configured guest. Boolean values are rejected. |
+| <a id="backup-site"></a>Site `backup` | Null or closed object | Optional; omission adds no client phase | Presence defines shared settings; only guests with their own `backup:` marker receive client preparation. Boolean values are rejected. |
 | <a id="backup-site-profile"></a>`backup.profile` | [Identifier](supporting-types.md#scalar-and-path-types) | Optional when exactly one profile exists | Reference to `backup_profiles`; omission selects the sole registered profile. |
 | <a id="backup-site-job"></a>`backup.job` | Closed [operational job](#operational-job) | Optional; no timer without it | Selects the destination, protected inputs, transport, schedule and permission to capture data. |
-| <a id="backup-volume"></a>Guest `volumes.<id>.backup` | Null or empty object | Optional | With root backup selected, presence includes the managed volume in native full-guest backup; omission excludes it. It is not a native database export. |
+| <a id="backup-guest"></a>Guest `backup` | Null or empty object | Optional; omission leaves guest unenrolled | Presence opts the guest into the shared configuration. Root `backup` is required. Booleans and unknown fields are rejected. |
+| <a id="backup-volume"></a>Guest `volumes.<id>.backup` | Null or empty object | Optional | On an enrolled guest, presence includes the managed volume in native full-guest backup; omission excludes it. It is not a native database export. |
 
-A bare `backup` key, null or an empty object selects only client software and recovery coverage: the files and data to protect. You can use this form while preparing the server. It selects no destination or credential and grants no permission to interrupt a service. Supply `job` to configure scheduled backups. Validation rejects unknown fields and Boolean values. Compilation does not contact a network service or read secrets. Neither form grants NAS administration or creates accounts or keys.
+A bare root `backup` key, null or an empty object selects a shared profile; guest markers select where to install its client software and derive recovery coverage. You can use this form while preparing the server. It selects no destination or credential and grants no permission to interrupt a service. Supply `job` to configure scheduled backups. Validation rejects unknown fields and Boolean values. Compilation does not contact a network service or read secrets. Preparation without a job creates no accounts or keys. An operational job requires the management and recovery-public-key bindings below; its protected CD job creates client credentials once and preserves them on updates.
 
-Without site-root backup, existing provider volume defaults remain unchanged. When you enable it, a protected app storage role cannot bind to a managed volume that lacks `backup`. This includes database engine volumes: native full-guest backup and a coherent database export are separate requirements. A `root_paths` binding uses the root filesystem, which belongs to the native full-guest tier; it does not create another provider mount or native `backup` flag.
+Without site-root backup, existing provider volume defaults remain unchanged. For an enrolled guest, a protected app storage role cannot bind to a managed volume that lacks `backup`. This includes database engine volumes: native full-guest backup and a coherent database export are separate requirements. A `root_paths` binding uses the root filesystem, which belongs to the native full-guest tier; it does not create another provider mount or native `backup` flag.
 
 For an existing guest, native backup flags may change only to match the compiled selection exactly. All other existing mount attributes and their order must stay unchanged. The only new allocation this contract permits is the declared empty, unprotected staging volume, appended after existing mount slots. Before apply, a read-only check rejects a staging path containing a foreign mount, symlink or existing data. Unknown flags, changed paths, sizes or volume identities, replacements and undeclared changes are still rejected.
+
+## Management and recovery inputs
+
+These root objects accompany `job`; neither belongs inside an individual client. Both are required for operational backup and rejected without a job. All objects are closed: unknown fields fail validation.
+
+| Field | Type | Required/default | Meaning and constraints |
+| --- | --- | --- | --- |
+| <a id="backup-management"></a>`backup.management` | Closed object | Required with `job` | Selects protected PBS API management for namespaces and client access; never provisions the server VM, creates a datastore or formats storage. |
+| <a id="backup-management-credential"></a>`backup.management.credential` | Secret-source identifier | Required | Environment source selecting `PBS_API_TOKEN`, whose value is `user@pbs!token:secret`. Only the management job receives it. |
+| <a id="backup-management-datastore-path"></a>`backup.management.datastore_path` | Absolute canonical path | Required | Expected path of the existing datastore prepared and verified during server setup. CD compares the API configuration with this value and refuses a missing or mismatched datastore. This field neither creates storage nor proves that its filesystem is mounted; `/` is not an accepted datastore path. |
+| <a id="backup-recovery-public-key"></a>`backup.recovery_public_key` | Closed source object | Required with `job` | The shared RSA recovery public key; never a client key or private PEM. |
+| <a id="backup-recovery-public-key-source"></a>`backup.recovery_public_key.source` | Confined site-relative file path | Required | A public PEM containing an RSA-4096 public key. Absolute paths, symlinks/escapes and private-key content are rejected. Its validated bytes are included in the deployment packet. |
+
+The management connection reuses `job.destination.endpoint` and its certificate fingerprint. A second endpoint or trust fallback is not accepted. Define the management source in the site's [secret sources](identity-and-secrets.md#secret-sources):
+
+```yaml
+secret_sources:
+  pbs-management:
+    type: environment
+    name: PBS_API_TOKEN
+    workflow_secret: PBS_API_TOKEN
+```
+
+The secret value belongs in the protected `backup` GitHub Environment, not in YAML. [API setup](../backup/access.md) explains its exact format and permissions. [Recovery-key setup](../backup/recovery-key.md) explains how to create and store the pair. Source compilation validates public inputs; it does not read the API secret or create private keys. Repeated deployment reuses recorded credentials and stops on missing/foreign records rather than generating replacements.
 
 ## Backup profiles
 
@@ -66,7 +91,7 @@ When root monitoring is also selected, recovery coverage includes the agent conf
 
 ## Application recovery declarations
 
-When the site enables backup, every selected app profile must supply a `backup` object that classifies **every storage role**, including optional roles. `include` and `exclude` must not overlap, and together they must cover exactly the profile's `storage` keys. Validation rejects a newly added storage role until the profile says whether to include or exclude it. The object accepts only the fields below.
+For every enrolled guest, each selected app profile must supply a `backup` object that classifies **every storage role**, including optional roles. `include` and `exclude` must not overlap, and together they must cover exactly the profile's `storage` keys. Validation rejects a newly added storage role until the profile says whether to include or exclude it. The object accepts only the fields below.
 
 <!-- example: backup-application -->
 ```yaml
@@ -105,11 +130,18 @@ The library's application-specific coverage guide must explain the contents of e
 
 ## Operational job
 
-This is a **site-root fragment**. The library's complete tested [synthetic backup example](https://github.com/theaussiepom/homelab-stack/blob/71fec803d9cd4cf599ab21719ea416da479c670a/site.backup.example.yaml) provides the referenced endpoint, context, file-secret sources, interface, network rule and dedicated guest volume. The fragment alone is not deployable.
+For a complete library/site composition and executable offline commands, use the [backup example](../examples/backup/README.md). The fragment below is a field lookup example, not that complete composition.
+
+This is a **site-root fragment**, not a standalone site. Define the referenced HTTPS endpoint, PBS client profile, enrolled `resolver` guest, static `primary` interface and unprotected `backup-stage` volume in the same site/library composition. The staging volume must meet the capacity rule below. Supply the real certificate fingerprint and public PEM rather than the synthetic values shown here. See [configure backups](../backup/configure.md) for the handoff from server setup.
 
 <!-- example: backup-job -->
 ```yaml
 backup:
+  management:
+    credential: pbs-management
+    datastore_path: /mnt/backup/recovery
+  recovery_public_key:
+    source: assets/backup/master-public.pem
   job:
     name: example-recovery
     destination:
@@ -120,9 +152,6 @@ backup:
     schedule: {calendar: '02:00', jitter_seconds: 300}
     clients:
       resolver:
-        auth_id: resolver@pbs!backup
-        password: pbs-password
-        encryption_key: pbs-key
         staging_volume: backup-stage
         interface: primary
     capture: {pause: [], database_lock: [], influx_tokens: {}}
@@ -136,15 +165,15 @@ All six top-level job fields are required when `job` is present. Validation reje
 | Field | Type | Required/default | Constraints and effect |
 | --- | --- | --- | --- |
 | <a id="backup-job-name"></a>`name` | Identifier | Required | Names the shared schedule. Renaming requires explicit retirement or handover of its protection. |
-| <a id="backup-job-destination"></a>`destination` | Closed object | Required | Existing PBS destination; no server provisioning. |
+| <a id="backup-job-destination"></a>`destination` | Closed object | Required | Declared destination on an installed PBS server; CD verifies the existing datastore and manages namespaces/client access, not the datastore, VM or storage filesystem. |
 | <a id="backup-job-destination-endpoint"></a>`destination.endpoint` | `{external: id}` | Required | Selects an existing HTTPS [external endpoint](networks.md#external-endpoints) for the server and port. No management endpoint is used as a fallback. |
-| <a id="backup-job-destination-datastore"></a>`destination.datastore` | String | Required | A nonempty string of ASCII letters, digits, underscores or hyphens, at most 128 characters; `/` is forbidden. |
-| <a id="backup-job-destination-namespace"></a>`destination.namespace` | String | Required | Uses the same character set as datastore, with nonempty segments separated by `/`. At most 128 characters and six segments; each guest's stable backup ID is appended. |
+| <a id="backup-job-destination-datastore"></a>`destination.datastore` | String | Required | 3–32 ASCII characters, starting with a letter, digit or underscore; later characters may also be dots or hyphens. `/` is forbidden. |
+| <a id="backup-job-destination-namespace"></a>`destination.namespace` | String | Required | Uses the same character/start rules as datastore, with 1–32-character segments separated by `/`. At most 128 characters and six segments; each guest's stable backup ID is appended. The complete ACL path `/datastore/<datastore>/<namespace>/<backup_id>` must also fit PBS's 128-character ACL limit. |
 | <a id="backup-job-destination-fingerprint"></a>`destination.fingerprint` | String | Required | Lowercase SHA256 certificate fingerprint, exactly 32 colon-separated hexadecimal bytes. |
 | <a id="backup-job-schedule"></a>`schedule` | Closed object | Required | Configures one controller timer for all group members, with no independent guest timers. |
 | <a id="backup-job-schedule-calendar"></a>`schedule.calendar` | String | Required | `hourly`, `daily` or quoted 24-hour `HH:MM`. All schedules use UTC. |
 | <a id="backup-job-schedule-jitter-seconds"></a>`schedule.jitter_seconds` | Integer | Required | 0–3600; randomized timer delay. Missed runs are not replayed on restart. |
-| <a id="backup-job-clients"></a>`clients` | Named map | Required | Must include every configured guest, including guests disabled for CD; the group has 1–64 members. |
+| <a id="backup-job-clients"></a>`clients` | Named map | Required | Must include exactly the enrolled configured guests, including enrolled guests disabled for CD; the group has 1–64 members. |
 | <a id="backup-job-capture"></a>`capture` | Closed object | Required | Declares permission to pause apps and the inputs required by native database export commands; see below. |
 | <a id="backup-job-limits"></a>`limits` | Closed object | Required | Bounds capture size, entry count and the duration of each phase. |
 | <a id="backup-job-limits-max-bytes"></a>`limits.max_bytes` | Integer | Required | 1 MiB through 1 PiB. Bounds native command output, the complete recovery files and readback, and the selected source files. Metadata counts toward the budget. |
@@ -153,27 +182,25 @@ All six top-level job fields are required when `job` is present. Validation reje
 
 ### Client fields
 
-Each `clients.<guest-id>` selects an existing configured guest. Credential inputs refer to [file secret sources](identity-and-secrets.md#secret-sources); they never contain secret values. Compilation validates the references without opening their paths.
+Each `clients.<guest-id>` selects an enrolled guest. CD creates and preserves its namespace-scoped PBS token and native client encryption key. Do not declare secret values or per-client credential-source fields here.
 
 | Field | Type | Required/default | Constraints and effect |
 | --- | --- | --- | --- |
-| <a id="backup-client-auth-id"></a>`auth_id` | String | Required | A unique PBS token identity, `user@pbs!token`, with permissions scoped to that member. Root and PAM logins are not accepted. |
-| <a id="backup-client-password"></a>`password` | Secret-source identifier | Required | Protected controller file containing the existing PBS token secret. |
-| <a id="backup-client-encryption-key"></a>`encryption_key` | Secret-source identifier | Required | Existing PBS client encryption-key file. No key creation, rotation or default key fallback. |
-| <a id="backup-client-key-password"></a>`key_password` | Secret-source identifier | Optional; absent for an unprotected key file | Password for an encrypted key file; passed only through the private process environment. |
 | <a id="backup-client-staging-volume"></a>`staging_volume` | Guest volume identifier | Required | Dedicated managed volume, no app binding and no `backup:` marker. Size must be at least four times `max_bytes`. Its path is reused from the volume declaration. |
 | <a id="backup-client-interface"></a>`interface` | Guest interface identifier | Required | Selects an existing interface with a resolved static IPv4 address. Before capture, the route check on the guest must report that exact device and source address. |
-| <a id="backup-client-backup-id"></a>`backup_id` | String | Optional; `guest-<VMID>` | Uses 1–128 ASCII letters, digits, dots, underscores or hyphens, starting with a letter or digit. It must be unique in the group. Set it explicitly when contexts reuse a VMID. Changing it requires explicit handover of protection. |
+| <a id="backup-client-backup-id"></a>`backup_id` | String | Optional; `guest-<VMID>` | Uses 1–32 ASCII letters, digits, dots, underscores or hyphens, starting with a letter or digit. The 32-character bound is the PBS namespace-leaf limit. It must be unique in the group. Set it explicitly when contexts reuse a VMID. Changing it requires explicit handover of protection. |
 
-The final namespace is `<namespace>/<backup_id>` and the snapshot is `host/<backup_id>/<UTC capture time>`. Create the namespaces beforehand and grant each guest only the permissions needed to upload and read back its own archives. Guest credentials need no server administration, pruning or garbage collection (GC) rights. See [Proxmox access control](https://pbs.proxmox.com/docs/user-management.html). Keep an independently recoverable encryption key outside the encrypted archive; a key stored only inside its own archive cannot recover it.
+The final namespace is `<namespace>/<backup_id>` and the snapshot is `host/<backup_id>/<UTC capture time>`. CD creates each namespace and its dedicated user/token with `DatastoreBackup` access there. Both user and token grants are required. The worker can back up and restore its owned archives, but cannot administer PBS or prune snapshots. Its protected controller record and guest files contain the same stable client identity and encryption key. See [API access and permissions](../backup/access.md).
+
+The native client uses the explicitly installed recovery public key on every encrypted upload. The backup includes `rsa-encrypted.key`, an encrypted copy of that client's key; it never includes the recovery private key. Loss of the original client key can therefore be recovered using the independently stored private key and passphrase, plus separate authenticated access to the archive. Follow [recovery-key setup and rehearsal](../backup/recovery-key.md). A public-key change does not make older archives recoverable with the new private key.
 
 ### Capture permissions
 
 | Field | Type | Required/default | Meaning |
 | --- | --- | --- | --- |
 | <a id="backup-job-capture-pause"></a>`capture.pause` | Unique app-ID list | Required; may be empty | Permits stopping and restarting only the listed apps' already-running Compose services. Every `application-export` dataset requires its app in this list. |
-| <a id="backup-job-capture-database-lock"></a>`capture.database_lock` | Unique app-ID list | Required; may be empty | Must list exactly the configured MariaDB apps. Authorises their all-table read lock while exporting all databases, routines, events and triggers. |
-| <a id="backup-job-capture-influx-tokens"></a>`capture.influx_tokens` | App-ID → secret-source map | Required; may be empty | Must include exactly the configured InfluxDB apps, each selecting its existing operator-token file. |
+| <a id="backup-job-capture-database-lock"></a>`capture.database_lock` | Unique app-ID list | Required; may be empty | Must list exactly the enrolled MariaDB apps. Authorises their all-table read lock while exporting all databases, routines, events and triggers. |
+| <a id="backup-job-capture-influx-tokens"></a>`capture.influx_tokens` | App-ID → secret-source map | Required; may be empty | Must include exactly the enrolled InfluxDB apps, each selecting its existing operator-token file. |
 
 PostgreSQL uses the `pg_dumpall` for its installed major version with local peer authentication. The export includes global objects and roles, with an individual snapshot for each database. MariaDB uses its native logical dump of all databases while holding the explicitly authorised all-table read lock. Influx uses its native full backup command. Raw database engine directories never enter the selected-file archive. These native formats still need a compatible restore environment, including the required extensions and plugins. Producing them does not prove that a restored service works.
 
@@ -193,9 +220,15 @@ Once a window opens, a failed run leaves any remaining controller holds in place
 
 ## First installation
 
-Select the backup profile and mark the managed volumes that contain data requiring protection. Before enabling an operational job, supply the existing server and namespaces, certificate fingerprint, separately stored recoverable encryption keys, scoped token files, transport policy and dedicated staging volume for every guest. Review the impact of each service pause and database lock before rollout. Also verify and authorise unattended use of the existing scoped deployment SSH key and the exact staging allocation in the saved plan. Passing public source checks does not authorise live key use, volume allocation or service interruption.
+Complete [server preparation](../backup/server.md), [recovery-key generation and independent storage](../backup/recovery-key.md), and [management-token setup](../backup/access.md). Then select the shared profile, enroll guests and mark their protected managed volumes. Supply the verified endpoint/fingerprint, public PEM, protected management credential, network policy and dedicated staging volume for each enrolled guest. Review service pauses, database locks and unattended SSH use before rollout.
 
-The ordinary `Prepare` phase installs the selected exact client package. The `PBS agent` step seals the recovery inventory and selected private inputs. When `job` is selected, it also uses Ansible to install the guest worker and one timer on the controller; it does not run a backup during CD.
+The protected **Backup** management job uses the `backup` GitHub Environment and explicitly forwarded `PBS_API_TOKEN`. It validates server identity and compares the existing datastore name/path with configuration before creating declared namespaces and client accounts. The operator verifies actual mounted storage during [server setup](../backup/server.md#create-and-verify-the-datastore-once); an API configuration read is not mount verification. CD does not create, move or delete datastores. Private client credentials are created once and handed to their own guest only. The recovery private key is never an input. A conflicting existing identity, unexpected datastore or uncertain token-creation result stops reconciliation; CD cannot silently adopt, rotate or regenerate it.
+
+The ordinary `Prepare` phase installs the selected exact client package. The guest's `PBS agent` step seals and installs its recovery inventory. It does not contact PBS or require newly generated backup credentials to deploy the application.
+
+After the selected guest jobs finish successfully, the separate **Backup** job admits the completed deployments for the whole enrolled group, including the last successful deployment of disabled members. It acquires the existing per-guest deployment locks, validates PBS and the prepared datastore, then provisions the declared namespaces and client access. For a new member, the already-installed native client generates its encryption key on that guest; the job retains a protected copy in its controller ownership record. Existing matching keys are verified, never regenerated. An incomplete or uncertain creation remains held for explicit investigation.
+
+Ansible installs the finite worker, private client inputs and one controller timer only after those ownership checks succeed. Activation records bind the completed deployment, public recovery identity and exact private-input digests. The schedule does not start an immediate backup. Backup activation introduces no new dependency between application jobs, and a PBS outage cannot prevent their configuration from completing; it fails the separate Backup job.
 
 On an existing guest, new staging must be the exact empty allocation appended after existing volumes. Deployment rejects missing or foreign evidence about the path before apply, or ambiguity in the provider plan. The controller schedule runs as the existing CD user from an immutable, verified bundle of public source. Capture starts only after the controller proves that every member completed an ordinary deployment. A version check or installed timer is not a recovery point.
 
@@ -207,19 +240,23 @@ A configuration without an operational job installs no scheduler. Once a job has
 
 ## Validation and support limits
 
-The [reference example tests](../../blueprints/test_component_reference_examples.py) parse the five named snippets on this page and pass them through the [coverage and profile validators](../../blueprints/component_backup.py) and [job validator](../../blueprints/component_backup_job.py). They also check these representative invalid inputs:
+Validate the named reference snippets using the [reference example suite](../../blueprints/test_component_reference_examples.py), [coverage/profile contracts](../../blueprints/component_backup.py) and [job contract](../../blueprints/component_backup_job.py). Every release must keep these examples and its validators consistent. Representative invalid inputs include:
 
 | Invalid input | Diagnostic and correction |
 | --- | --- |
 | Set a volume's `backup` to true | `component.backup-presence`; use null or an empty object to include it, or omit the field to exclude it when root backup is enabled. |
 | Add a storage role without classifying it | `component.backup-coverage`; include or exclude every role in the app profile. |
 | Give a `state` dataset `capture: files` | `component.backup-consistency`; select `application-export` and supply its required pause permission for an operational job. |
+| Give management a file credential or another Environment secret | `component.backup-management-credential`; select an Environment source named `PBS_API_TOKEN` for the isolated Backup job. |
+| Set the expected datastore path to `/` | `component.backup-datastore-path`; use the prepared datastore directory, never the server filesystem root. |
+| Omit management or the recovery public key from an operational job | `component.backup-recovery-key`; supply all three related root objects together. |
+| Supply an invalid or private PEM | `component.backup-recovery-key`; supply only the confined RSA-4096 public PEM. |
 | Set the calendar to `24:00` | `component.backup-schedule`; use `hourly`, `daily` or a valid quoted 24-hour `HH:MM` value. |
 
 These source checks do not install a worker, read credentials or contact PBS. [Documentation assurance](../contributing/documentation-assurance.md) states their scope.
 
 Component unit tests check accepted fields, references, paths and invalid combinations. App and guest tests mock their collaborators; compiler integration checks the generated packets, explicit volume flags and membership of disabled guests. Local runtime fixtures use real private filesystem records and concurrent pipe messages to test deadlines, preserved failures and service restart paths, while replacing native engines with fakes. Mock provider plans check that permitted allocations match the plan guards. These tests do not verify a real PBS server, Linux guest backup or restore. The feature uses the supported Debian LXC backend and adds no NAS VMM or physical-host provisioning backend.
 
-Before declaring the installation protected, verify a real scheduled capture, native database exports, encrypted transfer and full archive readback on the intended network. Then restore the related apps and databases together in isolation and check their service behavior. PVE full-guest schedules, NAS capacity and datastore provisioning, server retention, verification, pruning, garbage collection and offsite copies of complete datastores remain separate server or site work. This client cannot prune remote history.
+Before declaring the installation protected, verify a real scheduled capture, native database exports, encrypted transfer and full archive readback on the intended network. Then restore the related apps and databases together in isolation and check their service behavior. PBS installation/storage preparation, PVE full-guest schedules, retention, verification, pruning, garbage collection and offsite copies have their own [setup and acceptance checklist](../backup/operations.md). This client cannot prune remote history.
 
 Product references: [PBS client usage](https://pbs.proxmox.com/docs/backup-client.html), [client commands](https://pbs.proxmox.com/docs/proxmox-backup-client/man1.html), [PostgreSQL dumpall](https://www.postgresql.org/docs/current/app-pg-dumpall.html), [MariaDB dump](https://mariadb.com/docs/server/clients-and-utilities/backup-restore-and-import-clients/mariadb-dump) and [Influx backup](https://docs.influxdata.com/influxdb/v2/reference/cli/influx/backup/).

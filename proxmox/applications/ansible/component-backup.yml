@@ -70,6 +70,19 @@
           - version
       changed_when: false
 
+    - name: Verify guest helper source ownership
+      ansible.builtin.import_tasks: tasks/backup-source-owner.yml
+
+    - name: Install the finite client-key helper
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../{{ item }}'
+        dest: '/opt/homelab-backup/{{ item }}'
+        owner: root
+        group: root
+        mode: '0444'
+        follow: false
+      loop: [backup_client_key.py, backup_identity.py, backup_policy.py, backup_group.py, private_io.py]
+
     - name: Configure the selected recovery job
       ansible.builtin.import_tasks: tasks/backup-job.yml
       when: backup_agent.credentials is defined

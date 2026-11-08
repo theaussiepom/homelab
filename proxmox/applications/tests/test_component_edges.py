@@ -185,6 +185,28 @@ class TraefikTests(unittest.TestCase):
             app=descriptor('traefik');change(app)
             with self.subTest(change=change),units(app),self.assertRaises(ValueError):core._traefik(app,guest('traefik'))
 
+    def test_inline_public_trust_adds_only_its_exact_read_only_mount(self):
+        app=descriptor('traefik');app['settings']['route_ca_certificates']={
+            'backend':{'certificate':'validated-public-pem','filename':'route-backend.pem'}}
+        with units(app):result=core._traefik(app,guest('traefik'))['traefik']
+        selected=[row for row in result['volumes'] if row['target']=='/etc/ssl/certs/route-backend.pem']
+        self.assertEqual(len(selected),1)
+        self.assertTrue(selected[0]['read_only'])
+        self.assertTrue(selected[0]['source'].endswith('/route-backend.pem'))
+        self.assertTrue(any(row['target']=='/etc/ssl/certs/route-proxmox.pem' for row in result['volumes']))
+        for case in ('not-map','context-not-map','conflict','too-many','row','extra','filename','name'):
+            wrong=copy.deepcopy(app);rows=wrong['settings']['route_ca_certificates']
+            if case=='not-map':wrong['settings']['route_ca_certificates']=[]
+            elif case=='context-not-map':wrong['settings']['route_ca_files']=[]
+            elif case=='conflict':rows['proxmox']=rows['backend']
+            elif case=='too-many':rows.update({f'backend{i}':{
+                'certificate':'validated-public-pem','filename':f'route-backend{i}.pem'} for i in range(64)})
+            elif case=='row':rows['backend']=None
+            elif case=='extra':rows['backend']['source']='/foreign.pem'
+            elif case=='filename':rows['backend']['filename']='../foreign.pem'
+            else:rows['../foreign']=rows.pop('backend')
+            with self.subTest(case=case),units(wrong),self.assertRaises(ValueError):core._traefik(wrong,guest('traefik'))
+
 
 class BaselineIntegrationTests(unittest.TestCase):
     def test_each_real_handler_and_common_helpers_match_complete_preserved_service(self):

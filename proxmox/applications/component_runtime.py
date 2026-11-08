@@ -625,10 +625,14 @@ def _traefik(app, guest):
             'Preserve the bounded selected ACME propagation timeout')
     route_mounts = []
     rows = settings.get('route_ca_files', {})
-    require(isinstance(rows, dict) and len(rows) <= 64, 'Bind finite resolved route CA files')
-    for key, selected in rows.items():
+    certificates = settings.get('route_ca_certificates', {})
+    require(isinstance(rows, dict) and isinstance(certificates, dict)
+            and len(rows) + len(certificates) <= 64 and not set(rows) & set(certificates),
+            'Bind finite disjoint resolved route trust files')
+    for key, selected in {**rows, **certificates}.items():
+        fields = {'certificate', 'filename'} if key in certificates else {'source', 'filename'}
         require(isinstance(key, str) and re.fullmatch('[a-z][a-z0-9_-]{0,62}', key)
-                and isinstance(selected, dict) and set(selected) == {'source', 'filename'}
+                and isinstance(selected, dict) and set(selected) == fields
                 and selected['filename'] == 'route-' + key + '.pem',
                 'Use only the selected route CA filename')
         route_mounts.append(_runtime_mount(app, selected['filename'], discovery.ca_path(key)))

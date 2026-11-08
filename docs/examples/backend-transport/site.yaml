@@ -1,0 +1,155 @@
+schema: homelab-components-v1
+kind: site
+contexts:
+  lab:
+    backend: proxmox-lxc
+    node: example-node
+    api_endpoint:
+      external: api
+    trust:
+      ca_file: /example/ca.pem
+      known_hosts: /example/known_hosts
+    credentials:
+      api_token: token
+      ssh_private_key: ssh
+    paths:
+      state_root: /example/state
+      backup_directory: /example/backup/data
+      backup_mount: /example/backup
+      backup_source: example:/backup
+    protected_guests:
+    - 9900
+    - 9914
+    - 9915
+    - 9920
+    ssh_public_keys: []
+    dns_servers:
+    - external: dns
+secret_sources:
+  token:
+    type: file
+    path: /never-read/token
+  ssh:
+    type: file
+    path: /never-read/ssh
+  provider:
+    type: file
+    path: /never-read/provider.json
+  dns_api:
+    type: environment
+    name: EXAMPLE_DNS_TOKEN
+external_endpoints:
+  api:
+    protocol: https
+    address: 192.0.2.10
+    port: 8006
+  dns:
+    protocol: udp
+    address: 198.18.21.53
+    port: 53
+  backend:
+    protocol: https
+    address: 198.18.25.80
+    port: 8443
+networks:
+  primary:
+    context: lab
+    cidr: 198.18.20.0/24
+    bridge: example0
+    vlan: null
+    gateway: 198.18.20.1
+storage:
+  local:
+    context: lab
+    pool: example-local
+guests:
+  edge:
+    context: lab
+    template: base
+    lifecycle: fresh
+    identity:
+      vmid: 610
+      hostname: example-edge
+    template_file_id: example:vztmpl/debian.tar.zst
+    root_storage: local
+    control_interface: management
+    interfaces:
+      management:
+        network: primary
+        slot: 0
+        mac: 02:00:00:20:00:10
+        address:
+          mode: static
+          value: 198.18.20.10
+        default_route: true
+        ipv6: manual
+    resources:
+      memory_mib: 4096
+    root_paths:
+      data:
+        path: /srv/example/apps
+    network_policy:
+    - policy: backend_web
+      endpoints:
+        backend:
+          external: backend
+apps:
+  ingress:
+    profile: ingress
+    guest: edge
+    lifecycle: fresh
+    interfaces:
+      frontend:
+        interface: management
+    storage:
+      certs:
+        root_path: data
+        subpath: ingress
+    secrets:
+      cloudflare_dns_token: dns_api
+      proxmox_token: provider
+    properties:
+      dashboard: false
+      provider:
+        context: lab
+        token_id: fixture@pve!discovery
+      acme:
+        email: fixture@example.invalid
+        resolvers:
+        - external: dns
+domains:
+  backend: backend.example.invalid
+policies:
+  tls:
+    public:
+      type: acme
+      resolver: letsencrypt
+  transport:
+    backend:
+      source: transport.yaml
+  middlewares:
+    headers:
+      type: default-headers
+  network:
+    backend_web:
+      rules:
+      - direction: out
+        proto: tcp
+        destination:
+          endpoint: backend
+        port:
+          endpoint: backend
+        comment: Only the declared backend web endpoint
+exposures:
+  backend:
+    type: http
+    endpoint:
+      external: backend
+    domain: backend
+    ingress:
+      app: ingress
+      endpoint: https
+    tls: public
+    transport: backend
+    middlewares:
+    - headers

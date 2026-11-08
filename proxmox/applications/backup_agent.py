@@ -100,5 +100,6 @@ def inputs(value):
         sources['pbs-key-password'] = job['secrets']['key_password']
     sources.update({'influx-'+key: row for key, row in job['capture']['influx_tokens'].items()})
     result = {name: regular(Path(row['path']), private=True) for name, row in sources.items()}
+    result['pbs-recovery-public.pem'] = job['recovery_public_key']['pem'].encode()
     require(all(result.values()), 'A selected private backup input is empty')
     return result

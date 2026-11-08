@@ -103,15 +103,16 @@ def model(stack, site):
         if guest == 'selection':
             continue
         caller = source['deploy.yml']['jobs'][guest]
-        job = bind(copy.deepcopy(source['guest-' + guest + '.yml']['jobs']['deploy']), disabled)
+        filename = 'backup.yml' if guest == '_backup' else 'guest-' + guest + '.yml'
+        job = bind(copy.deepcopy(source[filename]['jobs']['deploy']), disabled)
         job.update(name=caller['name'], needs=copy.deepcopy(caller['needs']),
-                   environment=env['HOMELAB_ENVIRONMENT_PREFIX'] + '-' + guest,
+                   environment='backup' if guest == '_backup' else env['HOMELAB_ENVIRONMENT_PREFIX'] + '-' + guest,
                    **{'runs-on': labels, 'if': repository + ' && ' + caller['if'].replace("inputs.disabled || '[]'", repr(disabled or '[]'))})
         text = json.dumps(job)
         compiler.require(not WORKFLOW_INPUTS.search(text) and 'secrets: inherit' not in text,
                          'Materialize only closed guest workflow inputs')
         names = set(re.findall(r'\bsecrets\.([A-Za-z0-9_]+)', text))
-        compiler.require(names <= source['guest-' + guest + '.yml']['on']['workflow_call']['secrets'].keys(),
+        compiler.require(names <= source[filename]['on']['workflow_call']['secrets'].keys(),
                          'Preserve each guest secret subset')
         result['jobs'][guest] = job
     return result

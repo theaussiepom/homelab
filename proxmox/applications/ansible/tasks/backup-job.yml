@@ -69,6 +69,7 @@
   no_log: true
 
 - name: Install the owned controller schedule
+  when: backup_controller is defined
   delegate_to: localhost
   become: true
   block:

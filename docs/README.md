@@ -20,11 +20,15 @@ A stage does not establish the next one. The [evidence guide](concepts/evidence.
 
 The [reference index](reference/README.md) groups pages by the component responsible for each setting and the task you want to perform. Start with [site structure](reference/site.md), then follow a declaration to its nested type. The detailed [network and guest NIC reference](reference/networks.md) shows exact field records, all address branches, resolution and diagnostics.
 
-To combine objects, use [references and reuse](guides/references-and-reuse.md) and the [complete broker/browser/HTTPS example](examples/relationships/README.md). To inspect generated results use [validate and generate](guides/validate-and-generate.md) and the [CLI contract](reference/cli.md). The [glossary](glossary.md) defines recurring terms.
+To combine objects, use [references and reuse](guides/references-and-reuse.md) and the [complete broker/browser/HTTPS example](examples/relationships/README.md). For an existing HTTPS backend with its own trust anchor, use the [verified backend transport example](examples/backend-transport/README.md). To inspect generated results use [validate and generate](guides/validate-and-generate.md) and the [CLI contract](reference/cli.md). The [glossary](glossary.md) defines recurring terms.
 
 ## Operate or extend
 
 [Operations](operations/README.md) links preparation, first installation, verification, updates and [troubleshooting](operations/troubleshooting.md). [Host bootstrap, installer and recovery](framework-reference.md) have separate contracts and are not application recovery shortcuts.
+
+## Set up and operate backups
+
+Start with [Set up backups](backup/README.md): install PBS, prepare storage, create and safely store the recovery pair, add the management API token to GitHub, enroll guests, then verify a backup and isolated restore. The guide includes the maintenance and alerting checklist for unattended operation and links to the [configuration reference](reference/backup.md).
 
 Contributors start with the [change workflow](contributing/README.md), then [component boundaries](contributing/components.md), [testing](contributing/testing.md) and the [canonical documentation standard](contributing/documentation-standard.md). The [assurance record](contributing/documentation-assurance.md) states the exact automated documentation scope and what still requires review. It does not claim that automated checks cover every rule in the public contract.
 

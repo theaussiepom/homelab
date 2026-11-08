@@ -74,16 +74,19 @@ class RuntimeGuardTests(unittest.TestCase):
         value['configuration']={};value['applications']['app']['configuration']={}
         self.assertEqual(json.loads(backup_agent.configuration(cfg)['inventory']),value)
         with patch('private_io.regular',return_value=b'private'):
-            self.assertEqual(set(backup_agent.inputs(value)),{'pbs-password','pbs-key'})
+            self.assertEqual(set(backup_agent.inputs(value)),{'pbs-password','pbs-key','pbs-recovery-public.pem'})
             value['job']['secrets']['key_password']={'type':'file','path':'/key-pass'}
             value['job']['capture']['influx_tokens']={'db':{'type':'file','path':'/token'}}
-            self.assertEqual(set(backup_agent.inputs(value)),{'pbs-password','pbs-key','pbs-key-password','influx-db'})
+            self.assertEqual(set(backup_agent.inputs(value)),{'pbs-password','pbs-key','pbs-key-password','influx-db','pbs-recovery-public.pem'})
         with patch('private_io.regular',return_value=b''):
             with self.assertRaises(ValueError):backup_agent.inputs(value)
         self.assertEqual(backup_agent.inputs({}),{})
         cfg['guest']['volumes']['stage']['backup']=True
         with self.assertRaises(ValueError):backup_agent.configuration(cfg)
-        mutations=[lambda v:v.update(unknown=True),lambda v:v['transport'].update(device='eth;cmd'),
+        mutations=[lambda v:v['recovery_public_key'].update(pem='tampered'),
+            lambda v:v['recovery_public_key'].update(fingerprint='invalid'),
+            lambda v:v['recovery_public_key'].update(extra='invalid'),
+            lambda v:v.update(unknown=True),lambda v:v['transport'].update(device='eth;cmd'),
             lambda v:v['staging'].update(size_bytes=True),lambda v:v['destination'].update(backup_id='foreign'),
             lambda v:v['destination'].update(server='-bad'),lambda v:v['destination'].update(datastore='a/b'),
             lambda v:v['destination'].update(namespace='a/b/c/d/e/f/g'),lambda v:v['destination'].update(auth_id='root@pam'),
@@ -95,11 +98,18 @@ class RuntimeGuardTests(unittest.TestCase):
             with self.subTest(case=mutations.index(mutate)),self.assertRaises(ValueError):backup_policy.validate(job)
         for owner in ({}, {'node':'bad','vmid':True,'hostname':'bad'}):
             with self.assertRaises(ValueError):backup_policy.owner(owner)
-        for previous,current in [({},{}),({}, {'backup':{'job':{}}}),
-                                 ({'backup':{'job':{'group':{'name':'x'}}}}, {'backup':{'job':{'group':{'name':'x'}}}})]:
-            component_generation.backup_continuity(previous,current)
-        for current in ({},{'backup':{'job':{'group':{'name':'foreign'}}}}):
-            with self.assertRaises(ValueError):component_generation.backup_continuity({'backup':{'job':{'group':{'name':'x'}}}},current)
+        original={'backup':{'job':copy.deepcopy(self.fixture.value['job'])}}
+        component_generation.backup_continuity({}, {})
+        component_generation.backup_continuity({}, original)
+        component_generation.backup_continuity(original, copy.deepcopy(original))
+        changed=copy.deepcopy(original);changed['backup']['job']['destination']['fingerprint']=':'.join(['cd']*32)
+        component_generation.backup_continuity(original,changed)
+        for mutate in (lambda c:c.pop('backup'),lambda c:c['backup']['job']['group'].update(name='foreign'),
+                       lambda c:c['backup']['job']['destination'].update(datastore='different'),
+                       lambda c:c['backup']['job']['secrets']['password'].update(path='/new'),
+                       lambda c:c['backup']['job']['recovery_public_key'].update(fingerprint='b'*64)):
+            changed=copy.deepcopy(original);mutate(changed)
+            with self.assertRaises(ValueError):component_generation.backup_continuity(original,changed)
 
     def test_admission_uses_actual_completed_generation_trust_and_backend(self):
         row=scope()['members']['example-node-610'];row['state_root']=str(self.tmp)
@@ -246,11 +256,21 @@ class RuntimeGuardTests(unittest.TestCase):
         with patch.object(ansible.component_guest,'phases',return_value=['pbs-agent']), \
              patch.object(backup_agent,'configuration',return_value={'inventory':json.dumps(value)}), \
              patch.object(ansible,'SOURCE',source),patch.object(deployment_inputs,'source_hash',return_value='b'*64):
-            result=ansible.variables(cfg,'pbs-agent',payload=payload)
+            ordinary=ansible.variables(cfg,'pbs-agent',payload=payload)
+            self.assertNotIn('credentials',ordinary['backup_agent'])
+            self.assertNotIn('backup_controller',ordinary)
+            import component_payload
+            activation=self.tmp/'activation';activation.mkdir(mode=0o700)
+            payload=component_payload.prepare(activation,'a'*64,'backup-agent',
+                {'application.json':encoded(value),**backup_agent.inputs(value)})
+            worker_only=ansible.variables(cfg,'pbs-agent',payload=payload,activate_backup=True)
+            self.assertNotIn('backup_controller',worker_only)
+            self.assertIn('credentials',worker_only['backup_agent'])
+            result=ansible.variables(cfg,'pbs-agent',payload=payload,activate_backup=True,backup_schedule=True)
         self.assertEqual(len(result['backup_controller_files']),2)
         self.assertEqual(result['backup_controller']['configuration'],group)
         self.assertEqual({row['name'] for row in result['backup_agent']['credentials']},
-            {'pbs-password','pbs-key','pbs-key-password','influx-app'})
+            {'pbs-password','pbs-key','pbs-key-password','influx-app','pbs-recovery-public.pem'})
         self.assertFalse(result['app']['start_services'])
         # Binding itself owns external digest collection; source shape validation
         # is mocked here and exercised by real packet integrations elsewhere.
@@ -258,7 +278,7 @@ class RuntimeGuardTests(unittest.TestCase):
         with patch.object(component_inputs,'inspect',return_value={}), \
              patch.object(deployment_inputs,'source_hash',return_value='b'*64):
             binding=component_inputs.binding(cfg,inputs/'site.json')
-        self.assertTrue(all(row['path'] in binding['input_hashes'] for row in value['job']['secrets'].values()))
+        self.assertTrue(all(row['path'] not in binding['input_hashes'] for row in value['job']['secrets'].values()))
 
     def test_post_group_health_reads_never_restart_or_retry_a_failed_service(self):
         from types import SimpleNamespace

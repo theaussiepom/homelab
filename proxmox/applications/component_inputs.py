@@ -98,9 +98,6 @@ def binding(cfg, site):
     external = [cfg['paths']['ca_file']]
     if 'monitoring' in cfg['app']:
         external += monitoring_inputs.source_files()
-    if 'job' in cfg['app'].get('backup', {}):
-        job = cfg['app']['backup']['job']
-        external += [row['path'] for row in [*job['secrets'].values(), *job['capture']['influx_tokens'].values()]]
     runtime=read_json(Path(cfg['deployment']['runtime_file']),private=True)
     for app in runtime['applications'].values():
         if app['adapter']=='traefik':

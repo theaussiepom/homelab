@@ -20,7 +20,7 @@ def profile():
 
 
 def fixture():
-    guest = {'context': 'lab', 'identity': {'vmid': 610, 'hostname': 'example'},
+    guest = {'backup': None, 'context': 'lab', 'identity': {'vmid': 610, 'hostname': 'example'},
         'software_selection': {'packages': ['proxmox-backup-client=4.2.8-1']},
         'volumes': {'data': {'path': '/srv/example', 'backup': None}},
         'root_paths': {'root': {'path': '/srv/config'}}}
@@ -45,6 +45,19 @@ def fixture():
 
 
 class BackupUnits(unittest.TestCase):
+    def test_root_is_shared_and_mixed_guests_remain_independent(self):
+        r = fixture(); r.guests['empty'].pop('backup')
+        r.guests['empty']['software_selection']['packages'] = []
+        before = copy.deepcopy(r.guests['empty'])
+        backup.bind(r)
+        self.assertEqual(r.guests['empty'], before)
+        self.assertEqual(backup.software(r, r.guests['empty']), [])
+        self.assertEqual(backup.software(r, r.guests['one']), ['pbs-client'])
+        r = fixture(); r.site.pop('backup')
+        with self.assertRaisesRegex(ComponentError, 'backup-root-required'): backup.bind(r)
+        with self.assertRaisesRegex(ComponentError, 'backup-root-required'):
+            backup.software(r, r.guests['one'])
+
     def test_effective_client_package_selection_refuses_missing_conflicting_or_invalid_versions(self):
         for packages in ([], ['unrelated=1'], ['proxmox-backup-client'],
                 ['proxmox-backup-client=4.2.8-1', 'proxmox-backup-client=4.1.0-1'],
@@ -94,7 +107,9 @@ class BackupUnits(unittest.TestCase):
         self.assertEqual(selected['producer']['overlay'], '/opt/homelab-app/component-application-environment.yml')
         from test_component_backup_job import fixture as job_fixture
         from unittest.mock import patch
-        value, _ = job_fixture(); r = fixture(); r.site['backup'] = {'job':value}
+        value, _ = job_fixture(); r = fixture(); r.site['backup'] = {'job':value, 'recovery_public_key': {'source':'public.pem'},
+            'management': {'credential':'pbs-management','datastore_path':'/mnt/backup/recovery'}}
+        r.site['secret_sources'] = {'pbs-management':{'type':'environment','name':'PBS_API_TOKEN'}}
         self.assertEqual(backup.selected(r), 'pbs')
         with patch.object(backup.component_backup_job, 'bind', return_value={'schema':'group'}) as bind:
             result = backup.bind(r)
@@ -106,15 +121,17 @@ class BackupUnits(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ComponentError): backup.presence(value)
         r = fixture()
         self.assertEqual(backup.selected(r), 'pbs')
-        r.site['backup'] = {}; self.assertEqual(backup.software(r), ['pbs-client'])
+        r.site['backup'] = {}; self.assertEqual(backup.software(r, r.guests['one']), ['pbs-client'])
         r.site['backup'] = {'profile': 'pbs'}; self.assertEqual(backup.selected(r), 'pbs')
         for value in (False, 'pbs', {'profile': 'missing'}, {'profile': []}, {'enabled': True}):
             r.site['backup'] = value
             with self.subTest(value=value), self.assertRaises(ComponentError): backup.selected(r)
         r.site['backup'] = None; r.library['backup_profiles']['other'] = profile()
         with self.assertRaisesRegex(ComponentError, 'profile-selection'): backup.selected(r)
-        r.site.pop('backup'); before = copy.deepcopy(r.guests)
-        self.assertIsNone(backup.selected(r)); self.assertEqual(backup.software(r), [])
+        r.site.pop('backup')
+        for guest in r.guests.values(): guest.pop('backup')
+        before = copy.deepcopy(r.guests)
+        self.assertIsNone(backup.selected(r)); self.assertEqual(backup.software(r, r.guests['one']), [])
         self.assertIsNone(backup.bind(r)); self.assertEqual(before, r.guests)
 
     def test_profile_refuses_shells_empty_packages_root_paths_and_unknown_fields(self):
@@ -209,6 +226,12 @@ class BackupIntegration(unittest.TestCase):
             self.assertNotIn('backup', json.loads(before['files']['site.json'])['app'])
             self.assertNotIn('backup', json.loads(before['files']['site.json'])['guest']['volumes']['cache'])
             selected['backup'] = None; path.write_text(yaml.safe_dump(selected))
+            shared = component_plan.resolve(stack, path)
+            shared_packet = component_packet.lower_plan(shared)['resolver']
+            self.assertEqual(shared_packet, before)
+            self.assertNotIn('PBS agent', str(component_workflows.model(shared)))
+            selected['guests']['resolver']['backup'] = None
+            path.write_text(yaml.safe_dump(selected))
             plan = component_plan.resolve(stack, path, disabled=['resolver'])
             self.assertIn('backup', plan.resolved['guests']['resolver'])
             self.assertEqual(plan.resolved['enabled'], [])
@@ -224,9 +247,10 @@ class BackupIntegration(unittest.TestCase):
             job, _ = operational_fixture()
             job['clients'] = {'resolver': {**job['clients']['one'], 'staging_volume':'cache', 'interface':'backend'}}
             selected['external_endpoints']['pbs'] = {'protocol':'https','address':'192.0.2.50','port':8007}
-            job['clients']['resolver']['password'] = 'token'
-            job['clients']['resolver']['encryption_key'] = 'ssh'
-            selected['backup'] = {'job':job}; path.write_text(yaml.safe_dump(selected))
+            selected['secret_sources']['pbs-management'] = {'type':'environment','name':'PBS_API_TOKEN'}
+            (root/'public.pem').write_bytes((Path(__file__).resolve().parents[1]/'proxmox/applications/tests/backup-synthetic-recovery-public.pem.fixture').read_bytes())
+            selected['backup'] = {'job':job, 'recovery_public_key': {'source':'public.pem'},
+                'management': {'credential':'pbs-management','datastore_path':'/mnt/backup/recovery'}}; path.write_text(yaml.safe_dump(selected))
             operational = component_plan.resolve(stack,path,disabled=['resolver'])
             packet = component_packet.lower_plan(operational)['resolver']
             with self.assertRaisesRegex(ValueError,'Enable one reviewed'): component_guest.packet(packet,component_packet.INPUTS)
