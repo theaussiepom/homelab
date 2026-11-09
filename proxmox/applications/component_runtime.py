@@ -283,10 +283,12 @@ def _pihole(app, guest):
 
 
 def _music_assistant(app, guest):
+    """Render Music listeners while retaining the selected provider identity."""
     require(app['lifecycle'] == 'retained',
             'Fresh Music Assistant commissioning is not implemented')
     require(not app.get('properties'), 'Use only supported Music Assistant properties')
     selected = music.address(app.get('role_addresses', {}).get('web'))
+    stream = music.address(app['role_addresses'].get('stream', selected))
     require(set(app.get('storage_paths', {})) == {'data'},
             'Bind only the existing Music Assistant data role')
     storage = app['storage_paths']['data']
@@ -300,14 +302,16 @@ def _music_assistant(app, guest):
     listeners = app['listeners']
     require(len(listeners) == 2 and all(
         row['service'] == 'music_assistant' and row['namespace'] == 'host'
-        and row['interface'] == 'web' and row['bind'] == 'interface'
-        and row['protocol'] == 'tcp' and row['actual_bind'] == selected
+        and row['interface'] == ('stream' if row['port'] == 8097 and 'stream' in app['role_addresses'] else 'web')
+        and row['bind'] == 'interface' and row['protocol'] == 'tcp'
+        and row['actual_bind'] == (stream if row['port'] == 8097 else selected)
         and 'publish' not in row for row in listeners.values())
         and {row['port'] for row in listeners.values()} == {8095, 8097},
         'Preserve the declared Music Assistant UI and player listeners')
     service = _service(app, 'music_assistant', guest)
     service['network_mode'] = 'host'
-    music.configure_service(service, selected, data_root=root)
+    options = {'stream_address': stream} if 'stream' in app['role_addresses'] else {}
+    music.configure_service(service, selected, data_root=root, **options)
     return {'music_assistant': service}
 
 
@@ -418,16 +422,24 @@ def _zabbix(app, guest):
 
 
 def _node_red(app, guest):
+    """Render Node-RED without replacing its retained authentication wrappers."""
     require(not app.get('properties'), 'Use only supported Node-RED properties')
     service = _service(app, 'node_red', guest)
     require(len(app['listeners']) == 1 and all(row['service'] == 'node_red'
             and row['namespace'] == 'host' and row['protocol'] == 'tcp'
-            and row['port'] == 1880 and row['bind'] == 'wildcard' and 'publish' not in row
+            and row['port'] == 1880 and row['bind'] in ('wildcard','interface') and 'publish' not in row
             for row in app['listeners'].values()), 'Keep the declared Node-RED native listener')
     service['network_mode'] = 'host'
     storage = app.get('storage_paths', {})
     retained = app['lifecycle'] == 'retained'
     require(retained or app['lifecycle'] == 'fresh', 'Select a supported Node-RED lifecycle')
+    if next(iter(app['listeners'].values()))['bind'] == 'interface':
+        require(retained, 'A bound Node-RED listener requires its retained settings wrapper')
+        selected = music.address(app['role_addresses']['web'])
+        listener = next(iter(app['listeners'].values()))
+        require(listener.get('interface') == 'web' and listener.get('actual_bind') == selected,
+                'Bind Node-RED only to its selected web role')
+        service['environment']['NODE_RED_WEB_ADDRESS'] = selected
     if retained:
         require(set(storage) == {'data', 'config', 'settings', 'healthcheck'}
                 and storage['settings']['read_only'] is True and storage['healthcheck']['read_only'] is True,

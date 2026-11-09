@@ -13,6 +13,7 @@ function load(overrides = {}, original = undefined) {
     }};
     const module = {exports: {}};
     vm.runInNewContext(code, {URL, module, require: (name) => {
+        if (name === "node:net") return require("node:net");
         assert.equal(name, "/config/settings.js"); return settings;
     }, process: {env: {NODE_RED_IDENTITY_URL: "https://sso.example.invalid",
         NODE_RED_EXTERNAL_URL: "https://flows.example.invalid", NODE_RED_OIDC_PROVIDER: "nodered",
@@ -51,4 +52,14 @@ test("checks every restored strategy requirement and site input", () => {
         assert.throws(() => load({NODE_RED_EXTERNAL_URL: value}));
     }
     for (const value of ["", "bad/client"]) assert.throws(() => load({NODE_RED_OIDC_CLIENT_ID: value}));
+});
+
+test("binds the explicit Apps role while preserving old settings and rejecting unsafe addresses", () => {
+    for (const address of ["198.18.40.21", "1.2.3.4", "126.255.255.254", "128.0.0.1",
+        "169.253.255.255", "223.255.255.254"])
+        assert.equal(load({NODE_RED_WEB_ADDRESS: address}).uiHost, address);
+    for (const address of ["", "not-an-address", "::1", "198.18.40.21/24", "0.0.0.0",
+        "0.1.2.3", "0.255.255.255", "127.0.0.1", "127.255.255.255", "169.254.1.2",
+        "169.254.255.255", "224.0.0.1", "239.255.255.255", "240.0.0.1", "255.255.255.255"])
+        assert.throws(() => load({NODE_RED_WEB_ADDRESS: address}));
 });

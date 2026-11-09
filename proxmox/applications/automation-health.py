@@ -4,6 +4,7 @@ import base64
 import hashlib
 from http.client import HTTPConnection, HTTPException
 import json
+import ipaddress
 import os
 from pathlib import Path
 import re
@@ -75,10 +76,11 @@ def mqtt(path=Path('/srv/homelab/data/homeassistant/config/.storage/core.config_
         raise ValueError('The broker did not reject anonymous access')
 
 
-def http(port, path):
+def http(port, path, address='127.0.0.1'):
+    """Probe one bounded local HTTP response without a proxy or redirects."""
     opener = build_opener(ProxyHandler({}), NoRedirect())
     try:
-        with opener.open(f'http://127.0.0.1:{port}{path}', timeout=5) as response:
+        with opener.open(f'http://{address}:{port}{path}', timeout=5) as response:
             body = response.read(65537)
             if len(body) > 65536:
                 raise ValueError('Local service probe response exceeds its bound')
@@ -167,8 +169,23 @@ def selected_probe(service, mqtt_probe):
     return Path('/opt/homelab-app/runtime/mqtt-probe.json') if mqtt_probe is None else Path(mqtt_probe)
 
 
-def probe(service, mqtt_probe=None):
+def web_address(service, address):
+    """Validate the optional concrete address for Node-RED probes only."""
+    if address is None:
+        return None
+    if service not in ('node_red','node_red-fresh'):
+        raise ValueError('Select an explicit address only for the Node-RED web probe')
+    value=ipaddress.IPv4Address(address)
+    if str(value)!=address or value.is_unspecified or value.is_loopback or value.is_multicast or value.is_link_local:
+        raise ValueError('Select the assigned Node-RED IPv4 web address')
+    return str(value)
+
+
+def probe(service, mqtt_probe=None, address=None):
+    """Check the selected service boundary without submitting login credentials."""
     selected=selected_probe(service,mqtt_probe)
+    address=web_address(service,address)
+    web_options={} if address is None else {'address':address}
     if service == 'mqtt':
         mqtt()
     elif service == 'mqtt-broker':
@@ -180,22 +197,26 @@ def probe(service, mqtt_probe=None):
     elif service == 'homeassistant-fresh':
         homeassistant_fresh()
     elif service == 'node_red':
-        status, body = http(1880, '/auth/login')
-        if status != 200 or json.loads(body).get('type') != 'strategy' or http(1880, '/flows')[0] != 401:
+        status, body = http(1880, '/auth/login',**web_options)
+        if status != 200 or json.loads(body).get('type') != 'strategy' or http(1880, '/flows',**web_options)[0] != 401:
             raise ValueError('Node-RED native strategy or API login boundary differs')
     elif service == 'node_red-fresh':
-        if http(1880, '/')[0] != 200:
+        if http(1880, '/',**web_options)[0] != 200:
             raise ValueError('Fresh Node-RED local UI is not ready')
     else:
         raise ValueError('Select one automation service')
 
 
-def run(service, mqtt_probe=None):
+def run(service, mqtt_probe=None, address=None):
+    """Retry read-only probes to the fixed deadline, then report or refuse."""
     selected_probe(service,mqtt_probe)
+    address=web_address(service,address)
     deadline = time.monotonic() + 180
     while True:
         try:
-            if mqtt_probe is None:
+            if address is not None:
+                probe(service,mqtt_probe,address=address)
+            elif mqtt_probe is None:
                 probe(service)
             else:
                 probe(service,mqtt_probe)
@@ -211,8 +232,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('service', choices=('mqtt', 'mqtt-broker', 'homeassistant', 'homeassistant-fresh', 'node_red', 'node_red-fresh'))
     parser.add_argument('--mqtt-probe',type=Path)
+    parser.add_argument('--address')
     try:
         args=parser.parse_args()
-        print(json.dumps(run(args.service,args.mqtt_probe)))
+        print(json.dumps(run(args.service,args.mqtt_probe,**({} if args.address is None else {'address':args.address}))))
     except (OSError, ValueError, KeyError, TypeError):
         raise SystemExit('Automation service verification held; private values were not printed') from None

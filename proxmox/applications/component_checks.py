@@ -99,12 +99,22 @@ def _mariadb(app, compose_file):
 
 
 def _influxdb(app, compose_file):
+    """Check the database and optional web listeners without a data query."""
     address, version = _native_address(app), _native_version(app)
-    _listener(app, 'influxdb', 8086, 'host')
-    return [_service('influxdb'), _row('InfluxDB health without initial setup or application data',
+    frontend = component_native.web_frontend(app)
+    if not frontend['enabled']:
+        _listener(app, 'influxdb', 8086, 'host')
+    rows = [_service('influxdb'), _row('InfluxDB health without initial setup or application data',
         ['python3', '-c', "import json,urllib.request; d=json.load(urllib.request.urlopen('http://"
          + address + ":8086/health',timeout=5)); assert d['status']=='pass' and d['version']=='v"
          + version + "'; print('INFLUX_OK')"], 'INFLUX_OK'), _tcp(address, 8086)]
+    if frontend['enabled']:
+        web = _ipv4(app['role_addresses']['web'])
+        rows += [_service('homelab-influxdb-web.socket'), _row('InfluxDB Apps frontend reaches the unchanged local API',
+            ['python3', '-c', "import json,urllib.request; d=json.load(urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://"
+             + web + ":8086/health',timeout=5)); assert d['status']=='pass' and d['version']=='v"
+             + version + "'; print('INFLUX_FRONTEND_OK')"], 'INFLUX_FRONTEND_OK')]
+    return rows
 
 
 def _pihole(app, compose_file):
@@ -125,24 +135,37 @@ def _unbound(app, compose_file):
                  '/opt/unbound/etc/unbound/unbound.conf'), '')]
 
 
+def _bound_web_checks(app, port):
+    """Require the selected web socket and reject wildcard or legacy binds."""
+    if not any(row.get('bind')=='interface' for row in app['listeners'].values()):
+        return []
+    address=_ipv4(app['role_addresses']['web'])
+    code="import subprocess; rows=subprocess.check_output(['ss','-H','-ltn','sport = :"+str(port)+"'],text=True).splitlines(); sockets={r.split()[3] for r in rows}; assert "+repr(address+':'+str(port))+" in sockets and sockets <= "+"set("+repr([address+':'+str(port),'127.0.0.1:'+str(port),'[::1]:'+str(port)])+")"+"; print('WEB_BIND_OK')"
+    return [_row('Web socket is bound only to its selected interface and loopback',
+        ['python3','-c',code],'WEB_BIND_OK')]
+
+
 def _homeassistant(app, compose_file):
+    """Keep the local HA challenge probe and optional bound-socket check."""
     _listener(app, 'homeassistant', 8123, 'host')
     require(app['lifecycle'] in ('retained', 'fresh'), 'component.health-lifecycle')
     retained = app['lifecycle'] == 'retained'
     return [_row('HA web responds and unauthenticated API refused' if retained else
         'HA onboarding or login ready and unauthenticated API refused',
         ['python3', AUTOMATION_HELPER, 'homeassistant' if retained else 'homeassistant-fresh'],
-        '"read_only_probe": "passed"')]
+        '"read_only_probe": "passed"'), *_bound_web_checks(app,8123)]
 
 
 def _node_red(app, compose_file):
+    """Probe the declared Node-RED web address and optional socket binding."""
     _listener(app, 'node_red', 1880, 'host')
     require(app['lifecycle'] in ('retained', 'fresh'), 'component.health-lifecycle')
     retained = app['lifecycle'] == 'retained'
+    extra=['--address',_ipv4(app['role_addresses']['web'])] if any(row.get('bind')=='interface' for row in app['listeners'].values()) else []
     return [_row('Node-RED native login ready and unauthenticated flows refused' if retained else
         'Node-RED public UI responds', ['python3', AUTOMATION_HELPER,
-        'node_red' if retained else 'node_red-fresh'],
-        '"read_only_probe": "passed"' if retained else '"scope": "ui_only"')]
+        'node_red' if retained else 'node_red-fresh',*extra],
+        '"read_only_probe": "passed"' if retained else '"scope": "ui_only"'), *_bound_web_checks(app,1880)]
 
 
 HANDLERS = {'postgresql': _postgresql, 'mariadb': _mariadb, 'influxdb': _influxdb,
@@ -245,11 +268,13 @@ def _mqtt_explorer(app, compose_file):
 
 
 def _music_assistant(app, compose_file):
+    """Check web and stream roles separately, then the existing HTTPS route."""
     require(all(any(r.get('protocol')=='tcp' and r.get('namespace')=='host' and r.get('port')==port
                     for r in app['listeners'].values()) for port in (8095,8097)),'component.health-listener')
     address=_ipv4(app['role_addresses']['web']);origin,host,ingress,public=_public(app)
+    stream=_ipv4(app['role_addresses'].get('stream',address))
     require(public.get('source_address')==address,'component.health-source')
-    code="import socket,urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://"+address+":8095/info',timeout=5).close(); socket.create_connection(('"+address+"',8097),timeout=3).close(); print('core service only: passed')"
+    code="import socket,urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://"+address+":8095/info',timeout=5).close(); socket.create_connection(('"+stream+"',8097),timeout=3).close(); print('core service only: passed')"
     return [_row('Music Assistant core info and stream listener',_compose_exec(app,compose_file,'music_assistant',
         'python3','-c',code),'core service only: passed'),
         _row('Music Assistant HTTPS route',_curl()+['--interface',address,'--resolve',host+':443:'+ingress,

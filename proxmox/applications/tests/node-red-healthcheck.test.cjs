@@ -7,7 +7,7 @@ const vm = require("node:vm");
 const test = require("node:test");
 const code = fs.readFileSync(path.join(__dirname, "../node-red-healthcheck.js"), "utf8");
 
-function check(status, body, timeout = false, uiPort = 1880) {
+function check(status, body, timeout = false, uiPort = 1880, address = undefined) {
     const request = new EventEmitter();
     let callback, options, result;
     request.destroy = error => request.emit("error", error);
@@ -15,7 +15,7 @@ function check(status, body, timeout = false, uiPort = 1880) {
     vm.runInNewContext(code, {require: name => {
         if (name === "node:http") return http;
         assert.equal(name, "/config/settings.js"); return {uiPort, uiHost: "172.20.0.8"};
-    }, process: {exit: value => {result = value;}}}, {filename: path.join(__dirname, "../node-red-healthcheck.js")});
+    }, process: {env: {NODE_RED_WEB_ADDRESS: address}, exit: value => {result = value;}}}, {filename: path.join(__dirname, "../node-red-healthcheck.js")});
     if (timeout) request.emit("timeout");
     else {
         const response = new EventEmitter(); response.setEncoding = () => {};
@@ -41,4 +41,9 @@ test("uses the default port and refuses oversized replies", () => {
     assert.equal(check(200, '{"type":"strategy"}', false, undefined).options.port, 1880);
     assert.equal(check(200, '{"type":"strategy"}', false, 0).options.port, 1880);
     assert.equal(check(200, "x".repeat(65537)).result, 1);
+});
+
+test("uses the selected web address when the service no longer listens on loopback", () => {
+    const result = check(200, '{"type":"strategy"}', false, 1880, "198.18.40.21");
+    assert.equal(result.result, 0); assert.equal(result.options.hostname, "198.18.40.21");
 });

@@ -28,6 +28,7 @@ HELPERS = {'pihole': [('dns_records.py','dns_records.py')],
 
 
 def variables(cfg, phase, *, payload=None, previously_owned=False, activate_backup=False, backup_schedule=False):
+    """Derive one admitted phase from its bound payload and runtime descriptor."""
     require(type(activate_backup) is bool and type(backup_schedule) is bool
             and (not backup_schedule or activate_backup)
             and (not activate_backup or phase == component_guest.BACKUP_PHASE), 'Keep backup activation separate from guest deployment')
@@ -170,6 +171,9 @@ def variables(cfg, phase, *, payload=None, previously_owned=False, activate_back
             component_initial_compose_source=str(payload.directory/'initial-compose.yml'))
     if app_id in native:
         app['database']=native[app_id]['identity']
+        if selected['adapter']=='influxdb':
+            import component_native
+            result['component_native_frontend']=component_native.web_frontend(selected)
         if selected.get('database_administrators'):
             app['database_administrators']=selected['database_administrators']
         result['component_native_services']=native[app_id]['services']

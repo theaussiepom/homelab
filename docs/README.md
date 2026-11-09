@@ -22,6 +22,8 @@ The [reference index](reference/README.md) groups pages by the component respons
 
 To combine objects, use [references and reuse](guides/references-and-reuse.md) and the [complete broker/browser/HTTPS example](examples/relationships/README.md). For an existing HTTPS backend with its own trust anchor, use the [verified backend transport example](examples/backend-transport/README.md). To inspect generated results use [validate and generate](guides/validate-and-generate.md) and the [CLI contract](reference/cli.md). The [glossary](glossary.md) defines recurring terms.
 
+For separate browser and device paths, use [Separate web access from device communication](guides/separate-web-and-device-networks.md).
+
 ## Operate or extend
 
 [Operations](operations/README.md) links preparation, first installation, verification, updates and [troubleshooting](operations/troubleshooting.md). [Host bootstrap, installer and recovery](framework-reference.md) have separate contracts and are not application recovery shortcuts.
