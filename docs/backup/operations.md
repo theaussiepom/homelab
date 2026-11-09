@@ -19,9 +19,11 @@ No backup completion record can establish that a stopped scheduler will run tomo
 Use the existing CD account on the deployment controller, with read access to its protected state. Substitute your `backup.job.name` for `example-recovery` below. These commands inspect the timer; they do not start a backup:
 
 ```bash
-systemctl show homelab-backup-example-recovery.timer \
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+systemctl --user show homelab-backup-example-recovery.timer \
   --property=ActiveState --property=NextElapseUSecRealtime
-systemctl show homelab-backup-example-recovery.service \
+systemctl --user show homelab-backup-example-recovery.service \
   --property=Result --property=ExecMainStatus
 ```
 
@@ -29,7 +31,9 @@ Expect an active timer with a next scheduled time. After a run, the service must
 
 | Location | What to verify |
 | --- | --- |
-| Controller `/etc/homelab-backup-schedules/homelab-backup-<job-name>.json` | Group membership and schedule match the reviewed configuration. Read privately; this is not a credential file. |
+| Controller `<state_root>/backup-controller/schedules/homelab-backup-<job-name>.json` | Account-owned private group membership and schedule match the reviewed configuration. This is not a credential file. |
+| CD account home, `.config/systemd/user/homelab-backup-<job-name>.service` and `.timer` | The one user-scope alarm matches the selected source and schedule. Use the existing CD account and its persistent user manager; do not enable a root/system-scope namesake. |
+| Controller `<state_root>/backup-controller/framework/<source-hash>/proxmox/` | Complete account-owned public source is verified before use and preserved independently of a runner checkout. It is not root-immutable. |
 | Controller `<state_root>/backup-activation/<job-name>/<identity>/complete.json` | Successful whole-group activation, bound to every completed guest deployment and the installed private-input digests. A changed deployment requires successful activation before its next backup. Interrupted activation records are preserved; automatic retry does not adopt them. |
 | Controller `<state_root>/backup-groups/<generation>/started.json` | The attempted group and ordinary deployment receipt digests. The generation is a 32-character hexadecimal identifier. For a group spanning state roots, use the lexicographically first configured state root. |
 | Same directory, `complete.json` and `recovery-set.json` | Successful whole-group completion and the exact destinations/snapshots for restoration. `restore_verified: false` is intentional until a separate restore drill. |

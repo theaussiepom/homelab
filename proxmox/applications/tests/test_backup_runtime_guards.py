@@ -205,7 +205,7 @@ class RuntimeGuardTests(unittest.TestCase):
             value['job']['capture']['pause']=[];value['applications']['app']['storage']={}
             self.assertEqual(controller.controls(cfg),{})
         with patch.object(controller,'run',return_value={'status':'passed'}),patch.object(sys,'argv',['controller','--group',str(self.tmp/'group')]), \
-             patch.object(controller.signal,'signal') as signals,patch('builtins.print'):
+             patch.object(controller.signal,'signal') as signals,patch('builtins.print'),patch('backup_user.execution',return_value=1000):
             controller.main()
             with self.assertRaises(InterruptedError):signals.call_args.args[1](None,None)
         empty=self.tmp/'stage';empty.mkdir()
@@ -255,7 +255,8 @@ class RuntimeGuardTests(unittest.TestCase):
         (source/'public.py').write_text('PUBLIC = True');(common/'asset').write_text('public data')
         with patch.object(ansible.component_guest,'phases',return_value=['pbs-agent']), \
              patch.object(backup_agent,'configuration',return_value={'inventory':json.dumps(value)}), \
-             patch.object(ansible,'SOURCE',source),patch.object(deployment_inputs,'source_hash',return_value='b'*64):
+             patch.object(ansible,'SOURCE',source),patch.object(deployment_inputs,'source_hash',return_value='b'*64), \
+             patch('backup_user.account',return_value={'uid':1000,'home':'/home/runner','environment':{}}):
             ordinary=ansible.variables(cfg,'pbs-agent',payload=payload)
             self.assertNotIn('credentials',ordinary['backup_agent'])
             self.assertNotIn('backup_controller',ordinary)

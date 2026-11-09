@@ -1,0 +1,102 @@
+---
+- name: Resolve the existing non-root deployment account
+  ansible.builtin.getent:
+    database: passwd
+    key: '{{ runner_owner }}'
+
+- name: Bind the existing account UID
+  ansible.builtin.set_fact:
+    backup_manager_uid: '{{ getent_passwd[runner_owner][1] | int }}'
+
+- name: Refuse a privileged or mismatched deployment account
+  ansible.builtin.assert:
+    that:
+      - runner_owner == 'homelab-runner'
+      - backup_manager_uid | int > 0
+
+- name: Inspect the manager before any prerequisite changes
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -I
+      - -B
+      - -c
+      - "{{ lookup('file', playbook_dir + '/../../applications/backup_user.py') }}"
+      - inspect
+      - '{{ backup_manager_uid }}'
+  register: backup_manager_before
+  changed_when: false
+
+- name: Preserve an existing unsafe or foreign manager without restarting it
+  ansible.builtin.assert:
+    that:
+      - not (backup_manager_before.stdout | from_json).policy_present or (backup_manager_before.stdout | from_json).policy_matches
+      - not (backup_manager_before.stdout | from_json).active or ((backup_manager_before.stdout | from_json).policy_matches and (backup_manager_before.stdout | from_json).kernel_hardened and (backup_manager_before.stdout | from_json).configured_hardened and not (backup_manager_before.stdout | from_json).reload_needed)
+
+- name: Prepare the root-owned per-account manager policy directory
+  ansible.builtin.file:
+    path: '/etc/systemd/system/user@{{ backup_manager_uid }}.service.d'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install inherited privilege restrictions before starting the manager
+  ansible.builtin.copy:
+    content: "[Service]\nNoNewPrivileges=true\nCapabilityBoundingSet=\nAmbientCapabilities=\n"
+    dest: '/etc/systemd/system/user@{{ backup_manager_uid }}.service.d/50-homelab-cd.conf'
+    owner: root
+    group: root
+    mode: '0644'
+    force: false
+    follow: false
+
+- name: Load the root-owned policy before enabling persistence
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Install the standard user-session bus package
+  ansible.builtin.apt:
+    name: dbus-user-session
+    state: present
+    update_cache: true
+
+- name: Inspect account persistence without enabling it implicitly
+  ansible.builtin.stat:
+    path: '/var/lib/systemd/linger/{{ runner_owner }}'
+    follow: false
+  register: backup_linger
+
+- name: Refuse foreign account persistence metadata
+  ansible.builtin.assert:
+    that:
+      - not backup_linger.stat.exists or (backup_linger.stat.isreg and not backup_linger.stat.islnk and backup_linger.stat.uid == 0 and backup_linger.stat.nlink == 1 and backup_linger.stat.mode == '0644' and backup_linger.stat.size == 0)
+
+- name: Keep the manager available without an interactive login
+  ansible.builtin.command:
+    argv: [/usr/bin/loginctl, enable-linger, '{{ runner_owner }}']
+  when: not backup_linger.stat.exists
+  changed_when: true
+
+- name: Start the qualified manager without restarting existing services
+  ansible.builtin.systemd_service:
+    name: 'user@{{ backup_manager_uid }}.service'
+    state: started
+
+- name: Wait for the standard private user bus
+  ansible.builtin.wait_for:
+    path: '/run/user/{{ backup_manager_uid }}/bus'
+    state: present
+    timeout: 30
+
+- name: Verify effective persistent-manager protection
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -I
+      - -B
+      - -c
+      - "{{ lookup('file', playbook_dir + '/../../applications/backup_user.py') }}"
+      - ready
+      - '{{ backup_manager_uid }}'
+  changed_when: false

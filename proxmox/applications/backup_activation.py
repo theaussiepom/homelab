@@ -11,6 +11,7 @@ import backup_enrollment
 import backup_identity
 import backup_policy
 import backup_client_transport
+import backup_user
 import component_ansible
 import component_inputs
 import component_payload
@@ -44,6 +45,7 @@ def verify(schedule, admitted):
     for name,(cfg,_) in admitted.items():
         inputs = {key:digest(raw) for key,raw in backup_agent.inputs(cfg['app']['backup']).items()}
         require(inputs == value['inputs'][name], 'Backup private inputs changed after activation')
+    backup_controller.installation(schedule)
     return value
 
 
@@ -57,6 +59,7 @@ def activate(descriptor, token, *, admission=backup_controller.admit, api_factor
     require(isinstance(enabled,list) and enabled and len(enabled)==len(set(enabled))
             and set(enabled)<=set(group['members']), 'Activate only explicitly enabled guest members')
     deployment_state.bootstrap_closed()
+    backup_user.verify('homelab-backup-'+group['name'])
     scopes = sorted({(row['state_root'],row['vmid']) for row in group['members'].values()})
     with ExitStack() as opened:
         paths = [(Path(root)/'database-network.lock',True) for root in sorted({root for root,_ in scopes})]

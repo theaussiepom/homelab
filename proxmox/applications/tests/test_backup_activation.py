@@ -30,7 +30,8 @@ class ActivationTests(unittest.TestCase):
         self.api=Mock();self.deploy=Mock(return_value={'status':'passed'})
         self.fetch=Mock(return_value=b'synthetic key')
         self.provision=Mock()
-        for target,value in [('deployment_state.bootstrap_closed',Mock()),('backup_activation.source_hash',Mock(return_value='c'*64)),
+        for target,value in [('deployment_state.bootstrap_closed',Mock()),('backup_user.verify',Mock()),
+                             ('backup_controller.installation',Mock()),('backup_activation.source_hash',Mock(return_value='c'*64)),
                              ('backup_enrollment.provision',self.provision),('backup_agent.inputs',Mock(return_value={'pbs-key':b'key'})),
                              ('component_inputs.binding',Mock(return_value={'test':'binding'}))]:
             patched=patch(target,value);patched.start();self.addCleanup(patched.stop)

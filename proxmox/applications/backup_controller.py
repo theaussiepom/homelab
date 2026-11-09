@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Coordinate one recovery set under existing deployment custody, never deploy."""
 import argparse
+import base64
 from contextlib import ExitStack
 import fcntl
 import hashlib
@@ -17,6 +18,8 @@ import uuid
 import backup_group
 import backup_policy
 import backup_capture
+import backup_source
+import backup_user
 import component_generation
 import deployment_state
 from custody_records import no_markers
@@ -249,26 +252,69 @@ def run(path, *, launch=subprocess.Popen, admission=admit):
     return {'status': 'passed', 'generation': generation, 'restore_verified': False}
 
 
-def units(value, source_directory, user):
-    """One root schedule; disabled CD members keep their actual deployed protection."""
+def units(value, source_directory, user, home=None):
+    """Render one account-owned schedule without changing membership or capture behavior."""
     schedule(value)
-    require(type(user) is int and user >= 0 and isinstance(source_directory, str)
-            and source_directory.startswith('/') and not any(char in source_directory for char in '\n\r\x00%"\\'),
+    require(type(user) is int and user > 0, 'Use the existing non-root CD actor')
+    home = backup_user.account(user)['home'] if home is None else home
+    base = str(Path(min(row['state_root'] for row in value['group']['members'].values()))/'backup-controller')
+    require(all(isinstance(path, str) and path.startswith('/')
+            and str(Path(path)) == path and '..' not in Path(path).parts
+            and not any(ord(char) < 32 or char in '%"\\$' for char in path)
+            for path in (source_directory, home, base)),
             'Use the pinned source and existing CD actor')
     name = 'homelab-backup-'+value['group']['name']
-    path = '/etc/homelab-backup-schedules/'+name+'.json'
+    path = base+'/schedules/'+name+'.json'
+    # The trusted unit verifies the complete bundle as data before importing it.
+    verifier = base64.b64encode(Path(backup_source.__file__).read_bytes()).decode('ascii')
+    selected_hash = source_directory.rsplit('/', 3)[-3]
+    require(len(selected_hash) == 64 and all(c in '0123456789abcdef' for c in selected_hash),
+            'Select the versioned public source directory')
+    entry = ("import base64,runpy,sys;v={'__name__':'backup_source_verifier'};exec(base64.b64decode('"
+        +verifier+"'),v);v['verify'](sys.argv[1],sys.argv[2]);sys.path.insert(0,sys.argv[1]);"
+        "sys.argv=[sys.argv[1]+'/backup_controller.py','--group',sys.argv[3]];"
+        "runpy.run_path(sys.argv[0],run_name='__main__')")
     calendar = value['schedule']['calendar']
     calendar = {'hourly': '*-*-* *:00:00', 'daily': '*-*-* 00:00:00'}.get(calendar, '*-*-* '+calendar+':00')+' UTC'
     timeout = 3*86400+180*1024+300
     service = ('[Unit]\nDescription=Coordinated guest recovery\nAfter=network-online.target\n'
-        '[Service]\nType=oneshot\nUser='+str(user)+'\nUMask=0077\nEnvironment=PYTHONDONTWRITEBYTECODE=1\n'
-        'ExecStart=/usr/bin/python3 "'+source_directory+'/backup_controller.py" --group "'+path+'"\n'
+        '[Service]\nType=oneshot\nNoNewPrivileges=true\nUMask=0077\nEnvironment=PYTHONDONTWRITEBYTECODE=1\n'
+        'ExecStart=/usr/bin/python3 -I -B -c "'+entry+'" "'+source_directory+'" "'+selected_hash+'" "'+path+'"\n'
         'TimeoutStartSec='+str(timeout)+'\nKillMode=process\nTimeoutStopSec=190\n')
     timer = ('[Unit]\nDescription=Guest recovery schedule\n[Timer]\nOnCalendar='+calendar
         +'\nRandomizedDelaySec='+str(value['schedule']['jitter_seconds'])
         +'\nPersistent=false\n[Install]\nWantedBy=timers.target\n')
     return {'name': name, 'service': service, 'timer': timer, 'owner': {'schema': value['schema'],
-        'name': value['group']['name'], 'actor': user}, 'configuration': value, 'user': user}
+        'name': value['group']['name'], 'actor': user}, 'configuration': value, 'user': user,
+        'base': base, 'group_path': path, 'owner_path': base+'/schedules/'+name+'.owner.json',
+        'unit_directory': home+'/.config/systemd/user'}
+
+
+def installation(value):
+    """Verify the owned installed schedule and bundle before completing activation or capturing."""
+    from deployment_inputs import source_hash
+    actor = backup_user.verify('homelab-backup-'+value['group']['name'])
+    directory = str(Path(min(row['state_root'] for row in value['group']['members'].values()))/
+        'backup-controller/framework'/source_hash()/'proxmox/applications')
+    expected = units(value, directory, actor['uid'], actor['home'])
+    backup_source.verify(directory, source_hash(), actor['uid'])
+    for path in (expected['group_path'], expected['owner_path']):
+        backup_user.ancestors(Path(path).parent, actor['uid'])
+    require(json.loads(backup_user.read(expected['group_path'], {actor['uid']}, {0o600}, backup_group.LIMIT)) == value
+            and json.loads(backup_user.read(expected['owner_path'], {actor['uid']}, {0o600})) == expected['owner'],
+            'Preserve the installed schedule owner and exact current group')
+    for suffix in ('service', 'timer'):
+        path = Path(expected['unit_directory'])/(expected['name']+'.'+suffix)
+        backup_user.ancestors(path.parent, actor['uid'])
+        require(backup_user.read(path, {actor['uid']}, {0o644}).decode() == expected[suffix],
+                'Preserve the declared user unit bytes')
+        status = backup_user.show(path.name, ['LoadState', 'FragmentPath', 'DropInPaths', 'NeedDaemonReload'],
+            scope='user', environment=actor['environment'])
+        require(status == {'LoadState': 'loaded', 'FragmentPath': str(path), 'DropInPaths': '',
+                'NeedDaemonReload': 'no'}, 'Use only the loaded declared user unit')
+    timer = backup_user.show(expected['name']+'.timer', ['ActiveState', 'UnitFileState'],
+        scope='user', environment=actor['environment'])
+    require(timer == {'ActiveState': 'active', 'UnitFileState': 'enabled'}, 'Keep the declared user timer enabled')
 
 
 def main():
@@ -276,6 +322,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--group', type=Path, required=True)
     args = parser.parse_args()
+    backup_user.execution()
     def interrupted(signum, frame):
         """Abort through the operation cleanup path when the timer is interrupted."""
         raise InterruptedError('Recovery coordinator interrupted')
