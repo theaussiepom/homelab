@@ -62,7 +62,7 @@ def api_get(cfg, path):
         or endpoint.path not in ("", "/")
     ):
         raise ValueError("Guest discovery requires the trusted Proxmox HTTPS endpoint")
-    if not path.startswith("/nodes/"):
+    if not (path.startswith("/nodes/") or path == '/storage?type=zfspool'):
         raise ValueError("Use the selected Proxmox node API")
     request = Request(
         "https://" + endpoint.netloc + "/api2/json" + path,
@@ -225,12 +225,19 @@ def backup(cfg, state, label):
         write_new(f"{stamp}.json", encoded(receipt), dir_fd=directory)
 
 
-def infrastructure(cfg, site, work, operation, expected, *, state_identity=None):
+def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
+                   previous_configuration=None):
     """Plan the existing backend; apply only this reviewed guest's safe delta."""
     from deployment_inputs import binding
 
     host_devices.check(cfg, operation)
     existing = (work / "terraform.tfstate").is_file()
+    staging = None
+    if 'job' in cfg['app'].get('backup', {}):
+        import backup_staging
+        backup_staging.storage(api_get(cfg, '/storage?type=zfspool'), cfg['guest']['storage_id'])
+        staging = backup_staging.original(cfg, previous_configuration, work) if existing else True
+    original_state = sha(work / 'terraform.tfstate') if existing else None
     if existing:
         dhcp_admission(cfg)
     backup(cfg, work / "terraform.tfstate", "before-ordinary")
@@ -311,10 +318,19 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None)
         if backup_staging.newly_allocated(value, path):
             guest_trust(cfg, work, persist=False)
             backup_staging.inspect(cfg, path, log)
+        else:
+            guest_trust(cfg, work, persist=False)
+            staging_row, staging_slot = backup_staging.stage_row(value, path)
+            staging_proof = backup_staging.verify(cfg, staging_row, staging_slot, log,
+                lambda path: api_get(cfg, path), first=staging, label='before',
+                mounts=backup_staging.planned_mounts(value, 'before'))
+            staging = (staging_slot, staging_proof, staging, backup_staging.planned_mounts(value, 'after'))
     require(binding(cfg, site) == expected, "Approved inputs changed while planning")
+    require(not existing or sha(work / 'terraform.tfstate') == original_state,
+            'The owned backend changed while planning')
     changed = any(
         row["change"]["actions"] != ["no-op"] for row in value["resource_changes"]
-    )
+    ) or bool(value.get('resource_drift'))
     write(
         operation / "plan.json",
         {
@@ -349,6 +365,16 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None)
         guest_identity.pin(
             cfg, operation, cfg["app"]["address"], lambda p: api_get(cfg, p), write
         )
+        if staging is not None:
+            row, slot = backup_staging.applied(cfg, work)
+            guest_trust(cfg, work)
+            backup_staging.verify(cfg, row, slot, log, lambda path: api_get(cfg, path),
+                                  first=True, label='after', mounts=backup_staging.backend_mounts(work))
+    if isinstance(staging, tuple):
+        slot, proof, first, mounts = staging
+        require(backup_staging.verify(cfg, mounts[slot], slot, log, lambda path: api_get(cfg, path),
+                first=first, label='after', mounts=mounts) == proof,
+                'The declared staging filesystem changed across apply')
     changed = host_devices.attach(cfg, operation) or changed
     backup(cfg, work / "terraform.tfstate", "after-ordinary")
     return {

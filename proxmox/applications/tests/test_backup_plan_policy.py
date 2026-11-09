@@ -32,6 +32,7 @@ class BackupPlanTests(unittest.TestCase):
             self.assertFalse(policy.staging_mount(new,bad))
 
     def test_real_provider_caller_inspects_new_mount_before_mocked_apply_only(self):
+        """Check the real provider caller's staging inspection order around fake apply."""
         from unittest.mock import patch
         import deployment_inputs
         import proxmox_guest as provider
@@ -64,12 +65,16 @@ class BackupPlanTests(unittest.TestCase):
             with patch.object(deployment_inputs,'binding',return_value={}),patch.object(provider,'backup'), \
                  patch.object(provider,'host_devices') as devices,patch.object(provider,'dhcp_admission'), \
                  patch.object(provider,'guest_trust') as trust,patch.object(provider,'quiet',side_effect=quiet), \
+                 patch.object(provider,'api_get',return_value=[{'storage':'local','type':'zfspool','pool':'example/data'}]), \
                  patch.object(provider.subprocess,'check_output',return_value=encoded(plan)), \
+                 patch.object(backup_staging,'original',return_value=True), \
+                 patch.object(backup_staging,'verify',return_value={}) as verify, \
                  patch.object(backup_staging,'inspect',side_effect=lambda *args:seen.append('inspect')) as inspect:
                 devices.attach.return_value=False
                 result=infrastructure(cfg,case.root/'site',work,operation,{})
                 self.assertEqual(inspect.call_count,0 if existing_stage else 1)
-                self.assertEqual(trust.call_count,0 if existing_stage else 1)
+                self.assertEqual(trust.call_count,1)
+                self.assertEqual(verify.call_count,2 if existing_stage else 0)
                 if not existing_stage:
                     inspect.assert_called_once_with(cfg,'/srv/stage',operation/'infrastructure.log')
                     trust.assert_called_once_with(cfg,work,persist=False)
