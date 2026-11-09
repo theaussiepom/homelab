@@ -1,4 +1,5 @@
 """Execute the exact guest probe in a fictional FD/mount namespace, no SSH."""
+import ast
 import builtins
 from contextlib import nullcontext
 import json
@@ -17,6 +18,7 @@ class MountedScriptTests(unittest.TestCase):
     def exercise(self, **case):
         """Execute the exact mounted probe in a fictional FD and mount namespace."""
         descriptors = {}; closed = set(); counts = {}; reads = {}; printed = []
+        payloads = {}; offsets = {}
         def open_(path, flags, *, dir_fd=None):
             """Allocate fictional descriptors and model a refused symlink traversal."""
             if case.get('symlink') and path == 'stage': raise OSError('synthetic symlink refusal')
@@ -39,7 +41,15 @@ class MountedScriptTests(unittest.TestCase):
             return result
         def read_(fd, bound):
             """Supply bounded fictional mountinfo and FD mount-identity observations."""
-            path = descriptors[fd]; reads[path] = reads.get(path, 0)+1
+            if fd not in payloads:
+                payloads[fd] = contents(descriptors[fd], bound)
+            start = offsets.get(fd, 0)
+            raw = payloads[fd][start:start+min(bound, case.get('chunk_size', bound))]
+            offsets[fd] = start+len(raw)
+            return raw
+        def contents(path, bound):
+            """Keep each opened proc file stable while permitting later recheck changes."""
+            reads[path] = reads.get(path, 0)+1
             if case.get('oversize'): return b'x'*bound
             if path == '/proc/self/mountinfo':
                 if case.get('malformed'): return b'unparseable\n'
@@ -91,6 +101,43 @@ class MountedScriptTests(unittest.TestCase):
         """Accept an empty first root and the permitted later private history directory."""
         self.assertEqual(self.exercise()['device'], [0, 2])
         self.exercise(repeat=True, children=['.homelab-backup'])
+
+    def test_short_proc_reads_reach_the_complete_mount_and_fdinfo(self):
+        """Read beyond short non-EOF prefixes before validating the exact mount."""
+        self.assertEqual(self.exercise(chunk_size=7)['device'], [0, 2])
+        self.exercise(chunk_size=1, repeat=True, children=['.homelab-backup'])
+
+    def test_proc_exact_bound_eof_overflow_and_error_always_close(self):
+        """Keep the proc byte ceiling and close guard across short reads and errors."""
+        tree = ast.parse(backup_staging.MOUNTED_SCRIPT)
+        nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+                 and node.name in ('require', 'proc')]
+        for payload, error in [(b'12345678', False), (b'123456789', False), (b'12', True)]:
+            with self.subTest(payload=payload, error=error):
+                calls = []; closed = []; offset = 0
+                def open_(path, flags):
+                    """Assert the exact proc open flags without opening a real path."""
+                    self.assertEqual(path, '/proc/self/mountinfo')
+                    self.assertEqual(flags, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+                    return 77
+                def read_(fd, bound):
+                    """Return short byte chunks, EOF or an injected read error."""
+                    nonlocal offset
+                    self.assertEqual(fd, 77); calls.append(bound)
+                    if error and offset: raise OSError('synthetic proc read error')
+                    chunk = payload[offset:offset+min(2, bound)]; offset += len(chunk)
+                    return chunk
+                fake = SimpleNamespace(open=open_, read=read_, close=closed.append,
+                    O_RDONLY=os.O_RDONLY, O_NOFOLLOW=os.O_NOFOLLOW, O_CLOEXEC=os.O_CLOEXEC)
+                namespace = {'os': fake}
+                exec(compile(ast.Module(body=nodes, type_ignores=[]), '<exact-proc-reader>', 'exec'), namespace)
+                if len(payload) > 8 or error:
+                    with self.assertRaises((ValueError, OSError)):
+                        namespace['proc']('/proc/self/mountinfo', 8)
+                else:
+                    self.assertEqual(namespace['proc']('/proc/self/mountinfo', 8), payload)
+                    self.assertEqual(calls[-1], 1)  # EOF is established at the exact limit.
+                self.assertEqual(closed, [77])
 
     def test_foreign_ambiguous_unstable_or_nonempty_first_mount_refuses(self):
         """Refuse foreign, unstable, nested, writable or nonempty first-use stages."""

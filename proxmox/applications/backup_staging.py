@@ -70,7 +70,11 @@ def require(value):
 def proc(path,bound):
     fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
     try:
-        raw=os.read(fd,bound+1);require(len(raw)<=bound);return raw
+        raw=bytearray()
+        while True:
+            chunk=os.read(fd,bound+1-len(raw))
+            if not chunk:return bytes(raw)
+            raw.extend(chunk);require(len(raw)<=bound)
     finally:os.close(fd)
 def mount_id(fd):
     values=re.findall(r'(?m)^mnt_id:\\s*([0-9]+)\\s*$',proc('/proc/self/fdinfo/'+str(fd),8192).decode('ascii'))
