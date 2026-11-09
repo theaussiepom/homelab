@@ -121,6 +121,7 @@ finally:
 
 
 def selection(cfg):
+    """Project the declared operational staging path, quota and storage ID."""
     stage = cfg['app']['backup']['job']['staging']
     return {'path': stage['path'], 'size': str(stage['size_bytes']//1024**3)+'G',
             'volume': cfg['guest']['storage_id']}
@@ -164,6 +165,7 @@ def applied(cfg, work):
 
 
 def stage_row(plan, path):
+    """Find the unique refreshed mount at the declared staging path."""
     mounts = planned_mounts(plan, 'before')
     rows = [item for item in mounts if item.get('path') == path]
     require(len(rows) == 1, 'Bind one refreshed staging mount')
@@ -171,11 +173,13 @@ def stage_row(plan, path):
 
 
 def planned_mounts(plan, side):
+    """Read this guest's mount sequence from one admitted plan side."""
     row = next(row for row in plan['resource_changes'] if row['address'] == GUEST_RESOURCE)
     return row['change'][side].get('mount_point') or []
 
 
 def storage(rows, selected):
+    """Bind one bounded isolated ZFS pool and its exact host mountpoint."""
     require(isinstance(rows, list) and len(rows) <= 32, 'Bound the authorized ZFS storage index')
     matches = [row for row in rows if isinstance(row, dict) and row.get('storage') == selected]
     require(len(matches) == 1, 'Bind one selected storage configuration')
@@ -220,6 +224,7 @@ def native_row(raw, row):
 
 
 def native_mount(value, row, slot, mounts):
+    """Match the complete active mount sequence and isolated stage allocation."""
     require(isinstance(value, dict) and isinstance(mounts, list)
             and type(slot) is int and 0 <= slot < len(mounts) and mounts[slot] == row
             and {key for key in value if re.fullmatch(r'mp[0-9]+', key)} ==
@@ -242,6 +247,7 @@ def verify(cfg, row, slot, log, api_get, *, first, label, mounts):
     config_path = '/nodes/'+node+'/lxc/'+str(cfg['guest']['vmid'])+'/config?current=1'
     info_path = '/nodes/'+node+'/storage/'+quote(cfg['guest']['storage_id'], safe='')+'/content/'+quote(row['volume'], safe='')
     def projection():
+        """Join active mount options, selected storage and exact volume information."""
         native = native_mount(api_get(config_path), row, slot, mounts)
         pool, mount = storage(api_get('/storage?type=zfspool'), cfg['guest']['storage_id'])
         name = row['volume'].split(':', 1)[1]

@@ -10,6 +10,7 @@ from test_plan import existing_fixture, fixture
 
 
 def mount(name, *, backup=False):
+    """Build a fictional provider-normalized mount with selectable backup metadata."""
     volume = 'local-zfs:subvol-6100-disk-' + str(name)
     return {'path': '/srv/data' if name == 1 else '/srv/stage', 'size': '8G' if name == 1 else '4G',
             'volume': volume, 'path_in_datastore': volume, 'backup': backup, 'replicate': True,
@@ -17,11 +18,13 @@ def mount(name, *, backup=False):
 
 
 def selection():
+    """Return the fixed synthetic staging declaration used by plan controls."""
     return {'path': '/srv/stage', 'size': '4G', 'volume': 'local-zfs'}
 
 
 class DeclaredMountDriftTests(unittest.TestCase):
     def plan(self, empty=False):
+        """Build a saved no-op plan with only prepared native mount drift."""
         value = existing_fixture('no-op')
         resource = value['resource_changes'][0]
         old = copy.deepcopy(resource['change']['before'])
@@ -35,11 +38,13 @@ class DeclaredMountDriftTests(unittest.TestCase):
         return value
 
     def check(self, value, empty=False):
+        """Exercise the real plan policy with the complete selected backup contract."""
         policy.check_plan(value, 'pve-lab', 6100, existing=True, protected_guests=[900],
             backup_selection={**({} if empty else {'/srv/data': True}), '/srv/stage': False},
             backup_staging=selection())
 
     def test_nonempty_and_empty_prior_lists_append_one_exact_known_subvolume(self):
+        """Admit one exact staging append after either an empty or retained mount prefix."""
         for empty in (False, True):
             value = self.plan(empty); before = copy.deepcopy(value)
             self.check(value, empty)
@@ -49,6 +54,7 @@ class DeclaredMountDriftTests(unittest.TestCase):
         self.check(value, True)
 
     def test_backup_metadata_only_matches_the_complete_selected_volume_set(self):
+        """Require the operational stage and every selected volume for backup-bit drift."""
         value = self.plan(); change = value['resource_drift'][0]['change']
         change['before']['mount_point'].append(mount(2))
         policy.check_plan(value, 'pve-lab', 6100, existing=True, protected_guests=[],
@@ -60,6 +66,7 @@ class DeclaredMountDriftTests(unittest.TestCase):
             policy.check_plan(value, 'pve-lab', 6100, existing=True, protected_guests=[])
 
     def test_every_existing_volume_field_except_declared_backup_is_immutable(self):
+        """Reject changes to retained mount identity, options, order or capacity."""
         changes = {'path': '/srv/other', 'size': '9G', 'volume': 'local-zfs:subvol-6100-other',
                    'path_in_datastore': 'other', 'replicate': False, 'acl': True, 'quota': True,
                    'read_only': True, 'shared': True, 'mount_options': ['bind'], 'extra': 'sentinel'}
@@ -71,6 +78,7 @@ class DeclaredMountDriftTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.check(value)
 
     def test_wrong_stage_owner_pool_slot_identity_options_and_unknowns_refuse(self):
+        """Refuse a prepared stage with foreign ownership, shape or unknown metadata."""
         changes = {'path': '/srv/foreign', 'size': '8G', 'volume': 'local-zfs:subvol-6101-disk-2',
                    'path_in_datastore': 'local-zfs:subvol-6100-disk-3', 'backup': True,
                    'replicate': False, 'acl': True, 'quota': True, 'read_only': True,
@@ -91,6 +99,7 @@ class DeclaredMountDriftTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.check(value)
 
     def test_nonmount_drift_replacements_and_missing_selection_stay_refused(self):
+        """Keep unrelated drift, replacement and missing operational selection blocked."""
         for field, new in [('protection', False), ('disk', []), ('memory', [{'dedicated': 1}]),
                            ('node_name', 'foreign'), ('id', 'foreign')]:
             value = self.plan(); value['resource_drift'][0]['change']['after'][field] = new
@@ -103,6 +112,7 @@ class DeclaredMountDriftTests(unittest.TestCase):
                               backup_staging=selection())
 
     def test_prepared_shape_rejects_nonobjects_and_bad_selected_contract(self):
+        """Reject malformed stage declarations and provider mount identities."""
         for row, selected, vmid in [(None, selection(), 6100), (mount(2), None, 6100),
                                     (mount(2), selection(), True), (mount(2), {}, 6100)]:
             with self.subTest(row=row, selected=selected, vmid=vmid):
@@ -110,6 +120,7 @@ class DeclaredMountDriftTests(unittest.TestCase):
         self.assertFalse(policy.declared_backup_drift([], [mount(2)], None, selection(), 6100))
 
     def test_fresh_allocations_defer_only_provider_computed_names(self):
+        """Allow fresh computed datastore names while refusing unknown authored fields."""
         for rows in ([mount(2)], [mount(1, backup=True), mount(2)]):
             value = fixture(); change = value['resource_changes'][0]['change']
             allocated = [{k: v for k, v in row.items() if k != 'path_in_datastore'} for row in rows]

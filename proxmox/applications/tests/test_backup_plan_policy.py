@@ -32,6 +32,7 @@ class BackupPlanTests(unittest.TestCase):
             self.assertFalse(policy.staging_mount(new,bad))
 
     def test_real_provider_caller_inspects_new_mount_before_mocked_apply_only(self):
+        """Check the real provider caller's staging inspection order around fake apply."""
         from unittest.mock import patch
         import deployment_inputs
         import proxmox_guest as provider

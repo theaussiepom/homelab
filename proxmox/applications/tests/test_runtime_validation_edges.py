@@ -54,6 +54,7 @@ class ValidationEdges(unittest.TestCase):
 
 
     def test_proxmox_api_read_stays_on_the_declared_tls_endpoint(self):
+        """Keep API reads on the pinned TLS endpoint and the exact allowed path set."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             token = root / "token"

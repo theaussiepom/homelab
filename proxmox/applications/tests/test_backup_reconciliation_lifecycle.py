@@ -31,6 +31,7 @@ IS_ANCESTOR = commands.is_ancestor
 
 class BackupReconciliationLifecycleTests(unittest.TestCase):
     def setUp(self):
+        """Create an isolated real-source fixture with fictional runtime boundaries."""
         self.fixture = fixture_module.DeploymentIntegrationTests(); self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
         self.root = self.fixture.root; self.work = self.fixture.state/'610'
@@ -51,6 +52,7 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
         self.applies = []; self.remote = []; self.failure = None
 
     def publish(self, *, backup, data, job=True, protect_data=True):
+        """Compile a selected backup variation into the fixture's actual guest packet."""
         source = copy.deepcopy(self.source)
         volumes = source['guests']['resolver']['volumes']
         if data:
@@ -70,6 +72,7 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
         os.environ['GITHUB_SHA'] = self.revisions[1 if backup else 0]
 
     def allocated(self, cfg):
+        """Project declared volume order into fictional provider-allocated identities."""
         return [{'path': cfg['guest']['volumes'][name]['path'],
                  'size': str(cfg['guest']['volumes'][name]['size_gib'])+'G',
                  'volume': 'local-zfs:subvol-610-disk-'+str(index+1),
@@ -79,6 +82,7 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
                 for index, name in enumerate(cfg['guest']['volume_order'])]
 
     def seed(self, cfg, site, work, operation, expected, **kwargs):
+        """Complete the fixture infrastructure writer with normalized owned mount state."""
         result = self.fixture.infrastructure(cfg, site, work, operation, expected, **kwargs)
         state = read_json(work/'terraform.tfstate', private=True)
         state['resources'][0]['instances'][0]['attributes']['mount_point'] = self.allocated(cfg)
@@ -86,10 +90,12 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
         return result
 
     def ordinary(self):
+        """Execute every ordinary deployment phase through the actual attempt machinery."""
         return [deploy.run(phase, self.fixture.packet, inputs=self.fixture.inputs, environment={})
                 for phase in ['infrastructure', *self.cfg['deployment']['phases']]]
 
     def prepare_prior(self, data):
+        """Earn and preserve a genuine fixture success before selecting enrollment."""
         self.publish(backup=False, data=data)
         with patch.object(proxmox_guest, 'infrastructure', side_effect=self.seed): self.ordinary()
         self.previous = read_json(self.work/'ordinary-complete.json', private=True)
@@ -100,6 +106,7 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
         self.publish(backup=True, data=data)
 
     def plan(self):
+        """Return fictional CREATE or refreshed no-op plans for the selected packet."""
         if not (self.work/'terraform.tfstate').exists():
             value = fresh_plan()
             for row in value['resource_changes']:
@@ -126,6 +133,7 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
         return value
 
     def tofu(self, argv, environment, log):
+        """Simulate saved-plan and state writes without invoking a provider or target."""
         if 'plan' in argv: write_new(log.parent/'guest.tfplan', b'fictional saved provider plan')
         if 'apply' in argv:
             self.applies.append(log.parent.name)
@@ -143,6 +151,7 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
             write_bytes(self.work/'terraform.tfstate', encoded(state))
 
     def api(self, path):
+        """Serve only the fixed synthetic storage, volume-info and active-config reads."""
         self.remote.append(path)
         mounts = self.allocated(self.cfg)
         if path.endswith('/config?current=1'):
@@ -159,6 +168,7 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
                 'size': self.cfg['app']['backup']['job']['staging']['size_bytes']}
 
     def ssh(self, argv, environment, target, **kwargs):
+        """Emit a closed fictional proof while checking the exact mounted-probe command."""
         self.assertEqual(kwargs['input_bytes'], backup_staging.MOUNTED_SCRIPT)
         first = argv[-1].endswith(' true')
         source = 'rpool/data/'+self.allocated(self.cfg)[-1]['volume'].split(':')[1]
@@ -172,10 +182,12 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
         self.probes.append((target.name, first))
 
     def ansible(self, argv, environment, log):
+        """Fake PBS configuration while delegating other local fixture app phases."""
         if log.parent.name != 'pbs-agent': return self.fixture.ansible(argv, environment, log)
         write_new(log, b'example: ok=1 changed=0 failed=0\n')
 
     def boundaries(self):
+        """Replace native work while retaining real compiler, policy and ownership readers."""
         from contextlib import ExitStack
         stack = ExitStack(); self.addCleanup(stack.close)
         for target, values in [
@@ -193,12 +205,15 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
         return stack
 
     def test_empty_prior_mount_first_enrollment_then_owned_nonempty_repeat(self):
+        """Enroll from an empty prior mount list and admit a later owned repeat."""
         self.progression(False)
 
     def test_preserved_data_mount_and_order_first_enrollment_then_repeat(self):
+        """Preserve retained data mounts and their order across enrollment and repeat."""
         self.progression(True)
 
     def test_valid_fresh_allocation_verifies_after_creation_then_owned_repeat(self):
+        """Verify a fresh allocated stage after creation and retain ownership on repeat."""
         self.publish(backup=True, data=False)
         with self.boundaries():
             self.ordinary()
@@ -210,6 +225,7 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
         self.assertFalse((self.work/'ORDINARY-HOLD.json').exists())
 
     def test_unsupported_pool_refuses_fresh_before_creation_or_apply(self):
+        """Refuse unsupported fresh staging storage before resource creation or apply."""
         self.publish(backup=True, data=False); self.failure = 'pool'
         with self.boundaries():
             with self.assertRaises(ValueError): deploy.run('infrastructure', self.fixture.packet, inputs=self.fixture.inputs)
@@ -218,9 +234,11 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
         self.assertEqual(self.probes, [])
 
     def test_unsupported_pool_refuses_existing_before_apply(self):
+        """Refuse unsupported retained staging storage without applying a plan."""
         self.failure_case('pool', expected_applies=0)
 
     def test_backup_bit_only_reconciliation_has_current_operational_proof_then_noop(self):
+        """Commit backup-bit-only drift with active stage proof and then admit no-op repeat."""
         self.prepare_prior(True)
         with self.boundaries(), patch.dict(os.environ, {'GITHUB_RUN_ID': '102', 'GITHUB_RUN_NUMBER': '11'}):
             self.ordinary()
@@ -235,6 +253,7 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
             self.assertEqual(len(self.applies), 2)
 
     def test_backup_bit_drift_without_operational_job_retains_prior_refusal(self):
+        """Refuse backup-bit drift without broadening the no-job runtime contract."""
         self.prepare_prior(True)
         self.publish(backup=True, data=True, job=False, protect_data=False)
         with self.boundaries(), patch.dict(os.environ, {'GITHUB_RUN_ID': '102', 'GITHUB_RUN_NUMBER': '11'}):
@@ -245,6 +264,7 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
         self.assertEqual((self.work/'ordinary-complete.json').read_bytes(), self.canonical)
 
     def progression(self, data):
+        """Check state-only enrollment success, immutable old evidence and a later repeat."""
         self.prepare_prior(data)
         with self.boundaries(), patch.dict(os.environ, {'GITHUB_RUN_ID': '102', 'GITHUB_RUN_NUMBER': '11'}):
             self.ordinary()
@@ -260,12 +280,15 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
         self.assertEqual(self.history, {p: (p.stat().st_ino, p.read_bytes()) for p in self.history})
 
     def test_failed_first_identity_check_retains_canonical_state_hold_and_no_apply(self):
+        """Retain the prior canonical generation and HOLD when pre-apply identity fails."""
         self.failure_case('api', expected_applies=0)
 
     def test_failed_post_apply_identity_retains_hold_and_never_fabricates_success(self):
+        """Preserve failed evidence without a success receipt after post-apply mismatch."""
         self.failure_case('after', expected_applies=1)
 
     def failure_case(self, failure, expected_applies):
+        """Exercise a controlled failure with real attempt and receipt preservation."""
         self.prepare_prior(True); self.failure = failure
         with self.boundaries(), patch.dict(os.environ, {'GITHUB_RUN_ID': '102', 'GITHUB_RUN_NUMBER': '11'}):
             with self.assertRaises(ValueError): deploy.run('infrastructure', self.fixture.packet, inputs=self.fixture.inputs)

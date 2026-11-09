@@ -15,12 +15,15 @@ import backup_staging
 
 class MountedScriptTests(unittest.TestCase):
     def exercise(self, **case):
+        """Execute the exact mounted probe in a fictional FD and mount namespace."""
         descriptors = {}; closed = set(); counts = {}; reads = {}; printed = []
         def open_(path, flags, *, dir_fd=None):
+            """Allocate fictional descriptors and model a refused symlink traversal."""
             if case.get('symlink') and path == 'stage': raise OSError('synthetic symlink refusal')
             if dir_fd is not None: path = descriptors[dir_fd].rstrip('/')+'/'+path
             fd = len(descriptors)+1; descriptors[fd] = path; return fd
         def metadata(path):
+            """Return controlled ownership and inode changes for fictional paths."""
             counts[path] = counts.get(path, 0)+1
             is_stage = path == '/srv/stage'
             return SimpleNamespace(st_dev=2 if is_stage else 1,
@@ -29,11 +32,13 @@ class MountedScriptTests(unittest.TestCase):
                 st_uid=1 if case.get('foreign') and path == '/srv' else 0, st_gid=0,
                 st_mtime_ns=101, st_ctime_ns=102)
         def stat_(name, *, dir_fd, follow_symlinks):
+            """Check no-follow path readback and simulate a replaced directory link."""
             self.assertFalse(follow_symlinks)
             result = metadata(descriptors[dir_fd].rstrip('/')+'/'+name)
             if case.get('link_changes') and name == 'stage': result.st_ino += 1
             return result
         def read_(fd, bound):
+            """Supply bounded fictional mountinfo and FD mount-identity observations."""
             path = descriptors[fd]; reads[path] = reads.get(path, 0)+1
             if case.get('oversize'): return b'x'*bound
             if path == '/proc/self/mountinfo':
@@ -56,6 +61,7 @@ class MountedScriptTests(unittest.TestCase):
             if case.get('same_parent') and target == '/srv': value = 2
             return (('mnt_id: '+str(value)+'\n')* (2 if case.get('duplicate_fdinfo') else 1)).encode()
         def entries(fd):
+            """Describe controlled stage children without reading any real directory."""
             names = case.get('children', [])
             return nullcontext([SimpleNamespace(name=name, stat=lambda follow_symlinks: SimpleNamespace(
                 st_mode=(stat.S_IFLNK if case.get('child_link') else stat.S_IFDIR)|
@@ -68,6 +74,7 @@ class MountedScriptTests(unittest.TestCase):
             geteuid=lambda: 1000 if case.get('wrong_actor') else 0, major=os.major, minor=os.minor)
         namespace = dict(vars(builtins))
         def imported(name, *args, **kwargs):
+            """Inject only the fictional OS and argument interfaces into the exact probe."""
             if name == 'os': return fake
             if name == 'sys': return SimpleNamespace(argv=['-', '/srv/stage', 'rpool/data/subvol-6100-disk-2',
                                                           str(4*1024**3), 'false' if case.get('repeat') else 'true'])
@@ -81,10 +88,12 @@ class MountedScriptTests(unittest.TestCase):
         return json.loads(printed[0])
 
     def test_first_zfs_root_is_empty_and_later_owned_private_history_passes(self):
+        """Accept an empty first root and the permitted later private history directory."""
         self.assertEqual(self.exercise()['device'], [0, 2])
         self.exercise(repeat=True, children=['.homelab-backup'])
 
     def test_foreign_ambiguous_unstable_or_nonempty_first_mount_refuses(self):
+        """Refuse foreign, unstable, nested, writable or nonempty first-use stages."""
         cases = [{'wrong_actor': True}, {'symlink': True}, {'foreign': True}, {'writable': True},
                  {'inode_changes': True}, {'link_changes': True}, {'oversize': True}, {'malformed': True},
                  {'rootfs': True}, {'dataset_changes': True}, {'wrong_type': True}, {'bind_subdirectory': True},
