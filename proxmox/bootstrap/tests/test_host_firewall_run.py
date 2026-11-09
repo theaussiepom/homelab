@@ -126,6 +126,22 @@ class CallerControls(unittest.TestCase):
         f.source.write_text(json.dumps(f.c));f.final=False
         self.assertEqual(f.execute()['status'],'passed')
         self.assertFalse(f.api.b['cluster']['enabled'])
+
+    def test_added_host_address_allowance_keeps_existing_state_target_and_management_policy(self):
+        f=self.fixture();self.assertEqual(f.execute()['status'],'passed')
+        previous=deepcopy(f.api.b['rules']);target={key:f.c[key]for key in r.TARGET}
+        f.c=deepcopy(f.c)
+        f.c['allowances'].append({'source':'198.18.40.33/32','destination':'198.18.40.10',
+            'port':8006,'comment':'Application ingress to host UI'})
+        f.source.write_text(json.dumps(f.c));f.final=False
+        self.assertEqual(f.execute(),{'status':'passed','api_verified':True,
+                                      'provider_noop':True,'kernel_verified':False})
+        self.assertEqual({key:f.c[key]for key in r.TARGET},target)
+        self.assertEqual(f.api.b['rules'][:-1],previous)
+        self.assertEqual(f.api.b['rules'][-1]['dest'],'198.18.40.10/32')
+        self.assertEqual(f.applies,2)
+        self.assertEqual({item['type']+'.'+item['name']for item in f.state['resources']},
+                         {h.HOST,h.CLUSTER})
     def test_missing_state_wrong_target_existing_hold_and_environment_refuse_before_api(self):
         for case in ('missing-state','target','hold','work-path','platform'):
             f=self.fixture()

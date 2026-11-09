@@ -5,9 +5,10 @@ variable "policy" {
     node         = string
     host_address = string
     allowances = list(object({
-      source  = string
-      port    = number
-      comment = string
+      source      = string
+      destination = optional(string)
+      port        = number
+      comment     = string
     }))
     cluster = object({
       enabled        = bool

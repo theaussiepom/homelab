@@ -17,7 +17,7 @@ resource "proxmox_virtual_environment_firewall_rules" "host" {
       enabled        = true
       proto          = "tcp"
       source         = rule.value.source
-      dest           = "${var.policy.host_address}/32"
+      dest           = "${coalesce(rule.value.destination, var.policy.host_address)}/32"
       dport          = tostring(rule.value.port)
       comment        = rule.value.comment
       iface          = ""
