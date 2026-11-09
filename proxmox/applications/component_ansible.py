@@ -170,6 +170,9 @@ def variables(cfg, phase, *, payload=None, previously_owned=False, activate_back
             component_initial_compose_source=str(payload.directory/'initial-compose.yml'))
     if app_id in native:
         app['database']=native[app_id]['identity']
+        if selected['adapter']=='influxdb':
+            import component_native
+            result['component_native_frontend']=component_native.web_frontend(selected)
         if selected.get('database_administrators'):
             app['database_administrators']=selected['database_administrators']
         result['component_native_services']=native[app_id]['services']

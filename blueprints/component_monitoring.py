@@ -75,7 +75,9 @@ def bind(resolver, exposures):
         exposure = exposures.resolved[application['origin']['exposure']]
         ingress = resolver.apps[exposure['ingress_target']['app']]
         guest = resolver.guests[ingress['guest']]
-        guest['rules'].append(rule('out', source_address(guest, address), address, 8080))
+        web = exposure['target']
+        guest['rules'].append(rule('out', source_address(guest, web['address']),
+                                   web['address'], web['port']))
     members = []
     for guest_id, guest in resolver.guests.items():
         with at('guests', guest_id, 'monitoring'):

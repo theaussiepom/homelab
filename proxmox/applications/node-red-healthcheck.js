@@ -1,7 +1,7 @@
 "use strict";
 const http = require("node:http");
 const settings = require("/config/settings.js");
-const request = http.get({hostname: "127.0.0.1", port: settings.uiPort || 1880,
+const request = http.get({hostname: process.env.NODE_RED_WEB_ADDRESS || "127.0.0.1", port: settings.uiPort || 1880,
     path: "/auth/login", timeout: 4000}, response => {
     let body = "";
     response.setEncoding("utf8");

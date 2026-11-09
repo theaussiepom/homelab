@@ -199,6 +199,8 @@ jobs:
             -v "$PWD:/src:ro" -v "$RUNNER_TEMP/application-coverage:/coverage" \
             -e HOME=/tmp -e HOMELAB_COVERAGE_OUTPUT=/coverage/report -e GITHUB_SHA homelab-app-test \
             sh /src/proxmox/applications/tests/check.sh
+      - name: Verify separate native web frontend
+        run: python3 proxmox/applications/tests/influx_frontend_fixture.py
       - name: Verify PBS archive exclusions with GNU tar
         run: python3 proxmox/applications/tests/backup_tar_fixture.py
       - name: Verify Linux PBS staging preimages

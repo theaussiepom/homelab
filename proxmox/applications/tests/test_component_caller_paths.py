@@ -99,6 +99,22 @@ class CallerCase(unittest.TestCase):
 
 
 class AnsibleCallerTests(CallerCase):
+    def test_selected_native_influx_phase_derives_only_its_owned_web_units(self):
+        import component_native
+        from test_separate_web_listeners import influx
+        for split in (False, True):
+            selected=influx()
+            selected['software_selection']['images']={}
+            if not split:selected['role_addresses'].pop('web')
+            cfg,app=self.case('influxdb',selected)
+            write_new(self.directory/'component-native.json',encoded({'selected':{
+                'identity':{'user':'influxdb'},'services':['influxdb']}}))
+            payload=self.selected_payload()
+            values=ansible.variables(cfg,'selected',payload=payload)
+            self.assertEqual(values['component_native_frontend'],component_native.web_frontend(app))
+            self.assertEqual(values['component_native_frontend']['enabled'],split)
+            self.assertNotIn('component_compose_file',values)
+
     def test_native_preparation_and_selected_administrator_metadata_have_no_compose_dependency(self):
         for selected_admin in (False,True):
             with self.subTest(administrator=selected_admin):

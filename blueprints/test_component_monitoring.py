@@ -33,11 +33,21 @@ def fixture():
             'app_profiles': {key: {'monitoring': {'profile': key}} for key in values}},
         endpoint=lambda ref: {'protocol': 'tcp', 'port': 10051, 'address': '198.18.20.10'}
             if 'app' in ref else {'address': '198.18.20.2'})
-    exposures = SimpleNamespace(resolved={'monitoring': {'ingress_target': {'app': 'proxy'}}})
+    exposures = SimpleNamespace(resolved={'monitoring': {'ingress_target': {'app': 'proxy'},
+        'target': {'address': '198.18.20.10', 'port': 8080}}})
     return resolver, exposures
 
 
 class MonitoringTests(unittest.TestCase):
+    def test_web_grant_follows_the_web_endpoint_without_moving_agent_transport(self):
+        resolver, exposures = fixture()
+        resolver.guests['ingress']['provider_interfaces'].append({'ipv4': '198.18.40.13/24'})
+        exposures.resolved['monitoring']['target']['address'] = '198.18.40.10'
+        monitoring.bind(resolver, exposures)
+        self.assertEqual(resolver.guests['ingress']['rules'][0], monitoring.rule(
+            'out', '198.18.40.13', '198.18.40.10', 8080))
+        self.assertEqual(resolver.guests['database']['monitoring']['server_active'], '198.18.20.10:10051')
+
     def test_profile_and_reference_are_closed_without_commands_or_secrets(self):
         monitoring.profile({'type': 'zabbix-agent', 'profiles': ['linux', 'docker']})
         monitoring.reference({'profile': 'linux'})

@@ -53,6 +53,8 @@ def _music(app, compose_file):
     address = music_assistant.address(app['role_addresses']['web'])
     source = str(music_assistant.data_path(_data(app, '/data')))
     argv = ['python3', ROOT + 'music_assistant.py', '--address', address]
+    if 'stream' in app['role_addresses']:
+        argv += ['--stream-address', music_assistant.address(app['role_addresses']['stream'])]
     if source != str(music_assistant.DATA):
         argv += ['--data-root', source]
     return {'helpers': [_helper('music_assistant.py')], 'music_state': {'argv': argv}}

@@ -38,7 +38,12 @@ Object.assign(auth.strategy.options, {
     clientID: client,
     callbackURL: `${external}/auth/strategy/callback/`
 });
-// The retained configuration binds the former Docker bridge address. The new
-// guest firewall restricts access; loopback also remains available for probes.
-settings.uiHost = "0.0.0.0";
+// The bound profile supplies this non-secret address from its validated web
+// role. Legacy profiles keep their existing wildcard behaviour.
+const webAddress = process.env.NODE_RED_WEB_ADDRESS;
+if (webAddress !== undefined && (require("node:net").isIPv4(webAddress) !== true ||
+    webAddress === "0.0.0.0" || /^(127|169\.254|22[4-9]|23[0-9])\./.test(webAddress))) {
+    throw new Error("Select an assigned Node-RED web IPv4 address");
+}
+settings.uiHost = webAddress === undefined ? "0.0.0.0" : webAddress;
 module.exports = settings;
