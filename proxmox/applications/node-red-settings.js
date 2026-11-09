@@ -40,9 +40,12 @@ Object.assign(auth.strategy.options, {
 });
 // The bound profile supplies this non-secret address from its validated web
 // role. Legacy profiles keep their existing wildcard behaviour.
+const net = require("node:net");
+const unassignable = new net.BlockList();
+for (const [network, prefix] of [["0.0.0.0", 8], ["127.0.0.0", 8], ["169.254.0.0", 16],
+    ["224.0.0.0", 4], ["240.0.0.0", 4]]) unassignable.addSubnet(network, prefix, "ipv4");
 const webAddress = process.env.NODE_RED_WEB_ADDRESS;
-if (webAddress !== undefined && (require("node:net").isIPv4(webAddress) !== true ||
-    webAddress === "0.0.0.0" || /^(127|169\.254|22[4-9]|23[0-9])\./.test(webAddress))) {
+if (webAddress !== undefined && (!net.isIPv4(webAddress) || unassignable.check(webAddress, "ipv4"))) {
     throw new Error("Select an assigned Node-RED web IPv4 address");
 }
 settings.uiHost = webAddress === undefined ? "0.0.0.0" : webAddress;
