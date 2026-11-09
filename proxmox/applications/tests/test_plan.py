@@ -459,9 +459,19 @@ class OptionalEmptyRefreshTests(unittest.TestCase):
                 plan.check_plan(value, "pve-lab", 6100, existing=True, protected_guests=[9900,9914,9915,9920])
         malformed = {"disk": [None, {}, {"mount_options": False}], "features": None}
         self.assertEqual(plan.refresh_values(malformed), malformed)
+
+    def test_device_refresh_matches_current_projection_and_preserves_ownership(self):
+        """Distinguish equivalent empty devices from an unowned device addition."""
         value = self.observed_plan(addresses=False)
         change = value["resource_drift"][0]["change"]
         change["before"] = copy.deepcopy(change["after"])
         change["before"]["device_passthrough"] = None
         change["after"]["device_passthrough"] = []
+        self.assertFalse(plan.owned_resource_drift(value["resource_drift"], value['resource_changes'], "pve-lab", 6100, None))
+        projection = value["resource_changes"][0]["change"]
+        projection.update(actions=["no-op"], before=copy.deepcopy(change["after"]),
+                          after=copy.deepcopy(change["after"]))
+        self.assertTrue(plan.owned_resource_drift(value["resource_drift"], value['resource_changes'], "pve-lab", 6100, None))
+        change["after"]["device_passthrough"] = [plan.device_spec('/dev/serial/by-id/usb-Fixture')]
+        projection.update(before=copy.deepcopy(change["after"]), after=copy.deepcopy(change["after"]))
         self.assertFalse(plan.owned_resource_drift(value["resource_drift"], value['resource_changes'], "pve-lab", 6100, None))
