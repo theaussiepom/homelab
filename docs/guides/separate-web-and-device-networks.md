@@ -31,15 +31,23 @@ Because its web UI and database API use the same authenticated HTTP server,
 this adds a fixed local systemd socket proxy, not another database or a
 read-only UI. The database listener/configuration/data stay on `service`.
 The two roles must use different concrete IPv4 addresses and exactly the
-`web` and `backend` TCP8086 interface listeners. The app owns only
+`web` and `backend` interface listeners on TCP port 8086. The app owns only
 `homelab-influxdb-web.socket` and `homelab-influxdb-web.service`; existing foreign
 paths are refused. The socket starts after the network-ready gate and database,
 using explicit late-start ordering rather than the early sockets target.
 The existing `/usr/lib/systemd/systemd-socket-proxyd` must be executable.
 Removing the optional role retires only the owned frontend definitions.
 
+Restrict the web socket to explicitly approved clients with the guest firewall;
+the socket unit does not filter sources. InfluxDB sees the proxy's local
+connection, not the original client address, so database source-address rules
+cannot distinguish those web clients. Keep InfluxDB authentication enabled and
+review the effective firewall sources, destination and port before deployment.
+
 The monitoring component resolves a published Zabbix web grant through its
 actual exposure endpoint. Agent transport stays on the separate server endpoint.
+Review the resulting ingress-to-web address and port before deployment; a unit
+test of rule selection does not authorize a live network grant.
 
 Do not route MQTT or Thread through an HTTP proxy. A browser-based MQTT Explorer
 can listen on the application network while its server connects separately to

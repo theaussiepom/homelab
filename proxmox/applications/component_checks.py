@@ -99,6 +99,7 @@ def _mariadb(app, compose_file):
 
 
 def _influxdb(app, compose_file):
+    """Check the database and optional web listeners without a data query."""
     address, version = _native_address(app), _native_version(app)
     frontend = component_native.web_frontend(app)
     if not frontend['enabled']:
@@ -135,6 +136,7 @@ def _unbound(app, compose_file):
 
 
 def _bound_web_checks(app, port):
+    """Require the selected web socket and reject wildcard or legacy binds."""
     if not any(row.get('bind')=='interface' for row in app['listeners'].values()):
         return []
     address=_ipv4(app['role_addresses']['web'])
@@ -144,6 +146,7 @@ def _bound_web_checks(app, port):
 
 
 def _homeassistant(app, compose_file):
+    """Keep the local HA challenge probe and optional bound-socket check."""
     _listener(app, 'homeassistant', 8123, 'host')
     require(app['lifecycle'] in ('retained', 'fresh'), 'component.health-lifecycle')
     retained = app['lifecycle'] == 'retained'
@@ -154,6 +157,7 @@ def _homeassistant(app, compose_file):
 
 
 def _node_red(app, compose_file):
+    """Probe the declared Node-RED web address and optional socket binding."""
     _listener(app, 'node_red', 1880, 'host')
     require(app['lifecycle'] in ('retained', 'fresh'), 'component.health-lifecycle')
     retained = app['lifecycle'] == 'retained'
@@ -264,6 +268,7 @@ def _mqtt_explorer(app, compose_file):
 
 
 def _music_assistant(app, compose_file):
+    """Check web and stream roles separately, then the existing HTTPS route."""
     require(all(any(r.get('protocol')=='tcp' and r.get('namespace')=='host' and r.get('port')==port
                     for r in app['listeners'].values()) for port in (8095,8097)),'component.health-listener')
     address=_ipv4(app['role_addresses']['web']);origin,host,ingress,public=_public(app)

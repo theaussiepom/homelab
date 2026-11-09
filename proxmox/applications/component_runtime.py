@@ -283,6 +283,7 @@ def _pihole(app, guest):
 
 
 def _music_assistant(app, guest):
+    """Render Music listeners while retaining the selected provider identity."""
     require(app['lifecycle'] == 'retained',
             'Fresh Music Assistant commissioning is not implemented')
     require(not app.get('properties'), 'Use only supported Music Assistant properties')
@@ -421,6 +422,7 @@ def _zabbix(app, guest):
 
 
 def _node_red(app, guest):
+    """Render Node-RED without replacing its retained authentication wrappers."""
     require(not app.get('properties'), 'Use only supported Node-RED properties')
     service = _service(app, 'node_red', guest)
     require(len(app['listeners']) == 1 and all(row['service'] == 'node_red'
@@ -433,7 +435,11 @@ def _node_red(app, guest):
     require(retained or app['lifecycle'] == 'fresh', 'Select a supported Node-RED lifecycle')
     if next(iter(app['listeners'].values()))['bind'] == 'interface':
         require(retained, 'A bound Node-RED listener requires its retained settings wrapper')
-        service['environment']['NODE_RED_WEB_ADDRESS'] = music.address(app['role_addresses']['web'])
+        selected = music.address(app['role_addresses']['web'])
+        listener = next(iter(app['listeners'].values()))
+        require(listener.get('interface') == 'web' and listener.get('actual_bind') == selected,
+                'Bind Node-RED only to its selected web role')
+        service['environment']['NODE_RED_WEB_ADDRESS'] = selected
     if retained:
         require(set(storage) == {'data', 'config', 'settings', 'healthcheck'}
                 and storage['settings']['read_only'] is True and storage['healthcheck']['read_only'] is True,

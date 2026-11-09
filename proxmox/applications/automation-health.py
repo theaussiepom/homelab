@@ -77,6 +77,7 @@ def mqtt(path=Path('/srv/homelab/data/homeassistant/config/.storage/core.config_
 
 
 def http(port, path, address='127.0.0.1'):
+    """Probe one bounded local HTTP response without a proxy or redirects."""
     opener = build_opener(ProxyHandler({}), NoRedirect())
     try:
         with opener.open(f'http://{address}:{port}{path}', timeout=5) as response:
@@ -169,6 +170,7 @@ def selected_probe(service, mqtt_probe):
 
 
 def web_address(service, address):
+    """Validate the optional concrete address for Node-RED probes only."""
     if address is None:
         return None
     if service not in ('node_red','node_red-fresh'):
@@ -180,6 +182,7 @@ def web_address(service, address):
 
 
 def probe(service, mqtt_probe=None, address=None):
+    """Check the selected service boundary without submitting login credentials."""
     selected=selected_probe(service,mqtt_probe)
     address=web_address(service,address)
     web_options={} if address is None else {'address':address}
@@ -205,6 +208,7 @@ def probe(service, mqtt_probe=None, address=None):
 
 
 def run(service, mqtt_probe=None, address=None):
+    """Retry read-only probes to the fixed deadline, then report or refuse."""
     selected_probe(service,mqtt_probe)
     address=web_address(service,address)
     deadline = time.monotonic() + 180

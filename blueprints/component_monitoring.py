@@ -60,6 +60,7 @@ def rule(direction, source, destination, port):
 
 
 def bind(resolver, exposures):
+    """Expand the selected monitoring edges without changing transport roles."""
     selected = server(resolver)
     if selected is None:
         return None

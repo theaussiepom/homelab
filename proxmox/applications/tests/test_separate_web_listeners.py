@@ -19,6 +19,7 @@ from test_component_music import descriptor, settings, make_data
 
 
 def influx():
+    """Build a synthetic native API with a distinct optional web listener."""
     value = native_app('influxdb')
     value['role_addresses']['web'] = '198.18.40.26'
     value['listeners'] = {
@@ -30,7 +31,17 @@ def influx():
 
 
 class InfluxFrontendTests(unittest.TestCase):
+    def test_missing_database_role_refuses_clearly_before_native_rendering(self):
+        """A web role cannot hide the missing database target behind KeyError."""
+        value = influx()
+        value['role_addresses'].pop('service')
+        for call in (native.web_frontend, native.render):
+            with self.subTest(caller=call.__name__), self.assertRaisesRegex(
+                    ValueError, 'Resolve the native database service role'):
+                call(value)
+
     def test_real_ansible_ownership_guard_refuses_foreign_or_writable_unit_paths(self):
+        """Evaluate the actual ownership guard with valid and foreign path facts."""
         import yaml
         from ansible.parsing.dataloader import DataLoader
         from ansible.template import Templar,trust_as_template
@@ -47,6 +58,7 @@ class InfluxFrontendTests(unittest.TestCase):
                 self.assertEqual(templar.evaluate_expression(trust_as_template(expression)),expected)
 
     def test_health_uses_each_explicit_listener_without_a_setup_or_data_query(self):
+        """Keep unauthenticated health probes separate from setup and data APIs."""
         rows=checks._influxdb(influx(),None)
         self.assertEqual(len(rows),5)
         self.assertIn('198.18.33.26:8086/health',rows[1]['argv'][-1])
@@ -54,6 +66,7 @@ class InfluxFrontendTests(unittest.TestCase):
         self.assertNotIn('Authorization',repr(rows))
 
     def test_optional_frontend_keeps_every_native_file_data_path_and_identity_exact(self):
+        """Preserve original native output and check only the two owned units."""
         original = native_app('influxdb')
         self.assertEqual(native.web_frontend(original), {'enabled': False, 'files': []})
         value = influx(); before = copy.deepcopy(value)
@@ -74,6 +87,7 @@ class InfluxFrontendTests(unittest.TestCase):
         self.assertNotIn('0.0.0.0', ''.join(units.values()))
 
     def test_wrong_owner_addresses_protocols_names_and_publications_refuse(self):
+        """Reject malformed frontend bindings without creating systemd units."""
         changes = [lambda v: v.update(adapter='postgresql'),
                    lambda v: v['role_addresses'].update(web='0.0.0.0'),
                    lambda v: v['role_addresses'].update(web=v['role_addresses']['service']),
@@ -91,6 +105,7 @@ class InfluxFrontendTests(unittest.TestCase):
 
 class MusicSplitTests(unittest.TestCase):
     def test_split_hook_and_cli_preserve_default_compatibility_and_pass_the_stream_role(self):
+        """Pass the selected stream role through the hook and real helper CLI."""
         import io
         from contextlib import redirect_stdout
         from test_component_app_hooks import app,describe
@@ -102,6 +117,7 @@ class MusicSplitTests(unittest.TestCase):
         verify.assert_called_once_with(music.DATA,'198.18.41.9','198.18.100.40')
 
     def test_split_composition_keeps_owned_service_except_probes_and_stream_address(self):
+        """Render split Music roles without accepting a mismatched stream bind."""
         value = descriptor(); value['role_addresses']['stream'] = '198.18.100.40'
         value['listeners']['8097'].update(interface='stream', actual_bind='198.18.100.40')
         with patch.object(runtime, '_service', return_value={}) as builder:
@@ -114,6 +130,7 @@ class MusicSplitTests(unittest.TestCase):
         with self.assertRaises(ValueError): runtime._music_assistant(value, {})
 
     def test_retained_split_settings_validate_without_rewriting_any_data(self):
+        """Check selected Music settings while preserving every retained byte."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve(); make_data(root)
             value = settings(); value['core']['streams']['values'].update(
@@ -127,9 +144,24 @@ class MusicSplitTests(unittest.TestCase):
 
 
 class BoundAutomationTests(unittest.TestCase):
+    def test_node_bound_listener_must_match_its_web_role(self):
+        """Reject a listener on another interface or actual bind address."""
+        from test_component_handlers import case, base_service
+        for change in ({'interface': 'other'}, {'actual_bind': '198.18.30.21'},
+                       {'interface': None}, {'actual_bind': None}):
+            value = case('node_red')
+            app = value['app']
+            app['role_addresses'] = {'web': '198.18.40.21'}
+            app['listeners']['web'].update({'bind': 'interface', 'interface': 'web',
+                                          'actual_bind': '198.18.40.21', **change})
+            with self.subTest(change=change), patch.object(runtime, '_service', return_value=base_service()):
+                with self.assertRaisesRegex(ValueError, 'Bind Node-RED only to its selected web role'):
+                    runtime._node_red(app, value['guest'])
+
     def test_node_retained_interface_becomes_owned_nonsecret_environment_and_fresh_refuses(self):
+        """Derive the retained web address while refusing unprepared fresh use."""
         from test_component_handlers import case,base_service
-        value=case('node_red');app=value['app'];app['listeners']['web']['bind']='interface'
+        value=case('node_red');app=value['app'];app['listeners']['web'].update(bind='interface',interface='web')
         app['role_addresses']={'web':'198.18.40.21'}
         app['listeners']['web']['actual_bind']='198.18.40.21'
         with patch.object(runtime,'_service',return_value=base_service()):
@@ -139,6 +171,7 @@ class BoundAutomationTests(unittest.TestCase):
         with self.assertRaises(ValueError):runtime._node_red(app,value['guest'])
 
     def test_bound_web_contract_rejects_an_actual_wildcard_or_legacy_socket(self):
+        """Exercise generated socket checks with allowed and forbidden listeners."""
         import io
         from contextlib import redirect_stdout
         for port in (8123,1880):
@@ -153,6 +186,7 @@ class BoundAutomationTests(unittest.TestCase):
                         with self.assertRaises(AssertionError):exec(row['argv'][-1],{})
 
     def test_bound_health_uses_the_exact_node_address_and_keeps_ha_loopback_probe(self):
+        """Keep HA loopback probing separate from the selected Node-RED address."""
         from test_component_checks import case
         for adapter in ('homeassistant','node_red'):
             app=case(adapter)['app'];app['listeners']['web']['bind']='interface'

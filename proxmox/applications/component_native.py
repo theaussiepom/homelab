@@ -161,6 +161,7 @@ def web_frontend(app):
     selected = {'enabled': False, 'files': []}
     if 'web' not in roles:
         return selected
+    require('service' in roles, 'Resolve the native database service role')
     source, target = _address(roles['web']), _address(roles['service'])
     require(source != target, 'Separate the InfluxDB web and database addresses')
     listeners = app.get('listeners', {})

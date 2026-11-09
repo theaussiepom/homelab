@@ -99,7 +99,21 @@ class CallerCase(unittest.TestCase):
 
 
 class AnsibleCallerTests(CallerCase):
+    def test_native_influx_ansible_refuses_a_missing_database_role(self):
+        """The Ansible caller propagates the native frontend's clear refusal."""
+        from test_separate_web_listeners import influx
+        selected = influx()
+        selected['role_addresses'].pop('service')
+        selected['software_selection']['images'] = {}
+        cfg, _ = self.case('influxdb', selected)
+        write_new(self.directory/'component-native.json', encoded({'selected':{
+            'identity':{'user':'influxdb'}, 'services':['influxdb']}}))
+        payload = self.selected_payload()
+        with self.assertRaisesRegex(ValueError, 'Resolve the native database service role'):
+            ansible.variables(cfg, 'selected', payload=payload)
+
     def test_selected_native_influx_phase_derives_only_its_owned_web_units(self):
+        """Exercise optional frontend derivation through the real Ansible caller."""
         import component_native
         from test_separate_web_listeners import influx
         for split in (False, True):

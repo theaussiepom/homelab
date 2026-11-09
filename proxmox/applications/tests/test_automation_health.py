@@ -453,6 +453,7 @@ class HomeAssistantChallengeTests(unittest.TestCase):
 
 class BoundNodeProbeTests(unittest.TestCase):
     def test_explicit_web_address_cannot_target_another_service_or_unsafe_address(self):
+        """Reject non-Node-RED and unsafe explicit probe destinations."""
         self.assertEqual(health.web_address('node_red', '198.18.40.21'), '198.18.40.21')
         for service,address in [('homeassistant','198.18.40.21'),('node_red','0.0.0.0'),('node_red','127.0.0.1'),('node_red','224.0.0.1'),('node_red','169.254.1.2'),('node_red','198.018.40.21')]:
             with self.subTest(service=service,address=address), self.assertRaises(ValueError):health.web_address(service,address)
@@ -464,6 +465,7 @@ class BoundNodeProbeTests(unittest.TestCase):
         selected.assert_called_once_with('node_red',None,address='198.18.40.21')
 
     def test_cli_rejects_an_unsafe_explicit_address_before_any_probe(self):
+        """Exercise the CLI refusal before an invalid address reaches a probe."""
         import runpy,sys
         source=Path(__file__).resolve().parents[1]/'automation-health.py'
         with patch.object(sys,'argv',[str(source),'node_red','--address','224.0.0.1']),patch('urllib.request.OpenerDirector.open',side_effect=AssertionError('No target access')),self.assertRaises(SystemExit):

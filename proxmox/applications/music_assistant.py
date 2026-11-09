@@ -58,6 +58,7 @@ def configure_service(service, selected, *, data_root=None, stream_address=None)
 
 
 def validate_settings(settings, selected, stream_address=None):
+    """Check retained identity, providers and separately selected socket roles."""
     selected = address(selected)
     stream = selected if stream_address is None else address(stream_address)
     if (not isinstance(settings, dict) or not isinstance(settings.get('server_id'), str)
@@ -100,6 +101,7 @@ def read_file(path, limit, *, directory_fd=None):
 
 
 def check_directory(root, selected, stream_address=None):
+    """Read retained settings and database headers without changing state."""
     if root.is_symlink() or not root.is_dir():
         raise ValueError('Use the separately prepared Music Assistant data directory')
     validate_settings(json.loads(read_file(root / 'settings.json', 4 * 1024 * 1024)), selected, stream_address)
@@ -171,6 +173,7 @@ def check_bound_directory(value, selected, stream_address=None):
 
 
 def main(argv=None):
+    """Validate the declared retained Music directory and report its boundary."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--address', required=True)
     parser.add_argument('--data-root')
