@@ -436,8 +436,12 @@ class HostDeviceTests(unittest.TestCase):
                 },
             },
         }
+        value = existing_fixture()
+        current = value['resource_changes'][0]['change']
+        current.update(before=copy.deepcopy(drift['change']['after']),
+                       after=copy.deepcopy(drift['change']['after']))
         self.assertTrue(
-            plan_policy.allowed_guest_drift([drift], "pve-lab", 6100, selected)
+            plan_policy.owned_resource_drift([drift], value['resource_changes'], "pve-lab", 6100, selected)
         )
         for rows in (
             True,
@@ -447,12 +451,11 @@ class HostDeviceTests(unittest.TestCase):
             [dict(drift, change={"before": {}, "after": {}})],
         ):
             self.assertFalse(
-                plan_policy.allowed_guest_drift(rows, "pve-lab", 6100, selected)
+                plan_policy.owned_resource_drift(rows, value['resource_changes'], "pve-lab", 6100, selected)
             )
         self.assertFalse(
-            plan_policy.allowed_guest_drift([drift], "pve-lab", 6100, None)
+            plan_policy.owned_resource_drift([drift], value['resource_changes'], "pve-lab", 6100, None)
         )
-        value = existing_fixture()
         value["resource_drift"] = [drift]
         plan_policy.check_plan(
             value, "pve-lab", 6100, existing=True, serial_device=selected, protected_guests=[9900,9914,9915,9920]

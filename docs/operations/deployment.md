@@ -31,6 +31,38 @@ The generator creates one job for each enabled guest and preserves the declared 
 
 Declared readiness dependencies change the order in which phases run. Value references alone do not. The workflow rejects a selection that disables a required dependency or required monitoring server. Failure stops the chain; the normal CD workflow does not retry, release a HOLD or relabel an incomplete phase as success.
 
+For a declared [source reply policy](../reference/guests.md#source-reply-routing),
+preparation manages the existing guest-local routing helper and boot service.
+It reconciles the selected policy without restarting the guest, Docker or an
+application. Infrastructure NIC changes can still require a provider-managed
+guest reboot; these are distinct operations and must be reviewed in the plan.
+
+## Compare current infrastructure with the target
+
+Plan admission compares the provider's refreshed current resources with the
+proposed declared state. Historical mutable-value differences are retained as
+evidence, not rejected merely because the saved state previously recorded
+something else. For example, declared firewall allowances already present on
+the owned guest can converge without removing and re-adding them. An undesired
+extra rule in the fully owned guest policy can be reconciled to the declared
+target. This does not authorize changing another guest, host or router policy.
+
+Resource/node identity, root disk and existing data-volume identities and order
+remain protected against both historical ownership loss and unsafe proposed
+changes. Unknown required values, deletion, replacement, import, incomplete
+plans and foreign resources remain refusals. Prepared backup staging still
+requires its exact allocation/API/filesystem proof. Apply the admitted saved
+plan even when only refreshed state needs persistence; never edit the backend
+or canonical receipt manually to make the comparison pass.
+
+Live configuration convergence does not release an interrupted operation.
+The backend, exact HOLD, phase markers and applied infrastructure checkpoint
+have separate custody checks. An existing phase-completion writer is not
+permission to bypass a failed phase's entry checks; any supervised completion
+requires a separately reviewed operation, actual complete phase success and
+preservation of the failed evidence. The original failed workflow remains
+failed even if a later authorized operation restores service or completes work.
+
 ## Observe and verify
 
 Check the exact workflow, source revisions, run and attempt. Confirm the result of every affected guest phase and its completion receipt—the saved record of that successful operation. Preserve generic or redacted failure output. Where needed, use a separately reviewed read-only check limited to the evidence needed to establish the cause. Do not dump private controller files or the runtime environment into CI logs.

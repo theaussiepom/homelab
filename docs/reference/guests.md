@@ -33,7 +33,7 @@ Use only the listed fields. Required fields have no default, and null does not r
 | <a id="guest-runtime"></a>`runtime` | Optional unique ID list; omitted `[]` | Appends to template runtime; cannot reserve resources for app containers or native workloads |
 | <a id="guest-network-policy"></a>`network_policy` | Optional ordered list; omitted `[]` | Policy ID or explicit [policy binding](policies.md#bindings) |
 | <a id="guest-readiness"></a>`readiness` | Optional ordered list; omitted `[]` | Each exactly `{stage: preparation, target: {app: id, endpoint: name}}`; target must be on another guest |
-| <a id="guest-source-policy-route"></a>`source_policy_route` | Optional closed object | Exactly `{interface: nic_id}`; selected non-default static NIC requires a gateway different from its address |
+| <a id="guest-source-policy-route"></a>`source_policy_route` | Optional closed object | Exactly `{interface: nic_id}`; selected non-default static NIC requires a gateway different from its address; manages the [source reply policy](#source-reply-routing) |
 | <a id="guest-monitoring"></a>`monitoring` | Optional closed object | Exactly `{profile: id}`; replaces template selection; see [monitoring](zabbix.md) |
 
 ## Defaults and resolution
@@ -77,6 +77,39 @@ Full paths are `guests.<id>.security.<field>`. All fields are required in the te
 ### Compose project fields
 
 Each `guests.<id>.compose_projects.<id>` requires `name`, nonempty text of at most 4096 characters without NUL, and optionally accepts `file`. The file defaults to `compose-<map-key>.yml` and must match `[a-z][a-z0-9_-]{0,62}.yaml` or `.yml`. Filenames must be unique within the guest. Null and empty values do not request the default. Execution also checks the allowed runtime identity fields and values. [App identity](apps.md#runtime-identity) references the project by its map key.
+
+## Source reply routing
+
+`source_policy_route` selects one declared secondary interface. HomeLab manages
+the corresponding guest-local helper, private settings and
+`homelab-frontend-routing.service`. The service runs after Debian's
+`networking.service`, then verifies the exact address, prefix, MAC and link state
+before adding anything. `network-online.target` alone does not establish that
+the selected interface is ready.
+
+Preparation reconciles only missing routes in reserved table 10040 and its
+matching source-address rule, then reads the complete policy back. Existing
+correct policy is unchanged. Foreign or duplicate reserved rules/routes stop
+the operation; the helper does not flush a table, replace conflicting entries,
+change main routes, NAT or firewall policy, or restart Docker or applications.
+No route is configured on guests that omit the selection. Changing a selected
+address, gateway or MAC is a separate reachability change; an existing private
+settings file must agree with the declaration before reconciliation.
+
+This guest fragment illustrates the selection; `frontend` must be an existing
+static, non-default NIC whose network declares a gateway:
+
+```yaml
+source_policy_route:
+  interface: frontend
+```
+
+First installation creates the owned routing files and boot unit. Later
+deployments update the helper/unit and preserve the selected settings and
+effective routes. Source and isolated checks do not prove a future boot on the
+target; verify actual routing and service behavior after an authorized
+deployment or reboot. Partial failure may leave earlier successful route
+additions in place and is never an automatic retry or rollback.
 
 ## Backup enrollment
 
