@@ -22,7 +22,9 @@ class DocumentationControls(unittest.TestCase):
         self.assertEqual(len(examples),1)
         guide=h.authored_config.parse(examples[0].encode(),'.yaml')
         self.assertEqual(guide,example)
-        self.assertEqual([r['dport'] for r in h.rules(guide)],['8006','22'])
+        self.assertEqual([r['dport'] for r in h.rules(guide)],['8006','22','8006'])
+        self.assertEqual([r['dest'] for r in h.rules(guide)],
+                         ['198.18.25.10/32','198.18.25.10/32','198.18.40.10/32'])
         self.assertIn('kernel_verified: false',text)
         self.assertIn('There is no import, recovery, adoption',text)
         self.assertIn('environmental ownership',text)

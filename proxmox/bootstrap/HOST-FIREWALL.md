@@ -20,6 +20,10 @@ allowances:
   - source: 192.0.2.0/24
     port: 22
     comment: Approved management SSH
+  - source: 198.18.40.33/32
+    destination: 198.18.40.10
+    port: 8006
+    comment: Application ingress to host UI
 cluster:
   enabled: true
   ebtables: true
@@ -40,6 +44,7 @@ cluster:
 | host_address | Required string | Usable individual canonical IPv4 address; no prefix, loopback, link-local, multicast, reserved or unspecified address |
 | allowances | Required ordered list | 1–32 distinct records; the entire desired node rule list, including every allowance that must remain |
 | allowances[].source | Required string | Canonical IPv4 CIDR with a nonzero prefix; no host bits, loopback, link-local, multicast, reserved or unspecified network |
+| allowances[].destination | Optional string | One usable canonical IPv4 address on this same node, with the same address restrictions as `host_address`; no CIDR prefix. When omitted, both the controller and provider configuration use `host_address`. Null and empty values are refused |
 | allowances[].port | Required integer | TCP destination port 1–65535; booleans and strings are refused |
 | allowances[].comment | Required string | Unique printable ASCII purpose, 1–200 characters, no surrounding whitespace or control characters |
 | cluster.enabled | Required boolean | Desired global enforcement. `false` is an ordinary later configuration change; destroying/removing the resource is not a disable operation |
@@ -50,11 +55,11 @@ cluster:
 | cluster.log_ratelimit.rate | Required string | Positive integer of at most 9 digits followed by `/second`, `/minute`, `/hour` or `/day` |
 | cluster.log_ratelimit.burst | Required integer | 1–2147483647; boolean values refused |
 
-Every field must be supplied; the source has no defaults. The validator rejects unknown or missing keys, null values, duplicate source/port pairs and duplicate comments. The existing [bounded authored reader](../../docs/reference/sources.md) rejects aliases, tags, merge keys, duplicate mappings and competing `.yaml`/`.yml`/`.json` siblings. This document does not support component source references or includes.
+Every field except `allowances[].destination` must be supplied. The validator rejects unknown or missing required keys, null values, duplicate source/effective-destination/port tuples and duplicate comments. Explicitly supplying `host_address` as a destination cannot bypass duplicate detection for an allowance that omits it. The existing [bounded authored reader](../../docs/reference/sources.md) rejects aliases, tags, merge keys, duplicate mappings and competing `.yaml`/`.yml`/`.json` siblings. This document does not support component source references or includes.
 
-The controller converts each allowance to an enabled `in ACCEPT tcp`, destination `host_address/32`, and its declared source/port/comment. Interface, macro, log, source port and security group are empty. The controller does not infer an allowance for API port 8006, SSH, guests or management access. A source record using `port: true` or `source: 0.0.0.0/0` is invalid. A valid request to change the node/endpoint/host address is also refused in a workspace already managed by this capability: it selects a different target.
+The controller converts each allowance to an enabled `in ACCEPT tcp`, destination `destination/32` (or `host_address/32` when omitted), and its declared source/port/comment. Interface, macro, log, source port and security group are empty. The controller does not infer an allowance for API port 8006, SSH, guests or management access. A source record using `port: true`, `source: 0.0.0.0/0` or `destination: 198.18.40.0/24` is invalid. A valid request to change the node/endpoint/host address is also refused in a workspace already managed by this capability: it selects a different target. An additional allowance destination does not change that target, state ownership or the two managed resources. It does not create an interface or configure a listener; independently verify that the address belongs to the intended node before applying policy.
 
-The node resource owns the whole ordered list. Omitting a previously declared allowance requests its removal. Changing source/port/comment is an ordinary reviewed desired-state change, not a migration. Preserve all existing management access in the private source before enabling enforcement.
+The node resource owns the whole ordered list. Omitting a previously declared allowance requests its removal. Changing source/destination/port/comment is an ordinary reviewed desired-state change. Policies that omit `destination` retain their existing behavior. Preserve all existing management access in the private source before enabling enforcement.
 
 ## Cluster defaults are effective behavior
 
