@@ -257,7 +257,7 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
         self.prepare_prior(True)
         self.publish(backup=True, data=True, job=False, protect_data=False)
         with self.boundaries(), patch.dict(os.environ, {'GITHUB_RUN_ID': '102', 'GITHUB_RUN_NUMBER': '11'}):
-            with self.assertRaisesRegex(ValueError, 'drifted plans'):
+            with self.assertRaisesRegex(ValueError, 'Preserve owned resource identities'):
                 deploy.run('infrastructure', self.fixture.packet, inputs=self.fixture.inputs)
         self.assertEqual(self.remote, []); self.assertEqual(self.applies, [])
         self.assertEqual((self.work/'terraform.tfstate').read_bytes(), self.old_backend)

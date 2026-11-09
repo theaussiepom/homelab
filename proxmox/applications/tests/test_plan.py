@@ -255,7 +255,9 @@ class ActiveDriftTests(unittest.TestCase):
             value["resource_drift"] = [
                 {
                     "address": plan.GUEST_RESOURCE,
-                    "change": {"before": before, "after": current},
+                    # JSON has separate historical/current projections, not a
+                    # shared object that also mutates resource_changes.before.
+                    "change": {"before": before, "after": copy.deepcopy(current)},
                 }
             ]
             row["change"].update(before=current, after=dict(current, started=True))
@@ -341,8 +343,9 @@ class ComputedAddressDriftTests(unittest.TestCase):
         value = self.observed_plan()
         change = value["resource_drift"][0]["change"]
         change["before"] = copy.deepcopy(change["after"])
-        self.assertFalse(plan.allowed_guest_drift(
-            value["resource_drift"], "pve-lab", 6100, None
+        # An unchanged historical projection is evidence, not a reason to refuse.
+        self.assertTrue(plan.owned_resource_drift(
+            value["resource_drift"], value['resource_changes'], "pve-lab", 6100, None
         ))
 
     def test_observation_exception_preserves_config_data_and_identity_guards(self):
@@ -461,4 +464,4 @@ class OptionalEmptyRefreshTests(unittest.TestCase):
         change["before"] = copy.deepcopy(change["after"])
         change["before"]["device_passthrough"] = None
         change["after"]["device_passthrough"] = []
-        self.assertFalse(plan.allowed_guest_drift(value["resource_drift"], "pve-lab", 6100, None))
+        self.assertFalse(plan.owned_resource_drift(value["resource_drift"], value['resource_changes'], "pve-lab", 6100, None))

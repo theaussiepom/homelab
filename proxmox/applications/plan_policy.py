@@ -48,59 +48,60 @@ def refresh_values(value):
     return result
 
 
-def allowed_guest_drift(rows, node, vmid, serial_device, *, backup_selection=None,
-                        backup_staging=None):
-    """Reconcile bounded active/device/IP drift and exactly declared backup mounts."""
+def owned_resource_drift(rows, changes, node, vmid, serial_device, *, backup_selection=None,
+                         backup_staging=None):
+    """Retain ownership evidence without vetoing mutable current-to-target updates."""
     if rows is None or rows == []:
         return True
-    if not isinstance(rows, list) or len(rows) != 1:
+    if not isinstance(rows, list) or len(rows) > len(RESOURCES):
         return False
-    row = rows[0]
-    if not isinstance(row, dict) or row.get("address") != GUEST_RESOURCE:
-        return False
-    change = row.get("change", {})
-    before, after = change.get("before"), change.get("after")
-    if not isinstance(before, dict) or not isinstance(after, dict):
-        return False
-    old, new = refresh_values(before), refresh_values(after)
-    if (
-        before.get("vm_id") != vmid
-        or before.get("node_name") != node
-        or has_unknown(change.get("after_unknown", {}))
-        or {
-            k: v
-            for k, v in old.items()
-            if k not in {"started", "device_passthrough", "ipv4", "ipv6", "mount_point"}
-        }
-        != {
-            k: v for k, v in new.items() if k not in {"started", "device_passthrough", "ipv4", "ipv6", "mount_point"}
-        }
-        or not declared_backup_drift(old.get('mount_point'), new.get('mount_point'),
-                                    backup_selection, backup_staging, vmid)
-    ):
-        return False
-    old_devices, new_devices = (
-        before.get("device_passthrough") or [],
-        after.get("device_passthrough") or [],
-    )
-    if old_devices != new_devices:
+    current = {row['address']: row['change']['before'] for row in changes}
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            return False
+        address = row.get('address')
+        if not isinstance(address, str) or address not in RESOURCES or address in seen:
+            return False
+        seen.add(address)
+        change = row.get('change')
+        if not isinstance(change, dict):
+            return False
+        before, after = change.get('before'), change.get('after')
+        key = RESOURCES[address]
         if (
-            not serial_device
-            or old_devices
-            or new_devices != [device_spec(serial_device["path"])]
+            row.get('mode', 'managed') != 'managed'
+            or row.get('type', address.split('.')[2]) != address.split('.')[2]
+            or row.get('previous_address') is not None or row.get('deposed') is not None
+            or 'importing' in row or 'importing' in change
+            or change.get('generated_config') is not None or change.get('replace_paths')
+            or change.get('actions', ['update']) not in (['update'], ['no-op'])
+            or not isinstance(before, dict) or not isinstance(after, dict)
+            or any(type(side.get(key)) is not int or side[key] != vmid
+                   or side.get('node_name') != node for side in (before, after))
+            or before.get('id') != after.get('id')
+            or has_unknown(change.get('after_unknown', {}))
+            or refresh_values(after) != refresh_values(current[address] or {})
         ):
             return False
-    was, now = before.get("started"), after.get("started")
-    if was != now and not (type(was) is bool and type(now) is bool):
-        return False
-    return (
-        was != now
-        or old_devices != new_devices
-        or before.get("ipv4") != after.get("ipv4")
-        or before.get("ipv6") != after.get("ipv6")
-        or old.get('mount_point') != new.get('mount_point')
-        or (before != after and old == new)
-    )
+        if address != GUEST_RESOURCE:
+            continue
+        old, new = refresh_values(before), refresh_values(after)
+        if not all(
+            declared_backup_drift(old.get(field), new.get(field),
+                                 backup_selection, backup_staging, vmid)
+            if field == 'mount_point' else old.get(field) == new.get(field)
+            for field in IMMUTABLE_GUEST_FIELDS
+        ):
+            return False
+        old_devices, new_devices = before.get('device_passthrough') or [], after.get('device_passthrough') or []
+        if old_devices != new_devices and (not serial_device or old_devices
+                or new_devices != [device_spec(serial_device['path'])]):
+            return False
+        was, now = before.get('started'), after.get('started')
+        if was != now and not (type(was) is bool and type(now) is bool):
+            return False
+    return True
 
 
 
@@ -214,10 +215,8 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
         isinstance(value, dict)
         and value.get("errored") is not True
         and value.get("complete") is not False
-        and not value.get("deferred_changes")
-        and allowed_guest_drift(value.get("resource_drift"), node, vmid, serial_device,
-                                backup_selection=backup_selection, backup_staging=backup_staging),
-        "Review incomplete, deferred or drifted plans before deployment",
+        and not value.get("deferred_changes"),
+        "Review incomplete or deferred plans before deployment",
     )
     rows = value.get("resource_changes", [])
     require(
@@ -309,3 +308,6 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
                 and before is None,
                 "Fresh creation requires exactly three new resources",
             )
+    require(owned_resource_drift(value.get('resource_drift'), rows, node, vmid, serial_device,
+                                backup_selection=backup_selection, backup_staging=backup_staging),
+            'Preserve owned resource identities, immutable data and complete refreshed evidence')
