@@ -303,6 +303,50 @@ class PBSFirewallTests(unittest.TestCase):
                     raw = self.stream.read(bound); known.write_text('changed\n'); return raw
             with patch.object(p.os, 'fdopen', ChangedRead): self.refused(p.trust, config(), options)
 
+    def test_native_countdowns_do_not_mask_real_network_changes(self):
+        """Exact subprocess readback accepts elapsed lifetimes, but preserves every other field/order."""
+        tasks = yaml.safe_load((ROOT / 'ansible/pbs-firewall.yml').read_text())[0]['tasks']
+        scripts = [t['ansible.builtin.command']['argv'][2] for t in tasks if t.get('delegate_to') == 'localhost']
+        def invoke(code, value):
+            return subprocess.run([sys.executable, '-c', code, str(ROOT)], input=json.dumps(value),
+                                  text=True, capture_output=True)
+        before = observed(True)
+        before['addresses'][0]['addr_info'][0].update(valid_life_time=900, preferred_life_time=600,
+                                                     prefixlen=24, label='ens3', protocol='dhcp')
+        before['addresses'][0]['addr_info'].append({'family': 'inet6', 'local': '2001:db8:25::3',
+            'prefixlen': 64, 'scope': 'global', 'protocol': 'ra', 'valid_life_time': 800, 'preferred_life_time': 500})
+        before['routes'][0].update(expires=500, metric=10, protocol='ra')
+        admission = invoke(scripts[0], {'config': config(), 'facts': before})
+        self.assertEqual(admission.returncode, 0, admission.stderr)
+        snapshot = json.loads(admission.stdout)['network']
+        after = deepcopy(before)
+        for entry in after['addresses'][0]['addr_info']:
+            entry['valid_life_time'] -= 5; entry['preferred_life_time'] -= 5
+        after['routes'][0]['expires'] -= 5
+        def final(facts):
+            return invoke(scripts[1], {'config': config(), 'facts': facts, 'network': snapshot})
+        self.assertEqual(final(after).returncode, 0)
+        self.assertNotIn('valid_life_time', json.dumps(snapshot))
+        self.assertNotIn('preferred_life_time', json.dumps(snapshot))
+        self.assertNotIn('expires', json.dumps(snapshot))
+        for key, value in [('local', '198.18.25.4'), ('prefixlen', 25), ('scope', 'host'),
+                           ('label', 'changed'), ('protocol', 'changed'), ('new_attribute', True)]:
+            f = deepcopy(after); f['addresses'][0]['addr_info'][0][key] = value
+            self.assertNotEqual(final(f).returncode, 0, key)
+        changes = [lambda f: f['addresses'][0]['addr_info'].reverse(),
+                   lambda f: f['addresses'].reverse(),
+                   lambda f: f['addresses'][1].update(address='02:00:00:00:20:04'),
+                   lambda f: f['addresses'][1].update(ifname='renamed'),
+                   lambda f: f['routes'][0].update(gateway='198.18.25.2'),
+                   lambda f: f['routes'][0].update(metric=20),
+                   lambda f: f['routes'][0].update(protocol='static'),
+                   lambda f: f['routes'][0].update(new_attribute=True),
+                   lambda f: f['routes'].reverse()]
+        for change in changes:
+            f = deepcopy(after); change(f); result = final(f)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(p.ERROR, result.stderr)
+
     def test_actual_playbook_precontact_refusal_precedes_any_ssh_execution(self):
         """Resolve actual CLI options; owned SSH spy proves unsafe inputs fail before contact."""
         if not Path(sys.executable).with_name('ansible-playbook').exists():
@@ -319,7 +363,7 @@ class PBSFirewallTests(unittest.TestCase):
             cfg = root / 'ansible.cfg'; cfg.write_text('[defaults]\n')
             env = {**os.environ, 'PATH': str(root) + os.pathsep + os.environ['PATH'],
                    'ANSIBLE_LOCAL_TEMP': str(root / 'local'), 'ANSIBLE_SSH_ARGS': '-F /dev/null -o ControlMaster=no',
-                   'ANSIBLE_HOST_KEY_CHECKING': 'true', 'ANSIBLE_CONFIG': str(cfg), 'LC_ALL': 'en_US.UTF-8'}
+                   'ANSIBLE_HOST_KEY_CHECKING': 'true', 'ANSIBLE_CONFIG': str(cfg), 'LC_ALL': 'C.UTF-8'}
             args = '-o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o VerifyHostKeyDNS=no -o UpdateHostKeys=no -o UserKnownHostsFile=' + str(known) + ' -o BatchMode=yes -o IdentitiesOnly=yes -o ControlMaster=no'
             base = [str(Path(sys.executable).with_name('ansible-playbook')), '-i', str(inv),
                     str(ROOT / 'ansible/pbs-firewall.yml'), '-e', 'pbs_firewall_config=' + str(ROOT / 'pbs-firewall.example.yaml')]

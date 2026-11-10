@@ -70,6 +70,8 @@ Before first CD, independently establish console/management recovery, installed 
 
 Later deployments verify current ownership before applying the declared proxy change. Repeat unchanged input is idempotent; changed native policy/configuration is refused. Verify the intended proxy TLS path, non-proxy TCP8007/SSH/other IPv4 and all IPv6 denials on the selected NIC, continuing DNS/NFS/egress and unchanged management. CD cannot prove those client paths or future boot behavior without target observation. Preserve real failure evidence and obtain a reviewed next action instead of forcing adoption.
 
+Network readback preserves interface/address identity, route attributes and their order. It ignores only the native address lifetime and route-expiry countdowns; elapsed lease or Router Advertisement time is not a configuration change. Address, prefix, route, interface and other attribute changes still refuse.
+
 ## Source evidence and navigation
 
 [Validator](../../proxmox/bootstrap/pbs_firewall.py), [playbook](../../proxmox/bootstrap/ansible/pbs-firewall.yml), [template](../../proxmox/bootstrap/ansible/pbs-firewall.nft.j2) and [focused contract tests](../../proxmox/bootstrap/tests/test_pbs_firewall.py) are maintained together. The test-local coverage map associates every field and example with direct validation, target/ownership refusals and isolated Linux policy controls. Fakes do not establish native installation; target acceptance is separate.

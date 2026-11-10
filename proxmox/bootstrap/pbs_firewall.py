@@ -220,8 +220,11 @@ def network(c, f):
                     and 'nexthops' not in route and 'nhid' not in route)
     require(type(f['storage_routes']) is list and all(type(r) is list and len(r) == 1
             and r[0].get('dev') and r[0]['dev'] != a['interface'] for r in f['storage_routes']))
-    return [[{'ifname': r['ifname'], 'address': r.get('address'), 'addr_info': r.get('addr_info', [])}
-             for r in links], f['routes']]
+    return [[{'ifname': r['ifname'], 'address': r.get('address'),
+              'addr_info': [{k: value for k, value in v.items()
+                            if k not in ('valid_life_time', 'preferred_life_time')}
+                           for v in r.get('addr_info', [])]} for r in links],
+            [{k: value for k, value in route.items() if k != 'expires'} for route in f['routes']]]
 
 
 def trust(c, options):
