@@ -354,11 +354,13 @@ class PBSFirewallTests(unittest.TestCase):
 
     def test_render_matches_template_and_exact_ordered_family_direction_policy(self):
         """Generated rules have no global flush, output/forward chain or broad established grant."""
-        from jinja2 import Environment
         c = config(); policy = p.render(c)
         template = (ROOT / 'ansible/pbs-firewall.nft.j2').read_text()
-        self.assertEqual(Environment(keep_trailing_newline=True).from_string(template).render(
-            pbs_firewall_admission={'policy': policy}), policy)
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {'ANSIBLE_LOCAL_TEMP': d}):
+            from ansible.template import Templar, trust_as_template
+            rendered = Templar(variables={'pbs_firewall_admission': {'policy': policy}}).template(
+                trust_as_template(template))
+        self.assertEqual(rendered, policy)
         self.assertNotIn('flush ruleset', policy)
         self.assertNotIn('include ', policy)
         self.assertNotIn('hook output', policy); self.assertNotIn('hook forward', policy)
