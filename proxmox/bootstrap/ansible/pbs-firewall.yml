@@ -1,0 +1,139 @@
+---
+- name: Configure only the declared PBS browser-interface firewall
+  hosts: pbs
+  become: false
+  gather_facts: false
+  pre_tasks:
+    - name: Revalidate controller admission and authored input before target contact
+      delegate_to: localhost
+      become: false
+      vars: {ansible_connection: local, ansible_become: false}
+      block:
+        - name: Respect existing bootstrap custody before input or target work
+          ansible.builtin.command:
+            argv:
+              - '{{ ansible_playbook_python }}'
+              - -c
+              - 'import sys; sys.path.insert(0,sys.argv[1]); import deployment_state; deployment_state.bootstrap_closed()'
+              - '{{ playbook_dir }}/../../applications'
+          changed_when: false
+        - name: Require an explicit absolute authored file
+          ansible.builtin.assert:
+            that:
+              - pbs_firewall_config is string
+              - pbs_firewall_config.startswith('/')
+        - name: Emit the same closed source document locally
+          ansible.builtin.command:
+            argv: ['{{ ansible_playbook_python }}', '{{ playbook_dir }}/../pbs_firewall.py', --config, '{{ pbs_firewall_config }}', --emit]
+          changed_when: false
+          register: pbs_source
+        - name: Bind one explicitly trusted SSH target
+          ansible.builtin.assert:
+            that:
+              - groups['all'] | length == 1
+              - groups['pbs'] == [inventory_hostname]
+              - inventory_hostname == (pbs_source.stdout | from_json).target.hostname
+              - hostvars[inventory_hostname].ansible_host == (pbs_source.stdout | from_json).target.address
+              - hostvars[inventory_hostname].ansible_user == 'root'
+              - hostvars[inventory_hostname].ansible_connection == 'ssh'
+              - hostvars[inventory_hostname].get('ansible_port', 22) | int == 22
+            fail_msg: Use one explicit PBS SSH target and the validated management identity
+        - name: Verify explicit key and strict pinned SSH options before contact
+          ansible.builtin.command:
+            argv:
+              - '{{ ansible_playbook_python }}'
+              - -c
+              - 'import json,sys; sys.path.insert(0,sys.argv[1]); import pbs_firewall as p; v=json.load(sys.stdin); p.trust(v["config"],v["options"]); print("Explicit PBS SSH trust accepted")'
+              - '{{ playbook_dir }}/..'
+            stdin: '{{ {"config": pbs_source.stdout | from_json, "options": pbs_firewall_ssh_options} | to_json }}'
+          vars:
+            pbs_firewall_ssh_options:
+              private_key_file: '{{ lookup("ansible.builtin.config", "private_key_file", plugin_type="connection", plugin_name="ssh") }}'
+              host_key_checking: '{{ lookup("ansible.builtin.config", "host_key_checking", plugin_type="connection", plugin_name="ssh") }}'
+              ssh_executable: '{{ lookup("ansible.builtin.config", "ssh_executable", plugin_type="connection", plugin_name="ssh") }}'
+              ssh_args: '{{ lookup("ansible.builtin.config", "ssh_args", plugin_type="connection", plugin_name="ssh") }}'
+              ssh_common_args: '{{ lookup("ansible.builtin.config", "ssh_common_args", plugin_type="connection", plugin_name="ssh") }}'
+              ssh_extra_args: '{{ lookup("ansible.builtin.config", "ssh_extra_args", plugin_type="connection", plugin_name="ssh") }}'
+              scp_extra_args: '{{ lookup("ansible.builtin.config", "scp_extra_args", plugin_type="connection", plugin_name="ssh") }}'
+              sftp_extra_args: '{{ lookup("ansible.builtin.config", "sftp_extra_args", plugin_type="connection", plugin_name="ssh") }}'
+              inline_key_absent: '{{ not lookup("ansible.builtin.config", "private_key", plugin_type="connection", plugin_name="ssh") }}'
+              password_absent: '{{ not lookup("ansible.builtin.config", "password", plugin_type="connection", plugin_name="ssh") }}'
+          changed_when: false
+    - name: Select the validated desired policy
+      ansible.builtin.set_fact:
+        pbs_firewall_desired: '{{ pbs_source.stdout | from_json }}'
+  tasks:
+    - name: Read existing host facts without package or network changes
+      ansible.builtin.setup:
+    - name: Read installed package facts without installing anything
+      ansible.builtin.package_facts:
+        manager: apt
+    - name: Inspect current policy and persistence ownership
+      ansible.builtin.include_tasks: pbs-firewall-read.yml
+    - name: Validate current ownership and interface separation locally
+      ansible.builtin.command:
+        argv:
+          - '{{ ansible_playbook_python }}'
+          - -c
+          - 'import json,sys; sys.path.insert(0,sys.argv[1]); import pbs_firewall as p; v=json.load(sys.stdin); print(json.dumps(p.inspect(v["config"],v["facts"])))'
+          - '{{ playbook_dir }}/..'
+        stdin: '{{ {"config": pbs_firewall_desired, "facts": pbs_firewall_observed} | to_json }}'
+      delegate_to: localhost
+      become: false
+      vars: {ansible_connection: local, ansible_become: false}
+      changed_when: false
+      register: pbs_admission
+    - name: Retain the admitted policy and network snapshot
+      ansible.builtin.set_fact:
+        pbs_firewall_admission: '{{ pbs_admission.stdout | from_json }}'
+    - name: Prepare only the owned stock-service override directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/nftables.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+    - name: Remove the stock global-flushing stop action without adding a service
+      ansible.builtin.copy:
+        content: '{{ pbs_firewall_admission.dropin }}'
+        dest: /etc/systemd/system/nftables.service.d/50-homelab-pbs.conf
+        owner: root
+        group: root
+        mode: '0644'
+        follow: false
+      register: pbs_dropin_changed
+    - name: Syntax-check and install only the declared own-table policy
+      ansible.builtin.template:
+        src: pbs-firewall.nft.j2
+        dest: /etc/nftables.conf
+        owner: root
+        group: root
+        mode: '0600'
+        follow: false
+        validate: /usr/sbin/nft --check --file %s
+      register: pbs_policy_changed
+    - name: Enable persistence and start the existing service without a restart
+      ansible.builtin.systemd_service:
+        name: nftables.service
+        daemon_reload: '{{ pbs_dropin_changed.changed }}'
+        enabled: true
+        state: started
+    - name: Reload only a changed policy on an already-active service
+      ansible.builtin.command:
+        argv: [systemctl, reload, nftables.service]
+      when: pbs_firewall_admission.active == 'active' and pbs_policy_changed.changed
+      changed_when: true
+    - name: Read the actual final policy and persistence state
+      ansible.builtin.include_tasks: pbs-firewall-read.yml
+    - name: Verify exact final policy and unchanged networking locally
+      ansible.builtin.command:
+        argv:
+          - '{{ ansible_playbook_python }}'
+          - -c
+          - 'import json,sys; sys.path.insert(0,sys.argv[1]); import pbs_firewall as p; v=json.load(sys.stdin); r=p.inspect(v["config"],v["facts"],final=True); p.require(r["network"]==v["network"]); print("PBS policy and persistence verified; client and boot acceptance remain separate")'
+          - '{{ playbook_dir }}/..'
+        stdin: '{{ {"config": pbs_firewall_desired, "facts": pbs_firewall_observed, "network": pbs_firewall_admission.network} | to_json }}'
+      delegate_to: localhost
+      become: false
+      vars: {ansible_connection: local, ansible_become: false}
+      changed_when: false

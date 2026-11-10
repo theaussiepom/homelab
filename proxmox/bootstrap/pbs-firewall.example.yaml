@@ -1,0 +1,9 @@
+schema: homelab-pbs-firewall-v1
+target:
+  address: 198.18.25.3
+  hostname: backup
+apps:
+  interface: ens5
+  mac: '02:00:00:00:40:03'
+  address: 198.18.40.3
+  proxy: 198.18.40.33
