@@ -56,8 +56,8 @@ a whole-device default-deny policy. Existing DNS, device APIs, discovery,
 network configuration and data remain under their existing owners.
 
 The own-table replacement is one atomic nftables batch, without a global flush
-or includes. `/etc/homelab-device-web/web.nft` is root-owned mode0600. The
-dedicated root-owned mode0644 `homelab-device-web-firewall.service` applies it
+or includes. `/etc/homelab-device-web/web.nft` is root-owned mode 0600. The
+dedicated root-owned mode 0644 `homelab-device-web-firewall.service` applies it
 at boot after any selected stock nftables service and before Docker. It has no
 stop action; stopping it leaves enforcement in place. CD does not enable,
 replace or stop the global nftables service or restart an application.

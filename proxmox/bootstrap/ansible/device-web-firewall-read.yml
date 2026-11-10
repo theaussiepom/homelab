@@ -7,8 +7,8 @@
   ansible.builtin.command: {argv: [hostname]}
   register: web_hostname
   changed_when: false
-- name: Read actual IPv4 interface identities
-  ansible.builtin.command: {argv: [ip, -j, -4, address, show]}
+- name: Read actual link identities and assigned addresses
+  ansible.builtin.command: {argv: [ip, -j, address, show]}
   register: web_addresses
   changed_when: false
 - name: Inspect only the owned persistence paths without following links

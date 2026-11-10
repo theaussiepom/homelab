@@ -29,14 +29,17 @@ DOC_MAP = {'docs/reference/device-web-firewall.md': {
 
 
 def config():
+    """Load the complete fictional input through the actual authored reader."""
     return w.authored_config.read(ROOT/'device-web-firewall.example.yaml')
 
 
 def file_stat(mode):
+    """Describe a regular owned file without probing the test host."""
     return {'isreg': True, 'islnk': False, 'uid': 0, 'gid': 0, 'nlink': 1, 'mode': mode}
 
 
 def facts(owned=False):
+    """Project pristine or exactly owned synthetic state for real admission."""
     c = config()
     f = {'uid': 0, 'hostname': 'radio', 'addresses': [
         {'ifname': 'eth0.25', 'address': c['web']['mac'],
@@ -56,10 +59,12 @@ def facts(owned=False):
 
 class DeviceWebFirewallTests(unittest.TestCase):
     def refuses(self, fn, *args, **kwargs):
+        """Require the sanitized contract refusal instead of incidental failures."""
         with self.assertRaisesRegex(ValueError, '^'+w.ERROR+'$'):
             fn(*args, **kwargs)
 
     def test_example_cli_and_documented_fields(self):
+        """Check every CLI mode and bind complete public examples and field records."""
         c = config()
         self.assertIs(w.validate(c), c)
         for flag in ['--check', '--emit', '--observe']:
@@ -87,6 +92,7 @@ class DeviceWebFirewallTests(unittest.TestCase):
             self.assertIn('`'+field+'`', guide)
 
     def test_closed_input_rejects_missing_wrong_and_unsafe_values(self):
+        """Exercise required types, unknown keys and unsafe identities for each field."""
         original = config()
         for section in [None, 'target', 'web']:
             selected = original if section is None else original[section]
@@ -121,6 +127,7 @@ class DeviceWebFirewallTests(unittest.TestCase):
         bad = config(); bad['web']['proxy'] = bad['web']['address']; self.refuses(w.validate, bad)
 
     def test_exact_listener_scope_and_independent_persistence(self):
+        """Permit only proxy and local health traffic to the exact IPv4 listener."""
         c = config(); text = w.render(c)
         self.assertEqual(w.previous(text), c)
         self.assertEqual(text.count('ip daddr 198.18.40.4 tcp dport 8080'), 3)
@@ -143,6 +150,7 @@ class DeviceWebFirewallTests(unittest.TestCase):
             self.refuses(w.kernel, value)
 
     def test_first_repeat_update_and_final_actual_ownership(self):
+        """Distinguish first ownership, repeat, proxy update and real final refusal."""
         c = config()
         self.assertTrue(w.inspect(c, facts())['changed'])
         self.assertFalse(w.inspect(c, facts(True))['changed'])
@@ -163,7 +171,7 @@ class DeviceWebFirewallTests(unittest.TestCase):
             for value in [{'isdir': True, 'islnk': True, 'uid': 0, 'gid': 0, 'mode': '0755'},
                           {'isdir': True, 'islnk': False, 'uid': 0, 'gid': 0, 'mode': '0777'}]:
                 f = deepcopy(original); f['parent_stat'] = value; self.refuses(w.inspect, c, f)
-            for name, value in [('address', '02:00:00:00:40:05'), ('master', 'br0'), ('flags', ['SLAVE']),
+            for name, value in [('address', None), ('address', '02:00:00:00:40:05'), ('master', 'br0'), ('flags', ['SLAVE']),
                                 ('addr_info', [None]), ('addr_info', []), ('addr_info', 'wrong')]:
                 f = deepcopy(original); f['addresses'][1][name] = value
                 self.refuses(w.inspect, c, f)
@@ -185,6 +193,7 @@ class DeviceWebFirewallTests(unittest.TestCase):
             self.refuses(w.inspect, bad, f)
 
     def test_transport_reuses_shared_custody_and_preserves_refusals(self):
+        """Keep both callers on one custody check and sanitize its diagnostics."""
         c = config(); options = {'synthetic': True}
         with patch.object(w.bootstrap_ssh, 'trust') as check:
             w.trust(c, options)
@@ -193,6 +202,7 @@ class DeviceWebFirewallTests(unittest.TestCase):
             self.refuses(w.trust, c, options)
 
     def test_playbook_has_precontact_guards_and_no_application_or_network_writer(self):
+        """Bind the stock playbook to source, transport and exact native readback."""
         play = yaml.safe_load((ROOT/'ansible/device-web-firewall.yml').read_text())[0]
         self.assertFalse(play['gather_facts']); self.assertTrue(play['become'])
         guard = play['pre_tasks'][0]
@@ -203,6 +213,10 @@ class DeviceWebFirewallTests(unittest.TestCase):
         self.assertIn('w.trust(', text)
         self.assertIn('validate: /usr/sbin/nft -c -f %s', text)
         self.assertIn('--observe, --final', text)
+        reads = yaml.safe_load((ROOT/'ansible/device-web-firewall-read.yml').read_text())
+        address_read = next(task for task in reads if task.get('register') == 'web_addresses')
+        # iproute2 omits the link MAC with -4; admission needs both link and IP identity.
+        self.assertEqual(address_read['ansible.builtin.command']['argv'], ['ip', '-j', 'address', 'show'])
         for forbidden in ['apt:', 'docker compose', 'authorized_keys', 'reboot:', 'nft flush', 'nftables.service\n']:
             self.assertNotIn(forbidden, text)
 
@@ -240,6 +254,18 @@ class DeviceWebFirewallTests(unittest.TestCase):
             self.assertTrue(spy.exists(), result.stdout+result.stderr)
             self.assertIn('unreachable=1', result.stdout)
             self.assertIn('failed=0', result.stdout)
+
+    def test_script_isolation_and_namespace_imports_keep_the_shared_helper_available(self):
+        """The extraction must preserve prior PBS imports and isolated CLI use."""
+        for filename, example in [('pbs_firewall.py', 'pbs-firewall.example.yaml'),
+                                  ('device_web_firewall.py', 'device-web-firewall.example.yaml')]:
+            result=subprocess.run([sys.executable,'-I',str(ROOT/filename),'--config',str(ROOT/example),'--check'],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        root=ROOT.parents[1]
+        result=subprocess.run([sys.executable,'-c',
+            'import proxmox.bootstrap.pbs_firewall,proxmox.bootstrap.device_web_firewall'],
+            cwd=root,capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
 
 
 if __name__ == '__main__':
