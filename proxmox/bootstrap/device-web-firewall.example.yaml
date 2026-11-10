@@ -1,0 +1,11 @@
+schema: homelab-device-web-firewall-v1
+target:
+  address: 198.18.25.4
+  hostname: radio
+  user: operator
+web:
+  interface: eth0.40
+  mac: '02:00:00:00:40:04'
+  address: 198.18.40.4
+  proxy: 198.18.40.33
+  port: 8080

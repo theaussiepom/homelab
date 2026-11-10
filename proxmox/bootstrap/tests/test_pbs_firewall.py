@@ -262,7 +262,7 @@ class PBSFirewallTests(unittest.TestCase):
                        'password_absent': True, 'ssh_executable': 'ssh', 'ssh_args': '-C -F /dev/null -o ControlMaster=no',
                        'ssh_common_args': args, 'ssh_extra_args': '', 'sftp_extra_args': '', 'scp_extra_args': ''}
             c = config()
-            with patch.object(p.os, 'open', wraps=p.os.open) as opened:
+            with patch.object(p.bootstrap_ssh.os, 'open', wraps=p.bootstrap_ssh.os.open) as opened:
                 p.trust(c, options)
             self.assertEqual(opened.call_count, 1, str(opened.call_args_list))
             self.assertEqual(opened.call_args.args[0], known)
@@ -285,7 +285,7 @@ class PBSFirewallTests(unittest.TestCase):
             linked = root / 'linked'; linked.symlink_to(key)
             self.refused(p.trust, config(), {**options, 'private_key_file': str(linked)})
             os.link(key, root / 'hardlink'); self.refused(p.trust, config(), options); (root / 'hardlink').unlink()
-            with patch.object(p.os, 'geteuid', return_value=os.geteuid() + 10): self.refused(p.trust, config(), options)
+            with patch.object(p.bootstrap_ssh.os, 'geteuid', return_value=os.geteuid() + 10): self.refused(p.trust, config(), options)
             for body in ('', '# no actual key\n', '198.18.25.4 ssh-ed25519 AAAA\n',
                          '*.invalid ssh-ed25519 AAAA\n', '@cert-authority 198.18.25.3 ssh-ed25519 AAAA\n',
                          '198.18.25.3 unknown AAAA\n', '198.18.25.3 ssh-ed25519 ***\n', '\uffff'):
@@ -301,7 +301,7 @@ class PBSFirewallTests(unittest.TestCase):
                 def fileno(self): return self.stream.fileno()
                 def read(self, bound):
                     raw = self.stream.read(bound); known.write_text('changed\n'); return raw
-            with patch.object(p.os, 'fdopen', ChangedRead): self.refused(p.trust, config(), options)
+            with patch.object(p.bootstrap_ssh.os, 'fdopen', ChangedRead): self.refused(p.trust, config(), options)
 
     def test_native_countdowns_do_not_mask_real_network_changes(self):
         """Exact subprocess readback accepts elapsed lifetimes, but preserves every other field/order."""

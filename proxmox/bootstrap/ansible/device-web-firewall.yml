@@ -1,0 +1,118 @@
+---
+- name: Maintain one device web listener boundary
+  hosts: device_web
+  become: true
+  gather_facts: false
+  pre_tasks:
+    - name: Revalidate source and actual transport before target contact
+      delegate_to: localhost
+      become: false
+      vars: {ansible_connection: local, ansible_become: false}
+      block:
+        - name: Respect existing bootstrap custody
+          ansible.builtin.command:
+            argv:
+              - '{{ ansible_playbook_python }}'
+              - -c
+              - 'import sys; sys.path.insert(0,sys.argv[1]); import deployment_state; deployment_state.bootstrap_closed()'
+              - '{{ playbook_dir }}/../../applications'
+          changed_when: false
+        - name: Require one explicit authored input
+          ansible.builtin.assert:
+            that:
+              - device_web_firewall_config is string
+              - device_web_firewall_config.startswith('/')
+        - name: Resolve the closed source locally
+          ansible.builtin.command:
+            argv: ['{{ ansible_playbook_python }}', '{{ playbook_dir }}/../device_web_firewall.py', --config, '{{ device_web_firewall_config }}', --emit]
+          changed_when: false
+          register: web_source
+        - name: Bind the one selected inventory identity
+          ansible.builtin.assert:
+            that:
+              - groups['all'] | length == 1
+              - groups['device_web'] == [inventory_hostname]
+              - inventory_hostname == (web_source.stdout | from_json).target.hostname
+              - hostvars[inventory_hostname].ansible_host == (web_source.stdout | from_json).target.address
+              - hostvars[inventory_hostname].ansible_user == (web_source.stdout | from_json).target.user
+              - hostvars[inventory_hostname].ansible_connection == 'ssh'
+              - hostvars[inventory_hostname].get('ansible_port', 22) | int == 22
+              - lookup('ansible.builtin.config', 'use_tty', plugin_type='connection', plugin_name='ssh') is sameas false
+        - name: Admit actual SSH options and protected file custody
+          ansible.builtin.command:
+            argv:
+              - '{{ ansible_playbook_python }}'
+              - -c
+              - 'import json,sys; sys.path.insert(0,sys.argv[1]); import device_web_firewall as w; v=json.load(sys.stdin); w.trust(v["config"],v["options"]); print("Explicit device SSH trust accepted")'
+              - '{{ playbook_dir }}/..'
+            stdin: '{{ {"config": web_source.stdout | from_json, "options": web_ssh_options} | to_json }}'
+          vars:
+            web_ssh_options:
+              private_key_file: '{{ lookup("ansible.builtin.config", "private_key_file", plugin_type="connection", plugin_name="ssh") }}'
+              host_key_checking: '{{ lookup("ansible.builtin.config", "host_key_checking", plugin_type="connection", plugin_name="ssh") }}'
+              ssh_executable: '{{ lookup("ansible.builtin.config", "ssh_executable", plugin_type="connection", plugin_name="ssh") }}'
+              ssh_args: '{{ lookup("ansible.builtin.config", "ssh_args", plugin_type="connection", plugin_name="ssh") }}'
+              ssh_common_args: '{{ lookup("ansible.builtin.config", "ssh_common_args", plugin_type="connection", plugin_name="ssh") }}'
+              ssh_extra_args: '{{ lookup("ansible.builtin.config", "ssh_extra_args", plugin_type="connection", plugin_name="ssh") }}'
+              scp_extra_args: '{{ lookup("ansible.builtin.config", "scp_extra_args", plugin_type="connection", plugin_name="ssh") }}'
+              sftp_extra_args: '{{ lookup("ansible.builtin.config", "sftp_extra_args", plugin_type="connection", plugin_name="ssh") }}'
+              inline_key_absent: '{{ not lookup("ansible.builtin.config", "private_key", plugin_type="connection", plugin_name="ssh") }}'
+              password_absent: '{{ not lookup("ansible.builtin.config", "password", plugin_type="connection", plugin_name="ssh") }}'
+          changed_when: false
+    - name: Select the admitted source
+      ansible.builtin.set_fact:
+        device_web_desired: '{{ web_source.stdout | from_json }}'
+  tasks:
+    - name: Observe current identity and existing ownership
+      ansible.builtin.include_tasks: device-web-firewall-read.yml
+    - name: Admit the observed target without mutation
+      ansible.builtin.command:
+        argv: ['{{ ansible_playbook_python }}', '{{ playbook_dir }}/../device_web_firewall.py', --config, '{{ device_web_firewall_config }}', --observe]
+        stdin: '{{ device_web_observed | to_json }}'
+      delegate_to: localhost
+      become: false
+      vars: {ansible_connection: local, ansible_become: false}
+      changed_when: false
+      register: web_admission
+    - name: Create only the owned policy directory
+      ansible.builtin.file:
+        path: /etc/homelab-device-web
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+    - name: Syntax-check and install only the own-table batch
+      ansible.builtin.copy:
+        content: '{{ (web_admission.stdout | from_json).policy }}'
+        dest: /etc/homelab-device-web/web.nft
+        owner: root
+        group: root
+        mode: '0600'
+        follow: false
+        validate: /usr/sbin/nft -c -f %s
+      register: web_policy_changed
+    - name: Install the dedicated persistence unit
+      ansible.builtin.copy:
+        content: '{{ (web_admission.stdout | from_json).unit }}'
+        dest: /etc/systemd/system/homelab-device-web-firewall.service
+        owner: root
+        group: root
+        mode: '0644'
+        follow: false
+      register: web_persistence_changed
+    - name: Apply changed policy once and enable its own boot unit
+      ansible.builtin.systemd_service:
+        name: homelab-device-web-firewall.service
+        daemon_reload: '{{ web_persistence_changed.changed }}'
+        enabled: true
+        state: '{{ "restarted" if web_policy_changed.changed or web_persistence_changed.changed else "started" }}'
+    - name: Read the actual final policy and persistence
+      ansible.builtin.include_tasks: device-web-firewall-read.yml
+    - name: Verify actual final owned state
+      ansible.builtin.command:
+        argv: ['{{ ansible_playbook_python }}', '{{ playbook_dir }}/../device_web_firewall.py', --config, '{{ device_web_firewall_config }}', --observe, --final]
+        stdin: '{{ device_web_observed | to_json }}'
+      delegate_to: localhost
+      become: false
+      vars: {ansible_connection: local, ansible_become: false}
+      changed_when: false
