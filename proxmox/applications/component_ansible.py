@@ -62,17 +62,23 @@ def variables(cfg, phase, *, payload=None, previously_owned=False, activate_back
         if activate_backup:
             require('job' in cfg['app']['backup'], 'Activate only a declared recovery job')
             import backup_controller
+            import backup_user
             from deployment_inputs import source_hash
-            bundle = '/opt/homelab-backup/framework/' + source_hash() + '/proxmox'
+            account = backup_user.account(os.getuid())
+            selected = read_json(Path(cfg['deployment']['input_directory'])/'backup-group.json', private=True)
+            state = min(row['state_root'] for row in selected['group']['members'].values())
+            bundle = str(Path(state)/'backup-controller/framework'/source_hash()/'proxmox')
             sources = [path for parent in (SOURCE, SOURCE.parent/'common') for path in parent.rglob('*')
                 if path.is_file() and not any(part in {'.terraform', '__pycache__', '.work'} for part in path.parts)]
             result['backup_controller_files'] = [{'source': str(path),
                 'destination': str(Path(bundle)/path.relative_to(SOURCE.parent))} for path in sorted(sources)]
             result['backup_controller_directories'] = sorted({str(parent) for row in result['backup_controller_files']
                 for parent in [Path(row['destination']).parent, *Path(row['destination']).parent.parents]
-                if str(parent).startswith('/opt/homelab-backup/framework/')}, key=lambda path: (path.count('/'), path))
-            result['backup_controller'] = backup_controller.units(read_json(Path(cfg['deployment']['input_directory'])/'backup-group.json', private=True),
-                bundle+'/applications', os.getuid())
+                if parent == Path(state)/'backup-controller' or Path(state)/'backup-controller' in parent.parents},
+                key=lambda path: (path.count('/'), path))
+            result['backup_controller'] = backup_controller.units(selected,
+                bundle+'/applications', account['uid'], account['home'])
+            result['backup_controller']['environment'] = account['environment']
             result['backup_controller']['source_hash'] = source_hash()
             result['backup_controller']['directory'] = bundle+'/applications'
             job = cfg['app']['backup']['job']

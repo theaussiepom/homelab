@@ -71,10 +71,23 @@
 - name: Install the owned controller schedule
   when: backup_controller is defined
   delegate_to: localhost
-  become: true
+  become: false
+  environment: '{{ backup_controller.environment }}'
   block:
-    - name: Verify controller backup source ownership
-      ansible.builtin.import_tasks: backup-source-owner.yml
+    - name: Verify existing account-owned schedule ancestors
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - "{{ lookup('file', playbook_dir + '/../backup_source.py') }}"
+          - '{{ item }}'
+      loop:
+        - '{{ backup_controller.base }}'
+        - '{{ backup_controller.base }}/schedules'
+        - '{{ backup_controller.unit_directory }}'
+      changed_when: false
 
     - name: Verify existing public source ancestors before copying
       ansible.builtin.command:
@@ -108,17 +121,15 @@
       ansible.builtin.file:
         path: '{{ item }}'
         state: directory
-        owner: root
-        group: root
-        mode: '0755'
+        owner: '{{ backup_controller.user }}'
+        mode: '0700'
       loop: '{{ backup_controller_directories }}'
 
     - name: Copy the selected public framework generation
       ansible.builtin.copy:
         src: '{{ item.source }}'
         dest: '{{ item.destination }}'
-        owner: root
-        group: root
+        owner: '{{ backup_controller.user }}'
         mode: '0444'
         follow: false
       loop: '{{ backup_controller_files }}'
@@ -138,25 +149,25 @@
 
     - name: Inspect existing schedule ownership
       ansible.builtin.stat:
-        path: '/etc/systemd/system/{{ backup_controller.name }}.service'
+        path: '{{ backup_controller.unit_directory }}/{{ backup_controller.name }}.service'
         follow: false
       register: backup_service_before
 
     - name: Inspect schedule ownership record
       ansible.builtin.stat:
-        path: '/etc/homelab-backup-schedules/{{ backup_controller.name }}.owner.json'
+        path: '{{ backup_controller.owner_path }}'
         follow: false
       register: backup_schedule_owner_before
 
     - name: Inspect the existing timer
       ansible.builtin.stat:
-        path: '/etc/systemd/system/{{ backup_controller.name }}.timer'
+        path: '{{ backup_controller.unit_directory }}/{{ backup_controller.name }}.timer'
         follow: false
       register: backup_timer_before
 
     - name: Inspect the group configuration
       ansible.builtin.stat:
-        path: '/etc/homelab-backup-schedules/{{ backup_controller.name }}.json'
+        path: '{{ backup_controller.group_path }}'
         follow: false
       register: backup_group_before
 
@@ -167,13 +178,13 @@
           - backup_timer_before.stat.exists == backup_schedule_owner_before.stat.exists
           - backup_group_before.stat.exists == backup_schedule_owner_before.stat.exists
           - not backup_group_before.stat.exists or (backup_group_before.stat.isreg and not backup_group_before.stat.islnk and backup_group_before.stat.nlink == 1 and backup_group_before.stat.uid == backup_controller.user and backup_group_before.stat.mode == '0600')
-          - not backup_service_before.stat.islnk | default(false)
-          - not backup_timer_before.stat.islnk | default(false)
-          - not backup_schedule_owner_before.stat.islnk | default(false)
+          - not backup_service_before.stat.exists or (backup_service_before.stat.isreg and not backup_service_before.stat.islnk and backup_service_before.stat.nlink == 1 and backup_service_before.stat.uid == backup_controller.user and backup_service_before.stat.mode == '0644')
+          - not backup_timer_before.stat.exists or (backup_timer_before.stat.isreg and not backup_timer_before.stat.islnk and backup_timer_before.stat.nlink == 1 and backup_timer_before.stat.uid == backup_controller.user and backup_timer_before.stat.mode == '0644')
+          - not backup_schedule_owner_before.stat.exists or (backup_schedule_owner_before.stat.isreg and not backup_schedule_owner_before.stat.islnk and backup_schedule_owner_before.stat.nlink == 1 and backup_schedule_owner_before.stat.uid == backup_controller.user and backup_schedule_owner_before.stat.mode == '0600')
 
     - name: Read an existing schedule owner
       ansible.builtin.slurp:
-        src: '/etc/homelab-backup-schedules/{{ backup_controller.name }}.owner.json'
+        src: '{{ backup_controller.owner_path }}'
       register: backup_schedule_owner
       when: backup_schedule_owner_before.stat.exists
       no_log: true
@@ -186,18 +197,16 @@
 
     - name: Prepare protected schedule ownership
       ansible.builtin.file:
-        path: /etc/homelab-backup-schedules
+        path: '{{ backup_controller.base }}/schedules'
         state: directory
-        owner: root
-        group: root
-        mode: '0755'
+        owner: '{{ backup_controller.user }}'
+        mode: '0700'
 
     - name: Record schedule ownership
       ansible.builtin.copy:
         content: '{{ backup_controller.owner | to_json }}'
-        dest: '/etc/homelab-backup-schedules/{{ backup_controller.name }}.owner.json'
-        owner: root
-        group: root
+        dest: '{{ backup_controller.owner_path }}'
+        owner: '{{ backup_controller.user }}'
         mode: '0600'
         force: false
         follow: false
@@ -214,8 +223,7 @@
           ansible.builtin.copy:
             content: '{{ backup_controller.configuration | to_json }}'
             dest: '{{ backup_group_candidate.path }}'
-            owner: root
-            group: root
+            owner: '{{ backup_controller.user }}'
             mode: '0600'
           no_log: true
 
@@ -230,7 +238,7 @@
                 from private_io import read_json;
                 backup_controller.continuity(read_json(sys.argv[2]), read_json(sys.argv[3]))
               - '{{ backup_controller.directory }}'
-              - '/etc/homelab-backup-schedules/{{ backup_controller.name }}.json'
+              - '{{ backup_controller.group_path }}'
               - '{{ backup_group_candidate.path }}'
           when: backup_group_before.stat.exists
           changed_when: false
@@ -242,7 +250,7 @@
           ansible.builtin.copy:
             src: '{{ backup_group_candidate.path }}'
             remote_src: true
-            dest: '/etc/homelab-backup-schedules/{{ backup_controller.name }}.json'
+            dest: '{{ backup_controller.group_path }}'
             owner: '{{ backup_controller.user }}'
             mode: '0600'
             follow: false
@@ -253,27 +261,59 @@
             path: '{{ backup_group_candidate.path }}'
             state: absent
 
+    - name: Verify existing user units before changing declarations
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - --user
+          - show
+          - '{{ backup_controller.name }}.{{ item }}'
+          - --property=FragmentPath
+          - --property=DropInPaths
+          - --property=NeedDaemonReload
+      loop: [service, timer]
+      register: backup_loaded_before
+      when: backup_service_before.stat.exists
+      changed_when: false
+
+    - name: Refuse an unexpected effective user unit
+      ansible.builtin.assert:
+        that:
+          - item.stderr == ''
+          - item.stdout_lines | sort == (['FragmentPath=' + backup_controller.unit_directory + '/' + backup_controller.name + '.' + item.item, 'DropInPaths=', 'NeedDaemonReload=no'] | sort)
+      loop: '{{ backup_loaded_before.results }}'
+      when: backup_service_before.stat.exists
+
+    - name: Prepare the actor-owned user unit directory
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        mode: '0700'
+      loop:
+        - '{{ backup_controller.unit_directory | dirname | dirname }}'
+        - '{{ backup_controller.unit_directory | dirname }}'
+        - '{{ backup_controller.unit_directory }}'
+
     - name: Install the bounded recovery service
       ansible.builtin.copy:
         content: '{{ backup_controller.service }}'
-        dest: '/etc/systemd/system/{{ backup_controller.name }}.service'
-        owner: root
-        group: root
+        dest: '{{ backup_controller.unit_directory }}/{{ backup_controller.name }}.service'
+        owner: '{{ backup_controller.user }}'
         mode: '0644'
         follow: false
 
     - name: Install the recovery timer
       ansible.builtin.copy:
         content: '{{ backup_controller.timer }}'
-        dest: '/etc/systemd/system/{{ backup_controller.name }}.timer'
-        owner: root
-        group: root
+        dest: '{{ backup_controller.unit_directory }}/{{ backup_controller.name }}.timer'
+        owner: '{{ backup_controller.user }}'
         mode: '0644'
         follow: false
 
     - name: Enable the declared schedule without running a backup during CD
       ansible.builtin.systemd_service:
         name: '{{ backup_controller.name }}.timer'
+        scope: user
         daemon_reload: true
         enabled: true
         state: started

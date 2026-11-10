@@ -35,6 +35,20 @@ class Handler(BaseHTTPRequestHandler):
   self.send_response(200);self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
 ThreadingHTTPServer(('0.0.0.0',8080),Handler).serve_forever()
 '''
+BACKEND_READY = r'''
+import json,time,urllib.request
+deadline=time.monotonic()+25
+while True:
+ remaining=deadline-time.monotonic()
+ if remaining<=0:raise TimeoutError('Synthetic backend did not become ready')
+ try:
+  with urllib.request.urlopen('http://127.0.0.1:8080/ips',timeout=min(4,remaining)) as response:
+   feed=json.load(response)
+ except OSError:
+  time.sleep(min(.2,max(0,deadline-time.monotonic())));continue
+ assert feed=={'success':True,'result':{'ipv4_cidrs':['198.18.71.0/24'],'ipv6_cidrs':['2400:cb00::/32']}}
+ break
+'''
 CLIENT = r'''
 import json,sys,ssl,time,http.client
 host,scheme,headers,expected=sys.argv[1:];headers=json.loads(headers);expected=int(expected)
@@ -110,7 +124,7 @@ def main():
             backend=name+'-backend';owned.append(backend)
             docker('run','-d','--name',backend,'--network',networks[0],'--ip','10.254.71.3',
                 '-v',str(root)+':/fixture:ro',args.python_image,'python','/fixture/backend.py')
-            docker('exec',backend,'python','-c',"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ips',timeout=4).read()")
+            docker('exec',backend,'python','-c',BACKEND_READY)
             proxy=name+'-proxy';owned.append(proxy)
             docker('run','-d','--name',proxy,'--platform','linux/amd64','--network',networks[0],'--ip','10.254.71.2',
                 '-v',str(root)+':/fixture:ro','-v',str(plugin)+':/plugins-local/src/github.com/theaussiepom/homelab-cloudflare:ro',

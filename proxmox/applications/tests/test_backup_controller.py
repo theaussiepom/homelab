@@ -96,11 +96,11 @@ class ControllerTests(unittest.TestCase):
             command.assert_not_called()
 
     def test_units_preserve_utc_pinned_source_actor_and_no_catchup(self):
-        result = controller.units(self.value, '/opt/source/applications', os.getuid())
+        result = controller.units(self.value, '/state/framework/'+'b'*64+'/proxmox/applications', 1000, '/home/runner')
         self.assertIn('UTC', result['timer']); self.assertIn('Persistent=false', result['timer'])
         self.assertIn('--group', result['service']); self.assertNotIn('--site', result['service'])
         self.value['schedule']['calendar'] = '02:30'
-        self.assertIn('02:30:00 UTC', controller.units(self.value, '/opt/source', 1000)['timer'])
+        self.assertIn('02:30:00 UTC', controller.units(self.value, '/state/framework/'+'b'*64+'/proxmox/applications', 1000, '/home/runner')['timer'])
         controller.continuity(self.value, self.value)
         added = copy.deepcopy(self.value); added['group']['members']['three'] = {**added['group']['members']['two'], 'vmid': 612}
         controller.continuity(self.value, added)
@@ -108,7 +108,7 @@ class ControllerTests(unittest.TestCase):
             value = copy.deepcopy(self.value); change(value)
             with self.assertRaises(ValueError): controller.continuity(self.value, value)
         for path in ('relative', '/bad%path', '/newline\n'):
-            with self.assertRaises(ValueError): controller.units(self.value, path, 1000)
+            with self.assertRaises(ValueError): controller.units(self.value, path, 1000, '/home/runner')
         with self.assertRaises(ValueError): controller.schedule({**self.value, 'schema': 'foreign'})
         command = controller.command(self.cfg['one'])
         self.assertIn('StrictHostKeyChecking=yes', command); self.assertIn('ConnectTimeout=10', command)

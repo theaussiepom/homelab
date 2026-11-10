@@ -16,6 +16,24 @@ You need the real PBS HTTPS endpoint and its certificate fingerprint, the existi
 
 Copy the verified public key to a site-relative repository location such as `assets/backup/pbs-recovery-public.pub`. The `.pub` file contains the exact same PEM-encoded RSA public key produced as `master-public.pem`; keep that encoding rather than converting it to SSH public-key format. The repository destination uses `.pub` so it can be staged normally under the existing ignore and private-path rules. Keep the private PEM outside Git; do not force-add a `.pem` file or weaken those rules. Compare the public-key fingerprint with the [generation record](recovery-key.md#generate-the-pair-once). Its public nature does not make changes harmless: review replacement just like a trust-anchor change.
 
+### Prepare the controller's persistent user manager
+
+The existing CD account owns the coordinated backup service and timer. Controller bootstrap prepares only the standard systemd user manager and its user-session bus; it does not install a site-specific alarm or grant local root access to CD. Keep the runner's `NoNewPrivileges=true` and `PrivateTmp=true` protections. Local `sudo`, root SSH and a writable system-unit directory are not backup prerequisites.
+
+For first installation, normal controller bootstrap includes this preparation. For an existing controller, an independently authorized root administrator must use the exact reviewed framework release to run the [user-manager preparation playbook](../../proxmox/bootstrap/ansible/backup-user-manager.yml), outside the hardened runner. For example, from that trusted root session on the controller, after placing the verified framework at `/srv/homelab-framework`:
+
+```bash
+/opt/homelab-tools/bin/ansible-playbook -i 'deploy,' -c local \
+  /srv/homelab-framework/proxmox/bootstrap/ansible/backup-user-manager.yml \
+  --extra-vars '{"runner_owner":"homelab-runner"}'
+```
+
+This prepares persistent login-independent operation for the existing non-root account. The manager's hardening is root-owned and effective before it starts: `NoNewPrivileges=true` is inherited by its child processes, so a user-editable unit cannot undo that protection. Preparation refuses a foreign or already-running unhardened manager; it does not restart that manager, the runner or any application. Such a refusal needs separately reviewed maintenance, not a deployment workaround.
+
+Before PBS or guest enrollment changes, activation verifies the existing manager's identity, effective kernel protection, private runtime directory and user-session bus. CD then installs or updates the one user service/timer, its private group descriptor and an exact versioned public-source bundle under the existing CD account. These are account-owned files, not root-immutable files: a malicious process with that same UID can alter its own alarm. Foreign ownership, symlinks, changed expected source, and root/system-scope namesakes are refused. Guest workers and client credentials retain their existing root-only ownership; no token, key or capture contract changes.
+
+Later source, membership and schedule changes use ordinary CD under the same hardened manager. They do not require an administrator to reinstall each versioned bundle or alarm. An unchanged repeated deployment verifies the same owned files and effective user timer. Do not install a second system timer, manually adopt an existing scheduler or clear a failed activation to reach this step.
+
 ### Prepare storage for an already managed guest
 
 Operational staging currently supports **ZFS-pool subvolumes only**. The authored value remains a storage ID; before any resource apply or creation, CD verifies that the selected storage is a `zfspool`. Other pool/filesystem types are refused rather than using a block-device or root-filesystem fallback. Generic storage-ID syntax alone does not prove runtime support.
