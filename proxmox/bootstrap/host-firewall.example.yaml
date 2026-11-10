@@ -9,6 +9,10 @@ allowances:
   - source: 192.0.2.0/24
     port: 22
     comment: Approved management SSH
+  - source: 198.18.40.33/32
+    destination: 198.18.40.10
+    port: 8006
+    comment: Application ingress to host UI
 cluster:
   enabled: true
   ebtables: true

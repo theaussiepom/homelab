@@ -1,0 +1,90 @@
+---
+- name: Inspect only the two owned InfluxDB frontend unit paths
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ item }}"
+    follow: false
+  loop: [homelab-influxdb-web.socket, homelab-influxdb-web.service]
+  register: influx_web_units
+
+- name: Preserve foreign or unexpected frontend unit paths
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isreg | default(false) and item.stat.uid == 0 and item.stat.gid == 0 and item.stat.nlink == 1 and item.stat.mode in ['0600', '0644'] and item.stat.size < 16384)
+  loop: "{{ influx_web_units.results }}"
+
+- name: Read existing owned frontend definitions before changing them
+  ansible.builtin.slurp:
+    src: "{{ item.stat.path }}"
+  loop: "{{ influx_web_units.results }}"
+  when: item.stat.exists
+  register: influx_web_existing
+
+- name: Refuse to replace foreign service definitions
+  ansible.builtin.assert:
+    that:
+      - "(item.content | b64decode).startswith('# Managed by HomeLab InfluxDB web frontend.\n')"
+  loop: "{{ influx_web_existing.results }}"
+  when: not item.skipped | default(false)
+
+- name: Check the existing systemd socket proxy before enabling the frontend
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/systemd-socket-proxyd
+  register: influx_web_proxy
+  when: component_native_frontend.enabled
+
+- name: Require the installed proxy executable
+  ansible.builtin.assert:
+    that:
+      - influx_web_proxy.stat.isreg | default(false)
+      - influx_web_proxy.stat.executable | default(false)
+  when: component_native_frontend.enabled
+
+- name: Stop only the retired owned frontend socket
+  ansible.builtin.systemd_service:
+    name: homelab-influxdb-web.socket
+    state: stopped
+    enabled: false
+  when: not component_native_frontend.enabled and influx_web_units.results[0].stat.exists
+
+- name: Stop only the retired owned frontend proxy
+  ansible.builtin.systemd_service:
+    name: homelab-influxdb-web.service
+    state: stopped
+  when: not component_native_frontend.enabled and influx_web_units.results[1].stat.exists
+
+- name: Remove only retired owned frontend definitions
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item.item }}"
+    state: absent
+  loop: "{{ influx_web_units.results }}"
+  when: not component_native_frontend.enabled and item.stat.exists
+  register: influx_web_retired
+
+- name: Install the selected bound web frontend units
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item.name }}"
+    content: "{{ item.content }}"
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  loop: "{{ component_native_frontend.files }}"
+  register: influx_web_configuration
+
+- name: Reload only after frontend definitions change
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: influx_web_configuration.changed or influx_web_retired.changed
+
+- name: Stop the old owned proxy after its selected configuration changes
+  ansible.builtin.systemd_service:
+    name: homelab-influxdb-web.service
+    state: stopped
+  when: component_native_frontend.enabled and influx_web_configuration.changed and influx_web_units.results[1].stat.exists
+
+- name: Enable the bound socket after guest networking and InfluxDB are ready
+  ansible.builtin.systemd_service:
+    name: homelab-influxdb-web.socket
+    state: "{{ 'restarted' if influx_web_configuration.changed else 'started' }}"
+    enabled: true
+  when: component_native_frontend.enabled and app.start_services | default(false) | bool and not ansible_check_mode

@@ -66,6 +66,37 @@ class SourceControls(unittest.TestCase):
         self.assertTrue(all(set(r)==h.RULE_FIELDS and r['dest']=='198.18.25.10/32' for r in rows))
         self.assertEqual(h.native_rules(native(rows)),rows)
 
+    def test_explicit_destination_preserves_existing_management_rules(self):
+        c=config();previous=h.rules(c)
+        c['allowances'].append({'source':'198.18.40.33/32','port':8006,
+            'destination':'198.18.40.10','comment':'Application ingress to host UI'})
+        original=deepcopy(c)
+        self.assertIs(h.validate(c),c)
+        rows=h.rules(c)
+        self.assertEqual(rows[:-1],previous)
+        self.assertEqual(rows[-1]['dest'],'198.18.40.10/32')
+        self.assertEqual(rows[-1]['source'],'198.18.40.33/32')
+        self.assertEqual(rows[-1]['dport'],'8006')
+        self.assertEqual(h.native_rules(native(rows)),rows)
+        self.assertEqual(c,original)
+
+    def test_destination_is_one_canonical_ipv4_host_and_defaults_are_not_duplicate_waivers(self):
+        for value in [None,False,[],{},'::1','0.0.0.0','127.0.0.1','169.254.1.1',
+                      '224.0.0.1','240.0.0.1','198.18.40.10/32','198.18.40.0/24',
+                      '198.18.040.10','198.18.40.10 ','host.example.invalid']:
+            c=config();c['allowances'][1]['destination']=value
+            with self.subTest(value_type=type(value).__name__):self.refused(c)
+        c=config();row=dict(c['allowances'][0],destination='198.18.40.10',comment='Second host address')
+        c['allowances'].append(row)
+        self.assertIs(h.validate(c),c)
+        self.assertEqual([r['dest']for r in h.rules(c)],
+                         ['198.18.25.10/32','198.18.25.10/32','198.18.40.10/32'])
+        c['allowances'][-1]['destination']=c['host_address']
+        self.refused(c)
+        c['allowances'][-1]['destination']='198.18.40.10'
+        c['allowances'][-1]['comment']=c['allowances'][0]['comment']
+        self.refused(c)
+
     def test_root_and_row_and_cluster_closed_shapes(self):
         for key in config():
             c=config();del c[key]
@@ -160,6 +191,15 @@ class SourceControls(unittest.TestCase):
 
 
 class PlanControls(unittest.TestCase):
+    def test_destination_update_uses_the_same_two_resources_and_rejects_other_planned_targets(self):
+        c=config();b=before(c)
+        c['allowances'].append({'source':'198.18.40.33/32','destination':'198.18.40.10',
+            'port':8006,'comment':'Application ingress to host UI'})
+        self.assertTrue(h.check_plan(plan(c,b),c,b))
+        for value in ['198.18.25.10/32','198.18.40.11/32','198.18.40.0/24','0.0.0.0/0']:
+            p=plan(c,b);p['resource_changes'][0]['change']['after']['rule'][-1]['dest']=value
+            with self.subTest(destination=value),self.assertRaises(ValueError):h.check_plan(p,c,b)
+
     def test_one_ssh_append_repeat_and_explicit_disable_keep_other_behavior(self):
         c=config();b=before()
         self.assertTrue(h.check_plan(plan(c,b),c,b))

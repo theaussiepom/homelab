@@ -59,13 +59,15 @@ def validate(c):
     require(type(rows) is list and 1 <= len(rows) <= 32)
     tuples, comments = set(), set()
     for row in rows:
-        closed(row, ('source', 'port', 'comment'))
+        require(type(row) is dict and {'source', 'port', 'comment'} <= set(row)
+                and set(row) <= {'source', 'port', 'comment', 'destination'})
         address(row['source'], network=True)
+        destination = address(row.get('destination', c['host_address']))
         require(type(row['port']) is int and 1 <= row['port'] <= 65535
                 and type(row['comment']) is str and 1 <= len(row['comment']) <= 200
                 and row['comment'].strip() == row['comment']
                 and all(32 <= ord(char) < 127 for char in row['comment']))
-        key = row['source'], row['port']
+        key = row['source'], destination, row['port']
         require(key not in tuples and row['comment'] not in comments)
         tuples.add(key)
         comments.add(row['comment'])
@@ -88,7 +90,7 @@ def validate_cluster(cluster):
 def rules(c):
     validate(c)
     return [dict(action='ACCEPT', type='in', proto='tcp', enabled=True, comment=r['comment'],
-                 source=r['source'], dest=c['host_address'] + '/32', dport=str(r['port']),
+                 source=r['source'], dest=r.get('destination', c['host_address']) + '/32', dport=str(r['port']),
                  iface='', log='', macro='', sport='', security_group='', pos=i)
             for i, r in enumerate(c['allowances'])]
 

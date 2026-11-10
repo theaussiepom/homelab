@@ -22,6 +22,10 @@
       ansible.builtin.import_tasks: tasks/database.yml
       when: component_native_services is defined
 
+    - name: Reconcile the selected native application web frontend
+      ansible.builtin.import_tasks: tasks/influxdb-web-frontend.yml
+      when: component_native_frontend is defined
+
     - name: Reconcile the selected Compose services
       ansible.builtin.include_tasks: tasks/component-compose.yml
       when: component_compose_file is defined

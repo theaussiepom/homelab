@@ -149,6 +149,45 @@ def _clients(clients):
     return ''.join(result)
 
 
+def web_frontend(app):
+    """Own InfluxDB's optional web socket without moving its database listener.
+
+    This is an app-owned local TCP forwarding socket, not a second database or
+    a route between networks. Only fixed systemd unit names/commands are emitted.
+    The ordinary InfluxDB profile has no web role and keeps its existing output.
+    """
+    require(app.get('adapter') == 'influxdb', 'Only InfluxDB owns this native web frontend')
+    roles = app.get('role_addresses', {})
+    selected = {'enabled': False, 'files': []}
+    if 'web' not in roles:
+        return selected
+    require('service' in roles, 'Resolve the native database service role')
+    source, target = _address(roles['web']), _address(roles['service'])
+    require(source != target, 'Separate the InfluxDB web and database addresses')
+    listeners = app.get('listeners', {})
+    require(set(listeners) == {'web', 'backend'} and all(
+        row.get('service') == 'influxdb' and row.get('namespace') == 'host'
+        and row.get('bind') == 'interface' and row.get('protocol') == 'tcp'
+        and row.get('port') == 8086 and 'publish' not in row
+        and row.get('interface') == ('web' if name == 'web' else 'service')
+        and row.get('actual_bind') == (source if name == 'web' else target)
+        for name, row in listeners.items()), 'Bind the two exact InfluxDB listener roles')
+    marker = '# Managed by HomeLab InfluxDB web frontend.\n'
+    socket = marker + ('[Unit]\nDescription=InfluxDB application web frontend\n'
+        'DefaultDependencies=no\nConflicts=shutdown.target\nBefore=shutdown.target\n'
+        'Requires=homelab-network-ready.service influxdb.service\n'
+        'After=homelab-network-ready.service influxdb.service\n\n'
+        '[Socket]\nListenStream=' + source + ':8086\n\n'
+        '[Install]\nWantedBy=multi-user.target\n')
+    service = marker + ('[Unit]\nDescription=Forward InfluxDB web traffic to its local database listener\n'
+        'Requires=influxdb.service\nAfter=influxdb.service\n\n'
+        '[Service]\nExecStart=/usr/lib/systemd/systemd-socket-proxyd ' + target + ':8086\n'
+        'DynamicUser=yes\nNoNewPrivileges=yes\n')
+    return {'enabled': True, 'files': [
+        {'name': 'homelab-influxdb-web.socket', 'content': socket},
+        {'name': 'homelab-influxdb-web.service', 'content': service}]}
+
+
 def render(app, *, clients=()):
     """Return base native texts, fixed units and existing Ansible metadata.
 
@@ -162,6 +201,8 @@ def render(app, *, clients=()):
     require(isinstance(app, dict) and isinstance(app.get('adapter'), str) and app['adapter'] in _DATA,
             'Use a supported native database component')
     adapter = app['adapter']
+    if adapter == 'influxdb':
+        web_frontend(app)
     properties = app.get('properties', {})
     require(isinstance(properties, dict) and (not properties or
             adapter == 'postgresql' and set(properties) == {'client_access'}),

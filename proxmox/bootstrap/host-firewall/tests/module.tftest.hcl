@@ -58,3 +58,44 @@ run "same_desired_policy" {
     error_message = "The same source remains enabled on later runs."
   }
 }
+
+run "additional_address_preserves_management_policy" {
+  command = plan
+  variables {
+    policy = {
+      schema       = "homelab-host-firewall-v1"
+      endpoint     = "https://pve.example.invalid:8006/"
+      node         = "pve"
+      host_address = "198.18.25.10"
+      allowances = [
+        { source = "198.18.25.11/32", port = 8006, comment = "Existing API" },
+        { source = "192.0.2.0/24", port = 22, comment = "Reviewed management SSH" },
+        { source = "198.18.40.33/32", destination = "198.18.40.10", port = 8006, comment = "Application ingress to host UI" }
+      ]
+      cluster = {
+        enabled        = true
+        ebtables       = true
+        input_policy   = "DROP"
+        output_policy  = "ACCEPT"
+        forward_policy = "ACCEPT"
+        log_ratelimit  = { enabled = true, rate = "1/second", burst = 5 }
+      }
+    }
+  }
+  assert {
+    condition = (proxmox_virtual_environment_firewall_rules.host.node_name == "pve" &&
+      proxmox_virtual_environment_firewall_rules.host.container_id == null &&
+      proxmox_virtual_environment_firewall_rules.host.vm_id == null &&
+      length(proxmox_virtual_environment_firewall_rules.host.rule) == 3 &&
+      proxmox_virtual_environment_firewall_rules.host.rule[0].dest == "198.18.25.10/32" &&
+      proxmox_virtual_environment_firewall_rules.host.rule[0].source == "198.18.25.11/32" &&
+      proxmox_virtual_environment_firewall_rules.host.rule[0].dport == "8006" &&
+      proxmox_virtual_environment_firewall_rules.host.rule[1].dest == "198.18.25.10/32" &&
+      proxmox_virtual_environment_firewall_rules.host.rule[1].source == "192.0.2.0/24" &&
+      proxmox_virtual_environment_firewall_rules.host.rule[1].dport == "22" &&
+      proxmox_virtual_environment_firewall_rules.host.rule[2].dest == "198.18.40.10/32" &&
+      proxmox_virtual_environment_firewall_rules.host.rule[2].source == "198.18.40.33/32" &&
+    proxmox_virtual_environment_firewall_rules.host.rule[2].dport == "8006")
+    error_message = "An additional host address must preserve management allowances and host ownership."
+  }
+}
