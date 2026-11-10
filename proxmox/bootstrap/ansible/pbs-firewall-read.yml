@@ -1,0 +1,105 @@
+---
+- name: Read current interface addresses without changing networking
+  ansible.builtin.command:
+    argv: [ip, --json, address, show]
+  changed_when: false
+  register: pbs_addresses
+- name: Read all current IPv4 routes
+  ansible.builtin.command:
+    argv: [ip, --json, -4, route, show, table, all]
+  changed_when: false
+  register: pbs_routes4
+- name: Read all current IPv6 routes
+  ansible.builtin.command:
+    argv: [ip, --json, -6, route, show, table, all]
+  changed_when: false
+  register: pbs_routes6
+- name: Read existing NFS storage sources
+  ansible.builtin.command:
+    argv: [findmnt, --json, --list, --types, 'nfs,nfs4', --output, SOURCE]
+  changed_when: false
+  failed_when: pbs_mounts.rc not in [0, 1] or (pbs_mounts.rc == 1 and pbs_mounts.stdout != '')
+  register: pbs_mounts
+- name: Validate literal storage server selections locally
+  ansible.builtin.command:
+    argv:
+      - '{{ ansible_playbook_python }}'
+      - -c
+      - 'import json,sys; sys.path.insert(0,sys.argv[1]); import pbs_firewall as p; print(json.dumps(p.storage_servers(json.load(sys.stdin))))'
+      - '{{ playbook_dir }}/..'
+    stdin: '{{ pbs_mounts.stdout if pbs_mounts.rc == 0 else {"filesystems": []} | to_json }}'
+  delegate_to: localhost
+  become: false
+  vars: {ansible_connection: local, ansible_become: false}
+  changed_when: false
+  register: pbs_servers
+- name: Read the existing route to each mounted storage server
+  ansible.builtin.command:
+    argv: [ip, --json, route, get, '{{ item }}']
+  loop: '{{ pbs_servers.stdout | from_json }}'
+  changed_when: false
+  register: pbs_storage_routes
+- name: Read fixed service and configuration file metadata
+  ansible.builtin.stat:
+    path: '{{ item }}'
+    follow: false
+    get_checksum: false
+  loop:
+    - /usr/lib/systemd/system/nftables.service
+    - /etc/nftables.conf
+    - /etc/systemd/system/nftables.service.d/50-homelab-pbs.conf
+    - /etc/systemd/system/nftables.service.d
+  register: pbs_file_stats
+- name: Refuse linked or foreign persistence paths before reading their content
+  ansible.builtin.assert:
+    that:
+      - pbs_file_stats.results[0].stat.isreg | default(false)
+      - not (pbs_file_stats.results[0].stat.islnk | default(true))
+      - pbs_file_stats.results[1].stat.isreg | default(false)
+      - not (pbs_file_stats.results[1].stat.islnk | default(true))
+      - not pbs_file_stats.results[2].stat.exists or (pbs_file_stats.results[2].stat.isreg | default(false) and not (pbs_file_stats.results[2].stat.islnk | default(true)))
+      - not pbs_file_stats.results[3].stat.exists or (pbs_file_stats.results[3].stat.isdir | default(false) and not (pbs_file_stats.results[3].stat.islnk | default(true)) and pbs_file_stats.results[3].stat.uid == 0 and pbs_file_stats.results[3].stat.gid == 0 and pbs_file_stats.results[3].stat.mode == '0755')
+- name: Read fixed regular persistence file contents
+  ansible.builtin.slurp:
+    src: '{{ item }}'
+  loop: [/usr/lib/systemd/system/nftables.service, /etc/nftables.conf]
+  register: pbs_file_data
+- name: Read the owned drop-in only when present
+  ansible.builtin.slurp:
+    src: /etc/systemd/system/nftables.service.d/50-homelab-pbs.conf
+  when: pbs_file_stats.results[2].stat.exists
+  register: pbs_dropin_data
+- name: Read effective persistence ownership including an empty override list
+  ansible.builtin.command:
+    argv: [systemctl, show, --property=FragmentPath, --property=DropInPaths, --property=NeedDaemonReload, --property=ActiveState, --property=UnitFileState, nftables.service]
+  changed_when: false
+  register: pbs_service
+- name: Read the complete current kernel policy
+  ansible.builtin.command:
+    argv: [/usr/sbin/nft, --json, list, ruleset]
+  changed_when: false
+  register: pbs_ruleset
+- name: Collect observed values for the pure ownership validator
+  ansible.builtin.set_fact:
+    pbs_firewall_observed:
+      hostname: '{{ ansible_facts.hostname }}'
+      uid: '{{ ansible_facts.user_uid }}'
+      distribution: '{{ ansible_facts.distribution }}'
+      release: '{{ ansible_facts.distribution_major_version }}'
+      nft_version: '{{ ansible_facts.packages.get("nftables", [{}])[0].get("version", "") }}'
+      pbs_installed: '{{ "proxmox-backup-server" in ansible_facts.packages }}'
+      addresses: '{{ pbs_addresses.stdout | from_json }}'
+      routes: '{{ (pbs_routes4.stdout | from_json) + (pbs_routes6.stdout | from_json) }}'
+      storage_routes: '{{ pbs_storage_routes.results | map(attribute="stdout") | map("from_json") | list }}'
+      unit_stat: '{{ pbs_file_stats.results[0].stat }}'
+      config_stat: '{{ pbs_file_stats.results[1].stat }}'
+      dropin_stat: '{{ pbs_file_stats.results[2].stat }}'
+      unit: '{{ pbs_file_data.results[0].content | b64decode }}'
+      config: '{{ pbs_file_data.results[1].content | b64decode }}'
+      dropin: '{{ (pbs_dropin_data.content | default("") | b64decode) }}'
+      fragment: '{{ dict(pbs_service.stdout_lines | map("split", "=", 1))["FragmentPath"] }}'
+      dropins: '{{ dict(pbs_service.stdout_lines | map("split", "=", 1))["DropInPaths"] }}'
+      reload_needed: '{{ dict(pbs_service.stdout_lines | map("split", "=", 1))["NeedDaemonReload"] }}'
+      active: '{{ dict(pbs_service.stdout_lines | map("split", "=", 1))["ActiveState"] }}'
+      enabled: '{{ dict(pbs_service.stdout_lines | map("split", "=", 1))["UnitFileState"] }}'
+      ruleset: '{{ pbs_ruleset.stdout | from_json }}'

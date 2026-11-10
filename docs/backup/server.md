@@ -48,6 +48,14 @@ In the PBS interface:
 
 A proxy and browser FQDN are optional conveniences. Keep a verified direct PBS route for backup and recovery that does not require a working guest DNS, SSO or proxy deployment.
 
+### Limit a separate browser interface through CD
+
+When PBS has a separate application-facing interface, use the [PBS interface firewall](../reference/pbs-firewall.md) before exposing it. This capability configures the existing Debian nftables service over the management connection; it does not provision a VM, add a NIC, assign addresses or alter routes. First qualify independent management/console recovery and explicitly approve the network maintenance. Append the NIC disconnected, observe its actual Linux name and MAC, and only then write the binding. An absent binding must leave the private deployment job unselected before credentials or target contact.
+
+The policy permits only the declared IPv4 proxy to the declared application address on TCP8007, plus IPv4 reply-direction traffic for connections PBS originated. It drops every other local input on that interface, including all IPv6 before state allowances. Management/storage interfaces, ARP, OUTPUT and FORWARD remain outside its scope. Package installation and existing firewall takeover are unsupported: the first deployment requires the pristine installed nftables configuration, an empty ruleset and no service overrides. Later CD verifies its owned configuration and rules before updating them.
+
+Supply the closed YAML document, strict SSH trust and one target through the standard Ansible path described in the reference. Local validation proves the shape only. The playbook checks actual NIC/MAC, management/default/storage separation, current ownership and syntax before mutation. It uses the stock service with a narrow drop-in that removes the stock global-flushing stop action; it never stops or restarts that service. Keep the NIC disconnected until loaded policy and persistence readback succeed. Connecting it, assigning the reviewed address and testing both allowed and denied traffic require their own maintenance authority. A source test or successful service load does not prove future boot enforcement or client acceptance.
+
 ### Check the installed network and service identity
 
 From the trusted PBS root console, record these read-only results before changing storage or enrolling clients:
