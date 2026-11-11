@@ -208,3 +208,13 @@ def structural_runtime():
 
 def structural_documents():
     return component_runtime.compositions(structural_runtime())
+
+
+def influx_web_listeners(roles):
+    """Use one current InfluxDB network fixture in unit and hosted Linux checks."""
+    return {
+        name: {'service': 'influxdb', 'namespace': 'host', 'interface': role,
+               'bind': 'interface', 'protocol': 'tcp', 'port': 8086,
+               'actual_bind': roles[role]}
+        for name, role in (('web_listener', 'web_interface'),
+                           ('backend_listener', 'service_interface'))}

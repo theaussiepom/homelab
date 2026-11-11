@@ -2,9 +2,9 @@
 import http.server,json,os,pathlib,subprocess,sys,tempfile,threading,time,urllib.request
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]))
 import component_native
+from protocol_component_fixtures import influx_web_listeners
 value={'adapter':'influxdb','role_addresses':{'web_interface':'198.18.40.26','service_interface':'198.18.33.26'},'listeners':{}}
-for name,role in [('web','web'),('backend','service')]:
- value['listeners'][name]={'service':'influxdb','namespace':'host','interface':role,'bind':'interface','protocol':'tcp','port':8086,'actual_bind':value['role_addresses'][role]}
+value['listeners']=influx_web_listeners(value['role_addresses'])
 with tempfile.TemporaryDirectory()as directory:
  root=pathlib.Path(directory)
  for row in component_native.web_frontend(value)['files']:(root/row['name']).write_text(row['content'])

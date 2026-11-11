@@ -16,17 +16,14 @@ import component_app_hooks as hooks
 import music_assistant as music
 from test_component_native import app as native_app
 from test_component_music import descriptor, settings, make_data
+from protocol_component_fixtures import influx_web_listeners
 
 
 def influx():
     """Build a synthetic native API with a distinct optional web listener."""
     value = native_app('influxdb')
     value['role_addresses']['web_interface'] = '198.18.40.26'
-    value['listeners'] = {
-        name: {'service': 'influxdb', 'namespace': 'host', 'interface': role,
-               'bind': 'interface', 'protocol': 'tcp', 'port': 8086,
-               'actual_bind': value['role_addresses'][role]}
-        for name, role in [('web_listener', 'web_interface'), ('backend_listener', 'service_interface')]}
+    value['listeners'] = influx_web_listeners(value['role_addresses'])
     return value
 
 
