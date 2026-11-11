@@ -46,7 +46,7 @@ EXAMPLES = {
     'supporting-types.md': ['profile-minimal', 'runtime-minimal', 'device-minimal'],
     'zabbix.md': ['zabbix-selection', 'zabbix-profile'],
     'backup.md': ['backup-selection', 'backup-profile-selection', 'backup-profile',
-                  'backup-application', 'backup-job'],
+                  'backup-application', 'backup-job', 'backup-guest-override'],
     'lifecycle.md': ['lifecycle-fresh'],
 }
 
@@ -410,8 +410,9 @@ class ReferenceExamples(unittest.TestCase):
                                  'component.backup-consistency', ('include', 'data'))
         job = example('backup.md', 'backup-job')['backup']['job']
         component_backup_job.job(job)
+        component_backup_job.enrollment(example('backup.md', 'backup-guest-override')['backup'])
         missing = copy.deepcopy(job)
-        del missing['clients']
+        del missing['capture']
         expect_component_refusal(lambda: component_backup_job.job(missing), 'component.fields', ())
         invalid = copy.deepcopy(job)
         invalid['schedule']['calendar'] = '24:00'
