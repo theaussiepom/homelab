@@ -23,6 +23,16 @@ def closed(value, fields):
     require(type(value) is dict and set(value) == set(fields))
 
 
+def _ancestors(path):
+    """Keep each selected pathname entry under root/CD actor replacement control."""
+    for parent in reversed(path.parents):
+        info = parent.lstat()
+        require(stat.S_ISDIR(info.st_mode) and info.st_uid in (0, os.geteuid())
+                and (not info.st_mode & 0o022 or info.st_mode & stat.S_ISVTX))
+        # Sticky directories protect the next entry, whose root/CD ownership
+        # is checked by the next iteration or the existing leaf-file checks.
+
+
 def trust(target, options):
     """Check actual SSH option resolution and explicit files before any target contact."""
     closed(target, ('address', 'hostname'))
@@ -57,8 +67,12 @@ def trust(target, options):
                 and settings.get('IdentitiesOnly') == 'yes'
                 and settings.get('GlobalKnownHostsFile') == '/dev/null'
                 and settings.get('VerifyHostKeyDNS') == 'no' and settings.get('UpdateHostKeys') == 'no')
-        key, known = Path(options['private_key_file']), Path(settings['UserKnownHostsFile'])
+        known_value = settings['UserKnownHostsFile']
+        require(not any(char.isspace() or char in "%$'\"\\" for char in known_value))
+        key, known = Path(options['private_key_file']), Path(known_value)
         require(key.is_absolute() and known.is_absolute())
+        _ancestors(key)
+        _ancestors(known)
         k, before = key.lstat(), known.lstat()
         require(stat.S_ISREG(k.st_mode) and k.st_uid == os.geteuid() and k.st_nlink == 1
                 and stat.S_IMODE(k.st_mode) == 0o600

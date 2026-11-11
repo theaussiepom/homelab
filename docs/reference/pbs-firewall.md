@@ -49,7 +49,29 @@ python3 proxmox/bootstrap/pbs_firewall.py --config proxmox/bootstrap/pbs-firewal
 
 `--check` reports acceptance only; `--emit` writes the same validated document as JSON. Neither contacts a host or reads SSH credentials. Supplying a missing file, duplicate YAML key or sibling format is refused by the shared loader. For example `apps.proxy: 198.18.40.0/24` fails source validation; supply the exact permitted host instead. A well-formed but wrong MAC passes offline validation and fails the target preflight.
 
-The private protected main workflow must run the existing `deployment_state.bootstrap_closed()` guard before inventory, credentials or contact. An absent authored PBS binding means unselected. It builds **one** `pbs` inventory host whose alias equals `target.hostname`, `ansible_host` equals `target.address`, and `ansible_user=root`, with SSH as the connection. Keep the private key outside Git: its explicit absolute path must name a single regular file owned by the actual CD actor, mode0600. The independently reviewed known-hosts file must be a single root/CD-owned regular file, mode0600 or0644, at most64KiB, containing only this target's literal management address (optionally also its exact hostname) and public host keys. Links, wildcard/hashed/CA entries, unrelated hosts and writable trust files are unsupported.
+The private protected main workflow must run the existing `deployment_state.bootstrap_closed()` guard before inventory, credentials or contact. An absent authored PBS binding means unselected. It builds **one** `pbs` inventory host whose alias equals `target.hostname`, `ansible_host` equals `target.address`, and `ansible_user=root`, with SSH as the connection.
+
+Keep the private key outside Git: its explicit absolute path must name a single
+regular file owned by the actual CD actor, mode 0600. The independently reviewed
+known-hosts file must be a single root/CD-owned regular file, mode 0600 or 0644,
+at most 64 KiB, containing only this target's literal management address
+(optionally also its exact hostname) and public host keys. Its
+`UserKnownHostsFile` value must be one literal absolute path: percent/dollar
+expansion, whitespace, quotes and backslash syntax are unsupported.
+[OpenSSH can expand tokens and environment variables or select multiple files](https://man.openbsd.org/OpenBSD-7.7/ssh_config.5#UserKnownHostsFile);
+the local validator and SSH must read the same selected file. Links,
+wildcard/hashed/CA entries, unrelated hosts and writable trust files are refused.
+
+Both selected files require root/CD-owned ancestor directories without symlink
+components. Group/other-writable directories are refused unless their sticky
+bit protects the next root/CD-owned entry, as in a standard `/tmp` directory
+under the [Linux rename restrictions](https://man7.org/linux/man-pages/man2/rename.2.html#ERRORS).
+Every child directory and leaf still has to satisfy its ownership checks; a
+sticky parent does not admit a foreign-owned child. These checks preserve the
+selected path against replacement by other users until SSH reads it. Root and
+the CD actor remain trusted; this does not isolate conflicting writers using
+the same account. Apply the same checks on first installation and later CD;
+do not loosen file or directory ownership to pass admission.
 
 The precontact check reads the actual Ansible SSH option resolution, including CLI overrides. It requires standard SSH, no extra SSH/SCP/SFTP arguments, `-F /dev/null` to exclude inherited configuration, `StrictHostKeyChecking=yes`, `GlobalKnownHostsFile=/dev/null`, explicit `UserKnownHostsFile`, `BatchMode=yes`, `IdentitiesOnly=yes`, `ControlMaster=no`, `VerifyHostKeyDNS=no` and `UpdateHostKeys=no`; conflicting repeated options are refused. It reads only metadata for the private key, never its content. Do not weaken controller `NoNewPrivileges` or use local sudo. Then invoke stock Ansible with `pbs_firewall_config` set to the absolute authored path:
 
@@ -74,6 +96,6 @@ Network readback preserves interface/address identity, route attributes and thei
 
 ## Source evidence and navigation
 
-[Validator](../../proxmox/bootstrap/pbs_firewall.py), [playbook](../../proxmox/bootstrap/ansible/pbs-firewall.yml), [template](../../proxmox/bootstrap/ansible/pbs-firewall.nft.j2) and [focused contract tests](../../proxmox/bootstrap/tests/test_pbs_firewall.py) are maintained together. The test-local coverage map associates every field and example with direct validation, target/ownership refusals and isolated Linux policy controls. Fakes do not establish native installation; target acceptance is separate.
+[Validator](../../proxmox/bootstrap/pbs_firewall.py), [playbook](../../proxmox/bootstrap/ansible/pbs-firewall.yml), [template](../../proxmox/bootstrap/ansible/pbs-firewall.nft.j2), [focused contract tests](../../proxmox/bootstrap/tests/test_pbs_firewall.py) and [shared SSH path controls](../../proxmox/bootstrap/tests/test_bootstrap_ssh.py) are maintained together. The test-local coverage map associates every field and example with direct validation, target/ownership refusals and isolated Linux policy controls. Fakes do not establish native installation; target acceptance is separate.
 
 [Server setup](../backup/server.md#limit-a-separate-browser-interface-through-cd) · [Backup guide](../backup/README.md) · [Reference index](README.md)

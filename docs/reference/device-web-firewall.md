@@ -85,7 +85,9 @@ existing account must support the selected root privilege escalation.
 Use the same explicit key custody and strict SSH options as the
 [PBS host configuration](pbs-firewall.md#validate-and-deploy). Its private key
 remains outside Git. The shared precontact validator reads only its metadata
-and the pinned public host file. Disable Ansible SSH TTY allocation with
+and the pinned public host file. The same literal trust-path and protected
+ancestor-directory requirements apply to device CD. Disable Ansible SSH TTY
+allocation with
 `ANSIBLE_SSH_USETTY=False`; the actual plugin setting is checked before contact.
 Local admission is delegated with privilege escalation disabled. Set
 `device_web_firewall_config` to the absolute, reviewed authored input when
