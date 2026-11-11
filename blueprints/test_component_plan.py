@@ -307,7 +307,8 @@ class PlanTests(unittest.TestCase):
 
     def test_private_archive_binding_preserves_the_declared_policy_only(self):
         spec, value = library(), site()
-        spec['software'] = {'example': {'images': {'example': 'retained'}}}
+        spec['software'] = {'example': {'images': {'unbound': 'retained'}}}
+        spec['app_profiles']['recursive']['software'] = ['example']
         original = {'local_id': 'sha256:' + '0' * 64, 'archive': '/example/original.tar',
                     'archive_sha256': '0' * 64}
         (self.stack / 'images.json').write_text(json.dumps({'retained': original}))
@@ -316,6 +317,10 @@ class PlanTests(unittest.TestCase):
         result = self.resolve(spec, value).resolved['images']['retained']
         self.assertEqual(result['image'], 'sha256:' + 'a' * 64)
         self.assertEqual(result['archive'], '/private/example.tar')
+        spec['app_profiles']['recursive']['software'] = []
+        with self.assertRaisesRegex(ValueError, 'component.image-binding-unused'):
+            self.resolve(spec, value)
+        spec['app_profiles']['recursive']['software'] = ['example']
         for invalid in ({'repository': 'example/vendor', 'tag': 'stable', 'digest': 'sha256:' + 'c' * 64},
                         {'local_id': 'sha256:' + 'a' * 64, 'archive': 'relative.tar', 'archive_sha256': 'b' * 64}):
             value['images']['retained'] = invalid

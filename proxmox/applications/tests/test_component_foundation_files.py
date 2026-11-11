@@ -37,7 +37,7 @@ def ingress():
                 'login':{'type':'forward-auth','endpoint':{'app':'identity','endpoint':'web'},'target':target},
                 'canonical':{'type':'canonical-home-redirect','app':'db'}}
     def route(host,target,**extra):
-        return {'type':'http','endpoint':{'app':target['app'],'endpoint':'web'} if 'app'in target else {'external':'external'},
+        return {'type':'http','target':{'app':target['app'],'endpoint':'web'} if 'app'in target else {'external':'external'},
                 'domain':'fixture-domain','ingress':{'app':'edge','endpoint':'https'},'tls':'fixture-tls',
                 'hosts':[host],'target':target,'ingress_target':{'app':'edge','protocol':'https','address':'198.18.40.33','port':443},
                 'middlewares':['security-headers'],**extra}

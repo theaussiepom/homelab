@@ -36,6 +36,20 @@ Each `apps.<id>.interfaces.<role>` uses exactly one of the forms below. The sele
 
 Each branch requires exactly the fields listed; there are no defaults, and missing required fields, null values and unknown keys are rejected. An app interface assigns an existing address or network to a profile role. It does not allocate another NIC. See the [NIC address record](networks.md#field-guest-nic-address) for physical addresses and the [profile listener/endpoint contract](supporting-types.md#profile-interface-listener-and-endpoint-types) for sockets. A [connection](connections.md) must use a physical source or a supported same-guest loopback source. These bindings do not grant network access or make execution wait for another app.
 
+## Instance, interface role and exported endpoint
+
+In `apps.home.profile: homeassistant`, `home` names one site instance. The selected library's `homeassistant` profile supplies its supported software, roles, listeners and endpoints. A second instance can select the same profile, subject to placement and identity constraints; the instance name is not a software selector.
+
+Suppose `apps.home.guest` is `automation` and `apps.home.interfaces.web` is `{interface: primary}`. `primary` names a NIC in `guests.automation.interfaces`. The app's `web` role receives that NIC's resolved IPv4 address; it does not allocate a NIC or imply isolation. A profile may use the same word for several distinct contracts:
+
+- `interfaces.web` declares a role that the site must bind.
+- `listeners.web` declares the actual socket, such as host TCP port 8123.
+- `endpoints.web` exports a named connection: `listener: web`, `protocol: http`, `via: web`.
+
+For that profile, `{app: home, endpoint: web}` resolves HTTP, port 8123 and the address supplied through the `web` role. The site writes neither the port nor a copied backend address in its [exposure](exposures.md). `exposures.home_web.target` selects that exported connection; `ingress` separately selects the frontend HTTPS connection. A guest address change follows these references. The library owns which endpoints exist; do not assume that an arbitrary profile exports `web` or rename endpoint keys without migrating their consumers.
+
+A wildcard host listener still accepts other guest addresses unless access policy prevents it. App role binding and route selection do not alter listener isolation, authorize traffic or create a readiness dependency. See [connections](connections.md), [network policy](policies.md) and the selected profile's actual listener contract.
+
 ## Runtime identity
 
 The paths below are `apps.<id>.identity.<field>`. Generated identities for a fresh app establish new ownership; they cannot rename or adopt an existing service. Retained configuration must supply the required stable names and genuine runtime evidence that HomeLab already manages the app.

@@ -36,13 +36,31 @@ def fixture():
 
 
 def http(r, **extra):
-    value = {'type': 'http', 'endpoint': {'app': 'web', 'endpoint': 'http'}, 'domain': 'web',
+    value = {'type': 'http', 'target': {'app': 'web', 'endpoint': 'http'}, 'domain': 'web',
              'ingress': {'app': 'proxy', 'endpoint': 'https'}, 'tls': 'public', **extra}
     r.site['exposures']['web'] = value
     return value
 
 
 class ExposurePolicyReview(unittest.TestCase):
+    def test_http_and_dns_require_target_and_reject_the_old_outer_endpoint(self):
+        for kind in ('http', 'dns'):
+            for change in ('old-only', 'both', 'missing', 'null', 'wrong-reference'):
+                r = fixture()
+                value = http(r) if kind == 'http' else {
+                    'type': 'dns', 'target': {'app': 'web', 'endpoint': 'http'},
+                    'domain': 'web', 'resolver': 'dns'}
+                r.site['exposures']['web'] = value
+                if change == 'old-only': value['endpoint'] = value.pop('target')
+                elif change == 'both': value['endpoint'] = copy.deepcopy(value['target'])
+                elif change == 'missing': value.pop('target')
+                elif change == 'null': value['target'] = None
+                else: value['target'] = {'app': 'web', 'target': 'http'}
+                with self.subTest(kind=kind, change=change), self.assertRaisesRegex(
+                        ComponentError, ('component.invalid' if change == 'null' else 'component.fields')
+                        + ' at exposures.web'):
+                    Exposures(r).bind()
+
     def test_cloudflare_policy_resolves_a_named_internal_allowlist_in_any_order(self):
         r = fixture()
         r.policy['middlewares'] = {
@@ -134,11 +152,11 @@ class ExposureBindingReview(unittest.TestCase):
         self.assertNotIn('readiness', r.apps['web'])
 
     def test_external_http_and_dns_only_publish_the_declared_address(self):
-        r = fixture(); value = http(r, endpoint={'external': 'nas'}, transport='nas')
+        r = fixture(); value = http(r, target={'external': 'nas'}, transport='nas')
         api = Exposures(r); result = api.bind()
         self.assertEqual(result['dns_records'], {})
         self.assertEqual(api.hostname({'exposure': 'web'}, {'address': '198.18.25.10'}), 'Web.example.invalid')
-        r = fixture(); r.site['exposures']['web'] = {'type': 'dns', 'endpoint': {'app': 'web', 'endpoint': 'http'}, 'domain': 'web', 'resolver': 'dns'}
+        r = fixture(); r.site['exposures']['web'] = {'type': 'dns', 'target': {'app': 'web', 'endpoint': 'http'}, 'domain': 'web', 'resolver': 'dns'}
         api = Exposures(r); result = api.bind()
         self.assertEqual(result['routes'], {})
         self.assertEqual(result['dns_records'], {'dns': {'Web.example.invalid': '198.18.40.20'}})
@@ -153,7 +171,7 @@ class ExposureBindingReview(unittest.TestCase):
 
     def test_dashboard_needs_same_ingress_enabled_property_and_forward_auth(self):
         def selected():
-            r = fixture(); http(r, endpoint={'app': 'proxy', 'endpoint': 'dashboard'}, domain='proxy', middlewares=['login'])
+            r = fixture(); http(r, target={'app': 'proxy', 'endpoint': 'dashboard'}, domain='proxy', middlewares=['login'])
             r.policy['middlewares']['login'] = {'type': 'forward-auth', 'endpoint': {'app': 'sso', 'endpoint': 'auth'}}
             return r
         r = selected(); result = Exposures(r).bind()
@@ -185,7 +203,7 @@ class ExposureBindingReview(unittest.TestCase):
             r = fixture(); value = http(r); change(r, value)
             with self.subTest(number=number), self.assertRaises(ComponentError): Exposures(r).bind()
         for kind in ('internal', 'missing-address', 'non-address'):
-            r = fixture(); r.site['exposures']['web'] = {'type': 'dns', 'endpoint': {'app': 'web', 'endpoint': 'http'}, 'domain': 'web', 'resolver': 'dns'}
+            r = fixture(); r.site['exposures']['web'] = {'type': 'dns', 'target': {'app': 'web', 'endpoint': 'http'}, 'domain': 'web', 'resolver': 'dns'}
             if kind == 'internal': r.rows[('web', 'http')]['internal'] = 'dashboard'
             elif kind == 'missing-address': r.rows[('web', 'http')].pop('address')
             else: r.rows[('web', 'http')]['address'] = 'name.example.invalid'

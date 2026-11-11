@@ -36,7 +36,7 @@ def selection():
   'secrets':{'runtime_environment':'vault_environment'},'origin':{'exposure':'vault'},
   'properties':{'issuer':{'protocol':'http','domain':'issuer'},'database_name':'owned_vault','data_uid':1000,'data_gid':1000}}
  site['connections']['vault_database']={'consumer':{'app':'vault','connection':'database'},'target':{'external':'database'},'source_interface':'database'}
- site['exposures']['vault']={'type':'http','endpoint':{'app':'vault','endpoint':'web'},'domain':'vault','ingress':{'app':'ingress','endpoint':'https'},'tls':'public'}
+ site['exposures']['vault']={'type':'http','target':{'app':'vault','endpoint':'web'},'domain':'vault','ingress':{'app':'ingress','endpoint':'https'},'tls':'public'}
  site['policies']['network']['selected_external']['rules'].append({'direction':'out','proto':'tcp','destination':{'endpoint':'database'},'port':{'endpoint':'database'},'comment':'Selected database'})
  site['guests']['resolver']['network_policy'][0]['endpoints']['database']={'external':'database'}
  return library,site

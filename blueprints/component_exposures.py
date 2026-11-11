@@ -115,11 +115,11 @@ class Exposures:
             with at('exposures', name):
                 require(isinstance(value, dict) and value.get('type') in ('http', 'dns'))
                 http = value['type'] == 'http'
-                closed(value, ('type', 'endpoint', 'domain', 'ingress', 'tls') if http else
-                       ('type', 'endpoint', 'domain', 'resolver'),
+                closed(value, ('type', 'target', 'domain', 'ingress', 'tls') if http else
+                       ('type', 'target', 'domain', 'resolver'),
                        ('aliases', 'middlewares', 'resolver', 'transport') if http else ('aliases',))
-                types.endpoint(value['endpoint'])
-                endpoint = self.resolver.endpoint(value['endpoint'])
+                types.endpoint(value['target'])
+                endpoint = self.resolver.endpoint(value['target'])
                 types.strings(value.get('aliases', []), ids=True)
                 names = [value['domain'], *value.get('aliases', [])]
                 require(all(item in self.domains for item in names) and len(set(names)) == len(names),

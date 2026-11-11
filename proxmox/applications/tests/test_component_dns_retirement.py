@@ -67,7 +67,7 @@ class DnsRetirementIntegration(unittest.TestCase):
   source['apps']['recursive_a'].update(interfaces={'service':{'interface':'backend'},'upstream':{'interface':'backend'}},storage={'config':{'root_path':'data','subpath':'config'}})
   source['external_endpoints']['service']={'protocol':'http','address':ADDRESS,'port':80}
   source['domains']={'service':CURRENT,'retired':RETIRED}
-  source['exposures']={'service':{'type':'dns','endpoint':{'external':'service'},'domain':'service','resolver':'recursive_a','aliases':['retired']}}
+  source['exposures']={'service':{'type':'dns','target':{'external':'service'},'domain':'service','resolver':'recursive_a','aliases':['retired']}}
   source['connections']={'dns':{'consumer':{'app':'recursive_a','connection':'upstream'},'target':{'external':'dns'},'source_interface':'upstream'}}
   source['policies']={'network':{'dns':{'rules':[{'direction':'out','proto':protocol,'destination':{'endpoint':'dns'},'port':'53','comment':'Selected synthetic upstream'}for protocol in('udp','tcp')]}}}
   guest['network_policy']=[{'policy':'dns','endpoints':{'dns':{'external':'dns'}}}]

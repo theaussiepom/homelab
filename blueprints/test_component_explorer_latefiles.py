@@ -83,7 +83,7 @@ def source_fixture(*,existing=False,name='Saved source broker'):
             'secrets':{'cloudflare_dns_token':'dns_api','proxmox_token':'provider'},
             'properties':{'dashboard':False,'provider':{'context':'lab','token_id':'fixture@pve!discovery'},
                 'acme':{'email':'fixture@example.invalid','resolvers':[{'external':'dns'}]}}}}
-    site['exposures']={'browser':{'type':'http','endpoint':{'app':'browser','endpoint':'web'},
+    site['exposures']={'browser':{'type':'http','target':{'app':'browser','endpoint':'web'},
         'domain':'browser','ingress':{'app':'ingress','endpoint':'https'},'tls':'public'}}
     target={'external':'existing_broker'}if existing else{'app':'broker','endpoint':'backend'}
     site['connections']={'broker':{'consumer':{'app':'browser','connection':'broker'},'target':target,

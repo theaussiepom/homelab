@@ -326,7 +326,7 @@ class PlanCompilerWiringReview(unittest.TestCase):
             for method, returned in {'validate': None, 'image_values': {}, 'external_values': None,
                 'guest_values': None, 'app_values': None, 'endpoint_values': None,
                 'context_values': {'lab': {'node': 'example-node'}}, 'policy_values': [],
-                'execution_values': None}.items():
+                'execution_values': set()}.items():
                 stack.enter_context(patch.object(r, method, return_value=returned))
             exposure = stack.enter_context(patch.object(plan.component_exposures, 'Exposures')).return_value
             exposure.bind.return_value = {'exposures': {}, 'dns_records': {}, 'routes': {}, 'middlewares': {}}

@@ -143,7 +143,7 @@ policies:
 exposures:
   backend:
     type: http
-    endpoint:
+    target:
       external: backend
     domain: backend
     ingress:
