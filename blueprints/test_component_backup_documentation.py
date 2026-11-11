@@ -169,6 +169,36 @@ class BackupDocumentation(unittest.TestCase):
             with self.subTest(override=override), self.assertRaisesRegex(ComponentError, code):
                 self.plan(['resolver'])
 
+    def test_documented_unenrolment_commands_use_only_the_changed_disposable_copy(self):
+        """Execute the changed-copy tutorial and preserve the original enrolled source."""
+        marker = '<!-- example: backup-unenrolment-compile -->\n```bash\n'
+        page = (EXAMPLE/'README.md').read_text()
+        self.assertEqual(page.count(marker), 1)
+        source = page.split(marker, 1)[1].split('\n```', 1)[0]
+        original = {str(p.relative_to(EXAMPLE)): hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in EXAMPLE.rglob('*') if p.is_file()}
+        trace = self.root/'changed-directory.txt'
+        source += '\nprintf "%s\\n" "$PBS_CHANGE_WORK" > "$PBS_DOC_TEST_TRACE"\n'
+        env = dict(os.environ, TMPDIR=str(self.root), PBS_DOC_TEST_TRACE=str(trace),
+                   PATH=os.pathsep.join((str(Path(sys.executable).parent), os.environ['PATH'])))
+        result = subprocess.run(['bash', '-eu'], input=source, text=True, cwd=ROOT,
+                                env=env, capture_output=True, timeout=30, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'Unenrolled: resolver; PBS agent: absent')
+        work = Path(trace.read_text().strip())
+        self.assertEqual(work.resolve(), work)
+        self.assertTrue(work.is_relative_to(self.root))
+        self.assertEqual(sorted(p.name for p in work.iterdir()), ['example', 'resolver.json'])
+        changed = yaml.safe_load((work/'example/site.yaml').read_text())
+        self.assertEqual(changed['backup'], {})
+        self.assertNotIn('backup', changed['guests']['resolver'])
+        packet = json.loads((work/'resolver.json').read_text())
+        cfg = json.loads(packet['files']['site.json'])
+        self.assertNotIn('backup', cfg['app'])
+        self.assertNotIn('pbs-agent', cfg['deployment']['phases'])
+        self.assertEqual(original, {str(p.relative_to(EXAMPLE)): hashlib.sha256(p.read_bytes()).hexdigest()
+                                   for p in EXAMPLE.rglob('*') if p.is_file()})
+
     def test_documented_mixed_client_cli_commands_compile_the_canonical_source(self):
         """Run the maintained non-native shell example with the selected source interpreter."""
         marker = '<!-- example: backup-client-limits-compile -->\n```bash\n'

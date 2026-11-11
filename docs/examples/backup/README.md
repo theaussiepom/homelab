@@ -42,7 +42,38 @@ The final line must match the printed text above. The packet contains public sou
 
 ## Try a meaningful change
 
-Copy this directory to a new disposable location before editing it. Remove the guest's `backup` marker and remove the operational `defaults`, `job`, `management` and `recovery_public_key` objects, leaving root `backup: {}`. Compile again: the guest must receive no PBS phase. Root settings alone do not enroll it. Keeping a job with no enrolled guests is refused. Defaults never enroll an omitted guest. Existing configurations with a legacy client map must keep it exclusive of defaults and nonempty guest bindings.
+From the framework repository root, run the following commands to make a disposable copy. They remove the guest's `backup` marker and replace shared operational settings with `backup: {}` in that copy only. Compilation and inspection both use the changed copy; the original example stays enrolled.
+
+<!-- example: backup-unenrolment-compile -->
+```bash
+FRAMEWORK=$(pwd -P)
+PBS_CHANGE_WORK=$(mktemp -d "${TMPDIR:-/tmp}/homelab-backup-example.XXXXXXXX")
+PBS_CHANGE_WORK=$(cd "$PBS_CHANGE_WORK" && pwd -P)
+cp -R "$FRAMEWORK/docs/examples/backup" "$PBS_CHANGE_WORK/example"
+PBS_CHANGED_EXAMPLE="$PBS_CHANGE_WORK/example"
+python3 - "$PBS_CHANGED_EXAMPLE/site.yaml" <<'PY_CHANGE'
+from pathlib import Path
+import sys, yaml
+path = Path(sys.argv[1])
+site = yaml.safe_load(path.read_text())
+del site['guests']['resolver']['backup']
+site['backup'] = {}
+path.write_text(yaml.safe_dump(site, sort_keys=False))
+PY_CHANGE
+python3 "$FRAMEWORK/blueprints/compile.py" \
+  --stack "$PBS_CHANGED_EXAMPLE" --site "$PBS_CHANGED_EXAMPLE/site.yaml" \
+  --guest resolver --output "$PBS_CHANGE_WORK/resolver.json"
+python3 - "$PBS_CHANGE_WORK/resolver.json" <<'PY_CHANGE_CHECK'
+import json, sys
+packet = json.load(open(sys.argv[1]))
+cfg = json.loads(packet['files']['site.json'])
+assert 'backup' not in cfg['app']
+assert 'pbs-agent' not in cfg['deployment']['phases']
+print('Unenrolled: resolver; PBS agent: absent')
+PY_CHANGE_CHECK
+```
+
+The last line must match the printed text above. Root settings alone do not enroll guests. Keeping a job with no enrolled guests is refused. Defaults never enroll an omitted guest. Existing configurations with a legacy client map must keep it exclusive of defaults and nonempty guest bindings.
 
 These edits teach source selection only. Removing protection from a real installation needs the [retirement procedure](../../reference/backup.md#later-deployments-and-retirement); this exercise grants no permission to delete credentials or backups.
 

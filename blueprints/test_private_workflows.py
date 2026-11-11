@@ -220,6 +220,33 @@ class PrivateWorkflowTests(unittest.TestCase):
                 with self.assertRaises(ValueError): p.model(self.stack, self.site)
                 generate.assert_not_called()
 
+    def test_pbs_whole_context_values_refuse_without_confusing_step_ids(self):
+        """Whole contexts and case/whitespace variants cannot bypass PBS admission."""
+        for context, job in [('secrets', 'validate'), ('inputs', 'firewall')]:
+            for name in (context, context.upper(), context.title(),
+                         ''.join(c.upper() if i % 2 == 0 else c for i, c in enumerate(context))):
+                expressions = ['${{ toJSON(' + name + ') }}', '${{ ' + name + ' }}',
+                        '${{\n' + name + ' }}', '${{\t' + name + ' }}',
+                        '${{ ' + name + '\n .value }}', '${{ ' + name + "\t ['value'] }}"]
+                for space in ('\t', '\n', '\r', '\v', '\f', '\u0085', '\u00a0', '\u1680',
+                              '\u2000', '\u2003', '\u2028', '\u2029', '\u202f', '\u205f', '\u3000'):
+                    expressions.extend(('${{' + space + name + ' }}', '${{ ' + name + space + '}}'))
+                for expression in expressions:
+                    value = pbs_document(['self-hosted', 'linux'])
+                    value['jobs'][job]['steps'].append({'env': {'ALL': expression}, 'run': 'true'})
+                    self.write_pbs(value)
+                    with self.subTest(expression=expression, job=job), \
+                            patch.object(workflows, 'models') as generate:
+                        with self.assertRaisesRegex(ValueError,
+                                'without protected credentials' if job == 'validate' else 'unbound inputs'):
+                            p.model(self.stack, self.site)
+                        generate.assert_not_called()
+        value = pbs_document(['self-hosted', 'linux'])
+        value['jobs']['firewall']['steps'].append({'id': 'inputs', 'run': 'echo synthetic'})
+        value['jobs']['firewall']['steps'].append({'run': 'echo "${{ steps.inputs.outputs.work }}"'})
+        self.write_pbs(value)
+        self.assertIn('_pbs', p.model(self.stack, self.site)['jobs'])
+
     def test_pbs_unsafe_file_or_parent_is_not_treated_as_absence(self):
         path = self.site / p.PBS_WORKFLOW
         path.symlink_to(self.site / 'missing')

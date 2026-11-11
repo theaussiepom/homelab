@@ -104,11 +104,15 @@ def pbs_workflow(site, labels):
                      and all(isinstance(job, dict) for job in jobs.values()),
                      'Keep exactly the PBS validation and native jobs')
     validation, native = jobs['validate'], jobs['firewall']
+    # Keep Unicode whitespace visible and normalize JSON's escaped ASCII
+    # whitespace. A quoted step ID such as "inputs" is not a context reference.
+    context_end = r'\s*(?:\.|\[|(?=[),}\]|&=!<>]))'
     compiler.require(set(validation) <= {'name', 'runs-on', 'outputs', 'steps', 'timeout-minutes'}
                      and validation.get('runs-on') == 'ubuntu-24.04'
                      and validation.get('outputs') == {'selected': '${{ steps.selection.outputs.selected }}'}
                      and isinstance(validation.get('steps'), list)
-                     and not re.search(r'\bsecrets(?:\s|\\[nrt])*(?:\.|\[)', json.dumps(validation)),
+                     and not re.search(r'\bsecrets' + context_end,
+                         re.sub(r'\\(?:[nrtf]|u000b)', ' ', json.dumps(validation, ensure_ascii=False)), re.IGNORECASE),
                      'Keep PBS validation hosted and without protected credentials')
     compiler.require(set(native) <= {'name', 'needs', 'if', 'runs-on', 'environment', 'timeout-minutes', 'steps'}
                      and native.get('needs') == 'validate'
@@ -119,7 +123,8 @@ def pbs_workflow(site, labels):
                      and all(isinstance(label, str) for label in native['runs-on'])
                      and set(native['runs-on']) == set(labels)
                      and isinstance(native.get('steps'), list)
-                     and not re.search(r'(?<![\w.])inputs(?:\s|\\[nrt])*(?:\.|\[)', json.dumps(jobs)),
+                     and not re.search(r'(?<![\w.])inputs' + context_end,
+                         re.sub(r'\\(?:[nrtf]|u000b)', ' ', json.dumps(jobs, ensure_ascii=False)), re.IGNORECASE),
                      'Preserve selected protected PBS execution without a nested queue or unbound inputs')
     return True
 
