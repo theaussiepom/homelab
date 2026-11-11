@@ -243,8 +243,8 @@ def guest(value):
            ('display_name', 'resources', 'startup', 'security', 'ssh_public_keys', 'dns_servers',
             'volumes', 'root_paths', 'compose_projects', 'software', 'runtime', 'network_policy', 'timezone', 'readiness', 'source_policy_route', 'monitoring', 'backup'))
     if 'backup' in value:
-        from component_backup import presence
-        presence(value['backup'])
+        from component_backup_job import enrollment
+        enrollment(value['backup'])
     require(all(identifier(value[key]) for key in ('context', 'template', 'root_storage', 'control_interface')))
     require(value['lifecycle'] in ('fresh', 'retained'))
     closed(value['identity'], ('vmid', 'hostname'))

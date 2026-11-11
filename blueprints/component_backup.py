@@ -78,7 +78,7 @@ def selected(resolver):
         require(len(resolver.library['backup_profiles']) == 1, 'component.backup-profile-selection')
         name = next(iter(resolver.library['backup_profiles']))
     else:
-        closed(value, (), ('profile', 'job', 'recovery_public_key', 'management'))
+        closed(value, (), ('profile', 'job', 'recovery_public_key', 'management', 'defaults'))
         require(('job' in value) == ('recovery_public_key' in value) == ('management' in value),
                 'component.backup-recovery-key')
         if 'recovery_public_key' in value:
@@ -107,6 +107,7 @@ def bind(resolver):
                 'component.backup-root-required')
         return None
     client = resolver.library['backup_profiles'][name]
+    bindings = component_backup_job.clients(resolver)
     for guest_id, guest in resolver.guests.items():
         if 'backup' not in guest:
             continue
@@ -187,5 +188,6 @@ def bind(resolver):
     result = {'profile': name, 'mode': 'client-preparation'}
     if isinstance(resolver.site['backup'], dict) and 'job' in resolver.site['backup']:
         result.update(management=component_backup_management.bind(resolver, resolver.site['backup']['management']))
-        result.update(mode='scheduled-recovery', group=component_backup_job.bind(resolver, resolver.site['backup']['job']))
+        result.update(mode='scheduled-recovery', group=component_backup_job.bind(
+            resolver, resolver.site['backup']['job'], bindings))
     return result
