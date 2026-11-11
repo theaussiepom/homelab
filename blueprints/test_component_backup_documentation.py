@@ -124,7 +124,7 @@ class BackupDocumentation(unittest.TestCase):
             (lambda s: s['backup']['management'].update(datastore_path='/'), 'backup-datastore-path'),
             (lambda s: s['backup']['management'].update(credential='missing'), 'backup-management-credential'),
             (lambda s: s['backup']['recovery_public_key'].update(source='missing.pem'), 'source'),
-            (lambda s: s['backup']['job']['clients']['resolver'].update(password='obsolete'), 'fields'),
+            (lambda s: s['guests']['resolver'].update(backup={'password':'obsolete'}), 'fields'),
         ]
         for mutate, code in cases:
             self.site = copy.deepcopy(original); mutate(self.site)
@@ -157,7 +157,7 @@ class BackupDocumentation(unittest.TestCase):
         """Closed overrides and effective volume limits refuse at source resolution."""
         self.path = self.root/'client-limits.yaml'
         self.site = yaml.safe_load(self.path.read_text())
-        self.site['backup']['job']['clients']['resolver']['limits']['max_bytes'] = 256*1024**2
+        self.site['guests']['resolver']['backup']['limits']['max_bytes'] = 256*1024**2
         self.plan()
         original = copy.deepcopy(self.site)
         cases = [({'max_bytes': 256*1024**2+1}, 'backup-staging-volume'),
@@ -165,7 +165,7 @@ class BackupDocumentation(unittest.TestCase):
                  ({'max_files': True}, 'integer'), ({'max_bytes': 0}, 'integer')]
         for override, code in cases:
             self.site = copy.deepcopy(original)
-            self.site['backup']['job']['clients']['resolver']['limits'] = override
+            self.site['guests']['resolver']['backup']['limits'] = override
             with self.subTest(override=override), self.assertRaisesRegex(ComponentError, code):
                 self.plan(['resolver'])
 

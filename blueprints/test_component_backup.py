@@ -38,10 +38,12 @@ def fixture():
     app['storage']['config'] = {'root_path': 'root', 'subpath': 'config.yaml'}
     app['runtime_files'] = {'directory': '/opt/homelab-app/runtime/one', 'files': ['owned.json']}
     app['sidecar_files'] = {'sidecar': {'destination': '/opt/homelab-app/one.json'}}
-    return SimpleNamespace(site={'backup': None, 'contexts': {'lab': {'node': 'example-node'}}},
+    resolver = SimpleNamespace(site={'backup': None, 'contexts': {'lab': {'node': 'example-node'}}},
         library={'backup_profiles': {'pbs': profile()}, 'app_profiles': {'example': definition}},
         guests={'one': guest, 'empty': copy.deepcopy(dict(guest, identity={'vmid': 611, 'hostname': 'empty'}))},
         apps={'application': app})
+    resolver.site['guests'] = copy.deepcopy(resolver.guests)
+    return resolver
 
 
 class BackupUnits(unittest.TestCase):

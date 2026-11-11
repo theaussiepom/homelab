@@ -57,6 +57,8 @@ A successful result must discover tests and pass their assertions. Tests of the 
 
 These focused commands support development. The complete source, coverage, security, signing and review requirements still follow [Testing](testing.md). A passing local run does not show that hosted CI ran, that branch protection requires it, or that a change was merged.
 
+The [backup binding/default records](../reference/backup.md#binding-defaults-and-guest-overrides) are mapped to direct source-selection and real compilation checks in [`test_component_backup_defaults.py`](../../blueprints/test_component_backup_defaults.py). Those checks compare legacy and inherited forms, preserve disabled membership and packets, and refuse mixed forms, missing references and operational fields without a job. They establish source equivalence, not deployment, backup or restore acceptance.
+
 ## Maintain a changed contract
 
 1. Inspect the actual source owner and decide whether behavior or documentation is wrong. Never alter accepted values simply to satisfy a stale statement.
