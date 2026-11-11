@@ -254,7 +254,7 @@ def bind(resolver):
                 broker = app['resolved_connections'].get('broker')
                 require(broker is not None and broker['type'] == 'mqtt' and broker['target']['port'] == 1883,
                         'component.broker-binding')
-                target = resolver.endpoint({'app': app_id, 'endpoint': 'web'})
+                target = resolver.endpoint({'app': app_id, 'endpoint': 'web_endpoint'})
                 require(target['protocol'] == 'http', 'component.reference')
                 hostname = broker.get('hostname', broker['target']['address'])
                 values.update(serial_device=serial['path'], bind_address=target['address'],

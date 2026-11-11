@@ -33,7 +33,7 @@ def connection(kind, address, port, account=False):
 
 def fixture():
     cloud = {'id': 'cloud', 'adapter': 'cloudbeaver', 'lifecycle': 'retained', 'properties': metadata(),
-             'origin_url': 'https://db.example.invalid', 'role_addresses': {'web': '198.18.30.32'},
+             'origin_url': 'https://db.example.invalid', 'role_addresses': {'web_interface': '198.18.30.32'},
              'resolved_connections': {'postgresql': connection('postgresql', '198.18.31.23', 5432),
                                       'mariadb': connection('mariadb', '198.18.32.24', 3306),
                                       'postgresql-admin': connection('postgresql', '198.18.31.23', 5432, True),
@@ -41,13 +41,13 @@ def fixture():
     bitwarden = {'id': 'vault', 'adapter': 'bitwarden', 'lifecycle': 'retained',
         'properties': {'issuer': {'protocol': 'https', 'domain': 'vault-issuer'},
                        'database_name': 'retained_vault', 'data_uid': 1000, 'data_gid': 1000},
-        'origin_url': 'https://vault.example.invalid', 'role_addresses': {'web': '198.18.30.34'},
+        'origin_url': 'https://vault.example.invalid', 'role_addresses': {'web_interface': '198.18.30.34'},
         'secrets': {'runtime_environment': 'old_vault_environment'},
         'resolved_connections': {'database': connection('mariadb', '198.18.32.24', 3306)}}
-    edge = {'id': 'edge', 'adapter': 'traefik', 'interfaces': {'management': {'interface': 'control'}},
-            'role_addresses': {'management': '198.18.25.33'}}
-    pega = {'id': 'manager', 'adapter': 'pegaprox', 'properties': {'trusted_proxy': {'app': 'edge', 'interface': 'management'}},
-        'role_addresses': {'web': '198.18.25.35'}, 'secrets': {'database_key': 'old_manager_key'}}
+    edge = {'id': 'edge', 'adapter': 'traefik', 'interfaces': {'management_interface': {'interface': 'control'}},
+            'role_addresses': {'management_interface': '198.18.25.33'}}
+    pega = {'id': 'manager', 'adapter': 'pegaprox', 'properties': {'trusted_proxy': {'app': 'edge', 'interface': 'management_interface'}},
+        'role_addresses': {'web_interface': '198.18.25.35'}, 'secrets': {'database_key': 'old_manager_key'}}
     winet = {'id': 'telemetry', 'adapter': 'winet', 'properties': {'mqtt_prefix': 'winet-extractor/site'},
         'secrets': {'options': 'old_telemetry_options'}, 'resolved_connections': {
         'broker': dict(connection('mqtt', '198.18.30.37', 1883), hostname='broker.mqtt'),
@@ -125,7 +125,7 @@ class ValidationUnitTests(unittest.TestCase):
                 with self.assertRaises(ComponentError):properties.validate('bitwarden', selected)
 
     def test_pega_trusted_proxy_is_a_named_physical_role_not_an_address(self):
-        for selected in ('198.18.25.33/32', {'app': 'edge'}, {'app': 'edge', 'interface': 'management', 'address': 'foreign'}):
+        for selected in ('198.18.25.33/32', {'app': 'edge'}, {'app': 'edge', 'interface': 'management_interface', 'address': 'foreign'}):
             with self.subTest(selected=selected):
                 with self.assertRaises(ComponentError):properties.validate('pegaprox', {'trusted_proxy': selected})
 
@@ -243,8 +243,8 @@ class BindingUnitTests(unittest.TestCase):
     def test_pega_rejects_foreign_nonphysical_nontraefik_same_address_or_unknown_role(self):
         for mutate in (lambda r: r.apps['manager']['properties']['trusted_proxy'].update(app='missing'),
                        lambda r: r.apps['edge'].update(adapter='pihole'),
-                       lambda r: r.apps['edge']['interfaces'].update(management={'scope': 'app-network'}),
-                       lambda r: r.apps['edge']['role_addresses'].update(management='198.18.25.35'),
+                       lambda r: r.apps['edge']['interfaces'].update(management_interface={'scope': 'app-network'}),
+                       lambda r: r.apps['edge']['role_addresses'].update(management_interface='198.18.25.35'),
                        lambda r: r.apps['manager']['properties']['trusted_proxy'].update(interface='missing')):
             with self.subTest(mutate=mutate):
                 r = fixture();mutate(r)

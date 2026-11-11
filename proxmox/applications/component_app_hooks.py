@@ -51,11 +51,11 @@ def _pihole(app, compose_file):
 def _music(app, compose_file):
     """Select the retained Music state check with its optional stream address."""
     require(app.get('lifecycle') == 'retained', 'Fresh Music commissioning is not implemented')
-    address = music_assistant.address(app['role_addresses']['web'])
+    address = music_assistant.address(app['role_addresses']['web_interface'])
     source = str(music_assistant.data_path(_data(app, '/data')))
     argv = ['python3', ROOT + 'music_assistant.py', '--address', address]
-    if 'stream' in app['role_addresses']:
-        argv += ['--stream-address', music_assistant.address(app['role_addresses']['stream'])]
+    if 'stream_interface' in app['role_addresses']:
+        argv += ['--stream-address', music_assistant.address(app['role_addresses']['stream_interface'])]
     if source != str(music_assistant.DATA):
         argv += ['--data-root', source]
     return {'helpers': [_helper('music_assistant.py')], 'music_state': {'argv': argv}}

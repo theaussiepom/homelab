@@ -35,24 +35,24 @@ def source_fixture(*,existing=False,name='Saved source broker'):
         'ingress':{'containers':{'traefik':{'memory_mib':512,'pids_limit':256,'cpu_limit':1}}}}
     common={'health':{'ready':{'type':'adapter','check':'readiness'}}}
     library['app_profiles']['broker']={**copy.deepcopy(common),'adapter':'mqtt','display_name':'Broker',
-        'interfaces':{'backend':role('guest-interface'),'frontend':role('guest-interface')},
-        'listeners':{'mqtt':listener('mqtt','backend',1883)},
-        'endpoints':{'backend':{'listener':'mqtt','protocol':'tcp','via':'backend'}},
+        'interfaces':{'backend_interface':role('guest-interface'),'frontend_interface':role('guest-interface')},
+        'listeners':{'mqtt_listener':listener('mqtt','backend_interface',1883)},
+        'endpoints':{'backend_endpoint':{'listener':'mqtt_listener','protocol':'tcp','via':'backend_interface'}},
         'storage':{n:storage('/mosquitto/'+n)for n in ('config','data','log')},
         'software':['broker'],'runtime':['broker'],'secrets':{'probe':{'required':True}}}
     library['app_profiles']['browser']={**copy.deepcopy(common),'adapter':'mqtt_explorer','display_name':'Browser',
-        'interfaces':{'web':role('guest-interface'),'broker':role('guest-interface'),'private':role('app-network')},
-        'listeners':{'web':listener('explorer_gateway','private',4180,namespace='app-network',
-            publish={'scope':'guest-interface','interface':'web','port':80}),
-            'application':listener('mqtt_explorer','private',3000,namespace='app-network')},
-        'endpoints':{'web':{'listener':'web','protocol':'http','via':'web'}},
+        'interfaces':{'web_interface':role('guest-interface'),'broker_interface':role('guest-interface'),'private_interface':role('app-network')},
+        'listeners':{'web_listener':listener('explorer_gateway','private_interface',4180,namespace='app-network',
+            publish={'scope':'guest-interface','interface':'web_interface','port':80}),
+            'application_listener':listener('mqtt_explorer','private_interface',3000,namespace='app-network')},
+        'endpoints':{'web_endpoint':{'listener':'web_listener','protocol':'http','via':'web_interface'}},
         'connections':{'broker':{'type':'mqtt','required':True,'accounts':['mqtt-client']},
                        'outpost':{'type':'http','required':True}},
         'storage':{'data':storage('/app/data')},'software':['browser'],'runtime':['browser']}
     library['app_profiles']['ingress']={**copy.deepcopy(common),'adapter':'traefik','display_name':'Ingress',
-        'interfaces':{'frontend':role('guest-interface')},
-        'listeners':{'http':listener('traefik','frontend',80,bind='interface'),'https':listener('traefik','frontend',443,bind='interface')},
-        'endpoints':{'https':{'listener':'https','protocol':'https','via':'frontend'}},
+        'interfaces':{'frontend_interface':role('guest-interface')},
+        'listeners':{'http_listener':listener('traefik','frontend_interface',80,bind='interface'),'https_listener':listener('traefik','frontend_interface',443,bind='interface')},
+        'endpoints':{'https_endpoint':{'listener':'https_listener','protocol':'https','via':'frontend_interface'}},
         'storage':{'certs':storage('/var/traefik/certs')},'software':['ingress'],'runtime':['ingress'],
         'secrets':{'cloudflare_dns_token':{'required':True},'proxmox_token':{'required':True}}}
     guest=site['guests']['resolver'];guest['resources']={'memory_mib':4096}
@@ -69,26 +69,26 @@ def source_fixture(*,existing=False,name='Saved source broker'):
         'broker':{'profile':'broker','guest':'resolver','lifecycle':'retained',
             'identity':{'phase':'broker','runtime_id':'fixture-broker','project':'broker',
                 'services':{'mqtt':'owned-broker'},'networks':{},'runtime_directory':'/opt/homelab-app/runtime/broker'},
-            'interfaces':{'backend':{'interface':'backend'},'frontend':{'interface':'management'}},
+            'interfaces':{'backend_interface':{'interface':'backend'},'frontend_interface':{'interface':'management'}},
             'storage':{n:{'root_path':'data','subpath':'broker/'+n}for n in ('config','data','log')},
             'secrets':{'probe':'probe'},'properties':{'password_file':'/mosquitto/config/passwords'}},
         'browser':{'profile':'browser','guest':'resolver','lifecycle':'fresh',
-            'interfaces':{'web':{'interface':'backend'},'broker':{'interface':'backend'},
-                          'private':{'scope':'app-network','network':'explorer'}},
+            'interfaces':{'web_interface':{'interface':'backend'},'broker_interface':{'interface':'backend'},
+                          'private_interface':{'scope':'app-network','network':'explorer'}},
             'storage':{'data':{'root_path':'data','subpath':'browser'}},
             'origin':{'exposure':'browser'},'properties':{'connection_name':name}},
         'ingress':{'profile':'ingress','guest':'resolver','lifecycle':'fresh',
-            'interfaces':{'frontend':{'interface':'management'}},
+            'interfaces':{'frontend_interface':{'interface':'management'}},
             'storage':{'certs':{'root_path':'data','subpath':'ingress'}},
             'secrets':{'cloudflare_dns_token':'dns_api','proxmox_token':'provider'},
             'properties':{'dashboard':False,'provider':{'context':'lab','token_id':'fixture@pve!discovery'},
                 'acme':{'email':'fixture@example.invalid','resolvers':[{'external':'dns'}]}}}}
-    site['exposures']={'browser':{'type':'http','target':{'app':'browser','endpoint':'web'},
-        'domain':'browser','ingress':{'app':'ingress','endpoint':'https'},'tls':'public'}}
-    target={'external':'existing_broker'}if existing else{'app':'broker','endpoint':'backend'}
+    site['exposures']={'browser':{'type':'http','target':{'app':'browser','endpoint':'web_endpoint'},
+        'domain':'browser','ingress':{'app':'ingress','endpoint':'https_endpoint'},'tls':'public'}}
+    target={'external':'existing_broker'}if existing else{'app':'broker','endpoint':'backend_endpoint'}
     site['connections']={'broker':{'consumer':{'app':'browser','connection':'broker'},'target':target,
-        'source_interface':'broker','hostname':{'domain':'broker'}},
-        'outpost':{'consumer':{'app':'browser','connection':'outpost'},'target':{'external':'outpost'},'source_interface':'web'}}
+        'source_interface':'broker_interface','hostname':{'domain':'broker'}},
+        'outpost':{'consumer':{'app':'browser','connection':'outpost'},'target':{'external':'outpost'},'source_interface':'web_interface'}}
     if existing:
         site['secret_sources']['existing_password']={'type':'file','path':'/never-read/existing-password'}
         site['connections']['broker']['credential']={'principal':'existing_client','secret':'existing_password'}

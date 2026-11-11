@@ -159,18 +159,18 @@ def web_frontend(app):
     require(app.get('adapter') == 'influxdb', 'Only InfluxDB owns this native web frontend')
     roles = app.get('role_addresses', {})
     selected = {'enabled': False, 'files': []}
-    if 'web' not in roles:
+    if 'web_interface' not in roles:
         return selected
-    require('service' in roles, 'Resolve the native database service role')
-    source, target = _address(roles['web']), _address(roles['service'])
+    require('service_interface' in roles, 'Resolve the native database service role')
+    source, target = _address(roles['web_interface']), _address(roles['service_interface'])
     require(source != target, 'Separate the InfluxDB web and database addresses')
     listeners = app.get('listeners', {})
-    require(set(listeners) == {'web', 'backend'} and all(
+    require(set(listeners) == {'web_listener', 'backend_listener'} and all(
         row.get('service') == 'influxdb' and row.get('namespace') == 'host'
         and row.get('bind') == 'interface' and row.get('protocol') == 'tcp'
         and row.get('port') == 8086 and 'publish' not in row
-        and row.get('interface') == ('web' if name == 'web' else 'service')
-        and row.get('actual_bind') == (source if name == 'web' else target)
+        and row.get('interface') == ('web_interface' if name == 'web_listener' else 'service_interface')
+        and row.get('actual_bind') == (source if name == 'web_listener' else target)
         for name, row in listeners.items()), 'Bind the two exact InfluxDB listener roles')
     marker = '# Managed by HomeLab InfluxDB web frontend.\n'
     socket = marker + ('[Unit]\nDescription=InfluxDB application web frontend\n'
@@ -209,9 +209,9 @@ def render(app, *, clients=()):
             'Use only supported native database component properties')
     require(adapter == 'postgresql' or clients == () or clients == [],
             'PostgreSQL client allowances belong only to PostgreSQL')
-    require(set(app.get('role_addresses', {})) >= {'service'},
+    require(set(app.get('role_addresses', {})) >= {'service_interface'},
             'Resolve the native database service role')
-    address = _address(app['role_addresses']['service'])
+    address = _address(app['role_addresses']['service_interface'])
     data = _data(app)
     version, major = _version(app)
     if adapter == 'postgresql':

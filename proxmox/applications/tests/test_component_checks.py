@@ -1,5 +1,6 @@
 """Readiness-builder units mock collaborators; one retained public comparison."""
 import copy
+from fixture_network_names import modernize
 import importlib.util
 import json
 import os
@@ -12,10 +13,10 @@ FRAMEWORK = Path(Path(__file__).resolve().parents[3])
 sys.path[:0] = [str(FRAMEWORK/'blueprints'), str(FRAMEWORK/'proxmox/applications')]
 import component_checks as checks
 from component_errors import ComponentError
-FIXTURE = json.loads(Path(__file__).with_name('public-retained-health.json').read_text())
+FIXTURE = modernize(json.loads(Path(__file__).with_name('public-retained-health.json').read_text()))
 
 
-def case(adapter):return copy.deepcopy(FIXTURE['cases'][adapter])
+def case(adapter):return modernize(FIXTURE['cases'][adapter])
 
 
 class NativeReadinessUnitTests(unittest.TestCase):
@@ -54,7 +55,7 @@ class NativeReadinessUnitTests(unittest.TestCase):
     def test_unsupported_native_listener_does_not_get_a_false_health_contract(self):
         for adapter in ('postgresql','mariadb','influxdb'):
             with self.subTest(adapter=adapter):
-                v=case(adapter);v['app']['listeners']['web']['port']+=1
+                v=case(adapter);v['app']['listeners']['web_listener']['port']+=1
                 with self.assertRaises(ComponentError):checks.checks(v['app'], {}, compose_file=None)
 
     def test_native_source_helper_refusal_is_redacted_without_execution(self):
@@ -129,7 +130,7 @@ class AutomationReadinessUnitTests(unittest.TestCase):
             for key,value in [('lifecycle','unknown'),('port',1234)]:
                 with self.subTest(adapter=adapter,key=key):
                     v=case(adapter)
-                    if key=='port':v['app']['listeners']['web']['port']=value
+                    if key=='port':v['app']['listeners']['web_listener']['port']=value
                     else:v['app'][key]=value
                     with self.assertRaises(ComponentError):checks.checks(v['app'], {}, compose_file=None)
 
@@ -143,7 +144,7 @@ class SelectionUnitTests(unittest.TestCase):
 
     def test_arbitrary_argv_and_unhonored_source_interface_are_not_silently_accepted(self):
         for record in ({'type':'adapter','check':'readiness','argv':['ssh','arbitrary']},
-                       {'type':'adapter','check':'readiness','source_interface':'backend'}):
+                       {'type':'adapter','check':'readiness','source_interface':'backend_interface'}):
             with self.subTest(record=record):
                 v=case('node_red');v['app']['health']={'ready':record}
                 with self.assertRaises(ComponentError):checks.checks(v['app'], {}, compose_file=None)

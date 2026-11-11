@@ -287,8 +287,8 @@ def _music_assistant(app, guest):
     require(app['lifecycle'] == 'retained',
             'Fresh Music Assistant commissioning is not implemented')
     require(not app.get('properties'), 'Use only supported Music Assistant properties')
-    selected = music.address(app.get('role_addresses', {}).get('web'))
-    stream = music.address(app['role_addresses'].get('stream', selected))
+    selected = music.address(app.get('role_addresses', {}).get('web_interface'))
+    stream = music.address(app['role_addresses'].get('stream_interface', selected))
     require(set(app.get('storage_paths', {})) == {'data'},
             'Bind only the existing Music Assistant data role')
     storage = app['storage_paths']['data']
@@ -302,7 +302,7 @@ def _music_assistant(app, guest):
     listeners = app['listeners']
     require(len(listeners) == 2 and all(
         row['service'] == 'music_assistant' and row['namespace'] == 'host'
-        and row['interface'] == ('stream' if row['port'] == 8097 and 'stream' in app['role_addresses'] else 'web')
+        and row['interface'] == ('stream_interface' if row['port'] == 8097 and 'stream_interface' in app['role_addresses'] else 'web_interface')
         and row['bind'] == 'interface' and row['protocol'] == 'tcp'
         and row['actual_bind'] == (stream if row['port'] == 8097 else selected)
         and 'publish' not in row for row in listeners.values())
@@ -310,7 +310,7 @@ def _music_assistant(app, guest):
         'Preserve the declared Music Assistant UI and player listeners')
     service = _service(app, 'music_assistant', guest)
     service['network_mode'] = 'host'
-    options = {'stream_address': stream} if 'stream' in app['role_addresses'] else {}
+    options = {'stream_address': stream} if 'stream_interface' in app['role_addresses'] else {}
     music.configure_service(service, selected, data_root=root, **options)
     return {'music_assistant': service}
 
@@ -435,9 +435,9 @@ def _node_red(app, guest):
     require(retained or app['lifecycle'] == 'fresh', 'Select a supported Node-RED lifecycle')
     if next(iter(app['listeners'].values()))['bind'] == 'interface':
         require(retained, 'A bound Node-RED listener requires its retained settings wrapper')
-        selected = music.address(app['role_addresses']['web'])
+        selected = music.address(app['role_addresses']['web_interface'])
         listener = next(iter(app['listeners'].values()))
-        require(listener.get('interface') == 'web' and listener.get('actual_bind') == selected,
+        require(listener.get('interface') == 'web_interface' and listener.get('actual_bind') == selected,
                 'Bind Node-RED only to its selected web role')
         service['environment']['NODE_RED_WEB_ADDRESS'] = selected
     if retained:
@@ -586,7 +586,7 @@ def _pegaprox(app, guest):
     require(all(row['kind'] == 'directory' and row['read_only'] is False
                 for row in app['storage_paths'].values()), 'Keep the owned PegaProx data directories writable')
     _mounts(app, {'config': '/app/config', 'logs': '/app/logs'})
-    address=ipaddress.IPv4Address(app['role_addresses']['web'])
+    address=ipaddress.IPv4Address(app['role_addresses']['web_interface'])
     require(not (address.is_unspecified or address.is_loopback or address.is_multicast
                  or address.is_link_local or address.is_reserved)
             and (address.is_private or address in ipaddress.IPv4Network('198.18.0.0/15')),
@@ -606,7 +606,7 @@ def _pegaprox(app, guest):
         raise ValueError('Bind the selected PegaProx trusted ingress /32') from None
     require(str(selected) == proxy and selected.prefixlen == 32
             and any(selected.subnet_of(network) for network in pegaprox.PRIVATE_BACKENDS)
-            and str(selected.network_address) != app['role_addresses']['web'],
+            and str(selected.network_address) != app['role_addresses']['web_interface'],
             'Bind the exact distinct selected trusted ingress source')
     service = _service(app, 'pegaprox', guest)
     pegaprox.service_configuration(service, trusted_proxy=proxy,

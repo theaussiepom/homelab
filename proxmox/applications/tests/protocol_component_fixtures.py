@@ -16,12 +16,12 @@ import dns_records
 
 def _listener(service, port, address=None, published=None):
     result = {'service': service, 'port': port, 'protocol': 'tcp',
-              'namespace': 'app-network', 'interface': 'private',
+              'namespace': 'app-network', 'interface': 'private_interface',
               'bind': 'wildcard', 'actual_bind': '0.0.0.0'}
     if address is not None:
         result.update(publication_address=address,
                       publish={'port': port if published is None else published,
-                               'scope': 'guest-interface', 'interface': 'web'})
+                               'scope': 'guest-interface', 'interface': 'web_interface'})
     return result
 
 
@@ -70,8 +70,8 @@ def cloudbeaver_app(selected, value, *, image, gateway_image):
                                           'auth_gateway': {'image': gateway_image}}
     app['storage_paths'] = {'workspace': _directory('/srv/homelab/data/cloudbeaver',
                                                    '/opt/cloudbeaver/workspace')}
-    app['listeners'] = {'web': _listener('auth_gateway', 4180, settings['bind_address'], 80),
-                        'community': _listener('cloudbeaver', 8978)}
+    app['listeners'] = {'web_listener': _listener('auth_gateway', 4180, settings['bind_address'], 80),
+                        'community_listener': _listener('cloudbeaver', 8978)}
     return app
 
 
@@ -92,7 +92,7 @@ def bitwarden_app(*, image):
     app['storage_paths'] = {name: _directory('/srv/homelab/data/bitwarden/' + name, target)
                             for name, target in [('data', '/etc/bitwarden'),
                                                   ('logs', '/var/log/bitwarden')]}
-    app['listeners'] = {'web': _listener('bitwarden', 8080, '198.18.30.35')}
+    app['listeners'] = {'web_listener': _listener('bitwarden', 8080, '198.18.30.35')}
     return app
 
 
@@ -102,9 +102,9 @@ def zabbix_app(*, database_host, images):
         name: {'image': images[name]} for name in ('zabbix_server', 'zabbix_web')}
     app['settings'] = {'database': {'host': database_host, 'name': 'zabbix', 'user': 'zabbix'},
                        'database_credential': {'type': 'monitoring-owned', 'server': app['id']}}
-    app['listeners'] = {'server': _listener('zabbix_server', 10051, '198.18.30.50'),
-                        'web': _listener('zabbix_web', 8080, '198.18.30.50'),
-                        'local-web': _listener('zabbix_web', 8080, '127.0.0.1', 8081)}
+    app['listeners'] = {'server_listener': _listener('zabbix_server', 10051, '198.18.30.50'),
+                        'web_listener': _listener('zabbix_web', 8080, '198.18.30.50'),
+                        'local-web_listener': _listener('zabbix_web', 8080, '127.0.0.1', 8081)}
     return app
 
 
@@ -122,7 +122,7 @@ def authentik_app(*, image, redis_image):
     app['storage_paths'] = {role: _directory('/srv/homelab/data/'+source, target) for role, source, target in (
         ('media', 'authentik/media', '/media'), ('templates', 'authentik/templates', '/templates'),
         ('certs', 'authentik/certs', '/certs'), ('redis', 'redis', '/data'))}
-    app['listeners'] = {'web': _listener('server', 9000, '198.18.30.20')}
+    app['listeners'] = {'web_listener': _listener('server', 9000, '198.18.30.20')}
     return app
 
 
@@ -146,7 +146,7 @@ def dns_apps(*, image, records):
     # image selection is preserved verbatim, rather than choosing a new image.
     unbound['software_selection']['images'] = {'unbound': {'image': image}}
     unbound['storage_paths'] = {'config': _directory('/srv/homelab/data/unbound', '/opt/unbound/etc/unbound')}
-    unbound['listeners'] = {protocol: dict(_listener('unbound', 53, '127.0.0.1', 5335), protocol=protocol)
+    unbound['listeners'] = {protocol+'_listener': dict(_listener('unbound', 53, '127.0.0.1', 5335), protocol=protocol)
                             for protocol in ('tcp', 'udp')}
     return {'pihole': pihole, 'unbound': unbound}
 
@@ -164,7 +164,7 @@ def zigbee_app(*, image):
                        'frontend_port': 8099, 'adapter': 'ember', 'mqtt_server': 'mqtt://broker.mqtt:1883',
                        'mqtt_base_topic': 'home'}
     app['storage_paths'] = {'data': _directory('/srv/homelab/data/zigbee2mqtt', '/app/data')}
-    app['listeners'] = {'web': _listener('zigbee2mqtt', 8099, '198.18.30.22')}
+    app['listeners'] = {'web_listener': _listener('zigbee2mqtt', 8099, '198.18.30.22')}
     return app
 
 
@@ -198,7 +198,7 @@ def structural_runtime():
                                 for role in ('cloudflare_dns_token', 'proxmox_token')}
     proxy['settings'] = {'provider': {'url': 'https://198.18.25.10:8006'}, 'acme': {}, 'route_ca_files': {}}
     proxy['storage_paths'] = {'certs': _directory('/srv/homelab/data/traefik/certs', '/var/traefik/certs')}
-    proxy['listeners'] = {str(port): dict(_listener('traefik', port), namespace='host',
+    proxy['listeners'] = {str(port)+'_listener': dict(_listener('traefik', port), namespace='host',
         interface='frontend', bind='interface', actual_bind='198.18.40.33') for port in (80, 443)}
     apps['traefik'] = proxy
     return {'schema': component_runtime.SCHEMA,

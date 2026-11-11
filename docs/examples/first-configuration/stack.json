@@ -27,13 +27,13 @@
       "adapter": "unbound",
       "display_name": "Recursive DNS",
       "interfaces": {
-        "private": {
+        "private_interface": {
           "required": true,
           "accepts": [
             "app-network"
           ]
         },
-        "local": {
+        "local_interface": {
           "required": true,
           "accepts": [
             "guest-loopback"
@@ -41,10 +41,10 @@
         }
       },
       "listeners": {
-        "udp": {
+        "udp_listener": {
           "service": "unbound",
           "namespace": "app-network",
-          "interface": "private",
+          "interface": "private_interface",
           "bind": "wildcard",
           "protocol": "udp",
           "port": 53,
@@ -55,10 +55,10 @@
         }
       },
       "endpoints": {
-        "dns": {
-          "listener": "udp",
+        "dns_endpoint": {
+          "listener": "udp_listener",
           "protocol": "udp",
-          "via": "local"
+          "via": "local_interface"
         }
       },
       "software": [

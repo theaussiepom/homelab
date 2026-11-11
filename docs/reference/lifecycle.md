@@ -19,8 +19,11 @@ profile: recursive
 guest: resolver
 lifecycle: fresh
 interfaces:
-  private: {scope: app-network, network: default}
-  local: {scope: guest-loopback}
+  private_interface:
+    scope: app-network
+    network: default
+  local_interface:
+    scope: guest-loopback
 ```
 
 | Situation | Source and behavior |

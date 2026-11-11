@@ -158,7 +158,7 @@ def bind(resolver):
                     record['producer'] = {'type': app['adapter'],
                         'packages': guest['software_selection']['packages']}
                     if app['adapter'] == 'influxdb':
-                        record['producer']['endpoint'] = 'http://' + app['role_addresses']['service'] + ':8086'
+                        record['producer']['endpoint'] = 'http://' + app['role_addresses']['service_interface'] + ':8086'
                 if app['adapter'] in ('node_red', 'bitwarden') and app.get('secret_bindings'):
                     overlay = '/opt/homelab-app/component-' + app_id + '-environment.yml'
                     record['runtime_files'].append(overlay)

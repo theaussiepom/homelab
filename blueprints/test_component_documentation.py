@@ -65,7 +65,7 @@ class DocumentationContracts(unittest.TestCase):
         self.assertEqual(guest['interfaces'], [{'bridge': 'practice0', 'vlan': None,
             'mac': '02:00:00:30:00:20', 'ipv4': '198.18.30.20/24', 'gateway': '198.18.30.1', 'ipv6': 'manual'}])
         self.assertEqual((guest['cpu'], guest['root_gib'], runtime['guest']['os_reserve_mib']), (1, 8, 256))
-        self.assertEqual(runtime['applications']['recursive_a']['interfaces']['local'], {'scope': 'guest-loopback'})
+        self.assertEqual(runtime['applications']['recursive_a']['interfaces']['local_interface'], {'scope': 'guest-loopback'})
         expect_component_refusal(lambda: compiler.resolve_plan(self.config, self.site, admit=True),
                                  'component.synthetic-binding', ('guests', 'resolver', 'admission'))
 

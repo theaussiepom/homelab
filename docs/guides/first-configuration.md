@@ -64,11 +64,14 @@ contexts:
   lab:
     backend: proxmox-lxc
     node: practice-pve
-    api_endpoint: {external: api}
+    api_endpoint:
+      external: api
     trust:
       ca_file: /example/ca.pem
       known_hosts: /example/known_hosts
-    credentials: {api_token: token, ssh_private_key: ssh}
+    credentials:
+      api_token: token
+      ssh_private_key: ssh
     paths:
       state_root: /example/state
       backup_directory: /example/backup/data
@@ -76,14 +79,25 @@ contexts:
       backup_source: example:/backup
     protected_guests: [9900]
     ssh_public_keys: []
-    dns_servers: [{external: dns}]
+    dns_servers:
+      - external: dns
     timezone: Etc/UTC
 secret_sources:
-  token: {type: file, path: /never-read/token}
-  ssh: {type: file, path: /never-read/ssh}
+  token:
+    type: file
+    path: /never-read/token
+  ssh:
+    type: file
+    path: /never-read/ssh
 external_endpoints:
-  api: {protocol: https, address: 192.0.2.20, port: 8006}
-  dns: {protocol: udp, address: 198.18.30.53, port: 53}
+  api:
+    protocol: https
+    address: 192.0.2.20
+    port: 8006
+  dns:
+    protocol: udp
+    address: 198.18.30.53
+    port: 53
 networks:
   primary:
     context: lab
@@ -92,23 +106,30 @@ networks:
     vlan: null
     gateway: 198.18.30.1
 storage:
-  local: {context: lab, pool: practice-local}
+  local:
+    context: lab
+    pool: practice-local
 guests:
   resolver:
     context: lab
     template: base
     lifecycle: fresh
-    identity: {vmid: 620, hostname: practice-resolver}
+    identity:
+      vmid: 620
+      hostname: practice-resolver
     template_file_id: practice:vztmpl/debian-13.tar.zst
     root_storage: local
-    resources: {memory_mib: 1024}
+    resources:
+      memory_mib: 1024
     control_interface: management
     interfaces:
       management:
         network: primary
         slot: 0
         mac: 02:00:00:30:00:20
-        address: {mode: static, value: 198.18.30.20}
+        address:
+          mode: static
+          value: 198.18.30.20
         default_route: true
         ipv6: manual
 apps:
@@ -117,8 +138,11 @@ apps:
     guest: resolver
     lifecycle: fresh
     interfaces:
-      private: {scope: app-network, network: default}
-      local: {scope: guest-loopback}
+      private_interface:
+        scope: app-network
+        network: default
+      local_interface:
+        scope: guest-loopback
 ```
 
 Read the result from its goal back to its prerequisites: `apps.recursive_a` selects the library's `recursive` profile and runs on `guests.resolver`; that guest selects the `base` template, the `local` storage declaration and the `lab` context. Its `management` NIC selects the `primary` network and supplies both its control address and its only default route. Map keys are IDs; `profile: recursive` is a reference to a library entry, not an instruction to invent a new profile. The [site reference](../reference/site.md) explains the remaining top-level maps.
@@ -151,7 +175,7 @@ packet = json.load(open(sys.argv[1]))
 config = json.loads(packet['files']['site.json'])
 runtime = json.loads(packet['files']['component-runtime.json'])
 guest = config['guest']
-listener = runtime['applications']['recursive_a']['listeners']['udp']
+listener = runtime['applications']['recursive_a']['listeners']['udp_listener']
 print('schema:', packet['schema'])
 print('node:', config['site']['node'])
 print('guest:', guest['vmid'], guest['hostname'])
@@ -213,8 +237,11 @@ profile: recursive
 guest: resolver
 lifecycle: fresh
 interfaces:
-  private: {scope: app-network, network: default}
-  local: {scope: guest-loopback}
+  private_interface:
+    scope: app-network
+    network: default
+  local_interface:
+    scope: guest-loopback
 ```
 
 Replace the entire `recursive_a` value under `apps` in `site.yaml` with this root fragment:

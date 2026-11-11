@@ -18,9 +18,9 @@ def selection():
  library['software']['vault']={'images':{'bitwarden':'vault'}}
  library['runtime_profiles']['vault']={'containers':{'bitwarden':{'memory_mib':1536,'pids_limit':256,'cpu_limit':1}}}
  library['app_profiles']['vault']={'adapter':'bitwarden','display_name':'Vault',
-  'interfaces':{'web':role('guest-interface'),'database':role('guest-interface'),'private':role('app-network')},
-  'listeners':{'web':listener('bitwarden','private',8080,namespace='app-network',publish={'scope':'guest-interface','interface':'web','port':8080})},
-  'endpoints':{'web':{'listener':'web','protocol':'http','via':'web'}},
+  'interfaces':{'web_interface':role('guest-interface'),'database_interface':role('guest-interface'),'private_interface':role('app-network')},
+  'listeners':{'web_listener':listener('bitwarden','private_interface',8080,namespace='app-network',publish={'scope':'guest-interface','interface':'web_interface','port':8080})},
+  'endpoints':{'web_endpoint':{'listener':'web_listener','protocol':'http','via':'web_interface'}},
   'connections':{'database':{'type':'mariadb','required':True}},
   'storage':{'data':storage('/etc/bitwarden'),'logs':storage('/var/log/bitwarden')},
   'secrets':{'runtime_environment':{'required':True}},'software':['vault'],'runtime':['vault'],
@@ -31,12 +31,12 @@ def selection():
  site['guests']['resolver']['compose_projects']['vault']={'name':'owned-vault-project','file':'compose-vault.yml'}
  site['apps']['vault']={'profile':'vault','guest':'resolver','lifecycle':'retained',
   'identity':{'phase':'vault','runtime_id':'owned-vault','project':'vault','services':{'bitwarden':'owned-vault'},'networks':{'default':'owned-vault-network'}},
-  'interfaces':{'web':{'interface':'backend'},'database':{'interface':'backend'},'private':{'scope':'app-network','network':'default'}},
+  'interfaces':{'web_interface':{'interface':'backend'},'database_interface':{'interface':'backend'},'private_interface':{'scope':'app-network','network':'default'}},
   'storage':{key:{'root_path':'data','subpath':'vault/'+key}for key in('data','logs')},
   'secrets':{'runtime_environment':'vault_environment'},'origin':{'exposure':'vault'},
   'properties':{'issuer':{'protocol':'http','domain':'issuer'},'database_name':'owned_vault','data_uid':1000,'data_gid':1000}}
- site['connections']['vault_database']={'consumer':{'app':'vault','connection':'database'},'target':{'external':'database'},'source_interface':'database'}
- site['exposures']['vault']={'type':'http','target':{'app':'vault','endpoint':'web'},'domain':'vault','ingress':{'app':'ingress','endpoint':'https'},'tls':'public'}
+ site['connections']['vault_database']={'consumer':{'app':'vault','connection':'database'},'target':{'external':'database'},'source_interface':'database_interface'}
+ site['exposures']['vault']={'type':'http','target':{'app':'vault','endpoint':'web_endpoint'},'domain':'vault','ingress':{'app':'ingress','endpoint':'https_endpoint'},'tls':'public'}
  site['policies']['network']['selected_external']['rules'].append({'direction':'out','proto':'tcp','destination':{'endpoint':'database'},'port':{'endpoint':'database'},'comment':'Selected database'})
  site['guests']['resolver']['network_policy'][0]['endpoints']['database']={'external':'database'}
  return library,site

@@ -1,5 +1,6 @@
 """Independent adapter units mock helpers; each legacy comparison integrates once."""
 import copy
+from fixture_network_names import modernize
 import json
 from pathlib import Path
 import sys
@@ -9,11 +10,11 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import component_runtime as runtime
 
-FIXTURE = json.loads(Path(__file__).with_name('public-synthetic-retained-services.json').read_text())
+FIXTURE = modernize(json.loads(Path(__file__).with_name('public-synthetic-retained-services.json').read_text()))
 
 
 def case(name):
-    return copy.deepcopy(FIXTURE['cases'][name])
+    return modernize(FIXTURE['cases'][name])
 
 
 def base_service():
@@ -42,7 +43,7 @@ class NodeUnitTests(unittest.TestCase):
         for mutate in (lambda a: a['storage_paths'].pop('settings'),
                        lambda a: a['storage_paths']['healthcheck'].update(read_only=False),
                        lambda a: a.pop('authentication_resolved'),
-                       lambda a: a['listeners']['web'].update(port=1881)):
+                       lambda a: a['listeners']['web_listener'].update(port=1881)):
             with self.subTest(mutate=mutate):
                 item = case('node_red');mutate(item['app'])
                 with patch.object(runtime, '_service', return_value=base_service()):
@@ -92,7 +93,7 @@ class WinetUnitTests(unittest.TestCase):
 
     def test_custom_mount_listener_prefix_drift_or_process_override_refuses(self):
         for mutate in (lambda a: a.update(storage_paths={'custom': {}}),
-                       lambda a: a.update(listeners={'web': {}}),
+                       lambda a: a.update(listeners={'web_listener': {}}),
                        lambda a: a['settings'].update(mqtt_prefix='foreign-prefix')):
             with self.subTest(mutate=mutate):
                 item = case('winet');mutate(item['app'])
@@ -131,7 +132,7 @@ class ZigbeeUnitTests(unittest.TestCase):
                 with self.assertRaises(ValueError):runtime._zigbee2mqtt(item['app'], item['guest'])
 
     def test_port_namespace_and_process_identity_cannot_diverge_from_retained_config(self):
-        item = case('zigbee2mqtt');item['app']['listeners']['web']['namespace'] = 'host'
+        item = case('zigbee2mqtt');item['app']['listeners']['web_listener']['namespace'] = 'host'
         with self.assertRaises(ValueError):runtime._zigbee2mqtt(item['app'], item['guest'])
         item = case('zigbee2mqtt')
         with patch.object(runtime, '_ports', return_value=['0.0.0.0:8099:8099/tcp']):

@@ -99,7 +99,7 @@ apps:
     guest: edge
     lifecycle: fresh
     interfaces:
-      frontend:
+      frontend_interface:
         interface: management
     storage:
       certs:
@@ -148,7 +148,7 @@ exposures:
     domain: backend
     ingress:
       app: ingress
-      endpoint: https
+      endpoint: https_endpoint
     tls: public
     transport: backend
     middlewares:

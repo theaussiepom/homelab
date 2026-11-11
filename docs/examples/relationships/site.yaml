@@ -135,9 +135,9 @@ apps:
       networks: {}
       runtime_directory: /opt/homelab-app/runtime/broker
     interfaces:
-      backend:
+      backend_interface:
         interface: backend
-      frontend:
+      frontend_interface:
         interface: management
     storage:
       config:
@@ -158,11 +158,11 @@ apps:
     guest: resolver
     lifecycle: fresh
     interfaces:
-      web:
+      web_interface:
         interface: backend
-      broker:
+      broker_interface:
         interface: backend
-      private:
+      private_interface:
         scope: app-network
         network: explorer
     storage:
@@ -178,7 +178,7 @@ apps:
     guest: resolver
     lifecycle: fresh
     interfaces:
-      frontend:
+      frontend_interface:
         interface: management
     storage:
       certs:
@@ -226,11 +226,11 @@ exposures:
     type: http
     target:
       app: browser
-      endpoint: web
+      endpoint: web_endpoint
     domain: browser
     ingress:
       app: ingress
-      endpoint: https
+      endpoint: https_endpoint
     tls: public
     middlewares:
     - headers
@@ -242,8 +242,8 @@ connections:
       connection: broker
     target:
       app: broker
-      endpoint: backend
-    source_interface: broker
+      endpoint: backend_endpoint
+    source_interface: broker_interface
     hostname:
       domain: broker
     account: client
@@ -253,14 +253,14 @@ connections:
       connection: outpost
     target:
       external: outpost
-    source_interface: web
+    source_interface: web_interface
 accounts:
   client:
     adapter: mqtt-client
     owner: browser
     target:
       app: broker
-      endpoint: backend
+      endpoint: backend_endpoint
     principal: browser
     credential: browser_password
     access: read-write-all

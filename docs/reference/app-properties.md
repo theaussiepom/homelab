@@ -92,17 +92,25 @@ Each value below is a complete **effective properties object for the named adapt
 
 <!-- example: properties-adapters -->
 ```yaml
-unbound: {publish_port: 5335}
+unbound:
+  publish_port: 5335
 pihole: {}
-homeassistant: {mdns: {interface: web, startup: startup}}
+homeassistant:
+  mdns:
+    interface: web_interface
+    startup: startup
 node_red: {}
-mqtt: {password_file: /mosquitto/config/passwords}
-mqtt_explorer: {connection_name: Example broker}
+mqtt:
+  password_file: /mosquitto/config/passwords
+mqtt_explorer:
+  connection_name: Example broker
 music_assistant: {}
 mariadb: {}
 influxdb: {}
 authentik:
-  database: {name: example_identity, user: example_identity}
+  database:
+    name: example_identity
+    user: example_identity
   smtp:
     host: mail.example.invalid
     port: 587
@@ -111,32 +119,55 @@ authentik:
     from: identity@example.invalid
     username: ""
     timeout: 30
-zabbix: {database: {name: example_monitoring, user: example_monitoring}}
+zabbix:
+  database:
+    name: example_monitoring
+    user: example_monitoring
 postgresql:
   client_access:
-    - source: {app: client, interface: database}
+    - source:
+        app: client
+        interface: database_interface
       database: all
       user: all
       method: scram-sha-256
 traefik:
   dashboard: false
-  provider: {context: lab, token_id: reader@pve!discovery}
-  acme: {email: ops@example.invalid, resolvers: [{external: dns}]}
-zigbee2mqtt: {adapter: zstack, mqtt_base_topic: example/zigbee}
+  provider:
+    context: lab
+    token_id: reader@pve!discovery
+  acme:
+    email: ops@example.invalid
+    resolvers:
+    - external: dns
+zigbee2mqtt:
+  adapter: zstack
+  mqtt_base_topic: example/zigbee
 bitwarden:
-  issuer: {protocol: https, domain: vault}
+  issuer:
+    protocol: https
+    domain: vault
   database_name: example_vault
   data_uid: 1000
   data_gid: 1000
-pegaprox: {trusted_proxy: {app: ingress, interface: web}}
-winet: {mqtt_prefix: example/inverter}
+pegaprox:
+  trusted_proxy:
+    app: ingress
+    interface: web_interface
+winet:
+  mqtt_prefix: example/inverter
 cloudbeaver:
   server_name: Example database browser
   recovery_admin: recovery_admin
   heap_mib: 512
-  auth_headers: {user: X-Example-User, team: X-Example-Team}
+  auth_headers:
+    user: X-Example-User
+    team: X-Example-Team
   connections:
-    reporting: {name: Reporting, database: reports, sslmode: require}
+    reporting:
+      name: Reporting
+      database: reports
+      sslmode: require
 ```
 
 The CloudBeaver `reporting` example describes an **unmanaged PostgreSQL** connection. Declare its connection and existing credential separately. A managed connection omits `sslmode` and uses its managed account, so do not copy that key into managed PostgreSQL or any MariaDB metadata. To complete a supported CloudBeaver app, include at least one managed database connection and account, plus the public connection, OIDC and origin prerequisites above.

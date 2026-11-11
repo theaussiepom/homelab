@@ -63,7 +63,7 @@ def explorer():
         'password_file':'/mosquitto/config/selected_passwords','image':'example.invalid/mqtt@sha256:'+'b'*64}
     return {'id':'browser','adapter':'mqtt_explorer','identity':{'services':{'mqtt_explorer':'mqtt_explorer','explorer_gateway':'explorer_gateway'},
         'runtime_directory':m.RUNTIME},'project_name':'homelab-mqtt','origin_url':'https://explorer.example.invalid',
-        'role_addresses':{'web':'198.18.30.37'},'properties':{'connection_name':'Broker'},
+        'role_addresses':{'web_interface':'198.18.30.37'},'properties':{'connection_name':'Broker'},
         'settings':{'authentik_outpost_url':'http://198.18.30.20:9000','broker':broker},
         'storage_paths':{'data':{'source':e.DATA}},'software_selection':{'images':{name:{'image':'example.invalid/'+name+'@sha256:'+'a'*64}
                 for name in ('mqtt_explorer','explorer_gateway')}}}, {'fixture-gui':{'schema':'homelab-application-account-v1','owner':owner,'password':'d'*64}}

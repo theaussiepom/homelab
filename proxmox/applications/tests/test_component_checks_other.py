@@ -1,3 +1,4 @@
+from fixture_network_names import modernize
 """App readiness units mock helpers; one real public metadata integration."""
 import copy,importlib.util,json,os
 from pathlib import Path
@@ -6,8 +7,8 @@ from unittest.mock import patch
 F=Path(Path(__file__).resolve().parents[3]);sys.path[:0]=[str(F/'blueprints'),str(F/'proxmox/applications')]
 spec=importlib.util.spec_from_file_location('readiness_proposal_handlers',F/'proxmox/applications/component_checks.py');h=importlib.util.module_from_spec(spec);spec.loader.exec_module(h)
 from component_errors import ComponentError
-DATA=json.loads(Path(__file__).with_name('public-retained-other-health.json').read_text())
-def case(name):return copy.deepcopy(DATA['cases'][name])
+DATA=modernize(json.loads(Path(__file__).with_name('public-retained-other-health.json').read_text()))
+def case(name):return modernize(DATA['cases'][name])
 def rows(name,v=None):
  v=v or case(name);return h.HANDLERS[name](v['app'],v['compose_file'])
 
@@ -22,14 +23,14 @@ class BackendUnits(unittest.TestCase):
     v=case('bitwarden');v['app']['settings']['runtime']['issuer']=issuer;r=rows('bitwarden',v)[0]
     self.assertEqual(r['argv'][-3:],['--issuer',issuer,'--backend'])
  def test_backend_fixed_listener_and_role_must_agree(self):
-  v=case('authentik');v['app']['listeners']['web']['publish']['port']=8443
+  v=case('authentik');v['app']['listeners']['web_listener']['publish']['port']=8443
   with self.assertRaises(ComponentError):rows('authentik',v)
-  v=case('zabbix');v['app']['listeners']['web']['publication_address']='198.18.44.9'
+  v=case('zabbix');v['app']['listeners']['web_listener']['publication_address']='198.18.44.9'
   with self.assertRaises(ComponentError):rows('zabbix',v)
  def test_proxy_probe_is_the_declared_local_ping_not_public_dashboard(self):
   self.assertEqual(rows('traefik')[0]['argv'][-1],'http://127.0.0.1:8082/ping')
   r=rows('traefik')[0];self.assertEqual(r['expect'],'OK');self.assertNotIn('dashboard',repr(r))
-  self.assertEqual(set(case('traefik')['app']['listeners']),{'http','https'})
+  self.assertEqual(set(case('traefik')['app']['listeners']),{'http_listener','https_listener'})
 
 class GatewayUnits(unittest.TestCase):
  def test_cloud_uses_selected_runtime_leaf_and_canonical_signin_budget(self):
@@ -60,7 +61,7 @@ class OwnedHelperUnits(unittest.TestCase):
   with patch.object(h,'_compose_exec',return_value=['OWNED','COMPOSE']) as compose:
    r=rows('music_assistant',v)
   self.assertEqual(r[0]['argv'],['OWNED','COMPOSE']);self.assertEqual(compose.call_args.args[2:5],('music_assistant','python3','-c'))
-  source=v['app']['role_addresses']['web'];self.assertEqual(r[1]['argv'][r[1]['argv'].index('--interface')+1],source)
+  source=v['app']['role_addresses']['web_interface'];self.assertEqual(r[1]['argv'][r[1]['argv'].index('--interface')+1],source)
   v['app']['resolved_connections']['public']['source_address']='198.18.44.7'
   with self.assertRaises(ComponentError):rows('music_assistant',v)
  def test_winet_uses_selected_project_service_and_bounded_docker_json(self):

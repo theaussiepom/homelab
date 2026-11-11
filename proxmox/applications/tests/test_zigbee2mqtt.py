@@ -29,10 +29,10 @@ def runtime_app(selected):
         'settings':copy.deepcopy(selected),
         'storage_paths':{'data':{'source':'/srv/homelab/data/zigbee2mqtt','target':'/app/data',
                                  'kind':'directory','read_only':False}},
-        'listeners':{'web':{'service':'zigbee2mqtt','namespace':'app-network','interface':'private',
+        'listeners':{'web_listener':{'service':'zigbee2mqtt','namespace':'app-network','interface':'private_interface',
             'bind':'wildcard','protocol':'tcp','port':selected['frontend_port'],
             'publication_address':selected['bind_address'],
-            'publish':{'scope':'guest-interface','interface':'web','port':selected['frontend_port']}}}}
+            'publish':{'scope':'guest-interface','interface':'web_interface','port':selected['frontend_port']}}}}
 
 
 def settings():

@@ -19,7 +19,7 @@ def fixture():
                                   ('metrics', 'influxdb', 'influxdb'), ('proxy', 'traefik', 'docker')]:
         guest = {'zabbix': 'server', 'sql': 'database', 'metrics': 'metrics', 'proxy': 'ingress'}[key]
         apps[key] = {'id': key, 'guest': guest, 'adapter': adapter, 'profile': profile,
-                     'role_addresses': {'service': '198.18.20.11'}, 'resolved_connections': {}}
+                     'role_addresses': {'service_interface': '198.18.20.11'}, 'resolved_connections': {}}
     apps['zabbix']['origin'] = {'exposure': 'monitoring'}
     apps['zabbix']['resolved_connections'] = {
         'database': {'type': 'postgresql', 'source_address': '198.18.20.10',

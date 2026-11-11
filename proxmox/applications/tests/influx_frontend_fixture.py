@@ -2,7 +2,7 @@
 import http.server,json,os,pathlib,subprocess,sys,tempfile,threading,time,urllib.request
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]))
 import component_native
-value={'adapter':'influxdb','role_addresses':{'web':'198.18.40.26','service':'198.18.33.26'},'listeners':{}}
+value={'adapter':'influxdb','role_addresses':{'web_interface':'198.18.40.26','service_interface':'198.18.33.26'},'listeners':{}}
 for name,role in [('web','web'),('backend','service')]:
  value['listeners'][name]={'service':'influxdb','namespace':'host','interface':role,'bind':'interface','protocol':'tcp','port':8086,'actual_bind':value['role_addresses'][role]}
 with tempfile.TemporaryDirectory()as directory:

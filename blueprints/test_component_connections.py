@@ -13,7 +13,7 @@ def fixture(*, separate=False, alias=False):
                            ('db_a', 'postgresql'), ('db_b', 'postgresql')):
         apps[name] = {'id': name, 'guest': name, 'adapter': adapter,
                       'profile': 'client' if adapter == 'cloudbeaver' else 'server',
-                      'interfaces': {'database': {'interface': 'backend'}}}
+                      'interfaces': {'database_interface': {'interface': 'backend'}}}
     site = {'accounts': {}, 'secret_sources': {}, 'connections': {}}
     for suffix in ('a', 'b'):
         target = {'app': 'db_b' if separate and suffix == 'b' else 'db_a',
@@ -23,7 +23,7 @@ def fixture(*, separate=False, alias=False):
             'target': target, 'principal': 'shared_admin', 'credential': 'secret_' + suffix,
             'access': 'server-administration', 'lifecycle': 'create-once'}
         site['connections']['database_' + suffix] = {'consumer': {'app': 'client_' + suffix, 'connection': 'database'},
-            'target': target, 'source_interface': 'database', 'account': 'account_' + suffix}
+            'target': target, 'source_interface': 'database_interface', 'account': 'account_' + suffix}
 
     def endpoint(ref):
         name = ref['app']
@@ -79,8 +79,8 @@ class ConnectionComponentTests(unittest.TestCase):
             lambda r: r.site['accounts']['account_a'].update(lifecycle='rotate'),
             lambda r: r.site['secret_sources']['secret_a'].update(type='file'),
             lambda r: r.site['secret_sources']['secret_b'].update(credential_id='owned-a'),
-            lambda r: r.site['connections']['database_a'].update(target={'app': 'db_b', 'endpoint': 'sql'}),
-            lambda r: r.site['connections']['database_a'].update(source_interface='missing'),
+            lambda r: r.site['connections']['database_a'].update(target={'app': 'db_b', 'endpoint': 'sql_endpoint'}),
+            lambda r: r.site['connections']['database_a'].update(source_interface='missing_interface'),
             lambda r: r.site['connections']['database_a'].update(readiness='configure'),
             lambda r: r.site['connections']['database_a'].update(credential={'principal': 'user', 'secret': 'secret_a'}),
         ]
@@ -94,14 +94,14 @@ class ConnectionComponentTests(unittest.TestCase):
         resolver, exposures = fixture(separate=True)
         resolver.site['connections']['database_a']['readiness'] = 'start'
         resolver.guests['client_b']['readiness'] = [{'stage': 'preparation',
-                                                   'target': {'app': 'db_a', 'endpoint': 'sql'}}]
+                                                   'target': {'app': 'db_a', 'endpoint': 'sql_endpoint'}}]
         result = connections.bind(resolver, exposures)
         self.assertEqual(result['guest_dependencies']['client_a'], ['db_a'])
         self.assertEqual(result['guest_dependencies']['client_b'], ['db_a'])
         self.assertEqual(result['app_dependencies']['client_a'], ['db_a'])
         self.assertEqual(result['app_dependencies']['client_b'], [])
         resolver.guests['db_a']['readiness'] = [{'stage': 'preparation',
-                                              'target': {'app': 'client_a', 'endpoint': 'web'}}]
+                                              'target': {'app': 'client_a', 'endpoint': 'web_endpoint'}}]
         with self.assertRaisesRegex(ComponentError, 'component.readiness-cycle'):
             connections.bind(resolver, exposures)
 

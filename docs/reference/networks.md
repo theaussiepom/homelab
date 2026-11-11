@@ -63,7 +63,9 @@ This complete NIC value belongs at `guests.resolver.interfaces.management` in th
 network: primary
 slot: 0
 mac: 02:00:00:20:00:10
-address: {mode: static, value: 198.18.20.10}
+address:
+  mode: static
+  value: 198.18.20.10
 default_route: true
 ipv6: manual
 ```
@@ -198,8 +200,13 @@ This example combines the network with a shared VPN subnet while preserving orde
 
 <!-- example: network-groups -->
 ```yaml
-vpn: {members: [198.18.15.0/28]}
-clients: {members: [{network: primary}, {address_group: vpn}]}
+vpn:
+  members:
+  - 198.18.15.0/28
+clients:
+  members:
+  - network: primary
+  - address_group: vpn
 ```
 
 The resolver expands `clients` to `[198.18.20.0/24, 198.18.15.0/28]`. It rejects a group that references itself and does not automatically combine or deduplicate the resulting subnets.

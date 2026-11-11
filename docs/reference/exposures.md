@@ -18,9 +18,9 @@ Every selected domain must exist. Main/alias domain IDs and their case-folded ho
 
 ## Select a destination
 
-`target` is the destination of both DNS and HTTP exposures. Its closed [endpoint reference](networks.md#external-endpoints) accepts `{app: home, endpoint: web}` or `{external: service}`. The nested `endpoint` names a connection exported by the selected app profile; it is not another exposure field. See [instance, interface role and exported endpoint](apps.md#instance-interface-role-and-exported-endpoint) for the address and socket resolution chain.
+`target` is the destination of both DNS and HTTP exposures. Its closed [endpoint reference](networks.md#external-endpoints) accepts `{app: home, endpoint: web_endpoint}` or `{external: service}`. The nested `endpoint` names a connection exported by the selected app profile; it is not another exposure field. See [instance, interface role and exported endpoint](apps.md#instance-interface-role-and-exported-endpoint) for the address and socket resolution chain.
 
-For HTTP, `target` selects the backend. `ingress: {app: edge, endpoint: https}` selects the frontend Traefik connection, and `tls` selects a named certificate policy. For DNS, `target` supplies the published address and `resolver` selects the Pi-hole instance that owns the record. References use the current resolved guest address. They do not freeze a copy of it into source.
+For HTTP, `target` selects the backend. `ingress: {app: edge, endpoint: https_endpoint}` selects the frontend Traefik connection, and `tls` selects a named certificate policy. For DNS, `target` supplies the published address and `resolver` selects the Pi-hole instance that owns the record. References use the current resolved guest address. They do not freeze a copy of it into source.
 
 **Compatibility change:** the former outer `endpoint` field is removed for both exposure types. Change only that field to `target`, including in `kind: exposure` files. Keep nested app `endpoint`, `ingress`, middleware endpoint fields, connection targets, domains, TLS policies and identities unchanged. Old-only declarations and declarations containing both outer names fail with `component.fields`; there is no permissive alias. Historical sealed deployment payloads remain historical bytes and are not reinterpreted as authored source. Review generated routes and records before separately authorized deployment.
 
@@ -37,9 +37,13 @@ The complete [relationship example](../examples/relationships/README.md) supplie
 schema: homelab-components-v1
 kind: exposure
 type: http
-target: {app: browser, endpoint: web}
+target:
+  app: browser
+  endpoint: web_endpoint
 domain: browser
-ingress: {app: ingress, endpoint: https}
+ingress:
+  app: ingress
+  endpoint: https_endpoint
 tls: public
 ```
 

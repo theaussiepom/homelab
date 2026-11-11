@@ -3,11 +3,11 @@
     "recursive_dns": {
       "guest": "resolver",
       "interfaces": {
-        "private": {
+        "private_interface": {
           "network": "default",
           "scope": "app-network"
         },
-        "service": {
+        "service_interface": {
           "scope": "guest-loopback"
         }
       },

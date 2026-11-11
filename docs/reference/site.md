@@ -26,29 +26,58 @@ contexts:
   lab:
     backend: proxmox-lxc
     node: example-node
-    api_endpoint: {external: api}
-    trust: {ca_file: /example/ca.pem, known_hosts: /example/known_hosts}
-    credentials: {api_token: token, ssh_private_key: ssh}
-    paths: {state_root: /example/state, backup_directory: /example/backup/data, backup_mount: /example/backup, backup_source: "example:/backup"}
+    api_endpoint:
+      external: api
+    trust:
+      ca_file: /example/ca.pem
+      known_hosts: /example/known_hosts
+    credentials:
+      api_token: token
+      ssh_private_key: ssh
+    paths:
+      state_root: /example/state
+      backup_directory: /example/backup/data
+      backup_mount: /example/backup
+      backup_source: example:/backup
     protected_guests: [9900]
     ssh_public_keys: []
-    dns_servers: [{external: dns}]
+    dns_servers:
+      - external: dns
 secret_sources:
-  token: {type: file, path: /never-read/token}
-  ssh: {type: file, path: /never-read/ssh}
+  token:
+    type: file
+    path: /never-read/token
+  ssh:
+    type: file
+    path: /never-read/ssh
 external_endpoints:
-  api: {protocol: https, address: 192.0.2.10, port: 8006}
-  dns: {protocol: udp, address: 198.18.21.53, port: 53}
+  api:
+    protocol: https
+    address: 192.0.2.10
+    port: 8006
+  dns:
+    protocol: udp
+    address: 198.18.21.53
+    port: 53
 networks:
-  primary: {context: lab, cidr: 198.18.20.0/24, bridge: example0, vlan: null, gateway: 198.18.20.1}
+  primary:
+    context: lab
+    cidr: 198.18.20.0/24
+    bridge: example0
+    vlan: null
+    gateway: 198.18.20.1
 storage:
-  local: {context: lab, pool: example-local}
+  local:
+    context: lab
+    pool: example-local
 guests:
   resolver:
     context: lab
     template: base
     lifecycle: fresh
-    identity: {vmid: 610, hostname: example-dns}
+    identity:
+      vmid: 610
+      hostname: example-dns
     template_file_id: example:vztmpl/debian.tar.zst
     root_storage: local
     control_interface: management
@@ -57,7 +86,9 @@ guests:
         network: primary
         slot: 0
         mac: 02:00:00:20:00:10
-        address: {mode: static, value: 198.18.20.10}
+        address:
+          mode: static
+          value: 198.18.20.10
         default_route: true
 apps:
   recursive_a:
@@ -65,8 +96,11 @@ apps:
     guest: resolver
     lifecycle: fresh
     interfaces:
-      private: {scope: app-network, network: default}
-      local: {scope: guest-loopback}
+      private_interface:
+        scope: app-network
+        network: default
+      local_interface:
+        scope: guest-loopback
 ```
 
 To split the configuration into files, move `apps.recursive_a` into the complete typed source shown on [Sources](sources.md#worked-extraction-without-an-overlay). The resulting app and dependency graph stay the same. **Invalid variation:** change its guest to an unknown ID. Parsing succeeds, but reference resolution rejects the unknown guest.

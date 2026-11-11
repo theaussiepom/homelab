@@ -72,12 +72,12 @@ def component_fixture(root):
           'app_profiles':{'unbound':{'source':'apps/unbound.yaml'}}}
     profile={'schema':'homelab-components-v1','kind':'app-profile',
              'adapter':'unbound','display_name':'Unbound',
-             'interfaces':{'service':{'required':True,'accepts':['guest-loopback']},
-                           'private':{'required':True,'accepts':['app-network']}},
-             'listeners':{'dns':{'service':'unbound','namespace':'app-network',
-                 'interface':'private','bind':'wildcard','protocol':'udp','port':53,
+             'interfaces':{'service_interface':{'required':True,'accepts':['guest-loopback']},
+                           'private_interface':{'required':True,'accepts':['app-network']}},
+             'listeners':{'dns_listener':{'service':'unbound','namespace':'app-network',
+                 'interface':'private_interface','bind':'wildcard','protocol':'udp','port':53,
                  'publish':{'scope':'guest-loopback','port':5335}}},
-             'endpoints':{'dns':{'listener':'dns','protocol':'udp','via':'service'}}}
+             'endpoints':{'dns_endpoint':{'listener':'dns_listener','protocol':'udp','via':'service_interface'}}}
     write(root,'stack.json',json.dumps(spec))
     path=write(root,'apps/unbound.yaml',yaml.safe_dump(profile))
     return spec,site,profile,path

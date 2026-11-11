@@ -40,13 +40,13 @@ Each branch requires exactly the fields listed; there are no defaults, and missi
 
 In `apps.home.profile: homeassistant`, `home` names one site instance. The selected library's `homeassistant` profile supplies its supported software, roles, listeners and endpoints. A second instance can select the same profile, subject to placement and identity constraints; the instance name is not a software selector.
 
-Suppose `apps.home.guest` is `automation` and `apps.home.interfaces.web` is `{interface: primary}`. `primary` names a NIC in `guests.automation.interfaces`. The app's `web` role receives that NIC's resolved IPv4 address; it does not allocate a NIC or imply isolation. A profile may use the same word for several distinct contracts:
+Suppose `apps.home.guest` is `automation` and `apps.home.interfaces.web_interface` is `{interface: primary}`. `primary` names a NIC in `guests.automation.interfaces`. The app's `web_interface` role receives that NIC's resolved IPv4 address; it does not allocate a NIC or imply isolation. The purpose and kind are explicit in each name:
 
-- `interfaces.web` declares a role that the site must bind.
-- `listeners.web` declares the actual socket, such as host TCP port 8123.
-- `endpoints.web` exports a named connection: `listener: web`, `protocol: http`, `via: web`.
+- `interfaces.web_interface` declares a role that the site must bind.
+- `listeners.web_listener` declares the actual socket, such as host TCP port 8123.
+- `endpoints.web_endpoint` exports a named connection: `listener: web_listener`, `protocol: http`, `via: web_interface`.
 
-For that profile, `{app: home, endpoint: web}` resolves HTTP, port 8123 and the address supplied through the `web` role. The site writes neither the port nor a copied backend address in its [exposure](exposures.md). `exposures.home_web.target` selects that exported connection; `ingress` separately selects the frontend HTTPS connection. A guest address change follows these references. The library owns which endpoints exist; do not assume that an arbitrary profile exports `web` or rename endpoint keys without migrating their consumers.
+For that profile, `{app: home, endpoint: web_endpoint}` resolves HTTP, port 8123 and the address supplied through the `web_interface` role. The site writes neither the port nor a copied backend address in its [exposure](exposures.md). `exposures.home_web.target` selects that exported connection; `ingress` separately selects the frontend HTTPS connection. A guest address change follows these references. The library owns which endpoints exist; do not assume that an arbitrary profile exports `web_endpoint` or rename endpoint keys without migrating their consumers.
 
 A wildcard host listener still accepts other guest addresses unless access policy prevents it. App role binding and route selection do not alter listener isolation, authorize traffic or create a readiness dependency. See [connections](connections.md), [network policy](policies.md) and the selected profile's actual listener contract.
 
@@ -96,8 +96,11 @@ profile: recursive
 guest: resolver
 lifecycle: fresh
 interfaces:
-  private: {scope: app-network, network: default}
-  local: {scope: guest-loopback}
+  private_interface:
+    scope: app-network
+    network: default
+  local_interface:
+    scope: guest-loopback
 ```
 
 For a practical override, add the following fields to this app. The `unbound` role comes from its selected runtime; 256 MiB remains within the tutorial guest's budget. The display label is independent of its persistent identity.
@@ -107,7 +110,10 @@ For a practical override, add the following fields to this app. The `unbound` ro
 display_name: Example recursive resolver
 resources:
   containers:
-    unbound: {memory_mib: 256, cpu_limit: 1, pids_limit: 128}
+    unbound:
+      memory_mib: 256
+      cpu_limit: 1
+      pids_limit: 128
 ```
 
 **Invalid variation:** change `interfaces.local` to `{scope: app-network, network: default}`. Although that is a valid scope for some profiles, this profile accepts only guest loopback for the role, so reference resolution rejects it. Keep `lifecycle: fresh` for later ordinary deployments; do not toggle it after installation. See [First installation and later deployments](lifecycle.md).

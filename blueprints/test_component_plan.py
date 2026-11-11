@@ -17,12 +17,12 @@ def library():
                 'security': {'unprivileged': True, 'protection': True, 'nesting': True, 'keyctl': False}}},
             'app_profiles': {'recursive': {
                 'adapter': 'unbound', 'display_name': 'Recursive DNS',
-                'interfaces': {'private': {'required': True, 'accepts': ['app-network']},
-                               'local': {'required': True, 'accepts': ['guest-loopback']}},
-                'listeners': {'udp': {'service': 'unbound', 'namespace': 'app-network',
-                    'interface': 'private', 'bind': 'wildcard', 'protocol': 'udp', 'port': 53,
+                'interfaces': {'private_interface': {'required': True, 'accepts': ['app-network']},
+                               'local_interface': {'required': True, 'accepts': ['guest-loopback']}},
+                'listeners': {'udp_listener': {'service': 'unbound', 'namespace': 'app-network',
+                    'interface': 'private_interface', 'bind': 'wildcard', 'protocol': 'udp', 'port': 53,
                     'publish': {'scope': 'guest-loopback', 'port': 5335}}},
-                'endpoints': {'dns': {'listener': 'udp', 'protocol': 'udp', 'via': 'local'}}}}}
+                'endpoints': {'dns_endpoint': {'listener': 'udp_listener', 'protocol': 'udp', 'via': 'local_interface'}}}}}
 
 
 def site():
@@ -55,8 +55,8 @@ def site():
                     'backend': {'network': 'secondary', 'slot': 1, 'mac': '02:00:00:21:00:10',
                         'address': {'mode': 'static', 'value': '198.18.21.10'}, 'ipv6': 'manual'}}}},
             'apps': {'recursive_a': {'profile': 'recursive', 'guest': 'resolver', 'lifecycle': 'fresh',
-                'interfaces': {'private': {'scope': 'app-network', 'network': 'default'},
-                               'local': {'scope': 'guest-loopback'}}}}}
+                'interfaces': {'private_interface': {'scope': 'app-network', 'network': 'default'},
+                               'local_interface': {'scope': 'guest-loopback'}}}}}
 
 
 class PlanTests(unittest.TestCase):
@@ -106,7 +106,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(second['ipv6'], 'manual')
         self.assertEqual(guest['dns_servers'], ['198.18.21.53'])
         self.assertEqual(plan.resolved['contexts']['lab']['api_endpoint'], 'https://192.0.2.10:8006')
-        self.assertEqual(plan.resolved['endpoints']['app/recursive_a/dns']['address'], '127.0.0.1')
+        self.assertEqual(plan.resolved['endpoints']['app/recursive_a/dns_endpoint']['address'], '127.0.0.1')
         plan.check()
         guest['identity']['vmid'] = 611
         with self.assertRaises(ValueError):
@@ -167,9 +167,9 @@ class PlanTests(unittest.TestCase):
         plan = self.resolve(selected=value)
         a, b = plan.resolved['apps'].values()
         self.assertNotEqual(a['identity']['services'], b['identity']['services'])
-        self.assertEqual(plan.resolved['endpoints']['app/recursive_a/dns']['port'], 5335)
-        self.assertEqual(plan.resolved['endpoints']['app/recursive_b/dns']['port'], 5336)
-        self.assertEqual(b['listeners']['udp']['port'], 53)
+        self.assertEqual(plan.resolved['endpoints']['app/recursive_a/dns_endpoint']['port'], 5335)
+        self.assertEqual(plan.resolved['endpoints']['app/recursive_b/dns_endpoint']['port'], 5336)
+        self.assertEqual(b['listeners']['udp_listener']['port'], 53)
         second.pop('properties')
         with self.assertRaises(ValueError):
             self.resolve(selected=value)
@@ -203,7 +203,7 @@ class PlanTests(unittest.TestCase):
         plan = self.resolve(selected=value)
         self.assertEqual(plan.resolved['apps']['recursive_a']['identity']['services'],
                          plan.resolved['apps']['recursive_b']['identity']['services'])
-        self.assertEqual(plan.resolved['endpoints']['app/recursive_b/dns']['port'], 5336)
+        self.assertEqual(plan.resolved['endpoints']['app/recursive_b/dns_endpoint']['port'], 5336)
         second['identity']['project'] = 'first'
         with self.assertRaises(ValueError):
             self.resolve(selected=value)
@@ -236,8 +236,8 @@ class PlanTests(unittest.TestCase):
             lambda v: v['guests']['resolver']['interfaces']['backend'].update(slot=0),
             lambda v: v['guests']['resolver']['interfaces']['backend'].update(ipv6='auto'),
             lambda v: v['guests']['resolver']['interfaces']['backend'].update(mac='02:00:00:20:00:10'),
-            lambda v: v['apps']['recursive_a']['interfaces']['private'].update(network='foreign'),
-            lambda v: v['apps']['recursive_a']['interfaces'].update(extra={'scope': 'guest-loopback'}),
+            lambda v: v['apps']['recursive_a']['interfaces']['private_interface'].update(network='foreign'),
+            lambda v: v['apps']['recursive_a']['interfaces'].update(extra_interface={'scope': 'guest-loopback'}),
             lambda v: v['contexts']['lab'].update(api_endpoint={'external': 'dns'}),
             lambda v: v['external_endpoints']['dns'].update(port=54),
             lambda v: v['external_endpoints']['dns'].update(address='secret@example.invalid'),
@@ -271,14 +271,14 @@ class PlanTests(unittest.TestCase):
 
     def test_remote_physical_address_reference_has_no_fake_listener(self):
         spec, value = library(), site()
-        spec['app_profiles']['recursive']['interfaces']['client'] = {
+        spec['app_profiles']['recursive']['interfaces']['client_interface'] = {
             'required': False, 'accepts': ['guest-interface']}
-        value['apps']['recursive_a']['interfaces']['client'] = {'interface': 'backend'}
+        value['apps']['recursive_a']['interfaces']['client_interface'] = {'interface': 'backend'}
         value['policies'] = {'network': {'source': {'rules': [
             {'direction': 'in', 'proto': 'tcp', 'source': {'interface': 'client'},
              'port': '5432', 'comment': 'Existing dedicated source'}]}}}
         value['guests']['resolver']['network_policy'] = [{'policy': 'source',
-            'interfaces': {'client': {'app': 'recursive_a', 'interface': 'client'}}}]
+            'interfaces': {'client': {'app': 'recursive_a', 'interface': 'client_interface'}}}]
         plan = self.resolve(spec, value)
         self.assertEqual(plan.resolved['guests']['resolver']['rules'][0]['source'], '198.18.21.10/32')
         self.assertEqual(len(plan.resolved['endpoints']), 3)

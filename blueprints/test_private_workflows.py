@@ -23,11 +23,11 @@ def composition():
     spec['app_profiles'] = {'resolver': {
         'adapter': 'pihole', 'display_name': 'Pi-hole',
         'interfaces': {role: {'required': True, 'accepts': ['guest-interface']}
-                       for role in ('service', 'upstream')},
-        'listeners': {name: {'service': 'pihole', 'namespace': 'host', 'interface': 'service',
+                       for role in ('service_interface', 'upstream_interface')},
+        'listeners': {name: {'service': 'pihole', 'namespace': 'host', 'interface': 'service_interface',
                             'bind': 'wildcard', 'protocol': protocol, 'port': port}
-                      for name, protocol, port in (('udp', 'udp', 53), ('tcp', 'tcp', 53), ('web', 'tcp', 80))},
-        'endpoints': {'dns': {'listener': 'udp', 'protocol': 'udp', 'via': 'service'}},
+                      for name, protocol, port in (('udp_listener', 'udp', 53), ('tcp_listener', 'tcp', 53), ('web_listener', 'tcp', 80))},
+        'endpoints': {'dns_endpoint': {'listener': 'udp_listener', 'protocol': 'udp', 'via': 'service_interface'}},
         'storage': {'config': {'target': '/etc/pihole', 'kind': 'directory',
                                'required': True, 'read_only': False}},
         'connections': {'upstream': {'type': 'dns', 'required': True, 'readiness': ['start']}},
@@ -46,13 +46,13 @@ def composition():
                                      'path': '/srv/example/data', 'size_gib': 2}}
         source['guests'][name] = guest
         source['apps'][name + '_dns'] = {'guest': name, 'profile': 'resolver', 'lifecycle': 'fresh',
-            'interfaces': {'service': {'interface': 'management'}, 'upstream': {'interface': 'management'}},
+            'interfaces': {'service_interface': {'interface': 'management'}, 'upstream_interface': {'interface': 'management'}},
             'storage': {'config': {'volume': 'data', 'subpath': 'pihole'}}}
     source['connections'] = {
         'database_upstream': {'consumer': {'app': 'database_dns', 'connection': 'upstream'},
-            'target': {'external': 'dns'}, 'source_interface': 'upstream'},
+            'target': {'external': 'dns'}, 'source_interface': 'upstream_interface'},
         'web_upstream': {'consumer': {'app': 'web_dns', 'connection': 'upstream'},
-            'target': {'app': 'database_dns', 'endpoint': 'dns'}, 'source_interface': 'upstream',
+            'target': {'app': 'database_dns', 'endpoint': 'dns_endpoint'}, 'source_interface': 'upstream_interface',
             'readiness': 'start'}}
     # These finite grants are source intent in this synthetic fixture. The actual
     # resolver checks both sides; a connection never installs a policy itself.
@@ -65,10 +65,10 @@ def composition():
             'interface': 'local', 'comment': 'Selected DNS ingress'} for protocol in ('tcp', 'udp')]}}}
     source['guests']['database']['network_policy'] = [
         {'policy': 'dns_out', 'interfaces': {'local': 'management'}, 'endpoints': {'peer': {'external': 'dns'}}},
-        {'policy': 'dns_in', 'interfaces': {'local': 'management', 'client': {'app': 'web_dns', 'interface': 'upstream'}}}]
+        {'policy': 'dns_in', 'interfaces': {'local': 'management', 'client': {'app': 'web_dns', 'interface': 'upstream_interface'}}}]
     source['guests']['web']['network_policy'] = [
         {'policy': 'dns_out', 'interfaces': {'local': 'management'},
-         'endpoints': {'peer': {'app': 'database_dns', 'endpoint': 'dns'}}}]
+         'endpoints': {'peer': {'app': 'database_dns', 'endpoint': 'dns_endpoint'}}}]
     return spec, source
 
 
