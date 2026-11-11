@@ -502,6 +502,9 @@ def _zigbee2mqtt(app, guest):
     mounts = _mounts(app, {'data': '/app/data'})
     require(mounts == [data['source'] + ':/app/data'], 'Keep the exact Zigbee data mount')
     service = _service(app, 'zigbee2mqtt', guest)
+    if 'watchdog' in app.get('properties', {}):
+        require(app['properties']['watchdog'] == 'default', 'Use only the default Zigbee watchdog')
+        service['environment']['Z2M_WATCHDOG'] = 'default'
     require(not any(key in service for key in ('command', 'entrypoint', 'user', 'cap_add')),
             'Keep the upstream Zigbee process and coordinator configuration')
     require(len(app['listeners']) == 1 and all(row['service'] == 'zigbee2mqtt'
