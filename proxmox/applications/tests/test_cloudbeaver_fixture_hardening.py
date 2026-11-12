@@ -147,8 +147,37 @@ class FixtureHardeningTests(unittest.TestCase):
         self.assertEqual((value['unknown_exception_lines'],value['unknown_frame_lines']),(999,999))
         self.assertTrue(value['symbol_limit_reached'])
 
+    def test_community_log_projection_keeps_complete_tail_boundary_lines(self):
+        """A complete first type or frame at the tail boundary must remain visible."""
+        project=helpers()['community_exception_projection']
+        rows=[('java.lang.NullPointerException: synthetic', ['java.lang.NullPointerException'], []),
+              ('at io.cloudbeaver.service.core.impl.WebServiceCore.getUserConnections(WebServiceCore.java:14)',
+               [], [{'frame':'WebServiceCore.getUserConnections','line':14}])]
+        for separator in ('\n','\r','\r\n','\v','\f','\x1c','\x1d','\x1e','\x85','\u2028','\u2029'):
+            for line,types,frames in rows:
+                with self.subTest(separator=repr(separator),line=line):
+                    tail=line+'\n'+'x'*(65536-len(line)-1)
+                    self.assertEqual(len(tail),65536)
+                    value=project('discarded'+separator+tail)
+                    self.assertTrue(value['log_truncated'])
+                    self.assertEqual(value['observed_exception_types'],types)
+                    self.assertEqual(value['observed_frames'],frames)
+
+    def test_community_log_projection_discards_mid_line_tail_symbols(self):
+        """An exception-shaped suffix of a cut line is not a complete observation."""
+        project=helpers()['community_exception_projection']
+        for first in ('java.lang.NullPointerException: synthetic',
+                      'at io.cloudbeaver.service.core.impl.WebServiceCore.getUserConnections(WebServiceCore.java:14)'):
+            with self.subTest(first=first):
+                rows=first+'\njava.io.IOException: complete\n'
+                tail=rows+'x'*(65536-len(rows))
+                value=project('not-a-line-boundary-'+tail)
+                self.assertTrue(value['log_truncated'])
+                self.assertEqual(value['observed_exception_types'],['java.io.IOException'])
+                self.assertEqual(value['observed_frames'],[])
+
     def execute_case(self, community_status='owned', community_log=None, *, passed=False, query=True):
-        """Run real query refusal, finalisation and JSON output against fake Docker only."""
+        """Run real refusal and JSON output with injected HTTP, login and Docker responses."""
         ns=helpers();secret='private-cookie-key-password-session-sentinel';calls=[]
         if community_log is None:
             community_log='java.lang.NullPointerException: '+secret+'\nat io.cloudbeaver.service.core.impl.WebServiceCore.getUserConnections(WebServiceCore.java:14)\n'

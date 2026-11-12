@@ -524,7 +524,7 @@ def community_exception_projection(log):
               'io.cloudbeaver.WebServiceUtils.getApplicableDriversIds': 'WebServiceUtils.getApplicableDriversIds'}
     value.update(log_available=True, log_status='no-matching-lines', log_truncated=len(log) > 65536)
     selected = log[-65536:]
-    if value['log_truncated']:
+    if value['log_truncated'] and log[-65537] not in '\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029':
         selected = selected.partition('\n')[2]  # Discard a possible partial first line.
     for line in selected.splitlines():
         line = line.strip()
