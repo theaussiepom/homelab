@@ -69,7 +69,11 @@ def trust(target, options):
                 and settings.get('VerifyHostKeyDNS') == 'no' and settings.get('UpdateHostKeys') == 'no')
         known_value = settings['UserKnownHostsFile']
         require(not any(char.isspace() or char in "%$'\"\\" for char in known_value))
-        key, known = Path(options['private_key_file']), Path(known_value)
+        key_value = options['private_key_file']
+        # Ansible quotes IdentityFile, so ordinary spaces remain literal.
+        # OpenSSH still expands tokens/environment and parses quote escapes.
+        require(not any(char in '%"\\\r\n' for char in key_value) and '${' not in key_value)
+        key, known = Path(key_value), Path(known_value)
         require(key.is_absolute() and known.is_absolute())
         _ancestors(key)
         _ancestors(known)
@@ -78,7 +82,8 @@ def trust(target, options):
                 and stat.S_IMODE(k.st_mode) == 0o600
                 and stat.S_ISREG(before.st_mode) and before.st_uid in (0, os.geteuid())
                 and before.st_nlink == 1 and stat.S_IMODE(before.st_mode) in (0o600, 0o644)
-                and before.st_size <= 65536)
+                and before.st_size <= 65536
+                and (k.st_dev, k.st_ino) != (before.st_dev, before.st_ino))
         with os.fdopen(os.open(known, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as stream:
             opened = os.fstat(stream.fileno())
             raw = stream.read(65537)

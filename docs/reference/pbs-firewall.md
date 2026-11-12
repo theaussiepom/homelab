@@ -62,6 +62,15 @@ expansion, whitespace, quotes and backslash syntax are unsupported.
 the local validator and SSH must read the same selected file. Links,
 wildcard/hashed/CA entries, unrelated hosts and writable trust files are refused.
 
+The private-key path must also be literal and absolute. Percent tokens,
+`${...}` environment expansion, double quotes, backslashes and line breaks
+are unsupported because OpenSSH can expand or reparse the `IdentityFile`
+argument. Ansible quotes this argument, so ordinary spaces and apostrophes
+remain supported. The selected private key and known-hosts file must be
+different files, including when different path spellings identify the same
+file; the precontact check must never open the selected private key as a
+public host pin.
+
 Both selected files require root/CD-owned ancestor directories without symlink
 components. Group/other-writable directories are refused unless their sticky
 bit protects the next root/CD-owned entry, as in a standard `/tmp` directory
@@ -73,7 +82,7 @@ the CD actor remain trusted; this does not isolate conflicting writers using
 the same account. Apply the same checks on first installation and later CD;
 do not loosen file or directory ownership to pass admission.
 
-The precontact check reads the actual Ansible SSH option resolution, including CLI overrides. It requires standard SSH, no extra SSH/SCP/SFTP arguments, `-F /dev/null` to exclude inherited configuration, `StrictHostKeyChecking=yes`, `GlobalKnownHostsFile=/dev/null`, explicit `UserKnownHostsFile`, `BatchMode=yes`, `IdentitiesOnly=yes`, `ControlMaster=no`, `VerifyHostKeyDNS=no` and `UpdateHostKeys=no`; conflicting repeated options are refused. It reads only metadata for the private key, never its content. Do not weaken controller `NoNewPrivileges` or use local sudo. Then invoke stock Ansible with `pbs_firewall_config` set to the absolute authored path:
+The precontact check reads the actual Ansible SSH option resolution, including CLI overrides. Its effective host, user and port must match the selected management address, `root` account and port 22. Matching SSH aliases are supported; conflicting aliases or an inherited different port refuse before contact. It requires standard SSH, no extra SSH/SCP/SFTP arguments, `-F /dev/null` to exclude inherited configuration, `StrictHostKeyChecking=yes`, `GlobalKnownHostsFile=/dev/null`, explicit `UserKnownHostsFile`, `BatchMode=yes`, `IdentitiesOnly=yes`, `ControlMaster=no`, `VerifyHostKeyDNS=no` and `UpdateHostKeys=no`; conflicting repeated options are refused. It reads only metadata for the private key, never its content. Do not weaken controller `NoNewPrivileges` or use local sudo. Then invoke stock Ansible with `pbs_firewall_config` set to the absolute authored path:
 
 ```sh
 ANSIBLE_SSH_ARGS='-F /dev/null -o ControlMaster=no' \
@@ -89,6 +98,12 @@ This command is invocation notation: the paths must be replaced with reviewed pr
 ## Installation, updates and verification
 
 Before first CD, independently establish console/management recovery, installed package/service, a disconnected positively identified extra NIC and an approved maintenance window. The selected NIC must not be enslaved to a bridge/bond/master or own management, a default route, another global address or an existing NFS storage route. Bridged/bonded interface filtering and multipath or unresolved default routes are unsupported; CD does not add another route-resolution mechanism. Mounted NFS sources must name literal IPv4/IPv6 servers so the existing storage route can be checked without guessing hostname resolution; ambiguous sources are unsupported. Retain its disconnected state until CD's exact policy/persistence checks succeed; subsequent network exposure remains a separate operation.
+
+Persistence observation disables checksum and MIME content probes. Before
+reading the fixed files, CD requires root ownership, one hard link, the
+declared regular-file modes and at most 16 KiB per file. It also checks the
+optional override directory's root ownership and mode 0755. Linked, foreign,
+writable or oversized files refuse before their content is read.
 
 Later deployments verify current ownership before applying the declared proxy change. Repeat unchanged input is idempotent; changed native policy/configuration is refused. Verify the intended proxy TLS path, non-proxy TCP8007/SSH/other IPv4 and all IPv6 denials on the selected NIC, continuing DNS/NFS/egress and unchanged management. CD cannot prove those client paths or future boot behavior without target observation. Preserve real failure evidence and obtain a reviewed next action instead of forcing adoption.
 

@@ -16,6 +16,7 @@
     path: '{{ item }}'
     follow: false
     get_checksum: false
+    get_mime: false
   loop:
     - /etc/homelab-device-web
     - /etc/homelab-device-web/web.nft
@@ -49,7 +50,7 @@
     argv:
       - python3
       - -c
-      - 'import json,subprocess; r=subprocess.run(["systemctl","show","homelab-device-web-firewall.service","-p","FragmentPath","-p","DropInPaths","-p","ActiveState","-p","UnitFileState"],capture_output=True,text=True); assert r.returncode in (0,1); d=dict(line.split("=",1) for line in r.stdout.splitlines()); assert set(d)=={"FragmentPath","DropInPaths","ActiveState","UnitFileState"}; print(json.dumps(d))'
+      - 'import json,subprocess; r=subprocess.run(["systemctl","show","homelab-device-web-firewall.service","-p","FragmentPath","-p","DropInPaths","-p","ActiveState","-p","UnitFileState","-p","NeedDaemonReload"],capture_output=True,text=True); assert r.returncode in (0,1); d=dict(line.split("=",1) for line in r.stdout.splitlines()); assert set(d)=={"FragmentPath","DropInPaths","ActiveState","UnitFileState","NeedDaemonReload"}; print(json.dumps(d))'
   register: web_unit
   changed_when: false
 - name: Project only this capability's observation
@@ -68,3 +69,4 @@
       dropins: '{{ (web_unit.stdout | from_json).DropInPaths }}'
       active: '{{ (web_unit.stdout | from_json).ActiveState }}'
       enabled: '{{ (web_unit.stdout | from_json).UnitFileState }}'
+      reload_needed: '{{ (web_unit.stdout | from_json).NeedDaemonReload }}'

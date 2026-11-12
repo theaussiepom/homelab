@@ -37,6 +37,9 @@
               - hostvars[inventory_hostname].ansible_user == 'root'
               - hostvars[inventory_hostname].ansible_connection == 'ssh'
               - hostvars[inventory_hostname].get('ansible_port', 22) | int == 22
+              - lookup('ansible.builtin.config', 'host', plugin_type='connection', plugin_name='ssh') == (pbs_source.stdout | from_json).target.address
+              - lookup('ansible.builtin.config', 'remote_user', plugin_type='connection', plugin_name='ssh') == 'root'
+              - lookup('ansible.builtin.config', 'port', plugin_type='connection', plugin_name='ssh') in [none, 22]
             fail_msg: Use one explicit PBS SSH target and the validated management identity
         - name: Verify explicit key and strict pinned SSH options before contact
           ansible.builtin.command:

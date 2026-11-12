@@ -81,11 +81,14 @@ assigned management/web interfaces. Prepare console/management recovery and
 independently trusted SSH access first. The sole `device_web` inventory host
 must match the configured hostname, management address and account. The
 existing account must support the selected root privilege escalation.
+The effective SSH plugin host and user must match that same selection, with
+port 22. Matching aliases are supported; a conflicting alias or inherited
+different port refuses before target contact.
 
 Use the same explicit key custody and strict SSH options as the
 [PBS host configuration](pbs-firewall.md#validate-and-deploy). Its private key
 remains outside Git. The shared precontact validator reads only its metadata
-and the pinned public host file. The same literal trust-path and protected
+and the pinned public host file. The same literal key/trust-path and protected
 ancestor-directory requirements apply to device CD. Disable Ansible SSH TTY
 allocation with
 `ANSIBLE_SSH_USETTY=False`; the actual plugin setting is checked before contact.
@@ -101,9 +104,14 @@ capability. Foreign paths, links, writable files, unit overrides or an existing
 unowned table refuse before mutation. CD syntax-checks the nft batch before
 installing it, starts only its dedicated unit, then reads the real files,
 loaded unit and complete owned table back for exact comparison.
+Metadata observation disables checksum and MIME probes; file ownership, mode,
+link count and the 16 KiB size limit are checked before reading file content.
 
 Later CD requires the exact generated configuration, unchanged network/account
-identity and matching active/enabled unit and kernel table. Only the proxy
+identity and matching active/enabled unit and kernel table. A pending systemd
+daemon reload refuses admission even when the unit file on disk matches;
+the loaded service configuration may still differ. CD does not silently
+reload that uncertain state. Only the proxy
 allowance can change in an ordinary update. Unchanged input does not reload
 the unit. A changed listener identity requires a separately reviewed handover.
 A failed or uncertain application retains its CD evidence; there is no

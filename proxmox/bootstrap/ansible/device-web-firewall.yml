@@ -37,6 +37,9 @@
               - hostvars[inventory_hostname].ansible_user == (web_source.stdout | from_json).target.user
               - hostvars[inventory_hostname].ansible_connection == 'ssh'
               - hostvars[inventory_hostname].get('ansible_port', 22) | int == 22
+              - lookup('ansible.builtin.config', 'host', plugin_type='connection', plugin_name='ssh') == (web_source.stdout | from_json).target.address
+              - lookup('ansible.builtin.config', 'remote_user', plugin_type='connection', plugin_name='ssh') == (web_source.stdout | from_json).target.user
+              - lookup('ansible.builtin.config', 'port', plugin_type='connection', plugin_name='ssh') in [none, 22]
               - lookup('ansible.builtin.config', 'use_tty', plugin_type='connection', plugin_name='ssh') is sameas false
         - name: Admit actual SSH options and protected file custody
           ansible.builtin.command:

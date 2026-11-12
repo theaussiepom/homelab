@@ -78,6 +78,43 @@ class TrustPathTests(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, '^' + ssh.ERROR + '$'):
                             ssh.trust(TARGET, selected)
 
+    def test_identity_file_expansion_and_quoting_refuse_before_any_file_read(self):
+        """An existing literal key cannot conceal a different OpenSSH selection."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); key, known = files(root)
+            for name in ('key_%h', 'key_%%', 'key_${USER}', 'key"suffix',
+                         'key\\\\suffix', 'key\\"suffix', 'key\nsuffix', 'key\rsuffix'):
+                with self.subTest(name=name):
+                    candidate = root / name
+                    candidate.write_bytes(key.read_bytes()); candidate.chmod(0o600)
+                    with patch.object(ssh.os, 'open', wraps=os.open) as opened:
+                        with self.assertRaisesRegex(ValueError, '^' + ssh.ERROR + '$'):
+                            ssh.trust(TARGET, options(candidate, known))
+                    opened.assert_not_called()
+
+    def test_quoted_literal_key_spaces_and_apostrophes_remain_supported(self):
+        """Ansible quotes IdentityFile; its literal spaces are not a file list."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); key, known = files(root)
+            for name in ('key with spaces', "key'with#punctuation", 'key$dollar'):
+                candidate = root / name
+                candidate.write_bytes(key.read_bytes()); candidate.chmod(0o600)
+                with patch.object(ssh.os, 'open', wraps=os.open) as opened:
+                    ssh.trust(TARGET, options(candidate, known))
+                self.assertEqual(opened.call_count, 1)
+                self.assertEqual(opened.call_args.args[0], known)
+
+    def test_public_pin_cannot_open_the_selected_private_key(self):
+        """Both spellings of the same file refuse at metadata, before any read."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); key, _ = files(root)
+            (root/'nested').mkdir()
+            for known in (key, root/'nested'/'..'/key.name):
+                with self.subTest(known=known), patch.object(ssh.os, 'open', wraps=os.open) as opened:
+                    with self.assertRaisesRegex(ValueError, '^' + ssh.ERROR + '$'):
+                        ssh.trust(TARGET, options(key, known))
+                    opened.assert_not_called()
+
     def test_symlink_ancestors_refuse_for_both_selected_files(self):
         """A linked directory is refused even when the destination leaves are safe."""
         with tempfile.TemporaryDirectory() as temporary:

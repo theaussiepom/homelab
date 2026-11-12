@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import yaml
 
@@ -48,7 +49,7 @@ def facts(owned=False):
          'addr_info': [{'family': 'inet', 'local': c['web']['address']}]}],
          'parent_stat': {'exists': False}, 'config_stat': {'exists': False}, 'config': None,
          'unit_stat': {'exists': False}, 'unit': None, 'ruleset': {'nftables': []},
-         'fragment': '', 'dropins': '', 'active': 'inactive', 'enabled': ''}
+         'fragment': '', 'dropins': '', 'active': 'inactive', 'enabled': '', 'reload_needed': 'no'}
     if owned:
         f.update(parent_stat={'isdir': True, 'islnk': False, 'uid': 0, 'gid': 0, 'mode': '0755'},
                  config_stat=file_stat('0600'), config=w.render(c), unit_stat=file_stat('0644'),
@@ -201,6 +202,63 @@ class DeviceWebFirewallTests(unittest.TestCase):
         with patch.object(w.bootstrap_ssh, 'trust', side_effect=ValueError('private diagnostic')):
             self.refuses(w.trust, c, options)
 
+    def test_reader_carries_loaded_unit_reload_state_into_admission(self):
+        """Correct disk text cannot admit stale manager state before a restart."""
+        from ansible.template import Templar, trust_as_template
+        reads = yaml.safe_load((ROOT/'ansible/device-web-firewall-read.yml').read_text())
+        script = next(t for t in reads if t.get('register') == 'web_unit')['ansible.builtin.command']['argv'][-1]
+        projection = reads[-1]['ansible.builtin.set_fact']['device_web_observed']
+        for owned in (False, True):
+            for reload_needed in ('no', 'yes', '', 'unknown'):
+                with self.subTest(owned=owned, reload_needed=reload_needed):
+                    f = facts(owned)
+                    manager = {'FragmentPath': f['fragment'], 'DropInPaths': f['dropins'],
+                               'ActiveState': f['active'], 'UnitFileState': f['enabled'],
+                               'NeedDaemonReload': reload_needed}
+                    def show(argv, **kwargs):
+                        self.assertEqual(argv[:3], ['systemctl', 'show', 'homelab-device-web-firewall.service'])
+                        requested = [argv[i+1] for i in range(3, len(argv), 2) if argv[i] == '-p']
+                        return SimpleNamespace(returncode=0, stdout=''.join(k+'='+manager[k]+'\n' for k in requested))
+                    with patch.object(subprocess, 'run', side_effect=show), patch('sys.stdout', new_callable=io.StringIO) as out:
+                        exec(script, {})
+                    templar = Templar(variables={'web_unit': {'stdout': out.getvalue()}})
+                    for field, expression in projection.items():
+                        if 'web_unit.stdout' in expression:
+                            f[field] = templar.template(trust_as_template(expression))
+                    if reload_needed == 'no':
+                        self.assertEqual(w.inspect(config(), f)['changed'], not owned)
+                        if owned:
+                            self.assertFalse(w.inspect(config(), f, final=True)['changed'])
+                            changed = config(); changed['web']['proxy'] = '198.18.40.34'
+                            self.assertTrue(w.inspect(changed, f)['changed'])
+                    else:
+                        self.refuses(w.inspect, config(), f)
+
+    def test_metadata_probes_do_not_read_unadmitted_content(self):
+        """Run the locked stat module with both readers' real pre-admission options."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(); selected = root/'unadmitted'
+            selected.write_text('fictional content outside ownership admission')
+            spy = root/'content-probed'; binary = root/'file'
+            binary.write_text('#!/bin/sh\nprintf called >> '+shlex.quote(str(spy))+
+                              '\nprintf "fixture: text/plain; charset=us-ascii\\n"\n')
+            binary.chmod(0o755)
+            env = {**os.environ, 'PATH': str(root)+os.pathsep+os.environ['PATH']}
+            for name in ('device-web-firewall-read.yml', 'pbs-firewall-read.yml'):
+                tasks = yaml.safe_load((ROOT/'ansible'/name).read_text())
+                options = dict(next(t['ansible.builtin.stat'] for t in tasks if 'ansible.builtin.stat' in t))
+                options['path'] = str(selected)
+                with self.subTest(reader=name):
+                    if spy.exists():
+                        spy.unlink()
+                    result = subprocess.run([sys.executable, '-m', 'ansible.modules.stat'],
+                        input=json.dumps({'ANSIBLE_MODULE_ARGS': options}), env=env,
+                        text=True, capture_output=True)
+                    self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+                    actual = json.loads(result.stdout)['stat']
+                    self.assertTrue(actual['isreg']); self.assertEqual(actual['size'], selected.stat().st_size)
+                    self.assertFalse(spy.exists(), 'The MIME utility read a file before ownership admission')
+
     def test_playbook_has_precontact_guards_and_no_application_or_network_writer(self):
         """Bind the stock playbook to source, transport and exact native readback."""
         play = yaml.safe_load((ROOT/'ansible/device-web-firewall.yml').read_text())[0]
@@ -248,6 +306,26 @@ class DeviceWebFirewallTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(stage, result.stdout, result.stdout+result.stderr)
                 self.assertFalse(spy.exists(), result.stdout+result.stderr)
+            for aliases in ({'ansible_ssh_host': '198.18.25.99'},
+                            {'ansible_ssh_user': 'other'}, {'ansible_ssh_port': 2222}):
+                if spy.exists():
+                    spy.unlink()
+                with self.subTest(aliases=aliases):
+                    result = subprocess.run(base+['-e', json.dumps(aliases)], env=env, capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse(spy.exists(), result.stdout+result.stderr)
+                    self.assertIn('Bind the one selected inventory identity', result.stdout)
+            if spy.exists():
+                spy.unlink()
+            result = subprocess.run(base, env={**env, 'ANSIBLE_REMOTE_PORT': '2222'}, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(spy.exists(), result.stdout+result.stderr)
+            self.assertIn('Bind the one selected inventory identity', result.stdout)
+            matching = {'ansible_ssh_host': '198.18.25.4', 'ansible_ssh_user': 'operator', 'ansible_ssh_port': 22}
+            result = subprocess.run(base+['-e', json.dumps(matching)], env=env, capture_output=True, text=True)
+            self.assertTrue(spy.exists(), result.stdout+result.stderr)
+            self.assertIn('unreachable=1', result.stdout); self.assertIn('failed=0', result.stdout)
+            spy.unlink()
             result = subprocess.run(base, env=env, capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Read the effective remote identity', result.stdout, result.stdout+result.stderr)

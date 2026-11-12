@@ -378,6 +378,27 @@ class PBSFirewallTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertFalse(spy.exists(), result.stdout + result.stderr)
                 self.assertIn('Verify explicit key and strict pinned SSH options before contact', result.stdout, result.stdout + result.stderr)
+            admitted = base + ['--private-key', str(key), '--ssh-common-args', args]
+            for aliases in ({'ansible_ssh_host': '198.18.25.99'},
+                            {'ansible_ssh_user': 'other'}, {'ansible_ssh_port': 2222}):
+                if spy.exists():
+                    spy.unlink()
+                with self.subTest(aliases=aliases):
+                    result = subprocess.run(admitted+['-e', json.dumps(aliases)], env=env, text=True, capture_output=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse(spy.exists(), result.stdout+result.stderr)
+                    self.assertIn('Bind one explicitly trusted SSH target', result.stdout)
+            if spy.exists():
+                spy.unlink()
+            result = subprocess.run(admitted, env={**env, 'ANSIBLE_REMOTE_PORT': '2222'}, text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(spy.exists(), result.stdout+result.stderr)
+            self.assertIn('Bind one explicitly trusted SSH target', result.stdout)
+            matching = {'ansible_ssh_host': '198.18.25.3', 'ansible_ssh_user': 'root', 'ansible_ssh_port': 22}
+            result = subprocess.run(admitted+['-e', json.dumps(matching)], env=env, text=True, capture_output=True)
+            self.assertTrue(spy.exists(), result.stdout+result.stderr)
+            self.assertIn('unreachable=1', result.stdout); self.assertIn('failed=0', result.stdout)
+            spy.unlink()
             result = subprocess.run(base + ['--private-key', str(key), '--ssh-common-args', args], env=env, text=True, capture_output=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertTrue(spy.exists(), result.stdout + result.stderr)
@@ -395,6 +416,60 @@ class PBSFirewallTests(unittest.TestCase):
                       {'filesystems': [{'source': None}]}, {'filesystems': [{'source': 'nas:/export'}]},
                       {'filesystems': [{'source': '198.18.20.2:relative'}]}):
             self.refused(p.storage_servers, value)
+
+    def test_persistence_metadata_is_admitted_before_slurp(self):
+        """Real Ansible must refuse unsafe metadata before opening fixed files."""
+        executable = Path(sys.executable).with_name('ansible-playbook')
+        if not executable.exists():
+            self.skipTest('The locked Ansible environment is required')
+        reads = yaml.safe_load((ROOT/'ansible/pbs-firewall-read.yml').read_text())
+        start = next(i for i, t in enumerate(reads) if 'ansible.builtin.stat' in t) + 1
+        stop = next(i for i, t in enumerate(reads) if 'ansible.builtin.slurp' in t)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            paths = [root/'unit', root/'config', root/'dropin', root/'overrides']
+            for selected in paths[:3]:
+                selected.write_text('synthetic admitted content')
+            paths[3].mkdir()
+            initial = [{'stat': {**file_stat(mode), 'exists': True, 'size': paths[i].stat().st_size}}
+                       for i, mode in enumerate(('0644', '0755', '0644'))]
+            initial.append({'stat': {'exists': True, 'isdir': True, 'islnk': False,
+                                    'uid': 0, 'gid': 0, 'mode': '0755'}})
+            cases = [('owned', initial, True)]
+            for mode in ('0600', '0644'):
+                values = deepcopy(initial); values[1]['stat']['mode'] = mode
+                values[2]['stat'] = {'exists': False}
+                cases.append(('first-'+mode, values, True))
+            for index in range(3):
+                for field, value in [('uid', 1000), ('gid', 1000), ('nlink', 2),
+                                     ('mode', '0666'), ('size', 16385)]:
+                    values = deepcopy(initial); values[index]['stat'][field] = value
+                    cases.append((str(index)+'-'+field, values, False))
+            env = {**os.environ, 'ANSIBLE_CONFIG': str(root/'ansible.cfg'),
+                   'ANSIBLE_LOCAL_TEMP': str(root/'local'), 'LC_ALL': 'C.UTF-8'}
+            (root/'ansible.cfg').write_text('[defaults]\n')
+            content_tasks = deepcopy(reads[stop:stop+2])
+            content_tasks[0]['loop'] = [str(p) for p in paths[:2]]
+            content_tasks[1]['ansible.builtin.slurp']['src'] = str(paths[2])
+            for label, metadata, admitted in cases:
+                with self.subTest(case=label):
+                    play = [{'hosts': 'localhost', 'connection': 'local', 'gather_facts': False,
+                             'vars': {'ansible_python_interpreter': sys.executable,
+                                      'pbs_file_stats': {'results': metadata}},
+                             'tasks': deepcopy(reads[start:stop])+content_tasks+[
+                                 {'name': 'Check the admitted content was actually read',
+                                  'ansible.builtin.assert': {'that': [
+                                      "(pbs_file_data.results[0].content | b64decode) == 'synthetic admitted content'",
+                                      "(pbs_file_data.results[1].content | b64decode) == 'synthetic admitted content'"]}}]}]
+                    selected = root/'probe.yml'; selected.write_text(yaml.safe_dump(play))
+                    result = subprocess.run([str(executable), '-i', 'localhost,', str(selected)],
+                        env=env, text=True, capture_output=True)
+                    if admitted:
+                        self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+                        self.assertIn('Check the admitted content was actually read', result.stdout)
+                    else:
+                        self.assertNotEqual(result.returncode, 0, result.stdout+result.stderr)
+                        self.assertNotIn('Read fixed regular persistence file contents', result.stdout)
 
     def test_render_matches_template_and_exact_ordered_family_direction_policy(self):
         """Generated rules have no global flush, output/forward chain or broad established grant."""

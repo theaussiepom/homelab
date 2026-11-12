@@ -159,7 +159,7 @@ def inspect(c, f, final=False):
     """Admit an unused namespace or an exact owned repeat and actual readback."""
     validate(c)
     closed(f, ('uid', 'hostname', 'addresses', 'parent_stat', 'config_stat', 'config',
-               'unit_stat', 'unit', 'ruleset', 'fragment', 'dropins', 'active', 'enabled'))
+               'unit_stat', 'unit', 'ruleset', 'fragment', 'dropins', 'active', 'enabled', 'reload_needed'))
     require(type(f['uid']) is int and f['uid'] == 0 and f['hostname'] == c['target']['hostname']
             and type(f['addresses']) is list)
     require(all(type(r) is dict and type(r.get('addr_info', [])) is list
@@ -179,7 +179,7 @@ def inspect(c, f, final=False):
             and parent.get('islnk') is False and parent.get('uid') == 0
             and parent.get('gid') == 0 and parent.get('mode') == '0755'))
     active = kernel(f['ruleset'])
-    require(f['dropins'] == '')
+    require(f['dropins'] == '' and f['reload_needed'] == 'no')
     if f['config_stat'] == {'exists': False}:
         require(not final and f['unit_stat'] == {'exists': False} and f['config'] is None
                 and f['unit'] is None and not active and f['fragment'] == ''
