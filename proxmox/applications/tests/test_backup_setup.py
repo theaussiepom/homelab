@@ -5,7 +5,9 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import backup_setup as subject
@@ -140,6 +142,84 @@ class SetupTests(unittest.TestCase):
         factory.assert_called_with(job['destination'],'management-sentinel');api.datastore.assert_called_with('/mnt/recovery')
         invalid=copy.deepcopy(cfg);invalid['app']['backup']['job']['limits']['max_files']+=1
         with self.assertRaisesRegex(ValueError,'exact coverage'):subject.enroll(invalid,environment,api_factory=factory,fetch=fetch)
+
+    def test_parallel_guests_in_distinct_contexts_preserve_shared_namespace_and_acl_generation(self):
+        """Real enrollment/locks/records, with a digest-CAS PBS and native-key fake."""
+        class ConcurrentAPI(API):
+            def __init__(self):
+                super().__init__()
+                self.generation = 0
+                self.reads = threading.local()
+                self.mutex = threading.Lock()
+                self.started = threading.Barrier(2)
+                self.acl_read = threading.Barrier(2)
+
+            def datastore(self, path):
+                self.started.wait(timeout=5)  # Both guest phases are live before enrollment.
+
+            def request(self, method, path, fields=None):
+                with self.mutex:
+                    if method == 'PUT' and path == '/access/acl':
+                        if fields['digest'] != f'{self.generation:064x}':
+                            raise ValueError('PBS ACL digest conflict')
+                        self.generation += 1
+                    result = super().request(method, path, fields)
+                    if method == 'GET' and path == '/access/acl':
+                        result['digest'] = f'{self.generation:064x}'
+                        self.reads.count = getattr(self.reads, 'count', 0) + 1
+                        grants_read = self.reads.count == 2
+                    else:
+                        grants_read = False
+                if grants_read:
+                    # Without the real shared lock both guests read the same
+                    # digest here, and one fails after creating its token.
+                    try:
+                        self.acl_read.wait(timeout=0.25)
+                    except threading.BrokenBarrierError:
+                        pass
+                return result
+
+        peer = self.root/'second-context';peer.mkdir(mode=0o700)
+        configurations = []
+        members = {}
+        coverage = {}
+        for index, state in enumerate((self.root, peer)):
+            inventory = copy.deepcopy(self.inventory)
+            inventory['owner']['vmid'] += index
+            inventory['owner']['hostname'] += str(index)
+            job = inventory['job'];job['destination']['backup_id'] = 'guest-'+str(inventory['owner']['vmid'])
+            job['group']['member'] = job['destination']['backup_id']
+            selected = backup_identity.binding(job['destination'], inventory['owner'], job['group']['name'], str(state))
+            job['destination']['auth_id'] = selected['auth_id'];job['secrets'] = selected['secrets']
+            member = job['group']['member']
+            members[member] = {**self.value['group']['members'][self.member], **inventory['owner'], 'state_root':str(state)}
+            coverage[member] = digest(encoded(inventory))
+            directory = state/'inputs';directory.mkdir(mode=0o700)
+            configurations.append({'deployment':{'input_directory':str(directory)},
+                'paths':{'state_root':str(state)},'app':{'backup':inventory}})
+        schedule = {**self.value, 'group':{**self.value['group'], 'members':members}, 'coverage':coverage}
+        for cfg in configurations:
+            directory = Path(cfg['deployment']['input_directory'])
+            write_new(directory/'backup-group.json',encoded(schedule))
+            write_new(directory/'backup-management.json',encoded({'schema':'homelab-pbs-management-v1',
+                'credential':{'type':'environment','name':'PBS_API_TOKEN'},'datastore_path':'/mnt/recovery'}))
+        api = ConcurrentAPI()
+        def enroll(cfg):
+            return subject.enroll(cfg, {'PBS_API_TOKEN':'management-sentinel'},
+                api_factory=lambda destination, token:api, fetch=lambda *args, **kwargs:b'native-key')
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(enroll, configurations))
+        self.assertEqual(api.generation,4)
+        self.assertEqual(sum(path.endswith('/namespace') and fields['name']=='guests'
+            for method,path,fields in api.calls if method=='POST'),1)
+        self.assertEqual(len(api.people),2)
+        for selected in results:
+            directory = Path(selected['directory'])
+            self.assertTrue((directory/'complete.json').exists())
+            self.assertFalse((directory/'FAILED.json').exists());self.assertFalse((directory/'PENDING.json').exists())
+        lock = self.root/'pbs-enrollment.lock'
+        self.assertEqual(lock.stat().st_mode & 0o777,0o600)
+        self.assertFalse((peer/'pbs-enrollment.lock').exists())
 
 
 if __name__=='__main__':unittest.main()

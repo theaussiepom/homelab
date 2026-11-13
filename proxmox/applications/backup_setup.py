@@ -133,5 +133,12 @@ def enroll(cfg, environment, *, api_factory=backup_api.PBS, fetch=backup_client_
                                       job['group']['name'], cfg['paths']['state_root'])
     api = api_factory(job['destination'], environment.get('PBS_API_TOKEN', ''))
     api.datastore(management['datastore_path'])
-    return backup_enrollment.provision(job, cfg['app']['backup']['owner'], cfg['paths']['state_root'], api,
-        lambda *, create: fetch(cfg, selected['identity'], create=create))
+    # Namespace parents and the ACL digest are shared by parallel guest jobs.
+    # Use the group's existing controller state scope, including other contexts;
+    # hold only bounded enrollment, never worker installation or guest deployment.
+    state = Path(min(row['state_root'] for row in schedule['group']['members'].values()))
+    private_directory(state)
+    with private_writer(state/'pbs-enrollment.lock', append=True) as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return backup_enrollment.provision(job, cfg['app']['backup']['owner'], cfg['paths']['state_root'], api,
+            lambda *, create: fetch(cfg, selected['identity'], create=create))
