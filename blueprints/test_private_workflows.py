@@ -132,16 +132,57 @@ class PrivateWorkflowTests(unittest.TestCase):
     def with_backup(self, plan):
         """Supply only component graph metadata; retain real workflow/recipe lowering."""
         graph = self.original_graph(plan)
-        graph['backup'] = {'name': 'Backup', 'needs': ['selection'],
+        graph['backup'] = {'name': 'Configure backups', 'needs': ['selection'],
                           'environment': 'backup', 'workflow_secrets': ['PBS_API_TOKEN']}
         return graph
+
+    def test_parallel_source_checks_gate_setup_and_every_guest_path(self):
+        public = workflows.models(self.stack, site_source=self.site/'site.json')
+        baseline = p.model(self.stack,self.site)
+        for identifier, title in [('validate','Validate config'),('selection','Validate deployment')]:
+            job = baseline['jobs'][identifier]
+            self.assertEqual(job['name'],title)
+            self.assertNotIn('needs',job)
+            self.assertNotIn('environment',job)
+            self.assertNotIn('secrets.',json.dumps(job))
+        for guest in ('database','web'):
+            self.assertEqual(baseline['jobs'][guest]['needs'],
+                             ['validate',*public['deploy.yml']['jobs'][guest]['needs']])
+            self.assertIn("needs.validate.result == 'success'",baseline['jobs'][guest]['if'])
+
+        self.write_pbs()
+        policy_only = p.model(self.stack,self.site)
+        self.original_graph = workflows.component_workflows.model
+        def enrolled(plan):
+            graph = self.with_backup(plan)
+            for guest in graph['guests'].values():
+                guest['needs'].insert(1,'_backup')
+            return graph
+        with patch.object(workflows.component_workflows,'model',side_effect=enrolled):
+            operational = p.model(self.stack,self.site)
+        for value in (policy_only,operational):
+            self.assertEqual(set(value['jobs']),{'validate','selection','_backup','database','web'})
+            backup = value['jobs']['_backup']
+            self.assertEqual(backup['name'],'Configure backups')
+            self.assertEqual(backup['needs'],['validate','selection'])
+            required = set(("github.repository == 'owner/site' && " + workflows.PRIVATE_MAIN).split(' && '))
+            required |= {'!failure()','!cancelled()',"needs.validate.result == 'success'","needs.selection.result == 'success'"}
+            self.assertEqual(set(backup['if'].split(' && ')),required)
+            self.assertNotIn('needs',value['jobs']['validate'])
+            self.assertNotIn('needs',value['jobs']['selection'])
+        for guest in ('database','web'):
+            self.assertEqual(policy_only['jobs'][guest],baseline['jobs'][guest])
+            self.assertEqual(operational['jobs'][guest]['needs'],
+                             ['selection','_backup',*public['deploy.yml']['jobs'][guest]['needs'][1:]])
+            self.assertEqual(operational['jobs'][guest]['steps'],baseline['jobs'][guest]['steps'])
+            self.assertEqual(operational['jobs'][guest]['environment'],baseline['jobs'][guest]['environment'])
 
     def test_pbs_is_one_early_backup_job_with_named_step_secret_and_no_inner_queue(self):
         baseline=p.model(self.stack,self.site)
         self.write_pbs();value=p.model(self.stack,self.site)
         self.assertNotIn('_pbs',value['jobs'])
         backup=value['jobs']['_backup']
-        self.assertEqual(backup['name'],'Backup');self.assertEqual(backup['needs'],['selection'])
+        self.assertEqual(backup['name'],'Configure backups');self.assertEqual(backup['needs'],['validate','selection'])
         self.assertEqual(backup['environment'],'homelab-bootstrap');self.assertEqual(backup['timeout-minutes'],15)
         self.assertNotIn('concurrency',backup)
         native=backup['steps'][-1]
@@ -154,7 +195,7 @@ class PrivateWorkflowTests(unittest.TestCase):
         with patch.object(workflows.component_workflows,'model',side_effect=self.with_backup):
             before=p.model(self.stack,self.site);self.write_pbs();after=p.model(self.stack,self.site)
         backup=after['jobs']['_backup']
-        self.assertEqual(backup['needs'],['selection']);self.assertNotIn('_pbs',after['jobs'])
+        self.assertEqual(backup['needs'],['validate','selection']);self.assertNotIn('_pbs',after['jobs'])
         self.assertEqual(backup['steps'][-1],before['jobs']['_backup']['steps'][-1])
         self.assertEqual(backup['steps'][0],before['jobs']['_backup']['steps'][0])
         self.assertNotIn('if',backup['steps'][-1]);self.assertNotIn('continue-on-error',backup['steps'][-1])
@@ -284,13 +325,31 @@ class PrivateWorkflowTests(unittest.TestCase):
             self.assertEqual(job['name'],title)
             self.assertEqual(job['environment'],'private-apps-'+guest)
             self.assertEqual(job['runs-on'],['self-hosted','linux'])
-            self.assertEqual(job['needs'],public['deploy.yml']['jobs'][guest]['needs'])
+            self.assertEqual(job['needs'],['validate',*public['deploy.yml']['jobs'][guest]['needs']])
             self.assertEqual(job['timeout-minutes'],old['timeout-minutes'])
             for actual,expected in zip(job['steps'],old['steps'],strict=True):
                 self.assertEqual(actual,p.bind(expected,'[]'))
             self.assertIn("github.repository == 'owner/site'",job['if'])
             self.assertNotIn('inputs.',json.dumps(job))
-        self.assertEqual(value['jobs']['selection']['needs'],['validate'])
+        self.assertNotIn('needs',value['jobs']['selection'])
+
+    def test_authored_guest_labels_change_only_presentation_not_packets_or_job_ownership(self):
+        import component_packet
+        self.spec['app_profiles']['resolver']['health'] = {'ready':{'type':'adapter','check':'readiness'}}
+        (self.stack/'stack.json').write_text(json.dumps(self.spec))
+        self.freeze_stack()
+        before = p.model(self.stack,self.site)
+        packets = component_packet.lower_plan(p.compiler.resolve_plan(self.stack,self.site/'site.json'))
+        titles = {'database':'Storage guest','web':'Browser guest'}
+        for guest,title in titles.items():
+            self.source['guests'][guest]['display_name'] = title
+        (self.site/'site.json').write_text(json.dumps(self.source))
+        after = p.model(self.stack,self.site)
+        self.assertEqual(component_packet.lower_plan(p.compiler.resolve_plan(self.stack,self.site/'site.json')),packets)
+        for guest,title in titles.items():
+            old = copy.deepcopy(before['jobs'][guest]);new = copy.deepcopy(after['jobs'][guest])
+            self.assertEqual(new.pop('name'),title);old.pop('name')
+            self.assertEqual(new,old)
 
     def test_yaml_site_uses_the_same_generator_and_ambiguous_sources_refuse(self):
         expected=p.model(self.stack,self.site)
@@ -323,7 +382,7 @@ class PrivateWorkflowTests(unittest.TestCase):
                     'on: workflow_call\n', 'on: [push, workflow_call]\n']:
             path.write_text(raw + CI_JOBS)
             job = p.model(self.stack, self.site)['jobs']['validate']
-            self.assertEqual(job['name'], 'Validate')
+            self.assertEqual(job['name'], 'Validate config')
             self.assertNotIn('uses', job)
             self.assertEqual(job['steps'], [{'run': 'echo synthetic'}])
             self.assertEqual(job['defaults'], {'run': {'shell': 'bash -e {0}'}})
@@ -339,7 +398,7 @@ class PrivateWorkflowTests(unittest.TestCase):
                                 'env': {'SELECTED': '${{ github.sha }}'}})
         path.write_text(yaml.safe_dump(value))
         self.assertEqual(p.model(self.stack, self.site)['jobs']['validate'],
-                         {**source, 'name': 'Validate'})
+                         {**source, 'name': 'Validate config'})
 
     def test_native_validation_refuses_to_drop_other_jobs_or_workflow_context(self):
         path = self.site / '.github/workflows/ci.yml'

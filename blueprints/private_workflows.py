@@ -75,7 +75,7 @@ def validation_workflow(site):
                      'Materialize only closed validation job inputs')
     # A native job avoids GitHub's automatic caller/callee name separator.
     # Preserve the original Ubuntu default shell instead of inheriting Deploy's.
-    job.update(name='Validate')
+    job.update(name='Validate config')
     job.setdefault('defaults', {'run': {'shell': 'bash -e {0}'}})
     return job
 
@@ -193,7 +193,7 @@ def model(stack, site):
     source = workflows.models(stack, site_source=compiler.site_path(site), disabled=disabled_rows)
     compiler.require(not pbs or all(key in ('selection', '_backup') or re.fullmatch('[a-z][a-z0-9_-]*', key)
                                    for key in source['deploy.yml']['jobs']),
-                     'Keep only public guest jobs and the early Backup job')
+                     'Keep only public guest jobs and the early Configure backups job')
     repository = 'github.repository == ' + repr(env['HOMELAB_REPOSITORY'])
     condition = repository + ' && ' + workflows.PRIVATE_MAIN
     result = {'name': 'Deploy', 'on': {'push': {'branches': ['main']}},
@@ -202,7 +202,7 @@ def model(stack, site):
               'defaults': {'run': {'shell': 'bash'}}, 'env': copy.deepcopy(env),
               'jobs': {'validate': validation}}
     selector = bind(copy.deepcopy(source['deploy.yml']['jobs']['selection']), disabled)
-    selector.update(needs=['validate'], **{'if': condition})
+    selector.update(**{'if': condition})
     result['jobs']['selection'] = selector
     for guest in source['deploy.yml']['jobs']:
         if guest == 'selection':
@@ -213,6 +213,11 @@ def model(stack, site):
         job.update(name=caller['name'], needs=copy.deepcopy(caller['needs']),
                    environment='backup' if guest == '_backup' else env['HOMELAB_ENVIRONMENT_PREFIX'] + '-' + guest,
                    **{'runs-on': labels, 'if': repository + ' && ' + caller['if'].replace("inputs.disabled || '[]'", repr(disabled or '[]'))})
+        # Enrolled guests inherit config validation through their setup barrier.
+        # Other guests still need it while the source checks run independently.
+        if guest == '_backup' or '_backup' not in job['needs']:
+            job['needs'].insert(0, 'validate')
+            job['if'] += " && needs.validate.result == 'success'"
         text = json.dumps(job)
         compiler.require(not WORKFLOW_INPUTS.search(text) and 'secrets: inherit' not in text,
                          'Materialize only closed guest workflow inputs')
@@ -224,14 +229,15 @@ def model(stack, site):
         framework = compiler.workflow_selection(stack/'.github/workflows/phase.yml', 'guest-phase.yml')
         steps = pbs_steps(pbs, framework)
         if '_backup' not in result['jobs']:
-            result['jobs']['_backup'] = {'name': 'Backup', 'needs': ['selection'], 'if': condition,
+            result['jobs']['_backup'] = {'name': 'Configure backups', 'needs': ['validate', 'selection'],
+                'if': condition + " && !failure() && !cancelled() && needs.validate.result == 'success' && needs.selection.result == 'success'",
                 'runs-on': labels, 'environment': pbs['jobs']['firewall']['environment'],
                 'timeout-minutes': pbs['jobs']['firewall']['timeout-minutes'],
                 'steps': [{'name': 'Setup', 'uses': framework['repository'] + '/.github/actions/guest-setup@' + framework['revision']}]}
         backup = result['jobs']['_backup']
-        compiler.require(backup['name'] == 'Backup' and backup['needs'] == ['selection']
+        compiler.require(backup['name'] == 'Configure backups' and backup['needs'] == ['validate', 'selection']
                          and backup['steps'][0].get('name') == 'Setup',
-                         'Keep one early Backup job, never a final guest coordinator')
+                         'Keep one early Configure backups job, never a final guest coordinator')
         backup['environment'] = pbs['jobs']['firewall']['environment']
         backup['timeout-minutes'] = pbs['jobs']['firewall']['timeout-minutes']
         backup['steps'][1:1] = steps

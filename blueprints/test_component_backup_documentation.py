@@ -60,6 +60,7 @@ class BackupDocumentation(unittest.TestCase):
         (directory/'phase.yml').write_text('jobs:\n  run:\n    uses: example/framework/.github/workflows/guest-phase.yml@'+'1'*40+'\n')
         plan=self.plan();graph=component_workflows.model(plan)
         self.assertEqual(graph['backup']['needs'],['selection'])
+        self.assertEqual(graph['backup']['name'],'Configure backups')
         model=workflows.models(self.root,site_source=self.path)
         self.assertEqual(model['backup.yml']['jobs']['deploy']['environment'],'backup')
         self.assertIn('PBS_API_TOKEN', model['guest-resolver.yml']['on']['workflow_call']['secrets'])
@@ -67,7 +68,7 @@ class BackupDocumentation(unittest.TestCase):
         self.assertEqual([row['name'] for row in steps if 'PBS_API_TOKEN' in row.get('with', {})], ['Backup'])
         env={'HOMELAB_ENVIRONMENT_PREFIX':'example','HOMELAB_REPOSITORY':'example/private'}
         with patch.object(private_workflows,'settings',return_value=(env,['self-hosted'])), \
-             patch.object(private_workflows,'validation_workflow',return_value={'name':'Validate'}), \
+             patch.object(private_workflows,'validation_workflow',return_value={'name':'Validate config'}), \
              patch.object(private_workflows.compiler,'workflow_selection',return_value={'revision':'a'*40,'repository':'example/framework'}), \
              patch.object(private_workflows.compiler,'check_revision'), \
              patch.object(private_workflows.compiler,'workflow_disabled',return_value=[]), \
@@ -75,7 +76,9 @@ class BackupDocumentation(unittest.TestCase):
             (directory/'deploy.yml').write_text('synthetic private source')
             private=private_workflows.model(self.root,self.root)
         self.assertEqual(private['jobs']['_backup']['environment'],'backup')
-        self.assertEqual(private['jobs']['_backup']['needs'],['selection'])
+        self.assertEqual(private['jobs']['_backup']['needs'],['validate','selection'])
+        self.assertEqual(private['jobs']['resolver']['needs'],['selection','_backup'])
+        self.assertNotIn('needs',private['jobs']['selection'])
         self.assertNotIn('inputs.',json.dumps(private['jobs']['_backup']))
 
     def test_documented_public_key_handoff_stages_normally_and_preserves_compiled_identity(self):
