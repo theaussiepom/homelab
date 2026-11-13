@@ -14,7 +14,7 @@ Follow the documented sequence for setup and verification. If an instruction is 
 | --- | --- | --- |
 | 1 | [Install and prepare PBS](server.md) | A reachable, trusted server with a verified persistent datastore and working administrator access |
 | 2 | [Create and store the recovery key pair](recovery-key.md) | A public PEM for configuration and verified private copies outside the protected estate |
-| 3 | [Create the API token and GitHub secret](access.md) | One protected management credential, supplied only to the backup management job |
+| 3 | [Create the API token and GitHub secret](access.md) | One protected management credential placed for the [setup and guest enrollment steps](access.md#what-goes-where) |
 | 4 | [Configure and deploy backups](configure.md) | Selected guests, storage coverage, schedules and credentials installed through CD |
 | 5 | [Verify and operate backups](operations.md) | A real backup, a successful isolated restore, retention and alerts, and a completed unattended-operation checklist |
 
@@ -48,7 +48,7 @@ Temporary files, caches and scratch exports are not a replacement for durable re
 
 | Material | Normal location | In GitHub secrets? |
 | --- | --- | --- |
-| PBS management API token | Protected `backup` Environment in your deployment repository | Yes: `PBS_API_TOKEN` |
+| PBS management API token | [Selected setup and enrolled-guest Environments](access.md#what-goes-where) in your deployment repository | Yes: `PBS_API_TOKEN` |
 | Recovery public PEM | Referenced file in your site repository | No; it is public material |
 | Recovery private PEM and passphrase | Password manager plus independently recoverable offline copies | No |
 | Per-client PBS token and encryption key | Protected controller records and root-only files on that client | No manual per-guest GitHub copies |

@@ -4,6 +4,8 @@ Use the selected framework revision's locked Python tools. Install requirements 
 
 ## Test the boundary you change
 
+For application controller and runtime changes, use the [application-specific test guidance](../../proxmox/applications/tests/README.md) alongside the checks below.
+
 - Component unit tests exercise each validator directly: valid values, defaults, optional and null values, wrong types, missing and unknown keys, limits, unsafe paths, references, identity conflicts, redaction and failure propagation.
 - App units mock conforming component contracts and shared builders. They test adapter semantics, conditional requirements and wiring.
 - Guest units mock app/component results. They test placement, budgets, explicit control interfaces, stable namespaces and supported fresh/retained ownership.

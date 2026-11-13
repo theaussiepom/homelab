@@ -20,18 +20,18 @@ address. It does not move a socket or grant access by itself.
 
 Home Assistant and retained Node-RED also support interface-bound web declarations. Actual socket checks refuse a wildcard or another network address. Prepare retained HA HTTP settings with the selected web IP and loopback before CD; prepare Node-RED’s maintained settings/health wrappers separately. The bound Node-RED runtime derives its non-secret NODE_RED_WEB_ADDRESS from the selected role and probes that address. Fresh Node-RED commissioning with its bound variant is not implemented. HA requires prepared HTTP settings before its socket check can pass.
 
-Music Assistant supports an explicit `stream` guest-interface role in addition
-to `web`. Without it, the original shared-address behaviour remains. With it,
+Music Assistant supports an explicit `stream_interface` guest-interface role in addition
+to `web_interface`. Without it, the original shared-address behaviour remains. With it,
 retained settings must already match the selected web bind and original stream
 bind/publish addresses. Its helper validates these settings without rewriting
 provider accounts, library data or player configuration.
 
-InfluxDB supports an optional separate `web` role in addition to `service`.
+InfluxDB supports an optional separate `web_interface` role in addition to `service_interface`.
 Because its web UI and database API use the same authenticated HTTP server,
 this adds a fixed local systemd socket proxy, not another database or a
-read-only UI. The database listener/configuration/data stay on `service`.
+read-only UI. The database listener/configuration/data stay on `service_interface`.
 The two roles must use different concrete IPv4 addresses and exactly the
-`web` and `backend` interface listeners on TCP port 8086. The app owns only
+`web_listener` and `backend_listener` interface listeners on TCP port 8086. The app owns only
 `homelab-influxdb-web.socket` and `homelab-influxdb-web.service`; existing foreign
 paths are refused. The socket starts after the network-ready gate and database,
 using explicit late-start ordering rather than the early sockets target.

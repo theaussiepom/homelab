@@ -8,7 +8,7 @@ Create one dedicated PBS management identity, then store its token in the protec
 
 Complete [server setup](server.md). Use its trusted console or authenticated PBS interface. Have administrator access to the deployment repository and a reviewed GitHub Environment policy. Do not perform this task from an untrusted pull request, a recorded terminal, or a shell with tracing enabled.
 
-The examples use PBS user `homelab-cd@pbs`, token name `deployment`, protected Backup/guest Environments and the named secret `PBS_API_TOKEN`. Keep those names consistent with the [site management binding](../reference/backup.md#backup-management). The token's identity is `homelab-cd@pbs!deployment`; the generated secret is a separate value returned only once.
+The examples use PBS user `homelab-cd@pbs`, token name `deployment`, protected setup/guest Environments and the named secret `PBS_API_TOKEN`. Keep those names consistent with the [site management binding](../reference/backup.md#backup-management). The token's identity is `homelab-cd@pbs!deployment`; the generated secret is a separate value returned only once.
 
 ## Choose the management permissions
 
@@ -46,39 +46,42 @@ Use **either** the UI route or the commands, not both. The last command reports 
 
 The secret value has exactly this shape: `token-identity:token-secret`, with no spaces, quotes, HTTP-header prefix or line break. For this example, the identity portion is `homelab-cd@pbs!deployment`. Append a colon and the actual generated secret. This is the value used in PBS's `PBSAPIToken` authentication header; the workflow supplies the header prefix itself.
 
-In **your deployment repository**, not the public framework/library:
+In **your deployment repository**, not the public framework/library, inspect the generated jobs described in [Review the generated change](configure.md#review-the-generated-change). Use each job's actual `environment` value:
 
-1. Open **Settings → Environments** and create or select `backup`.
-2. Restrict deployment branches/tags to your reviewed production branch policy. Apply available reviewer protections according to your plan and repository visibility; do not assume every GitHub plan supports private-repository approval gates.
-3. Under **Environment secrets**, add `PBS_API_TOKEN` with the combined value described above.
-4. Make the backup management job use that Environment. Only that job receives the token; guest jobs and pull-request validation do not.
+1. Create or select the early **Configure backups** job's Environment: `backup` without local PBS host policy, or the retained `homelab-bootstrap` Environment when the supported local policy is combined with setup.
+2. Also identify every enrolled guest's protected job Environment. The private wrapper derives it from `HOMELAB_ENVIRONMENT_PREFIX` and the authored guest ID; do not infer it from the display label.
+3. Restrict each Environment to your reviewed production branch policy. Apply available reviewer protections according to your plan and repository visibility; not every GitHub plan supports private-repository approval gates.
+4. Add the named secret `PBS_API_TOKEN` with the combined value above to each of those Environments. Explicitly forward it through each reusable-workflow boundary, only to early setup and the enrolled guest's controller-side **Backup** step. Pull-request validation and unrelated app steps do not receive it. Do not use `secrets: inherit`.
 
-The following **alternative GitHub CLI commands** run on your trusted workstation with `gh` installed and already authenticated. They write one Environment secret; they do not install `gh` on PBS or create its Environment. First replace `example-owner/example-site` with your deployment repository and create/protect `backup` in the UI as above.
+The following **alternative GitHub CLI commands** run on your trusted workstation with `gh` installed and already authenticated. They write one Environment secret; they neither create nor protect an Environment. Replace the synthetic repository and Environment values with one reviewed generated job's selection after completing the UI protections above. Repeat for each required Environment; use the same existing management credential, not a new token per guest.
 
 ```bash
 PBS_SITE_REPOSITORY=example-owner/example-site
-gh secret set PBS_API_TOKEN --repo "$PBS_SITE_REPOSITORY" --env backup
-gh secret list --repo "$PBS_SITE_REPOSITORY" --env backup
+PBS_JOB_ENVIRONMENT=backup
+gh secret set PBS_API_TOKEN --repo "$PBS_SITE_REPOSITORY" --env "$PBS_JOB_ENVIRONMENT"
+gh secret list --repo "$PBS_SITE_REPOSITORY" --env "$PBS_JOB_ENVIRONMENT"
 ```
 
-Paste the combined value only at the interactive secret prompt. The listing confirms the name exists, not that its value is correct. GitHub does not return saved secret values; verify authentication during the management job's preflight without printing the header or secret. See [GitHub Environment secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets#creating-secrets-for-an-environment) and [Environment protection availability](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
+Paste the combined value only at the interactive secret prompt. The listing confirms the name exists, not its value. GitHub does not return saved secret values; verify authentication in the protected setup/enrollment steps without printing the header or secret. See [GitHub Environment secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets#creating-secrets-for-an-environment) and [Environment protection availability](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments).
 
 ## What goes where
 
 | Input | Storage | Consumer |
 | --- | --- | --- |
-| `PBS_API_TOKEN` | GitHub `backup` Environment secret | PBS management job only |
-| PBS endpoint and certificate fingerprint | [Destination configuration](../reference/backup.md#backup-job-destination) | Management preflight and backup clients |
+| `PBS_API_TOKEN` | Early setup's selected protected Environment and each enrolled guest's protected Environment | Only the controller workflow steps for **Configure backups** setup and each guest's **Backup** enrollment; never a guest file or payload input |
+| `PBS_FIREWALL_SSH_KEY`, when local PBS policy is selected | Existing protected `homelab-bootstrap` Environment | Only that policy's native host step in the combined early job |
+| `APPLICATION_SSH_KEY` and `PROXMOX_APP_TOKEN` | Existing protected guest job Environments, through explicit deployment bindings | Ordinary guest deployment and its Backup phase under that guest's locks; not central schedule setup |
+| PBS endpoint and certificate fingerprint | [Destination configuration](../reference/backup.md#backup-job-destination) | Setup preflight and backup clients |
 | Recovery public PEM | Site-relative public file referenced by [backup configuration](../reference/backup.md#backup-recovery-public-key) | Enrolled clients |
 | Recovery private PEM and passphrase | [Independent recovery stores](recovery-key.md#store-independent-recovery-copies) | Recovery operator only |
 | Per-client tokens/keys | Protected create-once controller records and guest files | That client's backup worker |
 
-The Backup job also needs the existing deployment SSH and PVE credentials to verify completed guest identities and install the declared backup configuration under the existing locks. Follow the [normal deployment setup](../guides/prepare-deployment.md#prepare-the-protected-workflow) to make only `APPLICATION_SSH_KEY` and `PROXMOX_APP_TOKEN` available to its protected `backup` Environment. Copy existing encrypted values through your protected credential procedure; do not create broader accounts. These are explicit job inputs, not inherited secrets. No recovery private key, recovery passphrase or per-guest token needs a GitHub secret.
+Keep ordinary guest credentials in their existing [deployment setup](../guides/prepare-deployment.md#prepare-the-protected-workflow). The early schedule job does not need application SSH/PVE credentials; combining local PBS policy adds only its existing named host key. Do not copy application credentials into a central backup Environment. No recovery private key, recovery passphrase or per-client token needs a GitHub secret.
 
 The managed native client key uses `--kdf none` so scheduled jobs do not need a separate unlock secret. The key file itself is therefore not passphrase-encrypted: it is stored as root-only `0600` on its guest and as `0600` inside the CD account's `0700` ownership record on the controller. This does **not** disable backup encryption. Anyone who obtains that key and the encrypted backup can decrypt the client's data, so protect both machines and their storage. The independently stored recovery private PEM remains passphrase-encrypted. See [the three credential roles](recovery-key.md#understand-the-three-credentials).
 
 ## Check the handoff
 
-Before [configuring backups](configure.md), confirm the user/token exist, their effective permissions match the approved role, and GitHub shows the secret in the intended Environment. Keep recovery access to PBS independent of this one CI token. Remove temporary transfer copies only after successful protected authentication has proved the stored value works; do not delete the independent recovery material.
+Before [configuring backups](configure.md), confirm the user/token exist, their effective permissions match the approved role, and GitHub shows the secret in every reviewed setup/enrolled-guest Environment. Keep recovery access to PBS independent of this one CI token. Remove temporary transfer copies only after successful protected authentication has proved the stored value works; do not delete the independent recovery material.
 
-Later token replacement is deliberate: establish the replacement, update the Environment secret, verify it through the protected job, then revoke the old token under the operator's change procedure. Changing this management token does not require changing client encryption keys or rewriting backup history.
+Later token replacement is deliberate: establish the replacement, update the required Environment secrets, verify them through the protected setup/enrollment steps, then revoke the old token under the operator's change procedure. Changing this management token does not require changing client encryption keys or rewriting backup history.

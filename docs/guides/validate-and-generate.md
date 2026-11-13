@@ -10,7 +10,7 @@ python3 "$FRAMEWORK/blueprints/compile.py" --stack "$LIBRARY" --site "$SITE" --c
 python3 "$FRAMEWORK/blueprints/workflows.py" --stack "$LIBRARY" --site "$SITE" --check
 ```
 
-The compiler checks the whole source and produces deployment packets containing only the fields their contracts allow. The workflow checker compares generated files with the selected plan; it refuses stale files. To regenerate deliberately, omit `--check` from the workflow command, then review its changes. Generation writes the library's three workflow files and composite action files; do not hand-edit generated output.
+The compiler checks the whole source and produces deployment packets containing only the fields their contracts allow. The workflow checker compares generated files with the selected plan; it refuses stale files. To regenerate deliberately, omit `--check` from the workflow command, then review its changes. Generation writes the library's deployment, guest and phase workflows and selected composite actions; operational backup also adds `backup.yml`. The consumer wrapper has its own [local workflow composition rules](../reference/cli.md#consumer-wrapper-blueprintsprivate_workflowspy). Do not hand-edit generated output.
 
 Use `--disabled '["guest_id"]'` only for actual guest IDs. Required enabled dependencies cannot be disabled. When root monitoring is selected, its server cannot be disabled while any guests remain enabled. An all-disabled source can be inspected, but a disabled packet cannot be admitted for deployment.
 

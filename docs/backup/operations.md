@@ -136,7 +136,7 @@ Complete this checklist with actual observations:
 
 - [ ] PBS and its backup mount survive a planned normal restart with the expected identity and capacity.
 - [ ] Direct management/recovery access works independently of the protected DNS, proxy and SSO services.
-- [ ] The management token is isolated to its protected job; guest tokens cannot access other guests or administer/prune PBS.
+- [ ] The management token is limited to the [protected setup/enrollment steps](access.md#what-goes-where); guest tokens cannot access other guests or administer/prune PBS.
 - [ ] Recovery PEM copies and their passphrase are available outside the protected estate, and an exported copy has been tested.
 - [ ] All intended guests/apps/volumes are covered; exclusions are explicit and database exports are coherent.
 - [ ] The first complete backup succeeded, with the expected encryption and recoverable key copy.
