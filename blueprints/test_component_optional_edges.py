@@ -21,7 +21,7 @@ import test_component_monitoring as monitoring_cases
 
 def app():
     return {'profile':'recursive','guest':'worker','lifecycle':'fresh',
-        'interfaces':{'service':{'interface':'control'}}}
+        'interfaces':{'service_interface':{'interface':'control'}}}
 
 
 def profile(adapter='traefik'):
@@ -78,7 +78,7 @@ class TypeOptionalEdges(unittest.TestCase):
         with stack,self.assertRaisesRegex(ComponentError,'runtime-directory'):types.app(value)
 
     def test_profile_internal_dashboard_monitoring_and_health_requirement_dispatch_are_closed(self):
-        value=profile();value.update(endpoints={'dashboard':{'internal':'dashboard'}},
+        value=profile();value.update(endpoints={'dashboard_endpoint':{'internal':'dashboard'}},
             monitoring={'profile':'linux'},health={'ready':{'profile':'ready'},'adapter':{'type':'adapter','check':'readiness'}})
         stack,mocks=self.profile_guards()
         with stack:types.profile(value)
@@ -87,11 +87,11 @@ class TypeOptionalEdges(unittest.TestCase):
         mocks['health'].assert_called_once_with({'type':'adapter','check':'readiness'})
 
     def test_profile_dashboard_and_health_reference_unknowns_do_not_become_ports_or_argv(self):
-        mutations=[lambda v:v.update(adapter='unbound',endpoints={'dashboard':{'internal':'dashboard'}}),
-            lambda v:v.update(endpoints={'dashboard':{'internal':'foreign'}}),
-            lambda v:v.update(endpoints={'dashboard':{'internal':'dashboard','port':80}}),
+        mutations=[lambda v:v.update(adapter='unbound',endpoints={'dashboard_endpoint':{'internal':'dashboard'}}),
+            lambda v:v.update(endpoints={'dashboard_endpoint':{'internal':'foreign'}}),
+            lambda v:v.update(endpoints={'dashboard_endpoint':{'internal':'dashboard','port':80}}),
             lambda v:v.update(health={'ready':{'profile':'bad!PRIVATE_SENTINEL'}}),
-            lambda v:v.update(health={'ready':{'profile':'ready','source_interface':'missing'}}),
+            lambda v:v.update(health={'ready':{'profile':'ready','source_interface':'missing_interface'}}),
             lambda v:v.update(health={'ready':{'profile':'ready','argv':['PRIVATE_SENTINEL']}})]
         for index,mutate in enumerate(mutations):
             value=profile();mutate(value);stack,_=self.profile_guards()
@@ -118,11 +118,11 @@ class TypeOptionalEdges(unittest.TestCase):
 
 def connection_fixture(*, managed=False, loopback=False):
     kind='dns' if loopback else 'mqtt';role='resolver' if loopback else 'broker'
-    target={'app':'producer','endpoint':'service'} if managed or loopback else {'external':'broker'}
+    target={'app':'producer','endpoint':'service_endpoint'} if managed or loopback else {'external':'broker'}
     owner={'id':'reader','guest':'reader_guest','adapter':'node_red','profile':'client',
-           'interfaces':{role:{'scope':'guest-loopback'} if loopback else {'interface':'service'}}}
+           'interfaces':{role+'_interface':{'scope':'guest-loopback'} if loopback else {'interface':'service'}}}
     site={'accounts':{},'secret_sources':{'existing':{'type':'environment','name':'EXISTING_BROKER_PASSWORD'}},
-        'connections':{'selected':{'consumer':{'app':'reader','connection':role},'target':target,'source_interface':role}}}
+        'connections':{'selected':{'consumer':{'app':'reader','connection':role},'target':target,'source_interface':role+'_interface'}}}
     apps={'reader':owner};guests={'reader_guest':{}}
     endpoint={'protocol':'udp' if loopback else 'tcp','port':5335 if loopback else 1883,
               'address':'127.0.0.1' if loopback else '198.18.41.2'}
@@ -186,7 +186,7 @@ class ConnectionOptionalEdges(unittest.TestCase):
         for change in ('foreign-guest','source-scope','other-loopback'):
             r,e,target=connection_fixture(loopback=True)
             if change=='foreign-guest':target['guest']='foreign'
-            elif change=='source-scope':r.apps['reader']['interfaces']['resolver']={'scope':'app-network','network':'private'}
+            elif change=='source-scope':r.apps['reader']['interfaces']['resolver_interface']={'scope':'app-network','network':'private'}
             else:target['address']='127.0.0.2'
             with self.subTest(case=change),self.assertRaises(ComponentError):connections.bind(r,e)
 

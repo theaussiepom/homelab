@@ -88,7 +88,7 @@ class BackupUnits(unittest.TestCase):
         for adapter, root in [('postgresql', '/etc/postgresql'), ('mariadb', '/etc/mysql'), ('influxdb', '/etc/influxdb')]:
             r = fixture(); app = r.apps['application']; app.update(adapter=adapter,
                 software_selection={'packages': ['postgresql-client-16=16.10-1']},
-                role_addresses={'service':'192.0.2.10'})
+                role_addresses={'service_interface':'192.0.2.10'})
             r.guests['one']['software_selection']['packages'].append('postgresql-client-16=16.10-1')
             app['software_selection']['packages'] = []
             rule = r.library['app_profiles']['example']['backup']

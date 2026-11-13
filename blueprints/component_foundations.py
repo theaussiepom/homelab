@@ -95,7 +95,9 @@ def validate(adapter, value, *, partial=False):
                     and row['method'] == 'scram-sha-256', 'component.database-access')
     elif adapter == 'zigbee2mqtt':
         closed(value, () if partial else ('adapter', 'mqtt_base_topic'),
-               ('adapter', 'mqtt_base_topic') if partial else ())
+               ('adapter', 'mqtt_base_topic', 'watchdog') if partial else ('watchdog',))
+        if 'watchdog' in value:
+            require(value['watchdog'] == 'default', 'component.property')
         if 'adapter' in value:
             require(isinstance(value['adapter'], str) and re.fullmatch('[a-z][a-z0-9_-]{0,62}', value['adapter']),
                     'component.property')
@@ -254,7 +256,7 @@ def bind(resolver):
                 broker = app['resolved_connections'].get('broker')
                 require(broker is not None and broker['type'] == 'mqtt' and broker['target']['port'] == 1883,
                         'component.broker-binding')
-                target = resolver.endpoint({'app': app_id, 'endpoint': 'web'})
+                target = resolver.endpoint({'app': app_id, 'endpoint': 'web_endpoint'})
                 require(target['protocol'] == 'http', 'component.reference')
                 hostname = broker.get('hostname', broker['target']['address'])
                 values.update(serial_device=serial['path'], bind_address=target['address'],

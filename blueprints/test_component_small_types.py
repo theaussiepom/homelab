@@ -22,7 +22,7 @@ def context():
   'credentials':{'api_token':'provider_token','ssh_private_key':'controller_key'},
   'paths':{'state_root':'/var/lib/example-state','backup_directory':'/srv/example-backup/run','backup_mount':'/srv/example-backup','backup_source':'nas.example.invalid:/synthetic'},
   'protected_guests':[91001,91002],'ssh_public_keys':['ssh-ed25519 synthetic-public-key'],
-  'dns_servers':[{'app':'resolver','endpoint':'dns_udp'}],
+  'dns_servers':[{'app':'resolver','endpoint':'dns_udp_endpoint'}],
   'capabilities':{'coordinator':{'type':'serial-device','ssh_private_key':'device_key','known_hosts':'/public/device-known-hosts'}},'timezone':'Etc/UTC'}
 
 
@@ -58,8 +58,8 @@ class DirectSmallTypesTests(unittest.TestCase):
   self.assertEqual(types.ip('198.18.0.1'),'198.18.0.1');types.strings(['a','b'],ids=True);types.strings(['same','same'],unique=False)
   self.bad(types.ip,['198.18.00.1','::1','198.18.1.256',None,1])
   self.bad(types.strings,[['a','a'],[1],[''],['x'*4097],'a',['x']*1025])
-  for value in ({'external':'api'},{'app':'resolver','endpoint':'dns_udp'}):types.endpoint(value)
-  self.bad(types.endpoint,[{},[],{'external':'api','app':'foreign'},{'app':'resolver'},{'app':'resolver','endpoint':'dns','port':53},{'external':'DO_NOT_ECHO!'}])
+  for value in ({'external':'api'},{'app':'resolver','endpoint':'dns_udp_endpoint'}):types.endpoint(value)
+  self.bad(types.endpoint,[{},[],{'external':'api','app':'foreign'},{'app':'resolver'},{'app':'resolver','endpoint':'dns_endpoint','port':53},{'external':'DO_NOT_ECHO!'}])
  def test_resources_full_and_partial_preserve_numeric_floors(self):
   good={'cpu_cores':1,'memory_mib':256,'root_gib':4,'os_reserve_mib':0};types.resource(good);types.resource({},partial=True);types.resource({'memory_mib':512},partial=True)
   for key in good:
@@ -78,7 +78,7 @@ class DirectSmallTypesTests(unittest.TestCase):
   self.bad(types.template,[{'resources':{}},dict(value,extra=True)])
  def test_context_success_requires_named_endpoint_trust_and_supplied_protected_ids(self):
   value=context();before=copy.deepcopy(value);types.context(value);self.assertEqual(value,before)
-  value['api_endpoint']={'app':'provider_proxy','endpoint':'api'};value.pop('capabilities');value.pop('timezone');types.context(value)
+  value['api_endpoint']={'app':'provider_proxy','endpoint':'api_endpoint'};value.pop('capabilities');value.pop('timezone');types.context(value)
  def test_context_each_required_field_and_unknowns_are_refused_directly(self):
   value=context();required=set(value)-{'capabilities','timezone'}
   for key in required:
@@ -143,11 +143,11 @@ class DirectSmallTypesTests(unittest.TestCase):
   rows=[{'memory_mib':0},{'pids_limit':True},{'cpu_limit':0},{'cpu_limit':257},{'cpu_limit':float('nan')},{'read_only':1},{'no_new_privileges':'yes'},{'cap_drop':['NET_ADMIN']},{'cap_add':['SYS_ADMIN']},{'cap_drop':['ALL','ALL']},{'tmpfs':['/tmp:rw,nosuid,nodev,size=0m']},{'tmpfs':['/etc:rw,nosuid,nodev,size=16m']},{'user':''},{'command':'DO_NOT_ECHO'}]
   self.bad(types.runtime,[{'containers':{'service':row}}for row in rows])
  def test_health_success_and_closed_readiness_source_role_structure(self):
-  types.health({'type':'adapter','check':'readiness'});types.health({'type':'adapter','check':'readiness','source_interface':'management'})
-  self.bad(types.health,[{}, {'type':'adapter'},{'type':'shell','check':'readiness'},{'type':'adapter','check':'command'},{'type':'adapter','check':'readiness','source_interface':'bad!'},{'type':'adapter','check':'readiness','argv':['DO_NOT_ECHO']}])
+  types.health({'type':'adapter','check':'readiness'});types.health({'type':'adapter','check':'readiness','source_interface':'management_interface'})
+  self.bad(types.health,[{}, {'type':'adapter'},{'type':'shell','check':'readiness'},{'type':'adapter','check':'command'},{'type':'adapter','check':'readiness','source_interface':'bad!_interface'},{'type':'adapter','check':'readiness','argv':['DO_NOT_ECHO']}])
  def test_policy_references_are_closed_without_free_configuration(self):
-  types.policy_binding('common');types.policy_binding({'policy':'access','interfaces':{'local':'control','remote':{'app':'peer','interface':'service'}},'networks':{'lan':'management'},'endpoints':{'database':{'app':'database','endpoint':'service'}}})
-  self.bad(types.policy_binding,['bad!',{'policy':'access','extra':True},{'policy':'access','interfaces':{'remote':{'app':'peer','interface':'bad!'}}},{'policy':'access','endpoints':{'database':{'app':'database'}}}])
+  types.policy_binding('common');types.policy_binding({'policy':'access','interfaces':{'local':'control','remote':{'app':'peer','interface':'service_interface'}},'networks':{'lan':'management'},'endpoints':{'database':{'app':'database','endpoint':'service_endpoint'}}})
+  self.bad(types.policy_binding,['bad!',{'policy':'access','extra':True},{'policy':'access','interfaces':{'remote':{'app':'peer','interface':'bad!_interface'}}},{'policy':'access','endpoints':{'database':{'app':'database'}}}])
  def test_role_and_rule_address_references_have_no_free_configuration_bag(self):
   for value in ({'interface':'control'},{'scope':'app-network','network':'private'},{'scope':'guest-loopback'}):types.role(value)
   self.bad(types.role,[{},[],{'scope':'host'},{'interface':'control','source':'DO_NOT_ECHO'},{'scope':'app-network'},{'scope':'guest-loopback','network':'private'}])
@@ -195,7 +195,7 @@ class GuestWiringUnitTests(unittest.TestCase):
   value=guest();before=copy.deepcopy(value);mocks=self.run_guest(value)
   mocks['interface'].assert_called_once_with(value['interfaces']['control']);mocks['storage_layout'].assert_called_once_with({},{});self.assertEqual(value,before)
  def test_guest_partial_resources_startup_security_and_named_ref_collaborators_are_forwarded(self):
-  value=guest();value.update(resources={'memory_mib':512},startup={'boot_order':4},security={'keyctl':False},ssh_public_keys=['synthetic-key'],dns_servers=[{'app':'resolver','endpoint':'dns'}],volumes={'data':{'storage':'pool','slot':0,'path':'/srv/example','size_gib':4}},root_paths={'config':{'path':'/srv/root-config'}},network_policy=[{'policy':'common'}],timezone='Etc/UTC',monitoring={'profile':'linux'},readiness=[{'stage':'preparation','target':{'app':'resolver','endpoint':'dns'}}])
+  value=guest();value.update(resources={'memory_mib':512},startup={'boot_order':4},security={'keyctl':False},ssh_public_keys=['synthetic-key'],dns_servers=[{'app':'resolver','endpoint':'dns_endpoint'}],volumes={'data':{'storage':'pool','slot':0,'path':'/srv/example','size_gib':4}},root_paths={'config':{'path':'/srv/root-config'}},network_policy=[{'policy':'common'}],timezone='Etc/UTC',monitoring={'profile':'linux'},readiness=[{'stage':'preparation','target':{'app':'resolver','endpoint':'dns_endpoint'}}])
   mocks=self.run_guest(value)
   for name in ('resource','startup','security'):mocks[name].assert_called_once_with(value[name if name!='resource'else'resources'],partial=True)
   mocks['volume'].assert_called_once_with(value['volumes']['data']);mocks['root_path'].assert_called_once_with(value['root_paths']['config']);mocks['policy_binding'].assert_called_once_with(value['network_policy'][0]);mocks['timezone'].assert_called_once_with('Etc/UTC');mocks['monitoring'].assert_called_once_with(value['monitoring']);self.assertEqual(mocks['endpoint'].call_count,2)
@@ -237,8 +237,8 @@ class GuestWiringUnitTests(unittest.TestCase):
    bad=guest();bad['compose_projects']=projects
    with self.subTest(keys=list(projects)),self.assertRaises(ComponentError):self.run_guest(bad)
  def test_preparation_readiness_is_explicit_managed_reference_and_wrong_stage_refuses(self):
-  value=guest();value['readiness']=[{'stage':'preparation','target':{'app':'resolver','endpoint':'dns'}}];mocks=self.run_guest(value);mocks['endpoint'].assert_called_once_with(value['readiness'][0]['target'])
-  for rows in ({},[{'stage':'start','target':{'app':'resolver','endpoint':'dns'}}],[{'stage':'preparation','target':{'external':'resolver'}}],[{'stage':'preparation','target':{'app':'resolver','endpoint':'dns'},'source':'DO_NOT_ECHO'}]):
+  value=guest();value['readiness']=[{'stage':'preparation','target':{'app':'resolver','endpoint':'dns_endpoint'}}];mocks=self.run_guest(value);mocks['endpoint'].assert_called_once_with(value['readiness'][0]['target'])
+  for rows in ({},[{'stage':'start','target':{'app':'resolver','endpoint':'dns_endpoint'}}],[{'stage':'preparation','target':{'external':'resolver'}}],[{'stage':'preparation','target':{'app':'resolver','endpoint':'dns_endpoint'},'source':'DO_NOT_ECHO'}]):
    bad=guest();bad['readiness']=rows
    with self.subTest(shape=type(rows).__name__),self.assertRaises(ComponentError):self.run_guest(bad)
  def test_collaborator_refusal_propagates_without_running_later_guest_components(self):

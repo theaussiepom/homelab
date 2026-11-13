@@ -137,7 +137,7 @@ class RelationshipSourceTests(unittest.TestCase):
         original = yaml.safe_load(path.read_text())
         changes = [{'consumer': {'app': 'missing', 'connection': 'broker'}},
                    {'consumer': {'app': 'browser', 'connection': 'missing'}},
-                   {'target': {'external': 'missing'}}, {'source_interface': 'missing'},
+                   {'target': {'external': 'missing'}}, {'source_interface': 'missing_interface'},
                    {'readiness': 'start'}, {'transport': 'missing'},
                    {'account': 'missing'}, {'credential': {'principal': 'client', 'secret': 'probe'}}]
         for change in changes:
@@ -151,7 +151,7 @@ class RelationshipSourceTests(unittest.TestCase):
         path = self.split()['exposures', 'browser']
         original = yaml.safe_load(path.read_text())
         for change in ({'type': 'unknown'}, {'domain': 'missing'}, {'tls': 'missing'},
-                       {'ingress': {'external': 'api'}}, {'endpoint': {'app': 'missing', 'endpoint': 'web'}},
+                       {'ingress': {'external': 'api'}}, {'endpoint': {'app': 'missing', 'endpoint': 'web_endpoint'}},
                        {'aliases': ['browser']}, {'middlewares': ['missing']}, {'transport': 'missing'}):
             path.write_text(yaml.safe_dump({**original, **change}))
             with self.subTest(change=change), self.assertRaises(ComponentError):

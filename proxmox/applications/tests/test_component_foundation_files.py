@@ -25,7 +25,7 @@ def ingress():
     app={'id':'edge','adapter':'traefik','properties':{'dashboard':True},
          'input_sources':{'cloudflare_dns_token':{'type':'environment','name':'CLOUDFLARE_DNS_TOKEN'},
                           'proxmox_token':{'type':'file','path':'/var/lib/example/service-discovery/token.json'}},
-         'role_addresses':{'frontend':'198.18.40.33'},
+         'role_addresses':{'frontend_interface':'198.18.40.33'},
          'settings':{'provider':{'url':'https://198.18.25.10:8006','token_id':'fixture@pve!discovery','ca_file':'/public/context.pem'},
                      'acme':{'email':'operator@example.invalid','resolvers':['198.18.40.2:53']},
                      'route_ca_files':{'verified':{'source':'/public/context.pem','filename':'route-verified.pem'}}}}
@@ -34,11 +34,11 @@ def ingress():
     ca=b'-----BEGIN CERTIFICATE-----\nsynthetic-public-fixture\n-----END CERTIFICATE-----\n'
     target={'app':'identity','protocol':'http','address':'198.18.30.20','port':9000}
     middleware={'security-headers':{'type':'default-headers'},'admins':{'type':'ip-allow-list','ranges':['198.18.25.0/24']},
-                'login':{'type':'forward-auth','endpoint':{'app':'identity','endpoint':'web'},'target':target},
+                'login':{'type':'forward-auth','endpoint':{'app':'identity','endpoint':'web_endpoint'},'target':target},
                 'canonical':{'type':'canonical-home-redirect','app':'db'}}
     def route(host,target,**extra):
-        return {'type':'http','endpoint':{'app':target['app'],'endpoint':'web'} if 'app'in target else {'external':'external'},
-                'domain':'fixture-domain','ingress':{'app':'edge','endpoint':'https'},'tls':'fixture-tls',
+        return {'type':'http','target':{'app':target['app'],'endpoint':'web_endpoint'} if 'app'in target else {'external':'external'},
+                'domain':'fixture-domain','ingress':{'app':'edge','endpoint':'https_endpoint'},'tls':'fixture-tls',
                 'hosts':[host],'target':target,'ingress_target':{'app':'edge','protocol':'https','address':'198.18.40.33','port':443},
                 'middlewares':['security-headers'],**extra}
     routes={'external':route('host.example.invalid',{'external':'host','protocol':'https','address':'198.18.25.1','port':443},middlewares=['security-headers','admins'],transport='verified'),

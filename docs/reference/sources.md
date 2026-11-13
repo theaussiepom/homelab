@@ -6,9 +6,11 @@ Use source files to organise complete declarations without adding an overlay lan
 
 ```yaml
 connections:
-  frontend_database: {source: connections/frontend-database.yaml}
+  frontend_database:
+    source: connections/frontend-database.yaml
 exposures:
-  frontend: {source: exposures/frontend.yaml}
+  frontend:
+    source: exposures/frontend.yaml
 ```
 
 The referenced file contains the complete connection declaration:
@@ -16,9 +18,13 @@ The referenced file contains the complete connection declaration:
 ```yaml
 schema: homelab-components-v1
 kind: connection
-consumer: {app: frontend, connection: database}
-target: {app: database, endpoint: service}
-source_interface: database
+consumer:
+  app: frontend
+  connection: database
+target:
+  app: database
+  endpoint: service_endpoint
+source_interface: database_interface
 ```
 
 This example still requires compatible profile roles and policy in the surrounding configuration. Moving the declaration to a file does not make its references optional.
@@ -67,8 +73,11 @@ profile: recursive
 guest: resolver
 lifecycle: fresh
 interfaces:
-  private: {scope: app-network, network: default}
-  local: {scope: guest-loopback}
+  private_interface:
+    scope: app-network
+    network: default
+  local_interface:
+    scope: guest-loopback
 ```
 
 The inline and separate-file forms produce identical app values, runtime packets and dependency graphs. Only the source filenames and hashes differ. To add an app `display_name`, put it inside the typed file rather than beside `source` in the parent. **Invalid variation:** `{source: apps/recursive.yaml, display_name: Another label}` is rejected because a reference cannot contain overrides. The app file also rejects `kind: guest`. These checks use the actual reader and its filesystem restrictions, including during offline compilation.

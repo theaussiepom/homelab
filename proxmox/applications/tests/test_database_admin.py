@@ -36,9 +36,9 @@ def source():
         'oauth_client_id':'fixture-client','oauth_name':'Synthetic SSO','user_claim':'preferred_username'},
         {'public_url':'https://db.example.invalid'},image='example/cloud@sha256:'+'b'*64,
         gateway_image='example/gateway@sha256:'+'b'*64)
-    cloud.update(id='cloud',guest='client',profile='cloud',origin_url=cloud['settings']['public_url'],interfaces={key:{'interface':key}
-        for key in ('web','postgresql','mariadb')},role_addresses={'web':'198.18.30.32',
-            'postgresql':'198.18.11.81','mariadb':'198.19.12.83'})
+    cloud.update(id='cloud',guest='client',profile='cloud',origin_url=cloud['settings']['public_url'],interfaces={key+'_interface':{'interface':key}
+        for key in ('web','postgresql','mariadb')},role_addresses={'web_interface':'198.18.30.32',
+            'postgresql_interface':'198.18.11.81','mariadb_interface':'198.19.12.83'})
     cloud['properties']={'server_name':'Database Tools','recovery_admin':'local-recovery','heap_mib':1024,
         'auth_headers':{'user':'X-User','team':'X-Team'},
         'connections':{'postgresql':{'name':'PostgreSQL','database':'postgres','sslmode':'prefer'},
@@ -52,16 +52,16 @@ def source():
         apps[engine]={'id':engine,'adapter':engine,'guest':engine,'profile':'native','interfaces':{}}
         guests[engine]={'context':'primary','identity':{'vmid':vmid,'hostname':engine}}
         site['secret_sources'][engine]={'type':'generated','credential_id':'fixture-'+engine}
-        site['accounts'][engine]={'adapter':engine+'-admin','owner':'cloud','target':{'app':engine,'endpoint':'sql'},
+        site['accounts'][engine]={'adapter':engine+'-admin','owner':'cloud','target':{'app':engine,'endpoint':'sql_endpoint'},
             'principal':engine+'_administrator','credential':engine,'access':'server-administration','lifecycle':'create-once'}
         for suffix in ('','-admin'):
             role=engine+suffix
             declarations[role]={'type':engine,'required':True,'accounts':[engine+'-admin'],'readiness':['start']}
-            site['connections'][role]={'consumer':{'app':'cloud','connection':role},'target':{'app':engine,'endpoint':'sql'},
-                'source_interface':engine,'readiness':'start'}
+            site['connections'][role]={'consumer':{'app':'cloud','connection':role},'target':{'app':engine,'endpoint':'sql_endpoint'},
+                'source_interface':engine+'_interface','readiness':'start'}
             if suffix:site['connections'][role]['account']=engine
     def endpoint(ref):
-        if set(ref)!={'app','endpoint'}or ref['app']not in addresses or ref['endpoint']!='sql':raise ComponentError('component.reference')
+        if set(ref)!={'app','endpoint'}or ref['app']not in addresses or ref['endpoint']!='sql_endpoint':raise ComponentError('component.reference')
         engine=ref['app']
         return {'app':engine,'guest':engine,'protocol':'tcp','port':m.KINDS[engine],'address':addresses[engine]}
     resolver=SimpleNamespace(apps=apps,guests=guests,site=site,library={'app_profiles':{
@@ -146,7 +146,7 @@ class DatabaseAdministratorTests(unittest.TestCase):
             lambda r:r.site['accounts']['postgresql'].update(owner='mariadb'),
             lambda r:r.site['secret_sources']['mariadb'].update(credential_id='fixture-postgresql'),
             lambda r:r.site['connections']['postgresql-admin'].update(account='missing'),
-            lambda r:r.site['connections']['postgresql-admin'].update(target={'app':'mariadb','endpoint':'sql'}),
+            lambda r:r.site['connections']['postgresql-admin'].update(target={'app':'mariadb','endpoint':'sql_endpoint'}),
             lambda r:r.site['connections'].pop('mariadb-admin'),
             lambda r:r.guests['postgresql'].update(context='foreign')]
         for change in changes:

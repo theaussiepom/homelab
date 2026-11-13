@@ -102,7 +102,7 @@ class ReferenceExamples(unittest.TestCase):
         for change in ('unknown-guest', 'wrong-local-scope', 'boolean-memory'):
             wrong = copy.deepcopy(selected)
             if change == 'unknown-guest': wrong['apps']['recursive_a']['guest'] = 'missing'
-            elif change == 'wrong-local-scope': wrong['apps']['recursive_a']['interfaces']['local'] = {'scope':'app-network','network':'default'}
+            elif change == 'wrong-local-scope': wrong['apps']['recursive_a']['interfaces']['local_interface'] = {'scope':'app-network','network':'default'}
             else: wrong['guests']['resolver']['resources']['memory_mib'] = True
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.resolve(wrong)
@@ -151,7 +151,7 @@ class ReferenceExamples(unittest.TestCase):
         types.device(example('supporting-types.md','device-minimal'))
         wrong=dict(example('supporting-types.md','device-minimal'),path='/dev/ttyUSB0')
         with self.assertRaises(ValueError):types.device(wrong)
-        wrong=example('supporting-types.md','profile-minimal');wrong['listeners']['udp']['interface']='missing'
+        wrong=example('supporting-types.md','profile-minimal');wrong['listeners']['udp_listener']['interface']='missing_interface'
         with self.assertRaises(ValueError):types.profile(wrong)
         wrong=example('supporting-types.md','runtime-minimal');wrong['containers']['unbound']['cpu_limit']=True
         with self.assertRaises(ValueError):types.runtime(wrong)
@@ -271,7 +271,7 @@ class ReferenceExamples(unittest.TestCase):
         for change in ('both-credentials','wrong-role','duplicate-domain','missing-tls'):
             wrong=copy.deepcopy(selected)
             if change=='both-credentials':wrong['connections']['broker']['credential']={'principal':'browser','secret':'probe'}
-            elif change=='wrong-role':wrong['connections']['broker']['source_interface']='missing'
+            elif change=='wrong-role':wrong['connections']['broker']['source_interface']='missing_interface'
             elif change=='duplicate-domain':wrong['exposures']['browser']['aliases']=['browser']
             else:wrong['exposures']['browser']['tls']='missing'
             with self.subTest(change=change),self.assertRaises(ValueError):self.resolve(wrong,library)

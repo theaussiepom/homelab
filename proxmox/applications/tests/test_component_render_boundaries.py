@@ -27,7 +27,7 @@ import test_component_proxy_files as file_fixtures
 class CheckAndFileBoundaries(unittest.TestCase):
     def test_invalid_native_and_http_addresses_refuse_with_component_error_not_raw_input(self):
         for address in (None,'not-an-address-PRIVATE','127.0.0.1'):
-            item=check_fixtures.case('postgresql');item['app']['role_addresses']={'service':address}
+            item=check_fixtures.case('postgresql');item['app']['role_addresses']={'service_interface':address}
             with self.subTest(address_type=type(address).__name__),self.assertRaises(ComponentError) as raised:
                 checks.checks(item['app'],item['guest'],compose_file=None)
             self.assertNotIn('PRIVATE',str(raised.exception))
@@ -82,18 +82,18 @@ class OwnedRuntimeBranches(unittest.TestCase):
     def test_same_owned_socket_publication_is_emitted_once_and_other_service_is_ignored(self):
         row={'service':'owned','protocol':'tcp','port':1883,
              'publication_address':'198.18.30.37','publish':{'port':1883}}
-        app={'listeners':{'a':row,'same-owned-socket':copy.deepcopy(row),
-                          'peer':dict(row,service='peer')}}
+        app={'listeners':{'a_listener':row,'same-owned-socket_listener':copy.deepcopy(row),
+                          'peer_listener':dict(row,service='peer')}}
         before=copy.deepcopy(app)
         self.assertEqual(runtime._ports(app,'owned'),['198.18.30.37:1883:1883/tcp'])
         self.assertEqual(app,before)
-        app['listeners']['udp']=dict(row,protocol='udp')
+        app['listeners']['udp_listener']=dict(row,protocol='udp')
         self.assertEqual(runtime._ports(app,'owned'),['198.18.30.37:1883:1883/tcp','198.18.30.37:1883:1883/udp'])
 
     def test_retained_homeassistant_mdns_is_explicit_and_alias_is_selected(self):
         app={'adapter':'homeassistant','lifecycle':'retained',
-             'properties':{'mdns':{'interface':'home','startup':'startup'}},
-             'role_addresses':{'home':'198.18.100.20'},
+             'properties':{'mdns':{'interface':'home_interface','startup':'startup'}},
+             'role_addresses':{'home_interface':'198.18.100.20'},
              'storage_paths':{'startup':{'target':'/startup','read_only':True}}}
         base=lambda:{'environment':{},'volumes':[],'cap_add':['NET_ADMIN']}
         before=copy.deepcopy(app)
@@ -110,7 +110,7 @@ class OwnedRuntimeBranches(unittest.TestCase):
             selected=copy.deepcopy(app);service_value=base()
             if change=='fresh':selected['lifecycle']='fresh'
             elif change=='writeable-startup':selected['storage_paths']['startup']['read_only']=False
-            elif change=='wrong-role':selected['properties']['mdns']['interface']='peer'
+            elif change=='wrong-role':selected['properties']['mdns']['interface']='peer_interface'
             else:service_value.pop('cap_add')
             with self.subTest(change=change),patch.object(runtime,'_service',return_value=service_value), \
                  patch.object(runtime,'_mounts',return_value=[]),patch.object(runtime,'_aliases',return_value={}), \

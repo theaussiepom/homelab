@@ -503,6 +503,7 @@ class Resolver:
     def execution_values(self, images):
         """Resolve declared software/security; never merge arbitrary Compose bags."""
         software, runtime = self.library['software'], self.library['runtime_profiles']
+        used_images = set()
 
         def runtime_values(refs, guest):
             result, package_refs, native = {}, [], None
@@ -545,6 +546,7 @@ class Resolver:
                 for role, image_id in row.get('images', {}).items():
                     require(image_id in images, 'component.reference')
                     if include_images:
+                        used_images.add(image_id)
                         require(role not in selected_images or selected_images[role] == images[image_id],
                                 'component.software-conflict')
                         selected_images[role] = copy.deepcopy(images[image_id])
@@ -609,6 +611,8 @@ class Resolver:
             require(total == 0 or total + guest['effective_os_reserve_mib']
                     <= guest['resources']['memory_mib'], 'component.memory-budget')
 
+        return used_images
+
     def resolve(self, disabled=None, *, admit=False):
         self.validate()
         self.address_groups = component_addresses.resolve(self.site.get('address_groups', {}), self.site['networks'])
@@ -629,7 +633,8 @@ class Resolver:
         contexts = self.context_values()
         for guest in self.guests.values():
             guest['rules'] = self.policy_values(guest)
-        self.execution_values(images)
+        used_images = self.execution_values(images)
+        require(set(self.site['images']) <= used_images, 'component.image-binding-unused')
         component_foundations.bind(self)
         for app_id, settings in component_properties.bind(self).items():
             self.apps[app_id]['settings'] = settings

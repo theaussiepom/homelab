@@ -13,12 +13,12 @@ def descriptor(address='198.18.25.34',proxy='198.18.25.33/32',image=IMAGE):
             'tmpfs':['/tmp:rw,nosuid,nodev,size=64m']}},
         'software_selection':{'images':{'pegaprox':{'image':image}}},
         'secret_bindings':{'database_key':{'type':'file','path':'/run/synthetic/retained-key'}},
-        'settings':{'trusted_proxy':proxy},'role_addresses':{'web':address},
+        'settings':{'trusted_proxy':proxy},'role_addresses':{'web_interface':address},
         'storage_paths':{name:{'source':'/srv/homelab/data/pegaprox/'+name,'target':'/app/'+name,
                               'kind':'directory','read_only':False} for name in ('config','logs')},
-        'listeners':{'web':{'service':'pegaprox','namespace':'app-network','interface':'private',
+        'listeners':{'web_listener':{'service':'pegaprox','namespace':'app-network','interface':'private_interface',
             'bind':'wildcard','actual_bind':'0.0.0.0','protocol':'tcp','port':5000,
-            'publication_address':address,'publish':{'scope':'guest-interface','interface':'web','port':5000}}}}
+            'publication_address':address,'publish':{'scope':'guest-interface','interface':'web_interface','port':5000}}}}
 
 
 def guest():return {'timezone':'Etc/UTC','memory_mib':2048,'os_reserve_mib':512}

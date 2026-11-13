@@ -46,14 +46,14 @@ def template():
 
 def profile():
     return {'adapter':'unbound','display_name':'Synthetic recursive resolver',
-        'interfaces':{'service':{'required':True,'accepts':['guest-interface']}},
-        'listeners':{'dns':{'service':'unbound','namespace':'app-network','interface':'service',
+        'interfaces':{'service_interface':{'required':True,'accepts':['guest-interface']}},
+        'listeners':{'dns_listener':{'service':'unbound','namespace':'app-network','interface':'service_interface',
             'bind':'interface','protocol':'udp','port':53}},
-        'endpoints':{'dns':{'listener':'dns','protocol':'udp','via':'service'}}}
+        'endpoints':{'dns_endpoint':{'listener':'dns_listener','protocol':'udp','via':'service_interface'}}}
 
 
 def app():
-    return {'profile':'recursive','guest':'worker','lifecycle':'fresh','interfaces':{'service':{'interface':'control'}}}
+    return {'profile':'recursive','guest':'worker','lifecycle':'fresh','interfaces':{'service_interface':{'interface':'control'}}}
 
 
 def case(collection,name,value,target,*,child=None):
@@ -191,11 +191,11 @@ class CompilerValidationDispatchTests(unittest.TestCase):
             ('package-reference',lambda v:v.update(packages=['bad!PRIVATE_SENTINEL']))])
 
     def test_health_validator_dispatch_requires_declared_readiness_not_arbitrary_argv(self):
-        value={'type':'adapter','check':'readiness','source_interface':'management'}
+        value={'type':'adapter','check':'readiness','source_interface':'management_interface'}
         self.matrix(case('health_profiles','ready',value,(types.__name__,'health')),[
             ('missing',lambda v:v.pop('check') and None),('unknown',lambda v:v.update(argv=['PRIVATE_SENTINEL'])),
             ('type',lambda v:v.update(check=[])),('unsupported-check',lambda v:v.update(check='command')),
-            ('source-reference',lambda v:v.update(source_interface='bad!PRIVATE_SENTINEL'))])
+            ('source-reference',lambda v:v.update(source_interface='bad!PRIVATE_SENTINEL_interface'))])
 
     def test_monitoring_profile_validator_dispatch_requires_explicit_finite_workloads(self):
         value={'type':'zabbix-agent','profiles':['linux']}
@@ -269,10 +269,10 @@ class CompilerValidationDispatchTests(unittest.TestCase):
     def test_profile_validator_dispatch_has_real_listener_bounds_and_local_endpoint_references(self):
         self.matrix(case('app_profiles','recursive',profile(),(types.__name__,'profile')),[
             ('missing',lambda v:v.pop('display_name') and None),('unknown',lambda v:v.update(raw='PRIVATE_SENTINEL')),
-            ('type',lambda v:v['interfaces']['service'].update(required=1)),
-            ('port-bound',lambda v:v['listeners']['dns'].update(port=65536)),
-            ('listener-reference',lambda v:v['endpoints']['dns'].update(listener='missing')),
-            ('physical-reference',lambda v:v['listeners']['dns'].update(interface='missing'))])
+            ('type',lambda v:v['interfaces']['service_interface'].update(required=1)),
+            ('port-bound',lambda v:v['listeners']['dns_listener'].update(port=65536)),
+            ('listener-reference',lambda v:v['endpoints']['dns_endpoint'].update(listener='missing_listener')),
+            ('physical-reference',lambda v:v['listeners']['dns_listener'].update(interface='missing'))])
 
     def test_profile_storage_role_validator_is_reached_from_actual_compiler_and_profile(self):
         value=profile();value['storage']={'data':{'target':'/config','read_only':False,'required':True,'kind':'directory',
@@ -308,16 +308,16 @@ class CompilerValidationDispatchTests(unittest.TestCase):
 
     def test_app_role_validator_dispatch_rejects_unknown_scope_or_symbolic_role_shape(self):
         spec=case('apps','recursive',app(),(types.__name__,'app'),child=(types.__name__,'role'))
-        self.matrix(spec,[('empty',lambda v:v['interfaces'].update(service={})),
-            ('unknown',lambda v:v['interfaces']['service'].update(source='PRIVATE_SENTINEL')),
-            ('type',lambda v:v['interfaces'].update(service=[])),
-            ('reference-syntax',lambda v:v['interfaces']['service'].update(interface='bad!PRIVATE_SENTINEL')),
-            ('unsupported-scope',lambda v:v['interfaces'].update(service={'scope':'host'}))])
+        self.matrix(spec,[('empty',lambda v:v['interfaces'].update(service_interface={})),
+            ('unknown',lambda v:v['interfaces']['service_interface'].update(source='PRIVATE_SENTINEL')),
+            ('type',lambda v:v['interfaces'].update(service_interface=[])),
+            ('reference-syntax',lambda v:v['interfaces']['service_interface'].update(interface='bad!PRIVATE_SENTINEL')),
+            ('unsupported-scope',lambda v:v['interfaces'].update(service_interface={'scope':'host'}))])
 
     def test_policy_binding_validator_dispatch_through_guest_preserves_typed_fragment_refs(self):
         value=small.guest();value['network_policy']=[{'policy':'common',
-            'interfaces':{'local':'control','remote':{'app':'database','interface':'service'}},
-            'networks':{'lan':'management'},'endpoints':{'db':{'app':'database','endpoint':'sql'}}}]
+            'interfaces':{'local':'control','remote':{'app':'database','interface':'service_interface'}},
+            'networks':{'lan':'management'},'endpoints':{'db':{'app':'database','endpoint':'sql_endpoint'}}}]
         spec=case('guests','worker',value,(types.__name__,'guest'),child=(types.__name__,'policy_binding'))
         self.matrix(spec,[('missing',lambda v:v['network_policy'][0].pop('policy') and None),
             ('unknown',lambda v:v['network_policy'][0].update(rule='PRIVATE_SENTINEL')),

@@ -145,20 +145,20 @@ apps:
     guest: resolver
     lifecycle: fresh
     interfaces:
-      private:
+      private_interface:
         scope: app-network
         network: default
-      local:
+      local_interface:
         scope: guest-loopback
   recursive_b:
     profile: recursive
     guest: replica
     lifecycle: fresh
     interfaces:
-      private:
+      private_interface:
         scope: app-network
         network: default
-      local:
+      local_interface:
         scope: guest-loopback
 backup:
   management:

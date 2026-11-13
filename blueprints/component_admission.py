@@ -43,7 +43,7 @@ def admit(resolver, enabled):
         else:
             active = resolver.apps[exposure['resolver']]['guest'] in enabled
         if active:
-            target = resolver.endpoint(exposure['endpoint']).get('address')
+            target = resolver.endpoint(exposure['target']).get('address')
             require(not synthetic_binding('addresses.backend', target)
                     and not synthetic_binding('domains.backend', target), 'component.synthetic-binding')
             for key in [exposure['domain'], *exposure.get('aliases', [])]:

@@ -9,10 +9,10 @@ from component_exposures import Exposures
 
 def fixture():
     rows = {
-        ('web', 'http'): {'app': 'web', 'address': '198.18.40.20', 'protocol': 'http', 'port': 8123},
-        ('proxy', 'https'): {'app': 'proxy', 'address': '198.18.40.10', 'protocol': 'https', 'port': 443},
-        ('proxy', 'dashboard'): {'app': 'proxy', 'internal': 'dashboard'},
-        ('sso', 'auth'): {'app': 'sso', 'address': '198.18.40.11', 'protocol': 'http', 'port': 9000},
+        ('web', 'http_endpoint'): {'app': 'web', 'address': '198.18.40.20', 'protocol': 'http', 'port': 8123},
+        ('proxy', 'https_endpoint'): {'app': 'proxy', 'address': '198.18.40.10', 'protocol': 'https', 'port': 443},
+        ('proxy', 'dashboard_endpoint'): {'app': 'proxy', 'internal': 'dashboard'},
+        ('sso', 'auth_endpoint'): {'app': 'sso', 'address': '198.18.40.11', 'protocol': 'http', 'port': 9000},
         ('external', 'nas'): {'address': '198.18.25.10', 'protocol': 'https', 'port': 5001},
     }
     calls = []
@@ -36,13 +36,31 @@ def fixture():
 
 
 def http(r, **extra):
-    value = {'type': 'http', 'endpoint': {'app': 'web', 'endpoint': 'http'}, 'domain': 'web',
-             'ingress': {'app': 'proxy', 'endpoint': 'https'}, 'tls': 'public', **extra}
+    value = {'type': 'http', 'target': {'app': 'web', 'endpoint': 'http_endpoint'}, 'domain': 'web',
+             'ingress': {'app': 'proxy', 'endpoint': 'https_endpoint'}, 'tls': 'public', **extra}
     r.site['exposures']['web'] = value
     return value
 
 
 class ExposurePolicyReview(unittest.TestCase):
+    def test_http_and_dns_require_target_and_reject_the_old_outer_endpoint(self):
+        for kind in ('http', 'dns'):
+            for change in ('old-only', 'both', 'missing', 'null', 'wrong-reference'):
+                r = fixture()
+                value = http(r) if kind == 'http' else {
+                    'type': 'dns', 'target': {'app': 'web', 'endpoint': 'http_endpoint'},
+                    'domain': 'web', 'resolver': 'dns'}
+                r.site['exposures']['web'] = value
+                if change == 'old-only': value['endpoint'] = value.pop('target')
+                elif change == 'both': value['endpoint'] = copy.deepcopy(value['target'])
+                elif change == 'missing': value.pop('target')
+                elif change == 'null': value['target'] = None
+                else: value['target'] = {'app': 'web', 'target': 'http'}
+                with self.subTest(kind=kind, change=change), self.assertRaisesRegex(
+                        ComponentError, ('component.invalid' if change == 'null' else 'component.fields')
+                        + ' at exposures.web'):
+                    Exposures(r).bind()
+
     def test_cloudflare_policy_resolves_a_named_internal_allowlist_in_any_order(self):
         r = fixture()
         r.policy['middlewares'] = {
@@ -76,7 +94,7 @@ class ExposurePolicyReview(unittest.TestCase):
                 'public': {'type': 'cloudflare-source', 'local_allowlist': 'local', 'origin_header': 'x-origin-token'},
                 'local': {'type': 'ip-allow-list', 'ranges': ['10.0.0.0/8']},
                 'headers': {'type': 'default-headers'},
-                'login': {'type': 'forward-auth', 'endpoint': {'app': 'sso', 'endpoint': 'auth'}}}
+                'login': {'type': 'forward-auth', 'endpoint': {'app': 'sso', 'endpoint': 'auth_endpoint'}}}
             http(r, middlewares=selected)
             with self.subTest(selected=selected), self.assertRaises(ComponentError): Exposures(r).bind()
         r = fixture()
@@ -87,7 +105,7 @@ class ExposurePolicyReview(unittest.TestCase):
     def test_named_policies_resolve_only_authored_endpoint_network_and_owner(self):
         r = fixture()
         r.policy['middlewares'] = {
-            'login': {'type': 'forward-auth', 'endpoint': {'app': 'sso', 'endpoint': 'auth'}},
+            'login': {'type': 'forward-auth', 'endpoint': {'app': 'sso', 'endpoint': 'auth_endpoint'}},
             'headers': {'type': 'default-headers'},
             'clients': {'type': 'ip-allow-list', 'ranges': [{'network': 'home'}, '198.18.25.10/32']},
             'canonical': {'type': 'canonical-home-redirect', 'app': 'web'},
@@ -96,9 +114,9 @@ class ExposurePolicyReview(unittest.TestCase):
         api = Exposures(r)
         api.validate_policies()
         self.assertEqual(api.middlewares['clients']['ranges'], ['198.18.40.0/24', '198.18.25.10/32'])
-        self.assertEqual(api.middlewares['login']['target'], r.rows[('sso', 'auth')])
+        self.assertEqual(api.middlewares['login']['target'], r.rows[('sso', 'auth_endpoint')])
         self.assertEqual(r.policy, original)
-        self.assertEqual(r.calls, [{'app': 'sso', 'endpoint': 'auth'}])
+        self.assertEqual(r.calls, [{'app': 'sso', 'endpoint': 'auth_endpoint'}])
         self.assertEqual((api.routes, api.records), ({}, {}))
 
     def test_policy_wrong_shapes_references_protocols_and_unknown_fields_refuse(self):
@@ -111,9 +129,9 @@ class ExposurePolicyReview(unittest.TestCase):
             r = fixture(); r.policy['middlewares']['invalid'] = value
             with self.subTest(value=value), self.assertRaises(ComponentError): Exposures(r).validate_policies()
         for mutation in ({'protocol': 'tcp'}, {'address': None}):
-            r = fixture(); r.policy['middlewares']['login'] = {'type': 'forward-auth', 'endpoint': {'app': 'sso', 'endpoint': 'auth'}}
-            if mutation.get('address', 'present') is None: r.rows[('sso', 'auth')].pop('address')
-            else: r.rows[('sso', 'auth')].update(mutation)
+            r = fixture(); r.policy['middlewares']['login'] = {'type': 'forward-auth', 'endpoint': {'app': 'sso', 'endpoint': 'auth_endpoint'}}
+            if mutation.get('address', 'present') is None: r.rows[('sso', 'auth_endpoint')].pop('address')
+            else: r.rows[('sso', 'auth_endpoint')].update(mutation)
             with self.subTest(mutation=mutation), self.assertRaisesRegex(ComponentError, 'authentication'): Exposures(r).validate_policies()
         for value in ({'type': 'static', 'resolver': 'dns'}, {'type': 'acme', 'resolver': '../bad'}):
             r = fixture(); r.policy['tls']['public'] = value
@@ -123,7 +141,7 @@ class ExposurePolicyReview(unittest.TestCase):
 class ExposureBindingReview(unittest.TestCase):
     def test_http_alias_dns_and_origin_bind_without_inventing_readiness(self):
         r = fixture(); http(r, aliases=['alias'], resolver='dns')
-        r.rows[('proxy', 'https')]['port'] = 8443
+        r.rows[('proxy', 'https_endpoint')]['port'] = 8443
         r.apps['web']['origin'] = {'exposure': 'web', 'domain': 'alias'}
         api = Exposures(r); result = api.bind()
         self.assertEqual(result['dns_records'], {'dns': {'Web.example.invalid': '198.18.40.10', 'Other.example.invalid': '198.18.40.10'}})
@@ -134,11 +152,11 @@ class ExposureBindingReview(unittest.TestCase):
         self.assertNotIn('readiness', r.apps['web'])
 
     def test_external_http_and_dns_only_publish_the_declared_address(self):
-        r = fixture(); value = http(r, endpoint={'external': 'nas'}, transport='nas')
+        r = fixture(); value = http(r, target={'external': 'nas'}, transport='nas')
         api = Exposures(r); result = api.bind()
         self.assertEqual(result['dns_records'], {})
         self.assertEqual(api.hostname({'exposure': 'web'}, {'address': '198.18.25.10'}), 'Web.example.invalid')
-        r = fixture(); r.site['exposures']['web'] = {'type': 'dns', 'endpoint': {'app': 'web', 'endpoint': 'http'}, 'domain': 'web', 'resolver': 'dns'}
+        r = fixture(); r.site['exposures']['web'] = {'type': 'dns', 'target': {'app': 'web', 'endpoint': 'http_endpoint'}, 'domain': 'web', 'resolver': 'dns'}
         api = Exposures(r); result = api.bind()
         self.assertEqual(result['routes'], {})
         self.assertEqual(result['dns_records'], {'dns': {'Web.example.invalid': '198.18.40.20'}})
@@ -153,12 +171,12 @@ class ExposureBindingReview(unittest.TestCase):
 
     def test_dashboard_needs_same_ingress_enabled_property_and_forward_auth(self):
         def selected():
-            r = fixture(); http(r, endpoint={'app': 'proxy', 'endpoint': 'dashboard'}, domain='proxy', middlewares=['login'])
-            r.policy['middlewares']['login'] = {'type': 'forward-auth', 'endpoint': {'app': 'sso', 'endpoint': 'auth'}}
+            r = fixture(); http(r, target={'app': 'proxy', 'endpoint': 'dashboard_endpoint'}, domain='proxy', middlewares=['login'])
+            r.policy['middlewares']['login'] = {'type': 'forward-auth', 'endpoint': {'app': 'sso', 'endpoint': 'auth_endpoint'}}
             return r
         r = selected(); result = Exposures(r).bind()
         self.assertEqual(result['routes']['proxy']['web']['target']['internal'], 'dashboard')
-        self.assertIn(('proxy', 'dashboard'), r.endpoints)
+        self.assertIn(('proxy', 'dashboard_endpoint'), r.endpoints)
         for kind in ('no-auth', 'headers-only', 'disabled', 'wrong-ingress'):
             r = selected()
             if kind == 'no-auth': r.site['exposures']['web']['middlewares'] = []
@@ -166,29 +184,29 @@ class ExposureBindingReview(unittest.TestCase):
             elif kind == 'disabled': r.apps['proxy']['properties']['dashboard'] = False
             else:
                 r.apps['other'] = {'adapter': 'traefik', 'properties': {}}
-                r.rows[('proxy', 'https')]['app'] = 'other'
+                r.rows[('proxy', 'https_endpoint')]['app'] = 'other'
             with self.subTest(kind=kind), self.assertRaisesRegex(ComponentError, 'authentication'): Exposures(r).bind()
         r = fixture(); Exposures(r).bind()
-        self.assertNotIn(('proxy', 'dashboard'), r.endpoints)
+        self.assertNotIn(('proxy', 'dashboard_endpoint'), r.endpoints)
 
     def test_ingress_target_resolver_transport_and_origin_refusals_are_closed(self):
         changes = [lambda r, v: v.update(extra=True), lambda r, v: v.update(tls='missing'),
                    lambda r, v: v.update(domain='missing'), lambda r, v: v.update(middlewares=['missing']),
                    lambda r, v: v.update(resolver='web'), lambda r, v: v.update(transport='missing'),
                    lambda r, v: v.update(transport='nas'),
-                   lambda r, v: r.rows[('proxy', 'https')].update(protocol='http'),
+                   lambda r, v: r.rows[('proxy', 'https_endpoint')].update(protocol='http'),
                    lambda r, v: r.apps['proxy'].update(adapter='unbound'),
-                   lambda r, v: r.rows[('web', 'http')].update(address='127.0.0.1'),
-                   lambda r, v: r.rows[('web', 'http')].update(address='name.example.invalid'),
-                   lambda r, v: r.rows[('web', 'http')].update(protocol='tcp')]
+                   lambda r, v: r.rows[('web', 'http_endpoint')].update(address='127.0.0.1'),
+                   lambda r, v: r.rows[('web', 'http_endpoint')].update(address='name.example.invalid'),
+                   lambda r, v: r.rows[('web', 'http_endpoint')].update(protocol='tcp')]
         for number, change in enumerate(changes):
             r = fixture(); value = http(r); change(r, value)
             with self.subTest(number=number), self.assertRaises(ComponentError): Exposures(r).bind()
         for kind in ('internal', 'missing-address', 'non-address'):
-            r = fixture(); r.site['exposures']['web'] = {'type': 'dns', 'endpoint': {'app': 'web', 'endpoint': 'http'}, 'domain': 'web', 'resolver': 'dns'}
-            if kind == 'internal': r.rows[('web', 'http')]['internal'] = 'dashboard'
-            elif kind == 'missing-address': r.rows[('web', 'http')].pop('address')
-            else: r.rows[('web', 'http')]['address'] = 'name.example.invalid'
+            r = fixture(); r.site['exposures']['web'] = {'type': 'dns', 'target': {'app': 'web', 'endpoint': 'http_endpoint'}, 'domain': 'web', 'resolver': 'dns'}
+            if kind == 'internal': r.rows[('web', 'http_endpoint')]['internal'] = 'dashboard'
+            elif kind == 'missing-address': r.rows[('web', 'http_endpoint')].pop('address')
+            else: r.rows[('web', 'http_endpoint')]['address'] = 'name.example.invalid'
             with self.subTest(dns=kind), self.assertRaises(ComponentError): Exposures(r).bind()
         for reference in ({'exposure': 'missing'}, {'exposure': 'web', 'domain': 'missing'}, {'exposure': 'web', 'extra': True}):
             r = fixture(); http(r); r.apps['web']['origin'] = reference

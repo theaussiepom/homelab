@@ -23,17 +23,17 @@ class PacketIntegrationTests(unittest.TestCase):
         self.spec['software'][adapter]={'packages':[package]}
         self.spec['runtime_profiles'][adapter]={'native':{'memory_mib':memory}}
         self.spec['app_profiles'][adapter]={'adapter':adapter,'display_name':adapter,
-            'interfaces':{'service':{'required':True,'accepts':['guest-interface']}},
-            'listeners':{'service':{'service':adapter,'namespace':'host','interface':'service',
+            'interfaces':{'service_interface':{'required':True,'accepts':['guest-interface']}},
+            'listeners':{'service_listener':{'service':adapter,'namespace':'host','interface':'service_interface',
                 'bind':'interface','protocol':'tcp','port':port}},
-            'endpoints':{'service':{'listener':'service','protocol':'tcp','via':'service'}},
+            'endpoints':{'service_endpoint':{'listener':'service_listener','protocol':'tcp','via':'service_interface'}},
             'storage':{'data':{'required':True,'target':path,'kind':'directory','read_only':False}},
             'software':[adapter],'runtime':[adapter],'health':{'ready':{'type':'adapter','check':'readiness'}}}
         guest=self.site['guests']['resolver'];guest['resources']={'memory_mib':8192}
         guest.setdefault('volumes',{})[adapter]={'slot':len(guest.get('volumes',{})),
             'path':path,'size_gib':4,'storage':'local'}
         self.site['apps'][adapter]={'profile':adapter,'guest':'resolver','lifecycle':'fresh',
-            'interfaces':{'service':{'interface':'backend'}},
+            'interfaces':{'service_interface':{'interface':'backend'}},
             'storage':{'data':{'volume':adapter,'subpath':''}}}
 
     def test_real_compiler_mixes_a_native_server_with_a_container_without_native_project_identity(self):
@@ -101,7 +101,7 @@ class PacketIntegrationTests(unittest.TestCase):
         self.spec['app_profiles']['recursive']['connections'] = {'upstream': {
             'type': 'dns', 'required': False, 'readiness': ['start']}}
         self.site['connections'] = {'upstream': {'consumer': {'app': 'zeta', 'connection': 'upstream'},
-            'target': {'app': 'alpha', 'endpoint': 'dns'}, 'source_interface': 'local'}}
+            'target': {'app': 'alpha', 'endpoint': 'dns_endpoint'}, 'source_interface': 'local_interface'}}
         plan = self.resolve()
         self.assertEqual(component_packet.application_order(plan, 'resolver'), ['zeta', 'alpha'])
         self.site['connections']['upstream']['readiness'] = 'start'
@@ -147,8 +147,8 @@ class PacketIntegrationTests(unittest.TestCase):
         self.spec['runtime_profiles']['ha']={'containers':{'homeassistant':{
             'memory_mib':256,'cpu_limit':1,'pids_limit':128}}}
         self.spec['app_profiles']['ha']={'adapter':'homeassistant','display_name':'Home Assistant',
-            'interfaces':{'web':{'required':True,'accepts':['guest-interface']}},
-            'listeners':{'web':{'service':'homeassistant','namespace':'host','interface':'web',
+            'interfaces':{'web_interface':{'required':True,'accepts':['guest-interface']}},
+            'listeners':{'web_listener':{'service':'homeassistant','namespace':'host','interface':'web_interface',
                 'bind':'interface','protocol':'tcp','port':8123}},
             'storage':{'config':{'target':'/config','kind':'directory','read_only':False,'required':True,
                 'initialize':{'type':'directory','uid':0,'gid':0,'mode':'0700'}}},
@@ -159,7 +159,7 @@ class PacketIntegrationTests(unittest.TestCase):
         self.site['guests']['resolver']['volumes']={'apps':{'storage':'local','slot':0,
             'path':'/srv/example/apps','size_gib':8}}
         self.site['apps']={'ha':{'profile':'ha','guest':'resolver','lifecycle':'fresh',
-            'interfaces':{'web':{'interface':'backend'}},'storage':{'config':{'volume':'apps','subpath':'homeassistant'}}}}
+            'interfaces':{'web_interface':{'interface':'backend'}},'storage':{'config':{'volume':'apps','subpath':'homeassistant'}}}}
         plan=self.resolve();root=self.root/'inputs'
         packet=component_packet.lower_plan(plan,inputs=root)['resolver']
         path=self.root/'packet.json';write_new(path,encoded(packet))

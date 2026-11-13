@@ -1,5 +1,6 @@
 """Three owned app units; common helpers mocked, exact baseline once per app."""
 import copy
+from fixture_network_names import modernize
 from contextlib import ExitStack
 import json
 import os
@@ -18,13 +19,13 @@ import bitwarden
 import pegaprox
 import foundation
 import component_runtime as core
-BASELINE=json.loads((HERE/'edge-compose-baseline.json').read_text())
+BASELINE=modernize(json.loads((HERE/'edge-compose-baseline.json').read_text()))
 
 
 def listener(service,port,address=None):
     row={'service':service,'port':port,'protocol':'tcp','namespace':'app-network',
-         'interface':'private','bind':'wildcard','actual_bind':'0.0.0.0'}
-    if address:row.update(publication_address=address,publish={'port':port,'scope':'guest-interface','interface':'web'})
+         'interface':'private_interface','bind':'wildcard','actual_bind':'0.0.0.0'}
+    if address:row.update(publication_address=address,publish={'port':port,'scope':'guest-interface','interface':'web_interface'})
     return row
 
 
@@ -41,21 +42,21 @@ def descriptor(adapter):
             'database_server':'198.18.32.35','database_provider':'mysql','database_name':'vault',
             'data_uid':1000,'data_gid':1000},'runtime':{'schema':'homelab-bitwarden-runtime-v2','public_origin':'https://vault.example.invalid','issuer':'http://localhost'}}
         app['storage_paths']={name:{'source':'/srv/homelab/data/bitwarden/'+name,'target':target,'kind':'directory','read_only':False} for name,target in [('data','/etc/bitwarden'),('logs','/var/log/bitwarden')]}
-        app['listeners']={'web':listener('bitwarden',8080,'198.18.30.35')}
+        app['listeners']={'web_listener':listener('bitwarden',8080,'198.18.30.35')}
     elif adapter=='pegaprox':
         app['identity']['runtime_directory']='/opt/homelab-app/runtime'
         app['secret_bindings']={'database_key':{'type':'file','path':'/run/synthetic/key'}}
-        app['settings']={'trusted_proxy':'198.18.25.33/32'};app['role_addresses']={'web':'198.18.25.34'}
+        app['settings']={'trusted_proxy':'198.18.25.33/32'};app['role_addresses']={'web_interface':'198.18.25.34'}
         app['storage_paths']={name:{'source':'/srv/homelab/data/pegaprox/'+name,'target':'/app/'+name,'kind':'directory','read_only':False} for name in ('config','logs')}
         app['containers']['pegaprox'].update(read_only=True,cap_drop=['ALL'],no_new_privileges=True,tmpfs=['/tmp:rw,nosuid,nodev,size=64m'])
-        app['listeners']={'web':listener('pegaprox',5000,'198.18.25.34')}
+        app['listeners']={'web_listener':listener('pegaprox',5000,'198.18.25.34')}
     else:
         app['identity']['runtime_directory']='/opt/homelab-app/runtime'
         app['secret_bindings']={'cloudflare_dns_token':{'type':'file','path':'/run/synthetic/dns'},'proxmox_token':{'type':'file','path':'/run/synthetic/provider'}}
         app['settings']={'provider':{'url':'https://198.18.25.10:8006'},'acme':{'propagation_timeout_seconds':2100},
                         'route_ca_files':{'proxmox':{'source':'/run/synthetic/ca.pem','filename':'route-proxmox.pem'}}}
         app['storage_paths']={'certs':{'source':'/srv/homelab/data/traefik/certs','target':'/var/traefik/certs','kind':'directory','read_only':False}}
-        app['listeners']={str(port):dict(listener('traefik',port),namespace='host',interface='frontend',bind='interface',actual_bind='198.18.40.33') for port in (80,443)}
+        app['listeners']={str(port)+'_listener':dict(listener('traefik',port),namespace='host',interface='frontend_interface',bind='interface',actual_bind='198.18.40.33') for port in (80,443)}
     return app
 
 
@@ -97,7 +98,7 @@ class BitwardenTests(unittest.TestCase):
             lambda a:a['containers']['bitwarden'].update(user='1000'),lambda a:a['storage_paths'].pop('logs'),
             lambda a:a['storage_paths']['data'].update(read_only=True),lambda a:a.update(private_environment={}),
             lambda a:a.update(private_environment={'BAD':True}),lambda a:a.update(private_environment={'BAD':'line\nbreak'}),
-            lambda a:a['listeners']['web'].update(port=80),lambda a:a.update(listeners={})]
+            lambda a:a['listeners']['web_listener'].update(port=80),lambda a:a.update(listeners={})]
         for change in changes:
             app=descriptor('bitwarden');change(app)
             with self.subTest(change=change),units(app),self.assertRaises(ValueError):core._bitwarden(app,guest('bitwarden'))
@@ -133,7 +134,7 @@ class PegaProxTests(unittest.TestCase):
             lambda a:a['storage_paths'].pop('config'),lambda a:a['storage_paths']['logs'].update(read_only=True),
             lambda a:a['software_selection']['images']['pegaprox'].update(image='example/foreign@sha256:'+'a'*64),
             lambda a:a['settings'].update(trusted_proxy='198.18.25.0/24'),lambda a:a['settings'].update(trusted_proxy='198.18.25.34/32'),
-            lambda a:a['settings'].update(trusted_proxy='192.0.2.1/32'),lambda a:a['listeners']['web'].update(port=443)]:
+            lambda a:a['settings'].update(trusted_proxy='192.0.2.1/32'),lambda a:a['listeners']['web_listener'].update(port=443)]:
             app=descriptor('pegaprox');change(app)
             with self.subTest(change=change),units(app),self.assertRaises(ValueError):core._pegaprox(app,guest('pegaprox'))
         for changed in [dict(guest('pegaprox'),os_reserve_mib=256),dict(guest('pegaprox'),memory_mib=1792)]:
@@ -180,7 +181,7 @@ class TraefikTests(unittest.TestCase):
             lambda a:a['settings']['acme'].update(propagation_timeout_seconds=True),
             lambda a:a['settings']['route_ca_files']['proxmox'].update(filename='../ca.pem'),
             lambda a:a['settings']['route_ca_files'].update({'../../foreign':{'source':'/run/synthetic/ca.pem','filename':'route-../../foreign.pem'}}),
-            lambda a:a['listeners']['80'].update(port=8080)]
+            lambda a:a['listeners']['80_listener'].update(port=8080)]
         for change in changes:
             app=descriptor('traefik');change(app)
             with self.subTest(change=change),units(app),self.assertRaises(ValueError):core._traefik(app,guest('traefik'))

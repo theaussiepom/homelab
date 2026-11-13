@@ -4,7 +4,7 @@ Keep one authority for a value, and bind it through the form defined for that ty
 
 | Need | Form | Meaning |
 | --- | --- | --- |
-| App socket | `{app: broker, endpoint: backend}` | Named profile endpoint of that instance |
+| App socket | `{app: broker, endpoint: backend_endpoint}` | Named profile endpoint of that instance |
 | Unmanaged socket | `{external: directory}` | Declared external endpoint |
 | Same address, different protocol/port | External `address: {external: other}` | Reuses address only |
 | Guest NIC | App role `{interface: backend}` | This guest's physical interface |
@@ -24,16 +24,22 @@ A connection is a complete relationship, inline or in a typed file:
 
 ```yaml
 connections:
-  broker: {source: connections/browser-broker.yaml}
+  broker:
+    source: connections/browser-broker.yaml
 ```
 
 ```yaml
 schema: homelab-components-v1
 kind: connection
-consumer: {app: browser, connection: broker}
-target: {app: broker, endpoint: backend}
-source_interface: broker
-hostname: {domain: broker}
+consumer:
+  app: browser
+  connection: broker
+target:
+  app: broker
+  endpoint: backend_endpoint
+source_interface: broker_interface
+hostname:
+  domain: broker
 account: client
 ```
 
@@ -43,16 +49,19 @@ This typed leaf uses the complete example's `browser` and `broker` apps, `client
 
 ```yaml
 address_groups:
-  vpn: {members: [198.18.15.0/28]}
+  vpn:
+    members:
+    - 198.18.15.0/28
   clients:
     members:
-      - {network: primary}
-      - {address_group: vpn}
+      - network: primary
+      - address_group: vpn
 policies:
   middlewares:
     lan_only:
       type: ip-allow-list
-      ranges: [{address_group: clients}]
+      ranges:
+        - address_group: clients
 ```
 
 Here `primary` is the network declared in the complete relationship example. A network-policy fragment uses local roles such as `source: {address_group: clients}`; its guest binding maps `address_groups: {clients: clients}`. Compilation rejects missing or unused bindings. Expansion preserves order, enforces size limits and checks for cycles. A group expansion only yields values; an explicitly selected policy consumes them. Merely declaring the group creates neither an endpoint nor a permission.

@@ -24,7 +24,7 @@ BASELINE = json.loads((HERE/'proxy-compose-baseline.json').read_text())
 
 def listener(service, port, address=None, published=None):
     value = {'service':service,'port':port,'protocol':'tcp','namespace':'app-network',
-             'interface':'private','bind':'wildcard','actual_bind':'0.0.0.0'}
+             'interface':'private_interface','bind':'wildcard','actual_bind':'0.0.0.0'}
     if address is not None:
         value.update(publication_address=address, publish={'port':published or port,
             'scope':'guest-loopback' if address=='127.0.0.1' else 'guest-interface',
@@ -55,22 +55,22 @@ def descriptor(adapter):
             'mariadb_jdbc':{'version':'3.5.11','sha256':'42604178b9e57ec08ee0035079961516f086e455d0141f0b22c6eff29fb2fff4',
                 'image_filename':'mariadb-java-client-3.5.10.jar'}}
         app['storage_paths']={'workspace':{'source':'/srv/homelab/data/cloudbeaver','target':'/opt/cloudbeaver/workspace','kind':'directory','read_only':False}}
-        app['listeners']={'web':listener('auth_gateway',4180,'198.18.30.32',80),
-                          'community':listener('cloudbeaver',8978)}
+        app['listeners']={'web_listener':listener('auth_gateway',4180,'198.18.30.32',80),
+                          'community_listener':listener('cloudbeaver',8978)}
     elif adapter=='mqtt_explorer':
         app['origin_url']='https://mqtt-ui-a.example.invalid'
         app['settings']={'authentik_outpost_url':'http://198.18.30.25:9000','broker':{'type':'mqtt',
             'target':{'port':1883,'address':'198.18.30.37'},'hostname':'broker.mqtt',
             'account':{'credential_id':'synthetic-only'}}}
         app['storage_paths']={'data':{'source':'/srv/homelab/data/mqtt-explorer','target':'/app/data','kind':'directory','read_only':False}}
-        app['listeners']={'web':listener('explorer_gateway',4180,'198.18.30.37',80),
-                          'explorer':listener('mqtt_explorer',3000)}
+        app['listeners']={'web_listener':listener('explorer_gateway',4180,'198.18.30.37',80),
+                          'explorer_listener':listener('mqtt_explorer',3000)}
     else:
         app['settings']={'database':{'host':'198.18.31.23','name':'zabbix','user':'zabbix'},
                          'database_credential':{'type':'monitoring-owned','server':'instance-a'}}
-        app['listeners']={'server':listener('zabbix_server',10051,'198.18.25.36'),
-            'web':listener('zabbix_web',8080,'198.18.25.36'),
-            'local-web':listener('zabbix_web',8080,'127.0.0.1',8081)}
+        app['listeners']={'server_listener':listener('zabbix_server',10051,'198.18.25.36'),
+            'web_listener':listener('zabbix_web',8080,'198.18.25.36'),
+            'local-web_listener':listener('zabbix_web',8080,'127.0.0.1',8081)}
     return app
 
 
@@ -132,8 +132,8 @@ class CommunityTests(unittest.TestCase):
             lambda a:a['storage_paths']['workspace'].update(read_only=True),
             lambda a:a.update(storage_paths={}),lambda a:a['containers']['auth_gateway'].update(user='root'),
             lambda a:a['containers']['cloudbeaver'].update(cap_add=['NET_ADMIN']),
-            lambda a:a['listeners'].pop('web'),lambda a:a['listeners']['community'].update(port=8080),
-            lambda a:a['listeners']['community'].update(publication_address='198.18.30.32',publish={'port':8978})]
+            lambda a:a['listeners'].pop('web_listener'),lambda a:a['listeners']['community_listener'].update(port=8080),
+            lambda a:a['listeners']['community_listener'].update(publication_address='198.18.30.32',publish={'port':8978})]
         for change in changes:
             app=descriptor('cloudbeaver');change(app)
             with self.subTest(change=change),units(app),self.assertRaises(ValueError):core._cloudbeaver(app,guest('cloudbeaver'))
@@ -173,9 +173,9 @@ class ExplorerTests(unittest.TestCase):
         changes=[lambda a:a.pop('origin_url'),lambda a:a.update(origin_url='http://ui.example.invalid'),
             lambda a:a['settings'].pop('authentik_outpost_url'),lambda a:a['settings']['broker'].pop('hostname'),
             lambda a:a['settings']['broker'].pop('account'),lambda a:a['settings']['broker']['target'].update(port=8883),
-            lambda a:a['storage_paths']['data'].update(read_only=True),lambda a:a['listeners'].pop('web'),
+            lambda a:a['storage_paths']['data'].update(read_only=True),lambda a:a['listeners'].pop('web_listener'),
             lambda a:a['containers']['mqtt_explorer'].update(user='root'),
-            lambda a:a['listeners']['explorer'].update(publication_address='198.18.30.37',publish={'port':3000})]
+            lambda a:a['listeners']['explorer_listener'].update(publication_address='198.18.30.37',publish={'port':3000})]
         for change in changes:
             app=descriptor('mqtt_explorer');change(app)
             with self.subTest(change=change),units(app),self.assertRaises(ValueError):core._mqtt_explorer(app,guest('mqtt_explorer'))
@@ -212,12 +212,12 @@ class ZabbixTests(unittest.TestCase):
     def test_credential_scope_unselected_file_mount_and_image_process_drift_refuse(self):
         changes=[lambda a:a['settings'].pop('database_credential'),
             lambda a:a['settings']['database_credential'].update(server='peer'),
-            lambda a:a.update(secret_bindings={'database_password':{}}),lambda a:a['listeners'].pop('server'),
+            lambda a:a.update(secret_bindings={'database_password':{}}),lambda a:a['listeners'].pop('server_listener'),
             lambda a:a['settings']['database'].update(user='postgres'),
             lambda a:a.update(storage_paths={'unexpected':{}}),
             lambda a:a['containers']['zabbix_server'].update(user='root'),
             lambda a:a['software_selection']['images']['zabbix_web'].update(image='example/foreign@sha256:'+'a'*64),
-            lambda a:a['listeners']['web'].update(port=443)]
+            lambda a:a['listeners']['web_listener'].update(port=443)]
         for change in changes:
             app=descriptor('zabbix');change(app)
             with self.subTest(change=change),units(app),self.assertRaises(ValueError):core._zabbix(app,guest('zabbix'))

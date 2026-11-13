@@ -103,7 +103,7 @@ class AnsibleCallerTests(CallerCase):
         """The Ansible caller propagates the native frontend's clear refusal."""
         from test_separate_web_listeners import influx
         selected = influx()
-        selected['role_addresses'].pop('service')
+        selected['role_addresses'].pop('service_interface')
         selected['software_selection']['images'] = {}
         cfg, _ = self.case('influxdb', selected)
         write_new(self.directory/'component-native.json', encoded({'selected':{
@@ -119,7 +119,7 @@ class AnsibleCallerTests(CallerCase):
         for split in (False, True):
             selected=influx()
             selected['software_selection']['images']={}
-            if not split:selected['role_addresses'].pop('web')
+            if not split:selected['role_addresses'].pop('web_interface')
             cfg,app=self.case('influxdb',selected)
             write_new(self.directory/'component-native.json',encoded({'selected':{
                 'identity':{'user':'influxdb'},'services':['influxdb']}}))

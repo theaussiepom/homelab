@@ -86,7 +86,7 @@ class PacketComponentBoundaryTests(unittest.TestCase):
         storage.update(id='storage',adapter='postgresql',monitoring_hba_source='198.18.20.20')
         storage.pop('project_file');storage.pop('project_name')
         storage['identity']={'phase':'storage','runtime_id':'storage','services':{},'networks':{}}
-        storage.update(role_addresses={'service':'198.18.31.20'},properties={},
+        storage.update(role_addresses={'service_interface':'198.18.31.20'},properties={},
             software_selection={'packages':['postgresql-16=16.10-1.pgdg13+1']},
             storage_paths={'data':{'source':'/var/lib/postgresql','target':'/var/lib/postgresql',
                                    'kind':'directory','read_only':False}})
