@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import selectors
 import signal
@@ -28,10 +29,17 @@ from private_io import encoded, private_directory, private_writer, read_json, re
 
 def schedule(value):
     """Validate the single versioned root schedule and physical membership."""
-    backup_policy.exact(value, ('schema', 'group', 'schedule', 'limits'))
-    require(value['schema'] == 'homelab-pbs-schedule-v1', 'Use the versioned recovery schedule')
+    backup_policy.exact(value, ('schema', 'group', 'schedule', 'limits'), ('coverage',))
+    require(value['schema'] in ('homelab-pbs-schedule-v1', 'homelab-pbs-schedule-v2'),
+            'Use the versioned recovery schedule')
     backup_group.configuration(value['group'])
     backup_policy.schedule(value['schedule']); backup_policy.limits(value['limits'])
+    require((value['schema'] == 'homelab-pbs-schedule-v1' and 'coverage' not in value)
+            or (value['schema'] == 'homelab-pbs-schedule-v2' and isinstance(value.get('coverage'), dict)
+                and set(value['coverage']) == set(value['group']['members'])
+                and all(isinstance(item, str) and re.fullmatch('[0-9a-f]{64}', item)
+                        for item in value['coverage'].values())),
+            'Bind expected coverage for every enrolled recovery member')
     return value
 
 
@@ -190,8 +198,8 @@ def run(path, *, launch=subprocess.Popen, admission=admit):
         admitted = {name: admission(name, row) for name, row in group['members'].items()}
         require(all(cfg['app']['backup']['job']['group']['name'] == group['name']
                 for cfg, _ in admitted.values()), 'Preserve the root recovery group identity')
-        import backup_activation
-        backup_activation.verify(value, admitted)
+        import backup_readiness
+        backup_readiness.verify(value, admitted)
         root = Path(scopes[0][0]); private_directory(root)
         attempts = root/'backup-groups'; private_directory(attempts, create=not attempts.exists())
         operation = attempts/generation; private_directory(operation, create=True)
@@ -284,7 +292,8 @@ def units(value, source_directory, user, home=None):
     timer = ('[Unit]\nDescription=Guest recovery schedule\n[Timer]\nOnCalendar='+calendar
         +'\nRandomizedDelaySec='+str(value['schedule']['jitter_seconds'])
         +'\nPersistent=false\n[Install]\nWantedBy=timers.target\n')
-    return {'name': name, 'service': service, 'timer': timer, 'owner': {'schema': value['schema'],
+    # The existing owner identity survives the internal v1 -> v2 schedule upgrade.
+    return {'name': name, 'service': service, 'timer': timer, 'owner': {'schema': 'homelab-pbs-schedule-v1',
         'name': value['group']['name'], 'actor': user}, 'configuration': value, 'user': user,
         'base': base, 'group_path': path, 'owner_path': base+'/schedules/'+name+'.owner.json',
         'unit_directory': home+'/.config/systemd/user'}

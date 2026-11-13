@@ -30,9 +30,9 @@ For first installation, normal controller bootstrap includes this preparation. F
 
 This prepares persistent login-independent operation for the existing non-root account. The manager's hardening is root-owned and effective before it starts: `NoNewPrivileges=true` is inherited by its child processes, so a user-editable unit cannot undo that protection. Preparation refuses a foreign or already-running unhardened manager; it does not restart that manager, the runner or any application. Such a refusal needs separately reviewed maintenance, not a deployment workaround.
 
-Before PBS or guest enrollment changes, activation verifies the existing manager's identity, effective kernel protection, private runtime directory and user-session bus. CD then installs or updates the one user service/timer, its private group descriptor and an exact versioned public-source bundle under the existing CD account. These are account-owned files, not root-immutable files: a malicious process with that same UID can alter its own alarm. Foreign ownership, symlinks, changed expected source, and root/system-scope namesakes are refused. Guest workers and client credentials retain their existing root-only ownership; no token, key or capture contract changes.
+Before controller schedule changes, the early Configure backups job verifies the existing manager's identity, effective kernel protection, private runtime directory and user-session bus. It installs or updates the one user service/timer, its complete expected membership/coverage and an exact versioned public-source bundle under the existing CD account. These account-owned files do not protect against a malicious process with the same UID. Foreign ownership, symlinks, changed source and root/system-scope namesakes are refused. Each guest retains its root-only worker and client credentials.
 
-Later source, membership and schedule changes use ordinary CD under the same hardened manager. They do not require an administrator to reinstall each versioned bundle or alarm. An unchanged repeated deployment verifies the same owned files and effective user timer. Do not install a second system timer, manually adopt an existing scheduler or clear a failed activation to reach this step.
+Later source, membership and schedule changes use ordinary CD under the same hardened manager. They do not require an administrator to reinstall each versioned bundle or alarm. An unchanged repeated deployment verifies the same owned files and effective user timer. Do not install a second system timer, manually adopt an existing scheduler or clear failed setup/enrollment evidence to reach this step.
 
 ### Prepare storage for an already managed guest
 
@@ -101,7 +101,7 @@ Use `backup.job.limits` for common defaults. A guest's optional `backup.limits` 
 
 Size each byte bound from that guest's complete native database exports, selected-file archive and metadata, with measured growth allowance. Live database-directory usage is not an export size. The [staging volume](../reference/backup.md#backup-client-staging-volume) must be at least four times the effective byte bound; the worker checks three times that bound free before starting. These are per-filesystem checks, not host thin-pool reservations. Review the combined allocations, other workload growth and pool reserve separately. A successful run releases its verified payload/readback copies but retains operation records and logs; failures preserve remaining artifacts. There is no automatic local history pruning to make an undersized allocation pass.
 
-A limit change is an ordinary configuration update. Enable each affected guest for its matching deployment, then complete the Backup job's whole-group activation before relying on the new configuration. An unchanged disabled member may retain its prior activated coverage; a changed disabled member is refused. Root-default edits affect inheriting clients, and removing an override restores inheritance. Keep existing namespace/token/client-key identities and failed evidence; increasing a bound does not authorize replay or cleanup.
+A limit change is an ordinary configuration update. Enable each affected guest and complete its own Backup step before relying on the new coverage. An unchanged disabled member may retain its genuine prior readiness; a changed disabled member cannot pass the schedule's expected-coverage check. Root-default edits affect inheriting clients, and removing an override restores inheritance. Preserve namespace/token/client-key identities and failed evidence; a larger bound is not evidence of sufficient host pool capacity.
 
 ## Enroll guests and select data
 
@@ -117,21 +117,23 @@ Root shared settings alone do not install clients everywhere. An enrolled guest'
 
 The compiler reuses bound app/guest paths. Do not write a second list of the same paths in backup configuration. Files classified as database engine storage are exported with supported database tools rather than copied as live directories. An application's required database-export member must also be enrolled; diagnostics identify missing members rather than silently adding them.
 
-Guests disabled only for a particular CD selection remain enrolled for backup. The Backup job verifies their existing completed deployment and activation without reconfiguring them. A new or changed backup configuration must first be deployed with that guest enabled; disabling it cannot bypass initial setup. A run with every guest disabled performs no activation. Removing a marker from an already protected member requires an explicit retirement procedure; it is not a request to delete snapshots or rotate keys.
+Guests disabled for one CD selection remain in the complete backup membership. Nightly capture verifies their actual completed deployment and sealed worker inputs without reconfiguring them. New or changed members must complete their own ordinary deployment and Backup step; disabling them cannot bypass readiness. Even when all guests are disabled, the early job maintains the single shared schedule and its expected coverage. Removing a protected member requires explicit retirement, not snapshot deletion or key rotation.
 
 ## Review the generated change
 
-Use [validate and generate](../guides/validate-and-generate.md) with the exact framework/library/site combination. Inspect the generated management and guest jobs before publication:
+Use [validate and generate](../guides/validate-and-generate.md) with the exact framework/library/site combination. Inspect the generated management and guest jobs before publication, then use the [credential-placement matrix](access.md#what-goes-where) to prepare their actual protected Environments:
 
-- After the selected guest jobs succeed, the **Backup** management job uses the `backup` Environment and receives the named management token. It checks the existing datastore name/path and creates only declared namespaces and client access. A missing or mismatched datastore stops provisioning; the job does not create or relocate it.
-- Only enrolled guests receive backup preparation and a **PBS agent** step. Their jobs keep their normal guest names and app deployment dependencies.
-- The native client on each newly enrolled guest creates its encryption key once; CD retains a protected controller copy and verifies it on later runs. Each guest receives its own namespace-scoped token and the shared recovery public key. The administrator token and recovery private key are absent from guest inputs.
-- Existing key fingerprints, namespaces, account ownership, app inputs and failure records are preserved. Repeated CD does not generate replacement keys.
-- The separate Backup job activates the schedule only for a complete, successfully deployed group; ordinary guest jobs prepare coverage without depending on a working PBS server. Review any selected app pauses or database locks before allowing unattended runs.
+- In the private wrapper, **Validate config** and **Validate deployment** run independently; setup requires both successful checks and refuses failure/cancellation. One early **Configure backups** job verifies the declared datastore and maintains the controller-owned schedule. If local PBS host policy is selected, its existing pure checks and host-policy steps share that job. It precedes enrolled guest jobs and never waits for a last guest.
+- Each enrolled guest has its own **Backup** step after its app/agent phases. It enrolls its client, seals and installs worker inputs, verifies non-capturing readiness and completes the existing ordinary receipt.
+- Supply only the inputs in the [credential-placement matrix](access.md#what-goes-where) to each reviewed job/step. The named management token is a controller workflow input, never a guest file or payload input.
+- The native client creates its encryption key once. Controller records and later deployments preserve the same key and namespace-scoped client token; the recovery private key stays offline.
+- The nightly controller requires genuine readiness matching every declared member before opening the existing coordinated capture window. There is no final activation job or group-activation record to manufacture readiness.
 
 GitHub secret forwarding must be explicit at every reusable-workflow boundary. Do not use `secrets: inherit` to make management secrets available throughout the guest graph. A missing Environment, denied token or inaccessible mount is a preparation failure, not a reason to broaden permissions during deployment.
 
 ## Deploy and check installation
+
+For an existing commissioned group, adopt the new framework/library selection through ordinary CD with every member enabled once. The changed internal packet creates a new sealed input tree; it does not overwrite old payloads or rotate keys. Historical activation successes remain retained, and historical failures still block capture/setup for explicit recovery. A disabled member from the old coverage-only format cannot borrow an activation success as readiness.
 
 Run the normal [protected deployment procedure](../operations/deployment.md) after the exact source and plan have passed their required checks. CD configures backup services; it does not count as the first successful backup.
 

@@ -19,7 +19,7 @@ Use only the listed fields. Required fields have no default, and null does not r
 | <a id="guest-root-storage"></a>`root_storage` | Required ID | [Storage pool](storage.md#storage-pool) in the same context |
 | <a id="guest-interfaces"></a>`interfaces` | Required nonempty named map | Exact [NIC records and address branches](networks.md#nic-property-index) |
 | <a id="guest-control-interface"></a>`control_interface` | Required ID | Selects a declared static/DHCP NIC for its management address and MAC; a manual NIC is forbidden |
-| <a id="guest-display-name"></a>`display_name` | Optional nonempty text, ≤4096, no NUL | Defaults to hostname; cosmetic, not an identity rename |
+| <a id="guest-display-name"></a>`display_name` | Optional nonempty text, ≤4096, no NUL | Defaults to hostname; sets the visible guest job name, for example `DNS guest`, without renaming its ID, hostname or protected environment. The site owns this cosmetic role choice. |
 | <a id="guest-resources"></a>`resources` | Optional partial object | Inherits template values, overridden by individual guest fields; [resource records](#resource-fields) |
 | <a id="guest-startup"></a>`startup` | Optional partial object | Inherits template values, overridden by individual guest fields; [startup records](#startup-fields) |
 | <a id="guest-security"></a>`security` | Optional partial object | Inherits template values, overridden by individual guest fields; [security records](#security-fields) |

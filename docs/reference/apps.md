@@ -116,7 +116,7 @@ resources:
       pids_limit: 128
 ```
 
-**Invalid variation:** change `interfaces.local` to `{scope: app-network, network: default}`. Although that is a valid scope for some profiles, this profile accepts only guest loopback for the role, so reference resolution rejects it. Keep `lifecycle: fresh` for later ordinary deployments; do not toggle it after installation. See [First installation and later deployments](lifecycle.md).
+**Invalid variation:** change `interfaces.local_interface` to `{scope: app-network, network: default}`. Although that is a valid scope for some profiles, this profile accepts only guest loopback for the role, so reference resolution rejects it. Keep `lifecycle: fresh` for later ordinary deployments; do not toggle it after installation. See [First installation and later deployments](lifecycle.md).
 
 ## Verification and navigation
 

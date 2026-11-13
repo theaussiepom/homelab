@@ -41,8 +41,9 @@ def test_optional_smtp_is_required_only_when_selected_and_never_rotated_or_trans
 def test_finite_action_slots_are_available_only_to_final_deploy_as_direct_scalars():
     steps=workflow()['jobs']['run']['steps'];deploy=steps[-1]
     declared={inputs.PREFIX+slot.upper()for roles in inputs.SLOTS.values()for slot in roles.values()}
-    assert set(deploy['env'])=={'GUEST','PHASE',*declared}
-    for step in steps[:-1]:assert not(set(step.get('env',{}))&declared)
+    assert set(deploy['env'])=={'GUEST','PHASE','PBS_API_TOKEN',*declared}
+    for step in steps[:-1]:assert not(set(step.get('env',{}))&{'PBS_API_TOKEN',*declared})
+    assert deploy['env']['PBS_API_TOKEN']=="${{ inputs.phase == 'pbs-agent' && secrets.PBS_API_TOKEN || '' }}"
     assert 'toJSON'not in str(deploy)and'fromJSON(secrets'not in str(deploy)
     for key in declared:
         assert deploy['env'][key]=='${{ secrets.'+key.removeprefix(inputs.PREFIX).lower()+' }}'

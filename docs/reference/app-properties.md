@@ -46,7 +46,7 @@ The optional `client_access` list preserves order, defaults to [] and accepts at
 | acme.resolvers | 1–3 endpoint references that resolve to unique IPv4 DNS sockets on port 53 using TCP/UDP |
 | acme.propagation_timeout_seconds | Optional integer 120–2100; omission preserves the adapter default |
 
-The current adapter requires the selected cloudflare_dns_token and proxmox_token roles. It obtains provider trust and the API endpoint from its context, and route-specific CAs from transport policies. You cannot supply those CAs through arbitrary runtime files.
+The current adapter requires the selected `cloudflare_dns_token` and `proxmox_token` roles; a route selecting `cloudflare-source` middleware also requires `cloudflare_origin_token`. Use the canonical [private-role inventory](identity-and-secrets.md#adapter-private-roles) and [Cloudflare boundary requirements](policies.md#cloudflare-source-boundary) when selecting those inputs. It obtains provider trust and the API endpoint from its context, and route-specific CAs from transport policies. You cannot supply those CAs through arbitrary runtime files.
 
 ## Zigbee2MQTT
 
@@ -86,7 +86,13 @@ CloudBeaver accepts at most 16 unmanaged and 8 managed connections, with a total
 
 The JDBC object contains exactly version, sha256 and image_filename. The version must be 3.5.N, where N is 11–999. SHA256 must contain 64 lowercase hexadecimal characters. The filename must match that version's JAR or the fixed compatibility filename mariadb-java-client-3.5.10.jar. The compiler derives the official Maven URL. The library controls this software selection; app properties cannot override it. The retired pgAdmin image is not an active property.
 
-CloudBeaver requires an HTTPS origin it owns and a selected OIDC configuration. Deployment checks protect its recovery administrator, workspace and private files, SQL accounts, HOLDs and private roles. Its generated health checks also require an explicit `public` HTTPS connection to IPv4 ingress port 443. Music Assistant has the same public-route requirement. Its HTTPS probe binds the connection's resolved source address, which must belong to a declared app interface role; this can differ from its local web and player addresses. Local web and stream probes still check their own listeners. See [Connections](connections.md).
+CloudBeaver requires an HTTPS origin it owns and a selected OIDC configuration. Deployment checks protect its recovery administrator, workspace and private files, SQL accounts, HOLDs and private roles. Its generated health checks also require an explicit `public` HTTPS connection to IPv4 ingress port 443. See [Connections](connections.md) for the shared connection fields.
+
+## Music Assistant
+
+Music Assistant requires an explicit `public` HTTPS connection to IPv4 ingress port 443 and an HTTPS origin it owns. Its HTTPS probe binds the connection’s resolved source address, which must belong to a declared app interface role; this can differ from the local web and player addresses. Local web and stream probes still check their own listeners. The separate `health.source_interface` restriction still selects the web role for the local health check; it does not override the public connection’s source. See [connection source selection](connections.md#connection-source-interface).
+
+## Optional listener selections
 
 Pi-hole profiles can opt into a separate `web_interface` role with an interface-bound host `web_listener` on TCP 80 and `web_endpoint` through that role. The runtime derives `FTLCONF_webserver_port` from the resolved address and verifies the selected socket, rejecting wildcard or other-address web binds. DNS listeners, upstreams, data, image and authentication remain unchanged. The ordinary profile without this role retains its existing environment and behavior. The [Pi-hole FTL reference](https://docs.pi-hole.net/ftldns/configfile/#port) documents the address-and-port setting; a declared endpoint alone does not rebind FTL.
 

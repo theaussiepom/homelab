@@ -34,7 +34,7 @@ assert cfg['guest']['volumes']['backup-stage']['backup'] is False
 assert backup['job']['destination']['datastore'] == 'recovery'
 assert backup['job']['destination']['backup_id'] == 'guest-610'
 assert 'pbs-agent' in cfg['deployment']['phases']
-print('Enrolled: resolver; datastore: recovery; staging: excluded; PBS agent: selected')
+print('Enrolled: resolver; datastore: recovery; staging: excluded; Backup step: selected')
 PYCODE
 ```
 
@@ -69,7 +69,7 @@ packet = json.load(open(sys.argv[1]))
 cfg = json.loads(packet['files']['site.json'])
 assert 'backup' not in cfg['app']
 assert 'pbs-agent' not in cfg['deployment']['phases']
-print('Unenrolled: resolver; PBS agent: absent')
+print('Unenrolled: resolver; Backup step: absent')
 PY_CHANGE_CHECK
 ```
 
@@ -109,4 +109,4 @@ print('resolver: overridden; replica: inherited; one group and timeout')
 PY_LIMITS
 ```
 
-The last line must match the printed text above. To test refusal, edit a disposable copy: adding `timeout_seconds` under a guest's `backup.limits` fails with `component.fields`. Setting `guests.resolver.backup.limits.max_bytes` to `268435457` exceeds one quarter of its 1 GiB staging volume and fails with `component.backup-staging-volume`. Exactly `268435456` is accepted. A changed effective limit in a real installation needs an enabled deployment and [whole-group activation](../../backup/configure.md#size-each-client-and-review-later-changes); compilation performs neither.
+The last line must match the printed text above. To test refusal, edit a disposable copy: adding `timeout_seconds` under a guest's `backup.limits` fails with `component.fields`. Setting `guests.resolver.backup.limits.max_bytes` to `268435457` exceeds one quarter of its 1 GiB staging volume and fails with `component.backup-staging-volume`. Exactly `268435456` is accepted. A changed effective limit in a real installation needs an enabled deployment and [its own successful Backup step](../../backup/configure.md#size-each-client-and-review-later-changes); compilation performs neither.

@@ -1,6 +1,7 @@
 """Prepare only one admitted app's immutable payload, never a peer's secrets."""
 import copy
 import json
+import os
 from pathlib import Path
 import re
 
@@ -239,11 +240,14 @@ def prepare_agent(cfg,environment=None):
 
 
 def prepare_backup(cfg, environment=None):
-    """Seal coverage only; the later Backup job owns private client activation."""
+    """Enroll this guest under its ordinary locks and seal its own worker inputs."""
     import backup_agent
     backup_agent.configuration(cfg)
     component_input_secrets.selected('agent', {}, environment)
     parent = component_inputs.app_directory(cfg, create=True)
     component_payload.existing(parent, cfg['deployment']['input_identity'], 'backup-agent')
+    if 'job' in cfg['app']['backup']:
+        import backup_setup
+        backup_setup.enroll(cfg, os.environ if environment is None else environment)
     return component_payload.prepare(parent, cfg['deployment']['input_identity'], 'backup-agent',
-        {'application.json': encoded(cfg['app']['backup'])})
+        {'application.json': encoded(cfg['app']['backup']), **backup_agent.inputs(cfg['app']['backup'])})

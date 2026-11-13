@@ -26,4 +26,6 @@ export ANSIBLE_CONFIG=/src/proxmox/applications/ansible/ansible.cfg
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-preparation.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-reconcile.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-agent.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-backup.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/backup-controller.yml
 ansible-playbook -i localhost, --syntax-check /src/proxmox/bootstrap/ansible/host-device.yml

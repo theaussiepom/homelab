@@ -181,7 +181,9 @@ class BackupJobTests(unittest.TestCase):
             selected = copy.deepcopy(value)
             selected['clients']['two']['limits'] = override
             with self.subTest(override=override):
-                self.assertEqual(subject.bind(resolver, selected), baseline)
+                current=subject.bind(resolver, selected)
+                self.assertEqual({k:v for k,v in current.items() if k != 'coverage'}, {k:v for k,v in baseline.items() if k != 'coverage'})
+                self.assertNotEqual(current['coverage'], baseline['coverage'])
                 self.assertEqual(resolver.guests['one']['backup']['job'], old_jobs['one'])
                 expected = {**old_jobs['two'], 'limits': {**value['limits'], **override}}
                 self.assertEqual(resolver.guests['two']['backup']['job'], expected)

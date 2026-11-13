@@ -16,10 +16,12 @@ Every form requires `type`. File and generated sources cannot include workflow_s
 
 The complete [relationship example](../examples/relationships/README.md) shows a generated account: it connects `apps.browser` to `apps.broker` through `accounts.client` and `secret_sources.browser_password`. The existing-credential and OpenID Connect (OIDC) examples below demonstrate their respective validators. They do not supply every prerequisite needed to install an app.
 
+<a id="adapter-private-roles"></a>
+
 | Adapter | Finite private roles |
 | --- | --- |
 | authentik | secret_key, postgresql_password, smtp_password |
-| traefik | cloudflare_dns_token, proxmox_token |
+| traefik | cloudflare_dns_token, proxmox_token; conditional `cloudflare_origin_token` when a selected route uses `cloudflare-source` middleware ([requirements](policies.md#cloudflare-source-boundary)) |
 | zabbix | database_password passes structural validation without root monitoring, but ordinary preparation requires root monitoring to manage the credential instead, with no selected role |
 | node_red | api_token |
 | bitwarden | runtime_environment |

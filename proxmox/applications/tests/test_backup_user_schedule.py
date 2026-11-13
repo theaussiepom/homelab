@@ -9,11 +9,9 @@ import sys
 import unittest
 from unittest.mock import Mock, patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import backup_activation
 import backup_controller as subject
 import backup_source
 from test_backup_group import scope
-import test_backup_activation as activation_fixture
 
 
 class ScheduleTests(unittest.TestCase):
@@ -92,36 +90,6 @@ class ScheduleTests(unittest.TestCase):
             with patch.object(Path,'lstat',return_value=info),self.assertRaises(ValueError):backup_source.metadata(path,False,1000)
 
 
-class ActivationPlatformTests(unittest.TestCase):
-    """A failed platform gate must precede PBS, enrollment and guest mutations."""
-    setUp = activation_fixture.ActivationTests.setUp
-    activate = activation_fixture.ActivationTests.activate
-
-    def test_manager_refusal_precedes_admission_and_every_remote_side_effect(self):
-        admission=Mock()
-        with patch('backup_user.verify',side_effect=ValueError('unhardened manager')):
-            with self.assertRaisesRegex(ValueError,'unhardened manager'):self.activate(admission)
-        admission.assert_not_called();self.api.datastore.assert_not_called()
-        self.provision.assert_not_called();self.deploy.assert_not_called()
-        self.assertFalse((self.root/'backup-activation').exists())
-
-    def test_repeat_and_before_capture_verify_actual_installed_schedule(self):
-        with patch.object(subject,'installation') as installed:
-            self.activate();self.assertEqual(installed.call_count,1)
-            self.activate();self.assertEqual(installed.call_count,2)
-            installed.side_effect=ValueError('timer changed')
-            with self.assertRaisesRegex(ValueError,'timer changed'):backup_activation.verify(self.schedule,self.admitted)
-
-    def test_failed_activation_is_never_adopted_even_with_a_ready_user_manager(self):
-        self.deploy.side_effect=ValueError('old failure')
-        with self.assertRaisesRegex(ValueError,'old failure'):self.activate()
-        root,_=backup_activation.location(self.schedule,self.admitted)
-        before={p.name:(p.stat().st_ino,p.read_bytes()) for p in root.iterdir() if p.is_file()}
-        self.deploy.side_effect=None
-        with self.assertRaisesRegex(ValueError,'no automatic retry'):self.activate()
-        self.assertEqual(before,{p.name:(p.stat().st_ino,p.read_bytes()) for p in root.iterdir() if p.is_file()})
-        self.assertEqual(self.deploy.call_count,1)
-
 class InstallerTests(unittest.TestCase):
     """Evaluate the actual controller task assertions without executing any module."""
     @classmethod
@@ -134,7 +102,7 @@ class InstallerTests(unittest.TestCase):
     def setUp(self):
         import yaml
         root=Path(__file__).resolve().parents[1]
-        self.block=yaml.safe_load((root/'ansible/tasks/backup-job.yml').read_text())[-1]
+        self.block=yaml.safe_load((root/'ansible/tasks/backup-controller.yml').read_text())[-1]
         self.tasks={row['name']:row for row in self.block['block']}
         self.spec={'name':'homelab-backup-example','unit_directory':'/home/runner/.config/systemd/user','user':1000}
 

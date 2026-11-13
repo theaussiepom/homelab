@@ -249,7 +249,7 @@ class RuntimeGuardTests(unittest.TestCase):
             'capabilities':['linux'],'input_directory':str(inputs),'runtime_file':str(inputs/'component-runtime.json')}}
         write_new(self.tmp/'ca',b'public synthetic certificate')
         with patch.object(backup_agent,'configuration',return_value={'inventory':json.dumps(value)}), \
-             patch.object(component_inputs,'app_directory',return_value=apps):
+             patch.object(component_inputs,'app_directory',return_value=apps), patch('backup_setup.enroll'):
             payload=component_prepare.prepare_backup(cfg,{})
         source=self.tmp/'source'/'applications';source.mkdir(parents=True);common=source.parent/'common';common.mkdir()
         (source/'public.py').write_text('PUBLIC = True');(common/'asset').write_text('public data')
@@ -257,19 +257,15 @@ class RuntimeGuardTests(unittest.TestCase):
              patch.object(backup_agent,'configuration',return_value={'inventory':json.dumps(value)}), \
              patch.object(ansible,'SOURCE',source),patch.object(deployment_inputs,'source_hash',return_value='b'*64), \
              patch('backup_user.account',return_value={'uid':1000,'home':'/home/runner','environment':{}}):
-            ordinary=ansible.variables(cfg,'pbs-agent',payload=payload)
-            self.assertNotIn('credentials',ordinary['backup_agent'])
-            self.assertNotIn('backup_controller',ordinary)
-            import component_payload
-            activation=self.tmp/'activation';activation.mkdir(mode=0o700)
-            payload=component_payload.prepare(activation,'a'*64,'backup-agent',
-                {'application.json':encoded(value),**backup_agent.inputs(value)})
-            worker_only=ansible.variables(cfg,'pbs-agent',payload=payload,activate_backup=True)
-            self.assertNotIn('backup_controller',worker_only)
-            self.assertIn('credentials',worker_only['backup_agent'])
-            result=ansible.variables(cfg,'pbs-agent',payload=payload,activate_backup=True,backup_schedule=True)
-        self.assertEqual(len(result['backup_controller_files']),2)
-        self.assertEqual(result['backup_controller']['configuration'],group)
+            result=ansible.variables(cfg,'pbs-agent',payload=payload)
+            self.assertNotIn('backup_controller',result)
+            self.assertIn('credentials',result['backup_agent'])
+        import backup_setup
+        with patch.object(backup_setup, 'SOURCE', source), patch.object(backup_setup, 'source_hash', return_value='b'*64), \
+             patch('backup_user.account',return_value={'uid':1000,'home':'/home/runner','environment':{}}):
+            controller_parameters = backup_setup.parameters(group)
+        self.assertEqual(len(controller_parameters['backup_controller_files']),2)
+        self.assertEqual(controller_parameters['backup_controller']['configuration'],group)
         self.assertEqual({row['name'] for row in result['backup_agent']['credentials']},
             {'pbs-password','pbs-key','pbs-key-password','influx-app','pbs-recovery-public.pem'})
         self.assertFalse(result['app']['start_services'])

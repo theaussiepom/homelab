@@ -82,9 +82,13 @@ class ComponentJobExecutionTests(unittest.TestCase):
         result = {key: value for key, value in os.environ.items()
                   if key not in self.known and not key.startswith(PREFIX)}
         for name, expression in fields.items():
-            match = re.fullmatch(r'\$\{\{ inputs\.([A-Za-z_][A-Za-z_0-9]*) \}\}', expression)
-            self.assertIsNotNone(match, expression)
-            result[name] = selected[match[1]]
+            if name == 'PBS_API_TOKEN':
+                self.assertEqual(expression, "${{ inputs.phase == 'pbs-agent' && inputs.PBS_API_TOKEN || '' }}")
+                result[name] = selected['PBS_API_TOKEN'] if selected['phase'] == 'pbs-agent' else ''
+            else:
+                match = re.fullmatch(r'\$\{\{ inputs\.([A-Za-z_][A-Za-z_0-9]*) \}\}', expression)
+                self.assertIsNotNone(match, expression)
+                result[name] = selected[match[1]]
         return result
 
     def exercise(self, guests, fail=None, guard='CONFIGURING'):
@@ -133,6 +137,7 @@ class ComponentJobExecutionTests(unittest.TestCase):
         self.assertEqual([(row['guest'], row['phase'], row['stage']) for row in records], expected)
         self.assertEqual(len(records), 18)
         self.assertEqual(len({row['packet'] for row in records}), 6)
+
         for index in range(0, len(records), 3):
             compile_row, credential_row, deploy_row = records[index:index + 3]
             guest, phase = compile_row['guest'], compile_row['phase']
@@ -149,6 +154,20 @@ class ComponentJobExecutionTests(unittest.TestCase):
             self.assertEqual(deploy_row['secrets'], selected)
             self.assertEqual(deploy_row['present_slots'], sorted(selected))
         self.assertEqual(len(list(folder.iterdir())), 6)
+
+    def test_management_token_reaches_only_the_guest_backup_deploy_process(self):
+        metadata=self.graph['guests']['store']
+        metadata['workflow_secrets'].append('PBS_API_TOKEN')
+        metadata['phases'].append({'id':'pbs-agent','name':'Backup','application':None,
+            'inputs':{'PBS_API_TOKEN':{'environment':'PBS_API_TOKEN','workflow_secret':'PBS_API_TOKEN'}}})
+        with patch.object(workflows.compiler,'resolve_plan',return_value=object()), \
+             patch.object(workflows.component_workflows,'model',return_value=self.graph):
+            self.models=workflows.models(self.stack,site_source=self.root/'site.yaml')
+        self.known.add('PBS_API_TOKEN')
+        status,records,_,_=self.exercise(['store'])
+        self.assertEqual(status,0)
+        self.assertEqual([(row['phase'],row['stage']) for row in records if 'PBS_API_TOKEN' in row['secrets']],
+                         [('pbs-agent','deploy')])
 
     def test_each_phase_compile_credential_or_deploy_failure_stops_all_later_commands(self):
         stages = ('compile', 'credentials', 'deploy')

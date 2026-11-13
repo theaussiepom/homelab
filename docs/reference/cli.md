@@ -21,27 +21,17 @@ The Python APIs are `compile.resolve_plan(stack_root, site_source, disabled=None
 
 ## Generate: blueprints/workflows.py
 
-This command requires `--stack PATH` and `--site FILE`. It also accepts `--disabled JSON` (default []) and `--check`. With `--check`, it compares existing files with the expected generated files and fails if they differ. Otherwise, it synchronizes three library workflows and selected composite actions from the current framework recipe. It generates files without executing a workflow. Supply the input filename explicitly; this command has no site-root option.
+This command requires `--stack PATH` and `--site FILE`. It also accepts `--disabled JSON` (default []) and `--check`. With `--check`, it compares existing files with the expected generated files and fails if they differ. Otherwise, it synchronizes the library deployment, guest and phase workflows and selected composite actions from the current framework recipe; operational backup also generates `backup.yml`. It generates files without executing a workflow. Supply the input filename explicitly; this command has no site-root option.
 
 ## Consumer wrapper: blueprints/private_workflows.py
 
 This command requires `--stack PATH` and `--site PATH`, and optionally accepts `--check`. It generates the consumer workflow, or checks that the existing workflow matches, using the selected published library and framework workflow references and the site configuration. Checks preserve the existing CI and security policy fields. The wrapper uses the existing parser and deployment engine.
 
-If the consumer includes the supported local `.github/workflows/pbs-firewall.yml`,
-the generated Deploy calls it as `PBS` after selection, alongside the guest
-jobs. That workflow must retain pure PR validation and declare only the named
-required `PBS_FIREWALL_SSH_KEY`, with its native job using `homelab-bootstrap`.
-It cannot retain a standalone push trigger or a nested deployment queue.
-Without this optional file, generation is unchanged; unsupported present files
-are refused. The caller forwards only that named secret, never inherited secrets.
+The generated private Deploy runs source-only **Validate config** and **Validate deployment** jobs in parallel. Its early **Configure backups** job waits for both to succeed and preserves failure/cancellation refusals. That job is present when operational backup or the supported local `.github/workflows/pbs-firewall.yml` is selected. Enrolled guests wait for it; other guest paths retain a direct config-validation dependency as well as deployment validation. Job identifiers, protected environments and guest dependency order remain unchanged. For the operator-facing phase sequence and readiness checks, use [Review the generated change](../backup/configure.md#review-the-generated-change).
 
-The selected PBS server participates in every main Deploy, not only policy-path
-pushes. An absent real binding skips target contact; successful validation still
-allows ordinary activation. A selected PBS failure or cancellation blocks final
-Backup, which also keeps all existing guest dependencies. This remains enrollment
-and user-schedule setup, not PBS server installation or a manual backup start.
-The outer Deploy owns the shared queue once. Guest graphs, phase operations and
-their credential subsets are unchanged; queueing does not create a DNS/PBS edge.
+The optional PBS workflow retains its pure PR validation and fixed named `PBS_FIREWALL_SSH_KEY` contract. Generation combines its pure check and selected native policy steps into the early Configure backups job, retaining its protected `homelab-bootstrap` Environment, 15-minute bound and target-selection condition. An absent real binding skips host contact while still permitting schedule maintenance. Source checkouts and dependency installation are supplied by the shared immutable job setup; any framework checkout quoted in the local workflow must select the same framework revision. PBS commands must use the selected job tools, not absolute shared-environment executables. Step identifiers are scoped to keep their output references distinct. Unsupported contexts, source drift, permissive failure flags and unsafe present files are refused.
+
+For the input consumers and Environment selections, use the [credential-placement matrix](../backup/access.md#what-goes-where). The outer Deploy retains its one shared queue. Setup neither installs PBS nor starts a backup; the [setup task](../backup/configure.md) explains its expected result and limits.
 
 ## Coverage: tools/measure_coverage.py
 

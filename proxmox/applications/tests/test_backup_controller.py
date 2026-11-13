@@ -36,7 +36,7 @@ for stage,action in [('prepared','pause'),('paused','capture'),('captured','resu
 
 class ControllerTests(unittest.TestCase):
     def setUp(self):
-        activation=patch('backup_activation.verify');activation.start();self.addCleanup(activation.stop)
+        activation=patch('backup_readiness.verify');activation.start();self.addCleanup(activation.stop)
         self.mask = os.umask(0o077); self.addCleanup(os.umask, self.mask)
         temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup); self.tmp = Path(temp.name).resolve()
         self.state = self.tmp/'state'; self.state.mkdir(mode=0o700)

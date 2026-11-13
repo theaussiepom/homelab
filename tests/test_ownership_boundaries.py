@@ -244,3 +244,95 @@ def test_yaml_profiles_share_the_source_reader_and_keep_boundary_guards(tmp_path
     path.write_text(yaml.safe_dump(profile))
     write(root,'apps/unbound.json','{}')
     with pytest.raises(ValueError):component_scan(root,spec,site)
+
+
+def pbs_caller(root, change=None):
+    source = Path(__file__).with_name('public-pbs-firewall-caller.yml').read_text()
+    if change is not None:
+        source = change(source)
+    return write(root, '.github/workflows/pbs-firewall.yml', source)
+
+
+def test_supported_protected_pbs_framework_call_passes_without_target_contact(tmp_path):
+    root = repo(tmp_path)
+    pbs_caller(root)
+    report = b.check(root, 'consumer')
+    assert report['status'] == 'passed' and report['findings'] == []
+    assert report['targets_contacted'] is False and report['runtime_state_read'] is False
+    # The exact current library/private caller, not a basename or command-name exemption.
+    source = (root/'.github/workflows/pbs-firewall.yml').read_text()
+    assert 'ansible-playbook \\\n' in source
+    assert b.pbs_framework_lines(root, '.github/workflows/pbs-firewall.yml', source) == {125}
+
+
+@pytest.mark.parametrize('before,after', [
+    ('framework-source/proxmox/bootstrap/ansible/pbs-firewall.yml', 'arbitrary.yml'),
+    ('--extra-vars "@$PBS_WORK/variables.json"', '--extra-vars "@$PBS_WORK/variables.json" --tags arbitrary'),
+    ('--private-key "$PBS_WORK/ssh-key"', '--private-key /another/key'),
+    ('-i "$PBS_WORK/inventory.json"', '-i "$PBS_WORK/inventory.json" -i arbitrary.json'),
+    ('--ssh-common-args "$PBS_SSH_ARGS"', '--ssh-common-args "-o StrictHostKeyChecking=no"'),
+    ('-i "$PBS_WORK/inventory.json"', '-i $PBS_WORK/inventory.json'),
+    ('--extra-vars "@$PBS_WORK/variables.json"', '--extra-vars "@$PBS_WORK/variables.json"; docker ps'),
+    ('--extra-vars "@$PBS_WORK/variables.json"', '--extra-vars "@$PBS_WORK/$(id).json"'),
+    ('          ansible-playbook \\', '          sudo ansible-playbook \\'),
+])
+def test_pbs_caller_rejects_other_playbooks_inputs_options_and_shell_commands(tmp_path, before, after):
+    root = repo(tmp_path)
+    pbs_caller(root, lambda text:text.replace(before, after))
+    findings = b.check(root, 'consumer')['findings']
+    assert any(row['code'] == 'consumer-target-workflow' and row['line'] == 125 for row in findings)
+
+
+@pytest.mark.parametrize('before,after', [
+    ('PBS_WORK: ${{ steps.inputs.outputs.work }}', 'PBS_WORK: /another/work'),
+    ('PBS_SSH_ARGS: ${{ steps.inputs.outputs.ssh_args }}', 'PBS_SSH_ARGS: arbitrary'),
+    ('PBS_FIREWALL_SSH_KEY: ${{ secrets.PBS_FIREWALL_SSH_KEY }}', 'PBS_FIREWALL_SSH_KEY: ${{ secrets.OTHER_KEY }}'),
+])
+def test_pbs_caller_preserves_the_three_declared_input_bindings(tmp_path, before, after):
+    root = repo(tmp_path)
+    pbs_caller(root, lambda text:text.replace(before, after))
+    assert b.check(root, 'consumer')['findings'] == [
+        {'path':'.github/workflows/pbs-firewall.yml','line':125,'code':'consumer-target-workflow'}]
+
+
+def test_pbs_allowance_does_not_admit_other_jobs_files_or_adjacent_target_commands(tmp_path):
+    root = repo(tmp_path)
+    path = pbs_caller(root)
+    value = b.authored_config.parse(path.read_bytes(), '.yml')
+    native = value['jobs']['firewall']['steps']
+    call = next(step for step in native if step.get('name') == 'Deploy only the declared PBS host policy')
+    value['jobs']['validate']['steps'].append({**call, 'env':{
+        key:item for key,item in call['env'].items() if key != 'PBS_FIREWALL_SSH_KEY'}})
+    native.append({'run':'docker ps'})
+    # Quoted/folded runs do not borrow the literal block's source-line allowance.
+    native.append({'env':call['env'], 'run':'arbitrary'})
+    native.append({'env':call['env'], 'run':'arbitrary\ntrue\n'})
+    class LiteralDumper(yaml.SafeDumper):
+        def ignore_aliases(self, data):
+            return True
+    LiteralDumper.add_representer(str, lambda dumper, text:dumper.represent_scalar(
+        'tag:yaml.org,2002:str', text, style='|' if '\n' in text else None))
+    path.write_text(yaml.dump(value, Dumper=LiteralDumper, sort_keys=False))
+    report = b.check(root, 'consumer')
+    assert report['status'] == 'failed'
+    assert len(report['findings']) == 2  # Hosted playbook call and adjacent Docker call.
+    assert all(row['code'] == 'consumer-target-workflow' for row in report['findings'])
+    path = pbs_caller(root)
+    text = path.read_text()
+    other = write(root, '.github/workflows/other.yml', text)
+    assert b.check(root, 'consumer')['findings'] == [
+        {'path':'.github/workflows/other.yml','line':125,'code':'consumer-target-workflow'}]
+    other.unlink()
+
+
+@pytest.mark.parametrize('before,after', [
+    ('github.event.repository.private == true', 'github.event.repository.private == false'),
+    ('environment: homelab-bootstrap', 'environment: arbitrary'),
+    ('timeout-minutes: 15', 'timeout-minutes: 150'),
+    ('permissions:\n  contents: read', 'permissions:\n  contents: write'),
+])
+def test_pbs_caller_requires_the_existing_protected_workflow_contract(tmp_path, before, after):
+    root = repo(tmp_path)
+    pbs_caller(root, lambda text:text.replace(before, after))
+    with pytest.raises(ValueError):
+        b.check(root, 'consumer')

@@ -7,6 +7,7 @@ Use [the stack contract](stack-contract.md) for the current deployment process. 
 - [Safe contributions](contributing-safely.md)
 - [Attended ISO builder](../proxmox/iso/README.md)
 - [Database backup and recovery](../services/database-backup/README.md)
+- [Network recovery](../services/network-recovery/README.md): its scope, supported recovery procedure and installation prerequisites
 
 The current application entrypoint is `proxmox/applications/deploy.py`. Host/ISO bootstrap and recovery are separate current subsystems. Old application deployment and migration requests are available through Git history only; they are not alternate current entrypoints.
 

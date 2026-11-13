@@ -75,7 +75,7 @@ def validation_workflow(site):
                      'Materialize only closed validation job inputs')
     # A native job avoids GitHub's automatic caller/callee name separator.
     # Preserve the original Ubuntu default shell instead of inheriting Deploy's.
-    job.update(name='Validate')
+    job.update(name='Validate config')
     job.setdefault('defaults', {'run': {'shell': 'bash -e {0}'}})
     return job
 
@@ -126,7 +126,57 @@ def pbs_workflow(site, labels):
                      and not re.search(r'(?<![\w.])inputs' + context_end,
                          re.sub(r'\\(?:[nrtf]|u000b)', ' ', json.dumps(jobs, ensure_ascii=False)), re.IGNORECASE),
                      'Preserve selected protected PBS execution without a nested queue or unbound inputs')
-    return True
+    return value
+
+
+def pbs_steps(value, framework):
+    """Combine the existing pure check and native policy stages under shared setup."""
+    validation, native = value['jobs']['validate'], value['jobs']['firewall']
+    compiler.require(sum(step.get('id') == 'selection' for step in validation['steps']) == 1,
+                     'Keep the explicit PBS policy selection step')
+    result = []
+    for label, job in (('check', validation), ('host', native)):
+        ids = [step['id'] for step in job['steps'] if 'id' in step]
+        compiler.require(all(isinstance(item, str) and re.fullmatch('[A-Za-z_][A-Za-z0-9_-]*', item) for item in ids)
+                         and len(ids) == len(set(ids)), 'Keep unique literal PBS step identities')
+        identities = {step['id']: 'pbs_' + label + '_' + step['id']
+                      for step in job['steps'] if 'id' in step}
+        def bind_steps(item):
+            if isinstance(item, dict): return {key: bind_steps(row) for key, row in item.items()}
+            compiler.require(not isinstance(item, list), 'Keep scalar PBS step inputs')
+            if isinstance(item, str):
+                for before, after in identities.items():
+                    item = re.sub(r'\bsteps\.' + re.escape(before) + r'(?=\.)', 'steps.' + after, item)
+            return item
+        for original in job['steps']:
+            step = copy.deepcopy(original)
+            if 'uses' in step and step['uses'].startswith('actions/checkout@'):
+                options = step.get('with', {})
+                compiler.require(set(step) == {'uses', 'with'} and options.get('persist-credentials') is False,
+                                 'Preserve read-only source checkout before sharing Backup setup')
+                if options.get('path') == 'framework-source':
+                    compiler.require(options.get('repository') == framework['repository']
+                                     and options.get('ref') == framework['revision'],
+                                     'Select the same reviewed framework for PBS policy and Backup CD')
+                else:
+                    compiler.require(set(options) <= {'persist-credentials', 'ref'}
+                                     and options.get('ref', '${{ github.sha }}') == '${{ github.sha }}',
+                                     'Keep the existing authored PBS source checkout')
+                continue  # The shared immutable Setup already performs these checkouts.
+            if step.get('run') == 'python3 -m pip install --require-hashes -r framework-source/requirements.lock.txt':
+                compiler.require(set(step) <= {'name', 'run'}, 'Keep finite source tooling installation')
+                continue  # Replaced by the existing job-owned, hash-locked Setup.
+            compiler.require('/opt/homelab-tools/' not in json.dumps(step)
+                             and not step.get('continue-on-error')
+                             and not re.search(r'\bsteps\s*\[', json.dumps(step)),
+                             'PBS policy must use selected job tools and preserve failures')
+            step = bind_steps(step)
+            if 'id' in step: step['id'] = identities[original['id']]
+            if label == 'host':
+                guard = "steps.pbs_check_selection.outputs.selected == 'true'"
+                step['if'] = '(' + step['if'] + ') && ' + guard if 'if' in step else 'success() && ' + guard
+            result.append(step)
+    return result
 
 
 def model(stack, site):
@@ -141,8 +191,9 @@ def model(stack, site):
     disabled = env.get('HOMELAB_DISABLED', '[]')
     disabled_rows = compiler.workflow_disabled((site / '.github/workflows/deploy.yml').read_text())
     source = workflows.models(stack, site_source=compiler.site_path(site), disabled=disabled_rows)
-    compiler.require(not pbs or '_pbs' not in source['deploy.yml']['jobs'],
-                     'Reserve _pbs for the local PBS server job')
+    compiler.require(not pbs or all(key in ('selection', '_backup') or re.fullmatch('[a-z][a-z0-9_-]*', key)
+                                   for key in source['deploy.yml']['jobs']),
+                     'Keep only public guest jobs and the early Configure backups job')
     repository = 'github.repository == ' + repr(env['HOMELAB_REPOSITORY'])
     condition = repository + ' && ' + workflows.PRIVATE_MAIN
     result = {'name': 'Deploy', 'on': {'push': {'branches': ['main']}},
@@ -151,12 +202,8 @@ def model(stack, site):
               'defaults': {'run': {'shell': 'bash'}}, 'env': copy.deepcopy(env),
               'jobs': {'validate': validation}}
     selector = bind(copy.deepcopy(source['deploy.yml']['jobs']['selection']), disabled)
-    selector.update(needs=['validate'], **{'if': condition})
+    selector.update(**{'if': condition})
     result['jobs']['selection'] = selector
-    if pbs:
-        result['jobs']['_pbs'] = {'name': 'PBS', 'needs': ['selection'], 'if': condition,
-                                'uses': './' + PBS_WORKFLOW,
-                                'secrets': {PBS_SECRET: '${{ secrets.' + PBS_SECRET + ' }}'}}
     for guest in source['deploy.yml']['jobs']:
         if guest == 'selection':
             continue
@@ -166,6 +213,11 @@ def model(stack, site):
         job.update(name=caller['name'], needs=copy.deepcopy(caller['needs']),
                    environment='backup' if guest == '_backup' else env['HOMELAB_ENVIRONMENT_PREFIX'] + '-' + guest,
                    **{'runs-on': labels, 'if': repository + ' && ' + caller['if'].replace("inputs.disabled || '[]'", repr(disabled or '[]'))})
+        # Enrolled guests inherit config validation through their setup barrier.
+        # Other guests still need it while the source checks run independently.
+        if guest == '_backup' or '_backup' not in job['needs']:
+            job['needs'].insert(0, 'validate')
+            job['if'] += " && needs.validate.result == 'success'"
         text = json.dumps(job)
         compiler.require(not WORKFLOW_INPUTS.search(text) and 'secrets: inherit' not in text,
                          'Materialize only closed guest workflow inputs')
@@ -173,10 +225,22 @@ def model(stack, site):
         compiler.require(names <= source[filename]['on']['workflow_call']['secrets'].keys(),
                          'Preserve each guest secret subset')
         result['jobs'][guest] = job
-    if pbs and '_backup' in result['jobs']:
+    if pbs:
+        framework = compiler.workflow_selection(stack/'.github/workflows/phase.yml', 'guest-phase.yml')
+        steps = pbs_steps(pbs, framework)
+        if '_backup' not in result['jobs']:
+            result['jobs']['_backup'] = {'name': 'Configure backups', 'needs': ['validate', 'selection'],
+                'if': condition + " && !failure() && !cancelled() && needs.validate.result == 'success' && needs.selection.result == 'success'",
+                'runs-on': labels, 'environment': pbs['jobs']['firewall']['environment'],
+                'timeout-minutes': pbs['jobs']['firewall']['timeout-minutes'],
+                'steps': [{'name': 'Setup', 'uses': framework['repository'] + '/.github/actions/guest-setup@' + framework['revision']}]}
         backup = result['jobs']['_backup']
-        backup['needs'].append('_pbs')
-        backup['if'] = '(' + backup['if'] + ") && needs._pbs.result == 'success'"
+        compiler.require(backup['name'] == 'Configure backups' and backup['needs'] == ['validate', 'selection']
+                         and backup['steps'][0].get('name') == 'Setup',
+                         'Keep one early Configure backups job, never a final guest coordinator')
+        backup['environment'] = pbs['jobs']['firewall']['environment']
+        backup['timeout-minutes'] = pbs['jobs']['firewall']['timeout-minutes']
+        backup['steps'][1:1] = steps
     return result
 
 

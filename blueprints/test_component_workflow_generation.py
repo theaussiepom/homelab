@@ -53,14 +53,17 @@ class WorkflowIntegrationTests(unittest.TestCase):
         return result
 
     def test_backup_management_is_separate_and_receives_only_its_admin_token(self):
-        value=graph();value['backup']={'name':'Backup','needs':['selection','store','viewer'],
+        value=graph();value['backup']={'name':'Configure backups','needs':['selection'],
                                      'environment':'backup','workflow_secrets':['PBS_API_TOKEN']}
         result=self.model(value)
-        self.assertEqual(result['deploy.yml']['jobs']['_backup']['needs'],['selection','store','viewer'])
+        self.assertEqual(result['deploy.yml']['jobs']['_backup']['name'],'Configure backups')
+        self.assertEqual(result['backup.yml']['name'],'Configure backups')
+        self.assertEqual(result['deploy.yml']['jobs']['_backup']['needs'],['selection'])
         self.assertIn("needs.selection.result == 'success'",result['deploy.yml']['jobs']['_backup']['if'])
         job=result['backup.yml']['jobs']['deploy']
+        self.assertEqual(job['name'],'Configure backups')
         self.assertEqual(job['environment'],'backup');self.assertEqual(job['if'],w.PRIVATE_MAIN)
-        self.assertEqual(set(job['steps'][1]['env']),{'DISABLED','PBS_API_TOKEN',*w.COMMON_SECRETS})
+        self.assertEqual(set(job['steps'][1]['env']),{'DISABLED','PBS_API_TOKEN'})
         for guest in ('store','viewer'):
             self.assertNotIn('PBS_API_TOKEN',json.dumps(result['guest-'+guest+'.yml']))
         self.assertNotIn('secrets: inherit',json.dumps(result))
@@ -79,7 +82,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
         for step in phase['runs']['steps'][:3]:
             self.assertFalse(any(key.startswith(component_input_secrets.PREFIX) for key in step.get('env', {})))
         deploy = phase['runs']['steps'][-1]
-        self.assertEqual(set(deploy['env']), {'GUEST', 'PHASE', *[component_input_secrets.PREFIX+s.upper() for s in w.SCALAR_SLOTS]})
+        self.assertEqual(set(deploy['env']), {'GUEST', 'PHASE', 'PBS_API_TOKEN', *[component_input_secrets.PREFIX+s.upper() for s in w.SCALAR_SLOTS]})
         self.assertNotIn('PROXMOX_APP_TOKEN', deploy['env']); self.assertNotIn('APPLICATION_SSH_KEY', deploy['env'])
         self.assertNotIn('secrets: inherit', json.dumps(phase))
         self.assertNotIn('toJSON', json.dumps(phase)); self.assertNotIn('fromJSON(secrets', json.dumps(phase))
@@ -104,7 +107,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertEqual(final['with']['cloudbeaver_client_secret'], '${{ secrets.EXAMPLE_OIDC_SECRET }}')
         self.assertNotIn('${{ secrets.EXAMPLE_CLIENT_SECRET }}', json.dumps(result))
         self.assertEqual(set(result['guest-store.yml']['on']['workflow_call']['secrets']), set(w.COMMON_SECRETS))
-        self.assertEqual(set(result['phase.yml']['on']['workflow_call']['secrets']), {*w.COMMON_SECRETS,*w.SCALAR_SLOTS})
+        self.assertEqual(set(result['phase.yml']['on']['workflow_call']['secrets']), {*w.COMMON_SECRETS,*w.SCALAR_SLOTS,'PBS_API_TOKEN'})
 
     def test_no_implicit_source_and_expression_labels_or_excess_budget_refuse(self):
         with self.assertRaises(TypeError): w.models(self.stack)
@@ -243,7 +246,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
         (site/'.github/workflows/deploy.yml').write_text(yaml.safe_dump(doc,sort_keys=False).replace("HOMELAB_DISABLED: '[]'","HOMELAB_DISABLED: '[]'"))
         (site/'site.yaml').write_text('schema: homelab-components-v1\nkind: site\n')
         source=self.model()
-        with patch.object(pw,'settings',return_value=(env,['self-hosted'])),patch.object(pw,'validation_workflow',return_value={'name':'Validate','steps':[]}), \
+        with patch.object(pw,'settings',return_value=(env,['self-hosted'])),patch.object(pw,'validation_workflow',return_value={'name':'Validate config','steps':[]}), \
              patch.object(pw.compiler,'workflow_selection',return_value={'repository':'example/stack','revision':'2'*40}), \
              patch.object(pw.compiler,'check_revision') as revision,patch.object(pw.subprocess,'check_output',return_value=''), \
              patch.object(w,'models',return_value=source) as models:
@@ -251,9 +254,9 @@ class WorkflowIntegrationTests(unittest.TestCase):
         models.assert_called_once_with(self.stack,site_source=site/'site.yaml',disabled=[])
         revision.assert_called_once_with(self.stack,'2'*40)
         self.assertEqual(result['concurrency'],{'group':'homelab-private-deployment','cancel-in-progress':False,'queue':'max'})
-        self.assertEqual(result['jobs']['selection']['needs'],['validate'])
+        self.assertNotIn('needs',result['jobs']['selection'])
         viewer=result['jobs']['viewer'];self.assertEqual(viewer['environment'],'fixture-viewer')
-        self.assertEqual(viewer['needs'],['selection','store']);self.assertEqual(viewer['runs-on'],['self-hosted'])
+        self.assertEqual(viewer['needs'],['validate','selection','store']);self.assertEqual(viewer['runs-on'],['self-hosted'])
         self.assertNotIn('inputs.',json.dumps(viewer));self.assertNotIn('secrets: inherit',json.dumps(result))
         self.assertEqual(viewer['steps'][-1]['with']['cloudbeaver_client_secret'],'${{ secrets.EXAMPLE_OIDC_SECRET }}')
 

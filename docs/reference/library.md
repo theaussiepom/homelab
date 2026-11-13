@@ -30,7 +30,7 @@ An app profile requires `adapter`, `display_name` and `interfaces`. The optional
 
 Select one of the [18 registered adapters](support.md). The display name must be nonempty text of at most 4096 characters. [Supporting types](supporting-types.md) describes every nested profile field, and [Application properties](app-properties.md) lists the properties each adapter accepts. Profiles may provide partial property defaults, but the result after merging app overrides must be complete.
 
-An app profile may also declare the [backup coverage object](backup.md#application-recovery-declarations). It classifies every storage role as included or excluded and can list native configuration paths. These declarations reuse guest storage bindings rather than repeating their allocations. When the site enables backup, every selected app profile must supply this coverage.
+An app profile may also declare the [backup coverage object](backup.md#application-recovery-declarations). It classifies every storage role as included or excluded and can list native configuration paths. These declarations reuse guest storage bindings rather than repeating their allocations. Every app profile selected on an explicitly [enrolled guest](backup.md#backup-guest) must supply this coverage, with the required root backup selection. Root presence alone neither enrolls nor protects a guest.
 
 ## First installation
 

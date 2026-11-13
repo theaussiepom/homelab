@@ -91,6 +91,24 @@ class WorkerTests(unittest.TestCase):
         return worker.run(self.value if value is None else value, root=self.root, config=self.config,
                           engine=FakeEngine() if engine is None else engine, generation=generation)
 
+    def test_deployment_readiness_checks_never_pause_capture_upload_or_open_pending_window(self):
+        engine=FakeEngine()
+        result=worker.run(self.value,root=self.root,config=self.config,engine=engine,generation='a'*32,preflight=True)
+        self.assertEqual(result['status'],'ready');self.assertFalse((self.root/'PENDING').exists())
+        self.assertTrue((self.root/('a'*32)/'ready.json').exists())
+        self.assertFalse(any(argv[0] in ('tar','pg_dumpall','mysqldump') or 'stop' in argv
+                             or argv[:2] == ['proxmox-backup-client','backup'] for argv,_,_ in engine.calls))
+        self.assertFalse(any(restored for _,_,restored in engine.calls))
+        for options in ({'preflight':'yes'}, {'preflight':True,'barrier':lambda *a:None}):
+            with self.assertRaisesRegex(ValueError,'cannot open'):worker.run(self.value,**options)
+
+    def test_readiness_cli_uses_the_same_installed_coverage_and_only_preflight(self):
+        with patch.object(worker,'read_json',return_value=self.value),patch.object(worker,'staging') as staging, \
+             patch.object(worker,'run',return_value={'status':'ready'}) as run,patch.object(sys,'argv',['worker','--check-ready']), \
+             patch.object(worker.signal,'signal'),patch('builtins.print') as output:
+            worker.main();staging.assert_called_once_with(self.value);run.assert_called_once_with(self.value,preflight=True)
+            self.assertEqual(json.loads(output.call_args.args[0]),{'status':'ready'})
+
     def test_missing_public_key_refuses_before_service_pause(self):
         (self.config/'pbs-recovery-public.pem').unlink()
         engine = FakeEngine()

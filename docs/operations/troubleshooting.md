@@ -32,6 +32,8 @@ Use the selected framework generator with the selected site and library. Review 
 
 A generic hold message can hide several causes: missing state or state owned by another installation, a changed pointer to the latest success, incomplete history, changed protected inputs, missing immutable inputs, or a HOLD that belongs to another operation. Preserve the evidence and use a read-only diagnostic limited to the information allowed by the installation's operating policy. Do not clear a marker, overwrite a receipt, restore an old backend or change lifecycle to fresh.
 
+The deployment entrypoint keeps that hold message and adds a bounded JSON diagnostic: a recognised Python exception type and up to four public framework source filenames with line numbers. Look up those locations in the exact selected framework revision. Exception messages, arguments, private paths, locals, environment values and request contents are not printed. Unknown exception classes use `Exception`; frames outside the framework application source are omitted. If diagnostic collection itself fails, the original generic hold still applies. This identifies a failure boundary without releasing custody or retrying the operation, and cannot recover details discarded by an earlier source version.
+
 A failure involving file permissions or ownership in a disposable test may be a fixture defect. Establish what the production contract requires before changing the test. Keep the original failed result and preserve meaningful checks of file identity, contents and permissions when correcting a test double.
 
 ## Runtime is healthy but a job failed
