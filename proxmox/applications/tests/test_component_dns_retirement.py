@@ -56,19 +56,19 @@ class DnsRetirementIntegration(unittest.TestCase):
    context.start();self.addCleanup(context.stop)
   self.stack=self.case.root/'library';self.file=self.case.root/'consumer/site.json'
   spec=library();source=site();profile=spec['app_profiles']['recursive']
-  profile.update(adapter='pihole',interfaces={key:{'required':True,'accepts':['guest-interface']}for key in('service','upstream')},
-   listeners={proto:{'service':'pihole','namespace':'host','interface':'service','bind':'wildcard','protocol':proto,'port':53}for proto in('tcp','udp')},
-   endpoints={'dns':{'listener':'udp','protocol':'udp','via':'service'}},
+  profile.update(adapter='pihole',interfaces={key:{'required':True,'accepts':['guest-interface']}for key in('service_interface','upstream_interface')},
+   listeners={proto+'_listener':{'service':'pihole','namespace':'host','interface':'service_interface','bind':'wildcard','protocol':proto,'port':53}for proto in('tcp','udp')},
+   endpoints={'dns_endpoint':{'listener':'udp_listener','protocol':'udp','via':'service_interface'}},
    connections={'upstream':{'type':'dns','required':True}},storage={'config':{'required':True,'target':'/etc/pihole','kind':'directory','read_only':False}},
    software=['dns'],runtime=['dns'],health={'ready':{'type':'adapter','check':'readiness'}})
   spec['software']={'dns':{'images':{'pihole':'dns'}}};spec['runtime_profiles']={'dns':{'containers':{'pihole':{'memory_mib':256,'cpu_limit':1,'pids_limit':128}}}}
   source['contexts']['lab']['paths']['state_root']=str(self.case.state);source['contexts']['lab']['trust']['ca_file']=str(self.case.root/'ca.pem')
   guest=source['guests']['resolver'];guest['resources']={'memory_mib':1024};guest['root_paths']={'data':{'path':'/srv/example/dns'}}
-  source['apps']['recursive_a'].update(interfaces={'service':{'interface':'backend'},'upstream':{'interface':'backend'}},storage={'config':{'root_path':'data','subpath':'config'}})
+  source['apps']['recursive_a'].update(interfaces={'service_interface':{'interface':'backend'},'upstream_interface':{'interface':'backend'}},storage={'config':{'root_path':'data','subpath':'config'}})
   source['external_endpoints']['service']={'protocol':'http','address':ADDRESS,'port':80}
   source['domains']={'service':CURRENT,'retired':RETIRED}
-  source['exposures']={'service':{'type':'dns','endpoint':{'external':'service'},'domain':'service','resolver':'recursive_a','aliases':['retired']}}
-  source['connections']={'dns':{'consumer':{'app':'recursive_a','connection':'upstream'},'target':{'external':'dns'},'source_interface':'upstream'}}
+  source['exposures']={'service':{'type':'dns','target':{'external':'service'},'domain':'service','resolver':'recursive_a','aliases':['retired']}}
+  source['connections']={'dns':{'consumer':{'app':'recursive_a','connection':'upstream'},'target':{'external':'dns'},'source_interface':'upstream_interface'}}
   source['policies']={'network':{'dns':{'rules':[{'direction':'out','proto':protocol,'destination':{'endpoint':'dns'},'port':'53','comment':'Selected synthetic upstream'}for protocol in('udp','tcp')]}}}
   guest['network_policy']=[{'policy':'dns','endpoints':{'dns':{'external':'dns'}}}]
   (self.stack/'stack.json').write_text(json.dumps(spec));(self.stack/'images.json').write_text(json.dumps({'dns':{'repository':'example/pihole','tag':None,'digest':'sha256:'+'a'*64}}));self.authored=source;self.compile()

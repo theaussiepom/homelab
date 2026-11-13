@@ -29,7 +29,7 @@ def app(adapter):
             'influxdb': '/var/lib/influxdb'}[adapter]
     address = {'postgresql': '198.18.31.23', 'mariadb': '198.18.32.24',
                'influxdb': '198.18.33.26'}[adapter]
-    return {'adapter': adapter, 'properties': {}, 'role_addresses': {'service': address},
+    return {'adapter': adapter, 'properties': {}, 'role_addresses': {'service_interface': address},
             'storage_paths': {'data': {'source': root, 'target': root, 'read_only': False,
                                        'kind': 'directory'}},
             'software_selection': {'packages': packages}}

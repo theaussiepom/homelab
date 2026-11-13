@@ -29,7 +29,7 @@ def app(adapter, *, source=None):
     if adapter == 'pihole':
         value['settings'] = {'dns_records': {'broker.example.invalid': '198.18.41.8'}}
     elif adapter == 'music_assistant':
-        value['role_addresses'] = {'web': '198.18.41.9'}
+        value['role_addresses'] = {'web_interface': '198.18.41.9'}
         value['storage_paths'] = {'data': {'source': source or str(music_assistant.DATA),
             'target': '/data', 'kind': 'directory', 'read_only': False}}
     elif adapter == 'zigbee2mqtt':

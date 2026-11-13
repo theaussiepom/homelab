@@ -174,7 +174,7 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
     require(isinstance(route_certificates, dict)
             and not set(route_certificates) & set(route_files),
             'Keep selected public certificate and context trust bindings separate')
-    selected = {'bind_address': app['role_addresses']['frontend'], 'proxmox_url': provider['url'],
+    selected = {'bind_address': app['role_addresses']['frontend_interface'], 'proxmox_url': provider['url'],
         'proxmox_token_id': provider['token_id'], 'acme_email': acme['email'],
         'acme_dns_resolvers': acme['resolvers'], 'dashboard': app['properties'].get('dashboard', False)}
     foundation.address(selected['bind_address']); foundation.origin(selected['proxmox_url'], 'provider')

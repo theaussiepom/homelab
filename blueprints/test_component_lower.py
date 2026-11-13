@@ -100,7 +100,7 @@ class LowerComponentTests(unittest.TestCase):
         plan=fixture();producer=app('mqtt',name='producer');producer['identity']['services']={'mqtt':'owned-broker'}
         producer['storage']={'config':{'root_path':'retained','subpath':'broker/config'}}
         explorer=app('mqtt_explorer',name='explorer');explorer['settings']={'broker':{'managed_credential':{
-            'credential_id':'selected-reader'},'target':{'app':'producer','endpoint':'mqtt'}}}
+            'credential_id':'selected-reader'},'target':{'app':'producer','endpoint':'mqtt_endpoint'}}}
         plan.resolved['apps']={'producer':producer,'explorer':explorer}
         plan.library['app_profiles']['profile']['storage']['config']={'kind':'directory','target':'/mosquitto/config','read_only':False}
         row=lower.runtime_config(plan,'one')['applications']['explorer']['settings']['broker']['runtime']

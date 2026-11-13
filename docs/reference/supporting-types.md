@@ -23,6 +23,8 @@ Canonical paths cannot contain dot or dotdot segments, repeated separators, doll
 | endpoints.<id> | listener, protocol, via | protocol must be http/https/tcp/udp; listener and interface role must exist |
 | endpoints.<id> internal alternative | internal: dashboard | Traefik only; requires an authenticated exposure belonging to that instance |
 
+Maintained app profiles use `<purpose>_interface`, `<purpose>_listener` and `<purpose>_endpoint` to distinguish these namespaces. Guest NIC names such as `primary` keep their own names. A listener references an app interface role; an endpoint references a listener and the app role supplying its address. These names express relationships and do not change bind scope. See [the complete resolution chain](apps.md#instance-interface-role-and-exported-endpoint).
+
 Each profile `connections.<role>` requires `type` (dns/mqtt/postgresql/mariadb/influxdb/http/https) and the Boolean `required`. Optional `readiness` selects zero or more of configure and start, without duplicates. Optional `accounts` selects zero or more of postgresql-admin, mariadb-admin and mqtt-client, also without duplicates. Both lists may be empty. A profile `devices.<role>` has the form `{type: serial, required: Boolean}`. See [Storage](storage.md) for storage-role fields.
 
 ## Software
@@ -81,23 +83,36 @@ This complete profile body describes the tutorial's single Unbound socket. It is
 adapter: unbound
 display_name: Recursive DNS
 interfaces:
-  private: {required: true, accepts: [app-network]}
-  local: {required: true, accepts: [guest-loopback]}
+  private_interface:
+    required: true
+    accepts:
+    - app-network
+  local_interface:
+    required: true
+    accepts:
+    - guest-loopback
 listeners:
-  udp:
+  udp_listener:
     service: unbound
     namespace: app-network
-    interface: private
+    interface: private_interface
     bind: wildcard
     protocol: udp
     port: 53
-    publish: {scope: guest-loopback, port: 5335}
+    publish:
+      scope: guest-loopback
+      port: 5335
 endpoints:
-  dns: {listener: udp, protocol: udp, via: local}
+  dns_endpoint:
+    listener: udp_listener
+    protocol: udp
+    via: local_interface
 software: [resolver]
 runtime: [resolver]
 health:
-  ready: {type: adapter, check: readiness}
+  ready:
+    type: adapter
+    check: readiness
 ```
 
 Its selected `runtime_profiles.resolver` is a complete runtime value:
@@ -105,7 +120,10 @@ Its selected `runtime_profiles.resolver` is a complete runtime value:
 <!-- example: runtime-minimal -->
 ```yaml
 containers:
-  unbound: {memory_mib: 256, cpu_limit: 1, pids_limit: 128}
+  unbound:
+    memory_mib: 256
+    cpu_limit: 1
+    pids_limit: 128
 ```
 
 The [tutorial library](../examples/first-configuration/stack.json) supplies the matching software and image declarations. Your site binds both interface roles as shown on [Apps](apps.md). The endpoint describes the protocol other declarations can reference, while its listener defines the actual UDP socket and where it is published. **Invalid variation:** change the listener's `interface` to an undeclared role, or use `cpu_limit: true`. Both fail their own validators. A valid profile can still fail later resource, namespace, image or traffic checks when composed with other apps.

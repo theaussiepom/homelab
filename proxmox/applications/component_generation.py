@@ -3,7 +3,7 @@ from pathlib import Path
 import json
 import re
 from private_io import require,digest,encoded,private_directory,read_json,regular,sha
-from plan_policy import RESOURCES
+from plan_policy import RESOURCES, IP_FILTER_RESOURCE, ip_filter_values, ip_filter_slots, resource_fields
 from custody_records import decode,read_existing,no_markers
 from component_payload import AppPayload,SCHEMA as APP_SCHEMA,BINDING_SCHEMA
 
@@ -119,30 +119,57 @@ def backend(work, member):
     require(isinstance(value, dict) and value.get("version") == 4
             and isinstance(value.get("lineage"), str) and 0 < len(value["lineage"]) <= 128
             and type(value.get("serial")) is int and value["serial"] >= 0
-            and isinstance(value.get("resources"), list) and len(value["resources"]) == len(RESOURCES),
+            and isinstance(value.get("resources"), list)
+            and len(value["resources"]) in (len(RESOURCES), len(RESOURCES)+1),
             "Preserve the authoritative backend generation")
     identities = {}
     for row in value["resources"]:
         require(isinstance(row, dict) and row.get("mode") == "managed", "Preserve managed backend identities")
         address = ".".join(str(row.get(k, "")) for k in ("module", "type", "name"))
-        require(address in RESOURCES and address not in identities
-                and isinstance(row.get("instances"), list) and len(row["instances"]) == 1,
+        filtered = address == IP_FILTER_RESOURCE
+        require((filtered or address in RESOURCES) and isinstance(row.get('instances'), list)
+                and (1 <= len(row['instances']) <= 32 if filtered else len(row['instances']) == 1),
                 "Keep exactly the commissioned backend resources")
-        instance = row["instances"][0]
-        require(isinstance(instance, dict) and instance.get("index_key") is None and instance.get("deposed") is None,
-                "Preserve an unambiguous backend instance")
-        attrs = instance.get("attributes", {})
-        key = RESOURCES[address]
-        require(isinstance(attrs, dict) and type(attrs.get(key)) is int and attrs[key] == member["vmid"]
-                and attrs.get("node_name") == member["node"] and isinstance(attrs.get("id"), str)
-                and 0 < len(attrs["id"]) <= 256, "Preserve backend VMID, node and resource ID")
-        identities[address] = {"id": attrs["id"], "vmid": attrs[key], "node": attrs["node_name"]}
+        for instance in row['instances']:
+            require(isinstance(instance, dict) and instance.get('deposed') is None,
+                    'Preserve an unambiguous backend instance')
+            selected = address
+            if filtered:
+                index = instance.get('index_key')
+                require(isinstance(index, str) and re.fullmatch(r'0|[1-9]|[12][0-9]|3[01]', index),
+                        'Preserve the exact per-NIC IP filter slot')
+                selected += '["' + index + '"]'
+                require(ip_filter_values(instance.get('attributes'), int(index)),
+                        'Preserve only owned empty per-NIC IP filters')
+            else:
+                require(instance.get('index_key') is None, 'Preserve an unambiguous backend instance')
+            require(selected not in identities, 'Preserve unique backend resource instances')
+            attrs = instance.get('attributes', {})
+            key = 'container_id' if filtered else RESOURCES[address]
+            require(isinstance(attrs, dict) and type(attrs.get(key)) is int and attrs[key] == member['vmid']
+                    and attrs.get('node_name') == member['node'] and isinstance(attrs.get('id'), str)
+                    and 0 < len(attrs['id']) <= 256, 'Preserve backend VMID, node and resource ID')
+            identities[selected] = {'id': attrs['id'], 'vmid': attrs[key], 'node': attrs['node_name']}
+    require(set(RESOURCES) <= set(identities), 'Preserve all commissioned guest and firewall identities')
     return digest(raw), {"lineage": value["lineage"], "resources": identities}
 
 
-def plan_identity(value, identity):
+def identity_extension(previous, current, slots):
+    """Only selected new filters may extend a genuine infrastructure checkpoint."""
+    return (isinstance(current, dict) and set(current.get('resources', {})) == set(resource_fields(slots))
+            and (previous is None or current.get('lineage') == previous.get('lineage')
+                 and all(current['resources'].get(address) == fields
+                         for address, fields in previous['resources'].items())))
+
+
+def plan_identity(value, identity, *, ip_filter_slots=()):
     """A reviewed existing plan must not alter the admitted provider IDs."""
     for row in value["resource_changes"]:
+        if row['address'] not in identity['resources']:
+            require(row['address'] in set(resource_fields(ip_filter_slots)) - set(RESOURCES)
+                    and row['change']['before'] is None and row['change']['actions'] == ['create'],
+                    'Only a selected missing IP filter may extend backend ownership')
+            continue
         expected = identity["resources"][row["address"]]["id"]
         require(all(row["change"][side].get("id") == expected for side in ("before", "after"))
                 and not row["change"].get("after_unknown", {}).get("id"),
@@ -274,7 +301,10 @@ def current(attempt):
     else:
         require(state_hash==value['state_sha256'] and ('state_identity'not in value or value['state_identity']==identity),
                 'Current backend changed outside its ordinary success')
-    require('state_identity'not in value or value['state_identity']==identity,
+    require('state_identity'not in value or value['state_identity']==identity
+            or (attempt.hold.exists() or attempt.hold.is_symlink())
+            and identity_extension(value['state_identity'], identity,
+                                   ip_filter_slots(attempt.cfg['guest']['interfaces'])),
             'Preserve the existing backend resource identity')
     canonical=Path(value['operation']);epoch=tuple(int(x)for x in canonical.name.removeprefix('ordinary-').split('-'))
     for path in attempt.work.iterdir():

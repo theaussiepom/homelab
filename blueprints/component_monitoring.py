@@ -66,7 +66,7 @@ def bind(resolver, exposures):
         return None
     application = resolver.apps[selected]
     owning_guest = resolver.guests[application['guest']]
-    endpoint = resolver.endpoint({'app': selected, 'endpoint': 'server'})
+    endpoint = resolver.endpoint({'app': selected, 'endpoint': 'server_endpoint'})
     require(endpoint.get('protocol') == 'tcp' and endpoint.get('port') == 10051,
             'component.monitoring-server')
     address = endpoint['address']
@@ -115,7 +115,7 @@ def bind(resolver, exposures):
                 if app['guest'] != guest_id or app['adapter'] not in ('postgresql', 'mariadb'):
                     continue
                 require('database_uri' not in guest['monitoring'], 'component.monitoring-database')
-                target = '127.0.0.1' if app['adapter'] == 'postgresql' else app['role_addresses']['service']
+                target = '127.0.0.1' if app['adapter'] == 'postgresql' else app['role_addresses']['service_interface']
                 port = 5432 if app['adapter'] == 'postgresql' else 3306
                 guest['monitoring']['database_uri'] = 'tcp://' + target + ':' + str(port)
                 guest['monitoring']['database_password_file'] = '${inputs}/monitoring-database-password'

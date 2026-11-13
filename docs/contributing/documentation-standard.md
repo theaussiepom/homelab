@@ -409,7 +409,9 @@ A NIC is one `guests.<id>.interfaces.<id>` value that uses the selected [network
 network: primary
 slot: 0
 mac: 02:00:00:20:00:10
-address: {mode: static, value: 198.18.20.10}
+address:
+  mode: static
+  value: 198.18.20.10
 default_route: true
 ipv6: manual
 ```

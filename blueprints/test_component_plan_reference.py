@@ -92,23 +92,23 @@ class PlanSourceReferenceReview(unittest.TestCase):
     def test_asset_and_health_references_are_selected_without_reading_assets_or_rendering(self):
         r = resolver(); profile = r.library['app_profiles']['recursive']; app = r.site['apps']['recursive_a']
         profile['storage'] = {'config': {'target': '/opt/unbound/etc/unbound', 'kind': 'file', 'read_only': True, 'required': False}}
-        profile['interfaces']['control'] = {'required': False, 'accepts': ['guest-interface']}
-        app['interfaces']['control'] = {'interface': 'management'}
+        profile['interfaces']['control_interface'] = {'required': False, 'accepts': ['guest-interface']}
+        app['interfaces']['control_interface'] = {'interface': 'management'}
         app['storage'] = {'config': {'asset': 'selected'}}
         r.library['assets']['selected'] = {'format': 'raw', 'text': 'synthetic-public-configuration'}
         r.library['health_profiles']['readiness'] = {'type': 'adapter', 'check': 'readiness'}
-        profile['health'] = {'ready': {'profile': 'readiness', 'source_interface': 'control'}}
+        profile['health'] = {'ready': {'profile': 'readiness', 'source_interface': 'control_interface'}}
         with patch.object(plan.component_foundations, 'validate') as validator:
             r.app_values()
         validator.assert_called_once_with('unbound', {})
-        self.assertEqual(r.apps['recursive_a']['health']['ready'], {'type': 'adapter', 'check': 'readiness', 'source_interface': 'control'})
+        self.assertEqual(r.apps['recursive_a']['health']['ready'], {'type': 'adapter', 'check': 'readiness', 'source_interface': 'control_interface'})
         self.assertEqual(r.apps['recursive_a']['storage'], {'config': {'asset': 'selected'}})
         for kind in ('missing-asset', 'writable-asset', 'missing-health', 'nonphysical-health'):
             bad = resolver(); bad.library = copy.deepcopy(r.library); bad.site = copy.deepcopy(r.site)
             if kind == 'missing-asset': bad.site['apps']['recursive_a']['storage']['config']['asset'] = 'missing'
             if kind == 'writable-asset': bad.library['app_profiles']['recursive']['storage']['config']['read_only'] = False
             if kind == 'missing-health': bad.library['app_profiles']['recursive']['health']['ready']['profile'] = 'missing'
-            if kind == 'nonphysical-health': bad.library['app_profiles']['recursive']['health']['ready']['source_interface'] = 'local'
+            if kind == 'nonphysical-health': bad.library['app_profiles']['recursive']['health']['ready']['source_interface'] = 'local_interface'
             with self.subTest(kind=kind), patch.object(plan.component_foundations, 'validate'), self.assertRaises(ComponentError): bad.app_values()
 
     def test_device_roles_bind_context_and_refuse_aliases_of_one_physical_device(self):
@@ -142,10 +142,10 @@ class PlanSourceReferenceReview(unittest.TestCase):
         r.site['apps']['recursive_a']['interfaces'] = {'control': {'interface': 'management'}}
         with patch.object(plan.component_properties, 'validate') as validator: r.app_values()
         validator.assert_called_once_with('node_red', {})
-        app = r.apps['recursive_a']; app['interfaces']['control'] = {'interface': 'management'}
-        self.assertEqual(r.role_address(app, 'control'), '198.18.20.10')
+        app = r.apps['recursive_a']; app['interfaces']['control_interface'] = {'interface': 'management'}
+        self.assertEqual(r.role_address(app, 'control_interface'), '198.18.20.10')
         r.guests['resolver']['interface_addresses']['management'] = None
-        with self.assertRaises(ComponentError): r.role_address(app, 'control')
+        with self.assertRaises(ComponentError): r.role_address(app, 'control_interface')
 
     def test_context_dns_deduplicates_only_equal_addresses_and_validates_api_credentials(self):
         r = resolver(); context = r.site['contexts']['lab']
@@ -164,43 +164,43 @@ class PlanSourceReferenceReview(unittest.TestCase):
     def test_internal_dashboard_and_private_service_endpoints_do_not_invent_host_publications(self):
         for enabled in (False, True):
             r = resolver(apps=True); profile = r.library['app_profiles']['recursive']
-            profile.update(adapter='traefik', interfaces={}, listeners={}, endpoints={'dashboard': {'internal': 'dashboard'}})
+            profile.update(adapter='traefik', interfaces={}, listeners={}, endpoints={'dashboard_endpoint': {'internal': 'dashboard'}})
             r.apps['recursive_a'].update(adapter='traefik', interfaces={}, properties={'dashboard': enabled})
             r.apps['recursive_a']['identity'].update(services={'traefik': 'proxy'}, networks={})
-            r.endpoint_values(); key = ('app', 'recursive_a', 'dashboard')
+            r.endpoint_values(); key = ('app', 'recursive_a', 'dashboard_endpoint')
             with self.subTest(dashboard=enabled):
                 self.assertEqual(key in r.endpoints, enabled)
                 if enabled: self.assertEqual(r.endpoints[key]['service'], 'api@internal')
         r = resolver(apps=True); profile = r.library['app_profiles']['recursive']
-        profile['listeners']['udp'].pop('publish'); profile['endpoints']['dns']['via'] = 'private'
-        r.endpoint_values(); endpoint = r.endpoint({'app': 'recursive_a', 'endpoint': 'dns'})
+        profile['listeners']['udp_listener'].pop('publish'); profile['endpoints']['dns_endpoint']['via'] = 'private_interface'
+        r.endpoint_values(); endpoint = r.endpoint({'app': 'recursive_a', 'endpoint': 'dns_endpoint'})
         self.assertEqual(endpoint['address'], 'recursive_a_unbound'); self.assertEqual(endpoint['port'], 53)
-        self.assertNotIn('publication_address', r.apps['recursive_a']['listeners']['udp'])
+        self.assertNotIn('publication_address', r.apps['recursive_a']['listeners']['udp_listener'])
 
     def test_host_endpoint_uses_the_declared_physical_role_and_transport(self):
         def selected():
             r = resolver(apps=True); profile = r.library['app_profiles']['recursive']
-            profile.update(adapter='homeassistant', listeners={'web': {'service': 'homeassistant', 'namespace': 'host',
-                'interface': 'web', 'bind': 'wildcard', 'protocol': 'tcp', 'port': 8123}},
-                endpoints={'web': {'listener': 'web', 'protocol': 'http', 'via': 'web'}},
-                interfaces={'web': {'required': True, 'accepts': ['guest-interface']}})
-            r.apps['recursive_a'].update(adapter='homeassistant', interfaces={'web': {'interface': 'management'}})
+            profile.update(adapter='homeassistant', listeners={'web_listener': {'service': 'homeassistant', 'namespace': 'host',
+                'interface': 'web_interface', 'bind': 'wildcard', 'protocol': 'tcp', 'port': 8123}},
+                endpoints={'web_endpoint': {'listener': 'web_listener', 'protocol': 'http', 'via': 'web_interface'}},
+                interfaces={'web_interface': {'required': True, 'accepts': ['guest-interface']}})
+            r.apps['recursive_a'].update(adapter='homeassistant', interfaces={'web_interface': {'interface': 'management'}})
             r.apps['recursive_a']['identity']['services'] = {'homeassistant': 'homeassistant'}
             return r
         r = selected(); r.endpoint_values()
-        self.assertEqual(r.endpoint({'app': 'recursive_a', 'endpoint': 'web'})['address'], '198.18.20.10')
+        self.assertEqual(r.endpoint({'app': 'recursive_a', 'endpoint': 'web_endpoint'})['address'], '198.18.20.10')
         for kind in ('loopback-only', 'protocol'):
             r = selected()
-            if kind == 'loopback-only': r.library['app_profiles']['recursive']['listeners']['web']['bind'] = 'loopback'
-            else: r.library['app_profiles']['recursive']['endpoints']['web']['protocol'] = 'udp'
+            if kind == 'loopback-only': r.library['app_profiles']['recursive']['listeners']['web_listener']['bind'] = 'loopback'
+            else: r.library['app_profiles']['recursive']['endpoints']['web_endpoint']['protocol'] = 'udp'
             with self.subTest(kind=kind), self.assertRaises(ComponentError): r.endpoint_values()
 
     def test_network_rule_app_roles_are_explicit_physical_references_not_implicit_grants(self):
         r = resolver(apps=True); guest = r.guests['resolver']
-        r.apps['recursive_a']['interfaces']['control'] = {'interface': 'management'}
+        r.apps['recursive_a']['interfaces']['control_interface'] = {'interface': 'management'}
         r.policy['network']['access'] = {'rules': [{'direction': 'out', 'action': 'ACCEPT', 'proto': 'tcp',
             'source': {'interface': 'client'}, 'destination': {'endpoint': 'server'}, 'port': {'endpoint': 'server'}}]}
-        guest['network_policy'] = [{'policy': 'access', 'interfaces': {'client': {'app': 'recursive_a', 'interface': 'control'}},
+        guest['network_policy'] = [{'policy': 'access', 'interfaces': {'client': {'app': 'recursive_a', 'interface': 'control_interface'}},
                                     'endpoints': {'server': {'external': 'api'}}}]
         before = copy.deepcopy(guest['network_policy']); rules = r.policy_values(guest)
         self.assertEqual(rules, [{'direction': 'out', 'action': 'ACCEPT', 'proto': 'tcp', 'source': '198.18.20.10/32',
@@ -210,7 +210,7 @@ class PlanSourceReferenceReview(unittest.TestCase):
             old = copy.deepcopy(r.apps); bindings = copy.deepcopy(guest['network_policy'])
             if kind == 'missing-app': guest['network_policy'][0]['interfaces']['client']['app'] = 'missing'
             elif kind == 'missing-role': guest['network_policy'][0]['interfaces']['client']['interface'] = 'missing'
-            elif kind == 'loopback-role': r.apps['recursive_a']['interfaces']['control'] = {'scope': 'guest-loopback'}
+            elif kind == 'loopback-role': r.apps['recursive_a']['interfaces']['control_interface'] = {'scope': 'guest-loopback'}
             else: guest['network_policy'][0]['interfaces']['unused'] = 'management'
             with self.subTest(kind=kind), self.assertRaises(ComponentError): r.policy_values(guest)
             r.apps = old; guest['network_policy'] = bindings
@@ -288,9 +288,9 @@ class PlanRuntimeReview(unittest.TestCase):
     def test_mdns_capability_requires_its_physical_interface_and_readonly_startup_owner(self):
         def selected():
             r, images = self.runtime(); profile = r.library['app_profiles']['recursive']; app = r.apps['recursive_a']
-            app.update(adapter='homeassistant', interfaces={'control': {'interface': 'management'}},
-                storage={'startup': {'asset': 'mdns'}}, properties={'mdns': {'interface': 'control', 'startup': 'startup'}})
-            profile.update(adapter='homeassistant', interfaces={'control': {'required': True, 'accepts': ['guest-interface']}})
+            app.update(adapter='homeassistant', interfaces={'control_interface': {'interface': 'management'}},
+                storage={'startup': {'asset': 'mdns'}}, properties={'mdns': {'interface': 'control_interface', 'startup': 'startup'}})
+            profile.update(adapter='homeassistant', interfaces={'control_interface': {'required': True, 'accepts': ['guest-interface']}})
             app['identity']['services'] = {'homeassistant': 'homeassistant'}
             r.library['assets']['mdns'] = {'format': 'raw', 'text': 'synthetic-startup-hook'}
             profile['storage'] = {'startup': {'target': '/startup', 'read_only': True, 'kind': 'directory', 'required': True}}
@@ -302,7 +302,7 @@ class PlanRuntimeReview(unittest.TestCase):
         self.assertEqual(r.apps['recursive_a']['containers']['homeassistant']['cap_add'], ['NET_ADMIN'])
         for kind in ('loopback', 'startup', 'target', 'writable', 'capability'):
             r, images = selected(); app = r.apps['recursive_a']
-            if kind == 'loopback': app['interfaces']['control'] = {'scope': 'guest-loopback'}
+            if kind == 'loopback': app['interfaces']['control_interface'] = {'scope': 'guest-loopback'}
             elif kind == 'startup': app['storage'] = {}
             elif kind == 'target': r.library['app_profiles']['recursive']['storage']['startup']['target'] = '/elsewhere'
             elif kind == 'writable': r.library['app_profiles']['recursive']['storage']['startup']['read_only'] = False
@@ -326,7 +326,7 @@ class PlanCompilerWiringReview(unittest.TestCase):
             for method, returned in {'validate': None, 'image_values': {}, 'external_values': None,
                 'guest_values': None, 'app_values': None, 'endpoint_values': None,
                 'context_values': {'lab': {'node': 'example-node'}}, 'policy_values': [],
-                'execution_values': None}.items():
+                'execution_values': set()}.items():
                 stack.enter_context(patch.object(r, method, return_value=returned))
             exposure = stack.enter_context(patch.object(plan.component_exposures, 'Exposures')).return_value
             exposure.bind.return_value = {'exposures': {}, 'dns_records': {}, 'routes': {}, 'middlewares': {}}

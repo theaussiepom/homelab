@@ -123,7 +123,7 @@ class AttemptPayloadIntegrationTests(PrivateInputsFixture):
         context = patch.dict(os.environ, environment)
         context.start(); self.addCleanup(context.stop)
         cfg = {'schema': 'homelab-component-guest-v1', 'site': {'node': 'fixture-pve'},
-            'guest': {'vmid': 180}, 'app': {},
+            'guest': {'vmid': 180, 'interfaces': [{'ipv4': '198.18.20.10/24', 'ipv6': 'manual'}]}, 'app': {},
             'paths': {'state_root': str(state)}, 'deployment': {
                 'input_identity': self.identity, 'payload_phases': {'worker': 'first'},
                 'lifecycle': 'fresh', 'applications': {'worker': {'id': 'first', 'adapter': 'unbound',

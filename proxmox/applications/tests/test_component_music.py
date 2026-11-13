@@ -23,11 +23,11 @@ import component_runtime as core
 ADDRESS='198.19.100.241'
 
 def descriptor(path='/srv/homelab/data/music-assistant/data'):
- return {'adapter':'music_assistant','lifecycle':'retained','project_name':'homelab-music','identity':{'services':{'music_assistant':'music_assistant'},'networks':{}},'properties':{},'role_addresses':{'web':ADDRESS},
+ return {'adapter':'music_assistant','lifecycle':'retained','project_name':'homelab-music','identity':{'services':{'music_assistant':'music_assistant'},'networks':{}},'properties':{},'role_addresses':{'web_interface':ADDRESS},
          'storage_paths':{'data':{'target':'/data','kind':'directory','read_only':False,'source':path}},
          'containers':{'music_assistant':{'memory_mib':1536,'cpu_limit':2,'pids_limit':512}},
          'software_selection':{'images':{'music_assistant':{'image':'ghcr.io/music-assistant/server:latest'}}},
-         'listeners':{str(port):{'service':'music_assistant','namespace':'host','interface':'web','bind':'interface','protocol':'tcp','port':port,'actual_bind':ADDRESS} for port in (8095,8097)}}
+         'listeners':{str(port)+'_listener':{'service':'music_assistant','namespace':'host','interface':'web_interface','bind':'interface','protocol':'tcp','port':port,'actual_bind':ADDRESS} for port in (8095,8097)}}
 
 def settings():
  return {'server_id':'synthetic-retained-server','onboard_done':True,'core':{'webserver':{'values':{'bind_ip':ADDRESS}},'streams':{'values':{'bind_ip':ADDRESS,'publish_ip':ADDRESS}}},'providers':{'preserved':{'domain':'spotify','values':{'private':'synthetic-provider-value-never-output'}}}}
@@ -48,14 +48,14 @@ class ComponentMusicTests(unittest.TestCase):
 
  def test_component_refuses_unowned_state_listener_or_process_changes_before_shared_builder(self):
   changes=[lambda a:a.update(lifecycle='fresh'),lambda a:a.update(properties={'initialize':True}),
-   lambda a:a['role_addresses'].pop('web'),lambda a:a['role_addresses'].update(web='127.0.0.1'),
+   lambda a:a['role_addresses'].pop('web_interface'),lambda a:a['role_addresses'].update(web_interface='127.0.0.1'),
    lambda a:a.update(storage_paths={}),lambda a:a['storage_paths'].update(extra=a['storage_paths']['data']),
    lambda a:a['storage_paths']['data'].update(target='/foreign'),lambda a:a['storage_paths']['data'].update(kind='file'),
    lambda a:a['storage_paths']['data'].update(read_only=True),lambda a:a['storage_paths']['data'].update(source='relative'),
-   lambda a:a['listeners'].pop('8097'),lambda a:a['listeners']['8097'].update(port=8095),
-   lambda a:a['listeners']['8097'].update(actual_bind='198.19.100.242'),lambda a:a['listeners']['8097'].update(interface='foreign'),
-   lambda a:a['listeners']['8097'].update(protocol='udp'),lambda a:a['listeners']['8097'].update(namespace='app-network'),
-   lambda a:a['listeners']['8097'].update(publish={'scope':'guest-loopback','port':8097})]
+   lambda a:a['listeners'].pop('8097_listener'),lambda a:a['listeners']['8097_listener'].update(port=8095),
+   lambda a:a['listeners']['8097_listener'].update(actual_bind='198.19.100.242'),lambda a:a['listeners']['8097_listener'].update(interface='foreign'),
+   lambda a:a['listeners']['8097_listener'].update(protocol='udp'),lambda a:a['listeners']['8097_listener'].update(namespace='app-network'),
+   lambda a:a['listeners']['8097_listener'].update(publish={'scope':'guest-loopback','port':8097})]
   changes += [lambda a,k=k:a['containers']['music_assistant'].update({k:False}) for k in ('user','cap_add','read_only','cap_drop','no_new_privileges','tmpfs')]
   for change in changes:
    app=descriptor();change(app)
@@ -69,7 +69,7 @@ class ComponentMusicTests(unittest.TestCase):
   address=baseline['healthcheck']['test'][-1]
   import re
   selected=re.search(r'http://([0-9.]+):8095',address).group(1)
-  app=descriptor();app['role_addresses']['web']=selected
+  app=descriptor();app['role_addresses']['web_interface']=selected
   for row in app['listeners'].values():row['actual_bind']=selected
   documents=core.compositions({'schema':core.SCHEMA,'guest':{'timezone':baseline['environment']['TZ'],'memory_mib':2048,'os_reserve_mib':256},'applications':{'music':app}})
   self.assertEqual(set(documents),{'homelab-music'})

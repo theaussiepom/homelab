@@ -106,6 +106,59 @@ class SafetyEdges(unittest.TestCase):
         ):
             safety.run(Path("."), "HEAD", "", Path("scanner"))
 
+    def test_author_display_labels_keep_exact_public_email_and_committer_rules(self):
+        """Display labels vary; reserved handles, committers and trailers stay bound."""
+        contributor = ("contributor", "123+contributor@users.noreply.github.com")
+        maintainer = (safety.OWN_NAME, safety.OWN_EMAIL)
+        github = ("GitHub", "noreply@github.com")
+        accepted = [
+            (*maintainer, *maintainer, ""),
+            ("Public display name", safety.OWN_EMAIL, *github, ""),
+            (safety.OWN_NAME.upper(), safety.OWN_EMAIL, *contributor, ""),
+            ("另一个公开名称", safety.OWN_EMAIL, *maintainer, ""),
+            (*contributor, *github, ""),
+            ("Other display name", "other@example.invalid", *contributor, ""),
+            (*contributor, *contributor, "Signed-off-by: other <other@example.invalid>"),
+            ("Public display name", safety.OWN_EMAIL, *github,
+             "Co-authored-by: THEAUSSIEPOM <" + safety.OWN_EMAIL + ">"),
+        ]
+        rejected = [
+            ("", safety.OWN_EMAIL, *github, ""),
+            (" \t\u2003", safety.OWN_EMAIL, *github, ""),
+            (safety.OWN_NAME, "wrong@example.invalid", *github, ""),
+            (safety.OWN_NAME.upper(), "wrong@example.invalid", *github, ""),
+            (safety.OWN_NAME, safety.OWN_EMAIL.upper(), *github, ""),
+            (safety.OWN_NAME, safety.OWN_EMAIL + " ", *github, ""),
+            ("Public display name", safety.OWN_EMAIL,
+             safety.OWN_NAME, "wrong@example.invalid", ""),
+            (*contributor, safety.OWN_NAME.upper(), safety.OWN_EMAIL, ""),
+            (*contributor, "Other display name", safety.OWN_EMAIL, ""),
+            (*contributor, "", safety.OWN_EMAIL, ""),
+            (*contributor, safety.OWN_NAME, safety.OWN_EMAIL.upper(), ""),
+            (*contributor, safety.OWN_NAME, safety.OWN_EMAIL + " ", ""),
+            (*contributor, safety.OWN_NAME.upper(), "wrong@example.invalid", ""),
+        ]
+        for row in accepted:
+            with self.subTest(accepted=row), patch.object(
+                safety, "git", return_value="\0".join(row).encode()
+            ):
+                safety.check_identity(Path("."), "a" * 40)
+        for row in rejected:
+            with self.subTest(rejected=row), patch.object(
+                safety, "git", return_value="\0".join(row).encode()
+            ), self.assertRaises(safety.guard.Blocked) as error:
+                safety.check_identity(Path("."), "a" * 40)
+            self.assertEqual(error.exception.reason, "maintainer_identity_mismatch")
+        for trailer in ("Co-authored-by", "Signed-off-by", "SIGNED-OFF-BY"):
+            for email in ("wrong@example.invalid", safety.OWN_EMAIL.upper()):
+                row = ("Public display name", safety.OWN_EMAIL, *github,
+                       trailer + ": THEAUSSIEPOM <" + email + ">")
+                with self.subTest(trailer=row), patch.object(
+                    safety, "git", return_value="\0".join(row).encode()
+                ), self.assertRaises(safety.guard.Blocked) as error:
+                    safety.check_identity(Path("."), "a" * 40)
+                self.assertEqual(error.exception.reason, "maintainer_trailer_email_mismatch")
+
     def test_ci_selector_entrypoint_reads_only_the_event_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "event"

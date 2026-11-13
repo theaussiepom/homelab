@@ -27,6 +27,22 @@ This command requires `--stack PATH` and `--site FILE`. It also accepts `--disab
 
 This command requires `--stack PATH` and `--site PATH`, and optionally accepts `--check`. It generates the consumer workflow, or checks that the existing workflow matches, using the selected published library and framework workflow references and the site configuration. Checks preserve the existing CI and security policy fields. The wrapper uses the existing parser and deployment engine.
 
+If the consumer includes the supported local `.github/workflows/pbs-firewall.yml`,
+the generated Deploy calls it as `PBS` after selection, alongside the guest
+jobs. That workflow must retain pure PR validation and declare only the named
+required `PBS_FIREWALL_SSH_KEY`, with its native job using `homelab-bootstrap`.
+It cannot retain a standalone push trigger or a nested deployment queue.
+Without this optional file, generation is unchanged; unsupported present files
+are refused. The caller forwards only that named secret, never inherited secrets.
+
+The selected PBS server participates in every main Deploy, not only policy-path
+pushes. An absent real binding skips target contact; successful validation still
+allows ordinary activation. A selected PBS failure or cancellation blocks final
+Backup, which also keeps all existing guest dependencies. This remains enrollment
+and user-schedule setup, not PBS server installation or a manual backup start.
+The outer Deploy owns the shared queue once. Guest graphs, phase operations and
+their credential subsets are unchanged; queueing does not create a DNS/PBS edge.
+
 ## Coverage: tools/measure_coverage.py
 
 | Argument | Meaning |

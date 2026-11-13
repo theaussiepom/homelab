@@ -5,7 +5,7 @@ An exposure declares a DNS record or an HTTPS frontend route. Declare it inline 
 | Field | DNS exposure | HTTP exposure |
 | --- | --- | --- |
 | <a id="exposure-type"></a>`type` | Required `dns` | Required `http` |
-| <a id="exposure-endpoint"></a>`endpoint` | Required app/external socket reference | Required HTTP/HTTPS app/external or authenticated internal dashboard endpoint |
+| <a id="exposure-target"></a>`target` | Required app/external socket reference | Required HTTP/HTTPS app/external or authenticated internal dashboard endpoint |
 | <a id="exposure-domain"></a>`domain` | Required site domain ID | Required site domain ID |
 | <a id="exposure-aliases"></a>`aliases` | Optional unique domain-ID list, [] | Same |
 | <a id="exposure-resolver"></a>`resolver` | Required Pi-hole app ID | Optional Pi-hole app ID; omission does not publish managed DNS |
@@ -15,6 +15,14 @@ An exposure declares a DNS record or an HTTPS frontend route. Declare it inline 
 | <a id="exposure-transport"></a>`transport` | Not accepted | Optional backend transport-policy ID, only for HTTPS backend |
 
 Every selected domain must exist. Main/alias domain IDs and their case-folded hostnames are globally unique among exposures. A DNS target needs an address and cannot be an internal service. Managed Pi-hole records require IPv4. HTTP app backends cannot use loopback. The selected ingress must be Traefik; dashboard exposure must use the same Traefik instance with dashboard enabled and a forward-auth middleware. TLS policies currently use the implemented ACME resolver contract; Traefik requires resolver `letsencrypt`.
+
+## Select a destination
+
+`target` is the destination of both DNS and HTTP exposures. Its closed [endpoint reference](networks.md#external-endpoints) accepts `{app: home, endpoint: web_endpoint}` or `{external: service}`. The nested `endpoint` names a connection exported by the selected app profile; it is not another exposure field. See [instance, interface role and exported endpoint](apps.md#instance-interface-role-and-exported-endpoint) for the address and socket resolution chain.
+
+For HTTP, `target` selects the backend. `ingress: {app: edge, endpoint: https_endpoint}` selects the frontend Traefik connection, and `tls` selects a named certificate policy. For DNS, `target` supplies the published address and `resolver` selects the Pi-hole instance that owns the record. References use the current resolved guest address. They do not freeze a copy of it into source.
+
+**Compatibility change:** the former outer `endpoint` field is removed for both exposure types. Change only that field to `target`, including in `kind: exposure` files. Keep nested app `endpoint`, `ingress`, middleware endpoint fields, connection targets, domains, TLS policies and identities unchanged. Old-only declarations and declarations containing both outer names fail with `component.fields`; there is no permissive alias. Historical sealed deployment payloads remain historical bytes and are not reinterpreted as authored source. Review generated routes and records before separately authorized deployment.
 
 ## Public origin
 
@@ -29,9 +37,13 @@ The complete [relationship example](../examples/relationships/README.md) supplie
 schema: homelab-components-v1
 kind: exposure
 type: http
-endpoint: {app: browser, endpoint: web}
+target:
+  app: browser
+  endpoint: web_endpoint
 domain: browser
-ingress: {app: ingress, endpoint: https}
+ingress:
+  app: ingress
+  endpoint: https_endpoint
 tls: public
 ```
 

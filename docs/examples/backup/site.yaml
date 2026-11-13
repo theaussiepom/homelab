@@ -94,7 +94,7 @@ guests:
           mode: static
           value: 198.18.21.10
         ipv6: manual
-    backup: null
+    backup:
     volumes:
       backup-stage:
         storage: local
@@ -107,10 +107,10 @@ apps:
     guest: resolver
     lifecycle: fresh
     interfaces:
-      private:
+      private_interface:
         scope: app-network
         network: default
-      local:
+      local_interface:
         scope: guest-loopback
 backup:
   management:
@@ -129,10 +129,6 @@ backup:
     schedule:
       calendar: 02:00
       jitter_seconds: 300
-    clients:
-      resolver:
-        staging_volume: backup-stage
-        interface: management
     capture:
       pause: []
       database_lock: []
@@ -141,3 +137,6 @@ backup:
       max_bytes: 33554432
       max_files: 10000
       timeout_seconds: 300
+  defaults:
+    interface: management
+    staging_volume: backup-stage

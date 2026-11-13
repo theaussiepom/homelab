@@ -104,7 +104,7 @@ class ConstructorUnits(NoNative):
                                       gateway_image='test/gateway@sha256:'+'3'*64)
         self.assertEqual(app['settings'], dict(data, recovery_admin='local-recovery'))
         self.assertEqual(app['authentication_resolved'], dict(auth, version=1))
-        self.assertEqual(app['listeners']['web']['publication_address'], data['bind_address'])
+        self.assertEqual(app['listeners']['web_listener']['publication_address'], data['bind_address'])
         self.assertEqual(app['software_selection']['images']['cloudbeaver']['image'], 'test/ce@sha256:'+'2'*64)
         self.assertEqual(app['software_selection']['images']['auth_gateway']['image'], 'test/gateway@sha256:'+'3'*64)
         self.assertEqual((auth, data), before)

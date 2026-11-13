@@ -116,7 +116,7 @@ def _cloudbeaver(resolver, app, value):
     require(app['lifecycle'] in ('retained', 'fresh'), 'component.lifecycle')
     result = {key: copy.deepcopy(value[key]) for key in
               ('server_name', 'recovery_admin', 'heap_mib', 'auth_headers')}
-    result.update(bind_address=resolver.role_address(app, 'web'), public_url=_origin(app),
+    result.update(bind_address=resolver.role_address(app, 'web_interface'), public_url=_origin(app),
                   connections={}, managed_connections={})
     for role, metadata in value['connections'].items():
         require(role in app['resolved_connections'], 'component.reference')
@@ -156,7 +156,7 @@ def _bitwarden(resolver, app, value):
     public = _origin(app)
     runtime = {'schema': 'homelab-bitwarden-runtime-v2', 'public_origin': public, 'issuer': issuer}
     settings = {'schema': 'homelab-bitwarden-runtime-v2',
-        'bind_address': resolver.role_address(app, 'web'),
+        'bind_address': resolver.role_address(app, 'web_interface'),
         'database_server': database['target']['address'], 'database_provider': 'mysql',
         'database_name': value['database_name'], 'data_uid': value['data_uid'], 'data_gid': value['data_gid']}
     return {'runtime': runtime, 'settings': settings}
@@ -172,7 +172,7 @@ def _pegaprox(resolver, app, value):
     types.ip(address)
     source = ipaddress.IPv4Address(address)
     require(source.is_private and not (source.is_unspecified or source.is_loopback or source.is_link_local
-            or source.is_multicast) and address != resolver.role_address(app, 'web'), 'component.properties')
+            or source.is_multicast) and address != resolver.role_address(app, 'web_interface'), 'component.properties')
     return {'trusted_proxy': address + '/32', 'database_key_source': _file(resolver, app, 'database_key')}
 
 

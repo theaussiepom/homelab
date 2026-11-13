@@ -63,7 +63,9 @@ This complete NIC value belongs at `guests.resolver.interfaces.management` in th
 network: primary
 slot: 0
 mac: 02:00:00:20:00:10
-address: {mode: static, value: 198.18.20.10}
+address:
+  mode: static
+  value: 198.18.20.10
 default_route: true
 ipv6: manual
 ```
@@ -80,6 +82,7 @@ The NIC accepts only the listed fields and does not inherit fields. Required val
 | `guests.<id>.interfaces.<id>.address` | all | Required | Tagged object | [Address branches](#field-guest-nic-address) |
 | `guests.<id>.interfaces.<id>.default_route` | all | Optional | Boolean | [Default route](#field-guest-nic-default-route) |
 | `guests.<id>.interfaces.<id>.ipv6` | all | Optional | String | [IPv6](#field-guest-nic-ipv6) |
+| `guests.<id>.interfaces.<id>.ip_filter` | all | Optional | Boolean | [Per-NIC source filter](#field-guest-nic-ip-filter) |
 
 <a id="field-guest-nic-network"></a>
 ### NIC network reference
@@ -100,6 +103,31 @@ The NIC accepts only the listed fields and does not inherit fields. Required val
 ### NIC IPv6 setting
 
 `guests.<id>.interfaces.<id>.ipv6` is optional. If present, it must be the string `manual`; null, empty and other values are rejected. Omitting it leaves the field out of the provider output. This field does not support general IPv6 allocation. IPv6 literals in [address groups](#address-groups) are policy values and do not allocate guest addresses.
+
+<a id="field-guest-nic-ip-filter"></a>
+### Per-NIC source IP filter
+
+`guests.<id>.interfaces.<id>.ip_filter` is an optional Boolean. Omission and false create no IP set and preserve existing provider output. True requires a configured static IPv4 address and selects only this NIC's `ipfilter-net<slot>` set. Null, numbers, strings and true on DHCP/manual addressing are rejected with `component.interface-ip-filter`.
+
+HomeLab manages an empty container-level set through the existing pinned provider. Proxmox automatically supplies that LXC NIC's configured addresses and MAC-derived IPv6 link-local address. Other outgoing source addresses are dropped on this NIC when the host/guest firewall is active. No arbitrary addresses, extra CIDRs or user-chosen set names are accepted. Other NICs and the guest-wide `ipfilter` option are unchanged. This is source anti-spoofing; it neither permits traffic nor creates isolation by itself. Review the [Proxmox IP-filter behavior](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#chapter_pve_firewall) and keep explicit traffic policy.
+
+This complete NIC value replaces `guests.resolver.interfaces.backend` in the maintained tutorial site for an offline compilation:
+
+<!-- example: nic-ip-filter -->
+```yaml
+network: secondary
+slot: 1
+mac: 02:00:00:21:00:10
+address:
+  mode: static
+  value: 198.18.21.10
+ipv6: manual
+ip_filter: true
+```
+
+First selection creates only the declared set after the container/firewall options; existing guest, firewall, data and ownership IDs must remain intact. For an existing guest, CD reads its live IP-set names before apply and refuses a pre-existing selected new name. An unavailable read stops reconciliation. Fresh guest creation retains the ordinary identity/admission checks and does not query an endpoint that does not exist yet. This is a preflight collision check, not an atomic no-adoption guarantee: the pinned provider can adopt a set created concurrently after the read. Preserve exclusive CD ownership; post-apply identity or shape mismatches retain the failure hold without deleting or retrying.
+
+Subsequent deployment preserves the set's recorded identity. Ordinary CD refuses deletion or replacement, including disabling an already-owned filter; retirement needs separate reviewed work. Source and provider plan tests do not verify live enforcement: the site owner must check the generated set, active kernel rules and allowed/forged-source behavior after its approved rollout. HomeLab does not change host firewall activation here.
 
 <a id="field-guest-nic-address"></a>
 ### NIC address branches
@@ -198,8 +226,13 @@ This example combines the network with a shared VPN subnet while preserving orde
 
 <!-- example: network-groups -->
 ```yaml
-vpn: {members: [198.18.15.0/28]}
-clients: {members: [{network: primary}, {address_group: vpn}]}
+vpn:
+  members:
+  - 198.18.15.0/28
+clients:
+  members:
+  - network: primary
+  - address_group: vpn
 ```
 
 The resolver expands `clients` to `[198.18.20.0/24, 198.18.15.0/28]`. It rejects a group that references itself and does not automatically combine or deduplicate the resulting subnets.

@@ -38,10 +38,12 @@ def fixture():
     app['storage']['config'] = {'root_path': 'root', 'subpath': 'config.yaml'}
     app['runtime_files'] = {'directory': '/opt/homelab-app/runtime/one', 'files': ['owned.json']}
     app['sidecar_files'] = {'sidecar': {'destination': '/opt/homelab-app/one.json'}}
-    return SimpleNamespace(site={'backup': None, 'contexts': {'lab': {'node': 'example-node'}}},
+    resolver = SimpleNamespace(site={'backup': None, 'contexts': {'lab': {'node': 'example-node'}}},
         library={'backup_profiles': {'pbs': profile()}, 'app_profiles': {'example': definition}},
         guests={'one': guest, 'empty': copy.deepcopy(dict(guest, identity={'vmid': 611, 'hostname': 'empty'}))},
         apps={'application': app})
+    resolver.site['guests'] = copy.deepcopy(resolver.guests)
+    return resolver
 
 
 class BackupUnits(unittest.TestCase):
@@ -86,7 +88,7 @@ class BackupUnits(unittest.TestCase):
         for adapter, root in [('postgresql', '/etc/postgresql'), ('mariadb', '/etc/mysql'), ('influxdb', '/etc/influxdb')]:
             r = fixture(); app = r.apps['application']; app.update(adapter=adapter,
                 software_selection={'packages': ['postgresql-client-16=16.10-1']},
-                role_addresses={'service':'192.0.2.10'})
+                role_addresses={'service_interface':'192.0.2.10'})
             r.guests['one']['software_selection']['packages'].append('postgresql-client-16=16.10-1')
             app['software_selection']['packages'] = []
             rule = r.library['app_profiles']['example']['backup']

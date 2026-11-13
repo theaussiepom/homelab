@@ -29,14 +29,14 @@ def _declared(app):
     for row in declarations.values():
         types.health(row)
         require('source_interface' not in row or (app['adapter'] == 'music_assistant'
-                and row['source_interface'] == 'web' and
-                'interface' in app['interfaces']['web']), 'component.health-source-unsupported')
+                and row['source_interface'] == 'web_interface' and
+                'interface' in app['interfaces']['web_interface']), 'component.health-source-unsupported')
     return bool(declarations)
 
 
 def _native_address(app):
     try:
-        return component_native._address(app['role_addresses']['service'])
+        return component_native._address(app['role_addresses']['service_interface'])
     except (ValueError, TypeError, KeyError):
         require(False, 'component.health')
 
@@ -109,7 +109,7 @@ def _influxdb(app, compose_file):
          + address + ":8086/health',timeout=5)); assert d['status']=='pass' and d['version']=='v"
          + version + "'; print('INFLUX_OK')"], 'INFLUX_OK'), _tcp(address, 8086)]
     if frontend['enabled']:
-        web = _ipv4(app['role_addresses']['web'])
+        web = _ipv4(app['role_addresses']['web_interface'])
         rows += [_service('homelab-influxdb-web.socket'), _row('InfluxDB Apps frontend reaches the unchanged local API',
             ['python3', '-c', "import json,urllib.request; d=json.load(urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://"
              + web + ":8086/health',timeout=5)); assert d['status']=='pass' and d['version']=='v"
@@ -127,6 +127,8 @@ def _pihole(app, compose_file):
         rows.append(_row('DNS service record ' + name,
             ['python3', '/opt/homelab-app/dns_records.py', 'probe', name, address],
             '"read_only_dns_check": "passed"'))
+    if 'web_interface' in app.get('role_addresses', {}):
+        rows.extend(_bound_web_checks(app, 80))
     return rows
 
 
@@ -139,21 +141,49 @@ def _bound_web_checks(app, port):
     """Require the selected web socket and reject wildcard or legacy binds."""
     if not any(row.get('bind')=='interface' for row in app['listeners'].values()):
         return []
-    address=_ipv4(app['role_addresses']['web'])
+    address=_ipv4(app['role_addresses']['web_interface'])
     code="import subprocess; rows=subprocess.check_output(['ss','-H','-ltn','sport = :"+str(port)+"'],text=True).splitlines(); sockets={r.split()[3] for r in rows}; assert "+repr(address+':'+str(port))+" in sockets and sockets <= "+"set("+repr([address+':'+str(port),'127.0.0.1:'+str(port),'[::1]:'+str(port)])+")"+"; print('WEB_BIND_OK')"
     return [_row('Web socket is bound only to its selected interface and loopback',
         ['python3','-c',code],'WEB_BIND_OK')]
 
 
+def _homeassistant_dual_web_checks(app):
+    """Keep one explicit retained transition; never permit arbitrary extra binds."""
+    require(app['lifecycle'] == 'retained', 'component.health-lifecycle')
+    roles = ('web_interface', 'transition_web_interface')
+    names = ('web_listener', 'transition_web_listener')
+    require(set(app['listeners']) == set(names), 'component.health-listener')
+    addresses = [_ipv4(app['role_addresses'][role]) for role in roles]
+    require(len(set(addresses)) == 2, 'component.health-address')
+    for role, name, address in zip(roles, names, addresses, strict=True):
+        selected = ipaddress.IPv4Address(address)
+        require(not (selected.is_unspecified or selected.is_loopback or selected.is_link_local
+                     or selected.is_multicast or selected.is_reserved), 'component.health-address')
+        row = app['listeners'][name]
+        require(row.get('service') == 'homeassistant' and row.get('namespace') == 'host'
+                and row.get('protocol') == 'tcp' and row.get('port') == 8123
+                and row.get('bind') == 'interface' and row.get('interface') == role
+                and row.get('actual_bind') == address and 'publish' not in row,
+                'component.health-listener')
+    required = [address+':8123' for address in addresses]+['127.0.0.1:8123']
+    allowed = required+['[::1]:8123']
+    code = "import subprocess; rows=subprocess.check_output(['ss','-H','-ltn','sport = :8123'],text=True).splitlines(); sockets={r.split()[3] for r in rows}; assert set("+repr(required)+") <= sockets and sockets <= set("+repr(allowed)+"); print('WEB_BIND_OK')"
+    return [_row('HA web sockets match both declared addresses and required loopback',
+                 ['python3', '-c', code], 'WEB_BIND_OK')]
+
+
 def _homeassistant(app, compose_file):
     """Keep the local HA challenge probe and optional bound-socket check."""
-    _listener(app, 'homeassistant', 8123, 'host')
+    dual = 'transition_web_interface' in app.get('role_addresses', {})
+    if not dual:
+        _listener(app, 'homeassistant', 8123, 'host')
     require(app['lifecycle'] in ('retained', 'fresh'), 'component.health-lifecycle')
     retained = app['lifecycle'] == 'retained'
     return [_row('HA web responds and unauthenticated API refused' if retained else
         'HA onboarding or login ready and unauthenticated API refused',
         ['python3', AUTOMATION_HELPER, 'homeassistant' if retained else 'homeassistant-fresh'],
-        '"read_only_probe": "passed"'), *_bound_web_checks(app,8123)]
+        '"read_only_probe": "passed"'), *(_homeassistant_dual_web_checks(app)
+            if dual else _bound_web_checks(app,8123))]
 
 
 def _node_red(app, compose_file):
@@ -161,7 +191,7 @@ def _node_red(app, compose_file):
     _listener(app, 'node_red', 1880, 'host')
     require(app['lifecycle'] in ('retained', 'fresh'), 'component.health-lifecycle')
     retained = app['lifecycle'] == 'retained'
-    extra=['--address',_ipv4(app['role_addresses']['web'])] if any(row.get('bind')=='interface' for row in app['listeners'].values()) else []
+    extra=['--address',_ipv4(app['role_addresses']['web_interface'])] if any(row.get('bind')=='interface' for row in app['listeners'].values()) else []
     return [_row('Node-RED native login ready and unauthenticated flows refused' if retained else
         'Node-RED public UI responds', ['python3', AUTOMATION_HELPER,
         'node_red' if retained else 'node_red-fresh',*extra],
@@ -181,10 +211,10 @@ def _ipv4(value):
 
 
 def _backend(app, port):
-    row=app['listeners']['web'];publish=row.get('publish',{})
+    row=app['listeners']['web_listener'];publish=row.get('publish',{})
     require(row['protocol']=='tcp' and row['port']==port and publish.get('scope')=='guest-interface'
-            and publish.get('interface')=='web' and publish.get('port')==port,'component.health-listener')
-    address=_ipv4(app['role_addresses']['web'])
+            and publish.get('interface')=='web_interface' and publish.get('port')==port,'component.health-listener')
+    address=_ipv4(app['role_addresses']['web_interface'])
     require(row.get('publication_address',address)==address,'component.health-listener')
     return 'http://'+address+':'+str(port)
 
@@ -271,13 +301,14 @@ def _music_assistant(app, compose_file):
     """Check web and stream roles separately, then the existing HTTPS route."""
     require(all(any(r.get('protocol')=='tcp' and r.get('namespace')=='host' and r.get('port')==port
                     for r in app['listeners'].values()) for port in (8095,8097)),'component.health-listener')
-    address=_ipv4(app['role_addresses']['web']);origin,host,ingress,public=_public(app)
-    stream=_ipv4(app['role_addresses'].get('stream',address))
-    require(public.get('source_address')==address,'component.health-source')
+    address=_ipv4(app['role_addresses']['web_interface']);origin,host,ingress,public=_public(app)
+    stream=_ipv4(app['role_addresses'].get('stream_interface',address))
+    source=_ipv4(public.get('source_address'))
+    require(source in app['role_addresses'].values(),'component.health-source')
     code="import socket,urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://"+address+":8095/info',timeout=5).close(); socket.create_connection(('"+stream+"',8097),timeout=3).close(); print('core service only: passed')"
     return [_row('Music Assistant core info and stream listener',_compose_exec(app,compose_file,'music_assistant',
         'python3','-c',code),'core service only: passed'),
-        _row('Music Assistant HTTPS route',_curl()+['--interface',address,'--resolve',host+':443:'+ingress,
+        _row('Music Assistant HTTPS route',_curl()+['--interface',source,'--resolve',host+':443:'+ingress,
          origin+'/info'],'server_version')]
 
 

@@ -34,7 +34,7 @@ EXAMPLES = {
     'library.md': ['template-minimal'],
     'sources.md': ['source-app'],
     'contexts.md': ['context-minimal', 'context-capability'],
-    'networks.md': ['network-minimal', 'nic-minimal', 'network-groups'],
+    'networks.md': ['network-minimal', 'nic-minimal', 'nic-ip-filter', 'network-groups'],
     'guests.md': ['guest-minimal'],
     'apps.md': ['app-minimal', 'app-overrides'],
     'app-properties.md': ['properties-adapters'],
@@ -46,7 +46,7 @@ EXAMPLES = {
     'supporting-types.md': ['profile-minimal', 'runtime-minimal', 'device-minimal'],
     'zabbix.md': ['zabbix-selection', 'zabbix-profile'],
     'backup.md': ['backup-selection', 'backup-profile-selection', 'backup-profile',
-                  'backup-application', 'backup-job'],
+                  'backup-application', 'backup-job', 'backup-guest-override'],
     'lifecycle.md': ['lifecycle-fresh'],
 }
 
@@ -102,7 +102,7 @@ class ReferenceExamples(unittest.TestCase):
         for change in ('unknown-guest', 'wrong-local-scope', 'boolean-memory'):
             wrong = copy.deepcopy(selected)
             if change == 'unknown-guest': wrong['apps']['recursive_a']['guest'] = 'missing'
-            elif change == 'wrong-local-scope': wrong['apps']['recursive_a']['interfaces']['local'] = {'scope':'app-network','network':'default'}
+            elif change == 'wrong-local-scope': wrong['apps']['recursive_a']['interfaces']['local_interface'] = {'scope':'app-network','network':'default'}
             else: wrong['guests']['resolver']['resources']['memory_mib'] = True
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.resolve(wrong)
@@ -151,7 +151,7 @@ class ReferenceExamples(unittest.TestCase):
         types.device(example('supporting-types.md','device-minimal'))
         wrong=dict(example('supporting-types.md','device-minimal'),path='/dev/ttyUSB0')
         with self.assertRaises(ValueError):types.device(wrong)
-        wrong=example('supporting-types.md','profile-minimal');wrong['listeners']['udp']['interface']='missing'
+        wrong=example('supporting-types.md','profile-minimal');wrong['listeners']['udp_listener']['interface']='missing_interface'
         with self.assertRaises(ValueError):types.profile(wrong)
         wrong=example('supporting-types.md','runtime-minimal');wrong['containers']['unbound']['cpu_limit']=True
         with self.assertRaises(ValueError):types.runtime(wrong)
@@ -186,6 +186,29 @@ class ReferenceExamples(unittest.TestCase):
         before, packets = self.resolve(selected)
         self.assertEqual(set(packets), {'resolver'})
         self.assertEqual(before.resolved['guests']['resolver']['provider_interfaces'][0]['ipv4'], '198.18.20.10/24')
+        import component_lower
+        filtered = copy.deepcopy(selected)
+        filtered['guests']['resolver']['interfaces']['backend'] = example('networks.md', 'nic-ip-filter')
+        new, _ = self.resolve(filtered)
+        original_provider = component_lower.provider_config(before, 'resolver')
+        new_provider = component_lower.provider_config(new, 'resolver')
+        self.assertIs(new_provider['guest']['interfaces'][1].pop('ip_filter'), True)
+        self.assertEqual(new_provider, original_provider)
+        self.assertEqual(component_lower.runtime_config(new, 'resolver'),
+                         component_lower.runtime_config(before, 'resolver'))
+        filtered['guests']['resolver']['interfaces']['backend']['ip_filter'] = False
+        disabled, _ = self.resolve(filtered)
+        self.assertEqual(component_lower.provider_config(disabled, 'resolver'), original_provider)
+        for invalid in (None, 0, 1, 'true', {}, []):
+            bad = copy.deepcopy(filtered)
+            bad['guests']['resolver']['interfaces']['backend']['ip_filter'] = invalid
+            expect_component_refusal(lambda: self.resolve(bad), 'component.interface-ip-filter',
+                                     ('guests', 'resolver', 'interfaces', 'backend'))
+        for address in ({'mode': 'manual'}, {'mode': 'dhcp', 'endpoint': '198.18.21.10'}):
+            bad = copy.deepcopy(filtered)
+            bad['guests']['resolver']['interfaces']['backend'].update(address=address, ip_filter=True)
+            expect_component_refusal(lambda: self.resolve(bad), 'component.interface-ip-filter',
+                                     ('guests', 'resolver', 'interfaces', 'backend'))
         dhcp = copy.deepcopy(selected)
         nic = dhcp['guests']['resolver']['interfaces']['management']
         nic['address'] = {'mode': 'dhcp', 'endpoint': '198.18.20.10'}
@@ -271,7 +294,7 @@ class ReferenceExamples(unittest.TestCase):
         for change in ('both-credentials','wrong-role','duplicate-domain','missing-tls'):
             wrong=copy.deepcopy(selected)
             if change=='both-credentials':wrong['connections']['broker']['credential']={'principal':'browser','secret':'probe'}
-            elif change=='wrong-role':wrong['connections']['broker']['source_interface']='missing'
+            elif change=='wrong-role':wrong['connections']['broker']['source_interface']='missing_interface'
             elif change=='duplicate-domain':wrong['exposures']['browser']['aliases']=['browser']
             else:wrong['exposures']['browser']['tls']='missing'
             with self.subTest(change=change),self.assertRaises(ValueError):self.resolve(wrong,library)
@@ -410,8 +433,9 @@ class ReferenceExamples(unittest.TestCase):
                                  'component.backup-consistency', ('include', 'data'))
         job = example('backup.md', 'backup-job')['backup']['job']
         component_backup_job.job(job)
+        component_backup_job.enrollment(example('backup.md', 'backup-guest-override')['backup'])
         missing = copy.deepcopy(job)
-        del missing['clients']
+        del missing['capture']
         expect_component_refusal(lambda: component_backup_job.job(missing), 'component.fields', ())
         invalid = copy.deepcopy(job)
         invalid['schedule']['calendar'] = '24:00'

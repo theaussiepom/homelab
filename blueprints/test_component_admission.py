@@ -68,8 +68,8 @@ class SourceSuitabilityReview(unittest.TestCase):
     def test_http_and_dns_exposure_checks_follow_active_publishers_without_invented_edges(self):
         for kind in ('http', 'dns'):
             r = fixture(); r.apps['ingress'] = dict(copy.deepcopy(r.apps['server']), id='ingress')
-            exposure = {'type': kind, 'endpoint': {'external': 'backend'}, 'domain': 'web', 'aliases': ['alias']}
-            if kind == 'http': exposure['ingress'] = {'app': 'ingress', 'endpoint': 'https'}
+            exposure = {'type': kind, 'target': {'external': 'backend'}, 'domain': 'web', 'aliases': ['alias']}
+            if kind == 'http': exposure['ingress'] = {'app': 'ingress', 'endpoint': 'https_endpoint'}
             else: exposure['resolver'] = 'server'
             r.site['exposures']['web'] = exposure; self.run_admit(r)
             for change in ('backend', 'alias'):

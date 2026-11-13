@@ -19,7 +19,7 @@ from component_errors import ComponentError
 def database_fixture(engine='postgresql'):
     endpoint={'app':'database','guest':'database_guest','address':'198.18.31.23',
               'protocol':'tcp','port':5432 if engine=='postgresql' else 3306}
-    account={'adapter':engine+'-admin','owner':'console','target':{'app':'database','endpoint':'sql'},
+    account={'adapter':engine+'-admin','owner':'console','target':{'app':'database','endpoint':'sql_endpoint'},
              'principal':'console_admin','credential':'database_secret','access':'server-administration',
              'lifecycle':'create-once','target_endpoint':endpoint,'credential_id':'console-database'}
     connection={'account':copy.deepcopy(account),'source_address':'198.18.31.32'}

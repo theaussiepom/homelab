@@ -154,8 +154,8 @@ class WorkflowIntegrationTests(unittest.TestCase):
         if remote:
             spec['app_profiles']['published']=copy.deepcopy(spec['app_profiles']['recursive'])
             profile=spec['app_profiles']['published']
-            profile['interfaces']['local']['accepts']=['guest-interface']
-            profile['listeners']['udp']['publish']={'scope':'guest-interface','interface':'local','port':5335}
+            profile['interfaces']['local_interface']['accepts']=['guest-interface']
+            profile['listeners']['udp_listener']['publish']={'scope':'guest-interface','interface':'local_interface','port':5335}
             source['guests']['remote']=copy.deepcopy(source['guests']['resolver'])
             guest=source['guests']['remote'];guest['identity']={'vmid':611,'hostname':'example-remote'}
             for index,(key,nic) in enumerate(guest['interfaces'].items()):
@@ -163,8 +163,8 @@ class WorkflowIntegrationTests(unittest.TestCase):
                 nic['address']['value']='198.18.'+str(20+index)+'.11'
             source['apps']['remote_dns']=copy.deepcopy(source['apps']['recursive_a'])
             source['apps']['remote_dns'].update(profile='published',guest='remote')
-            source['apps']['remote_dns']['interfaces']['local']={'interface':'backend'}
-            source['guests']['resolver']['readiness']=[{'stage':'preparation','target':{'app':'remote_dns','endpoint':'dns'}}]
+            source['apps']['remote_dns']['interfaces']['local_interface']={'interface':'backend'}
+            source['guests']['resolver']['readiness']=[{'stage':'preparation','target':{'app':'remote_dns','endpoint':'dns_endpoint'}}]
             # This fixture requests real cross-guest preparation, so explicitly
             # declare both DNS transports on each owned guest firewall.
             source['policies']={'network':{direction:{'rules':[

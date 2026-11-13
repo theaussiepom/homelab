@@ -59,7 +59,7 @@ class TrafficProjectionTests(unittest.TestCase):
 
     def test_context_dns_projects_both_protocols_and_named_app_owner_without_grants(self):
         resolver, exposures, _ = self.fixture()
-        resolver.site['contexts']['context']['dns_servers'] = [{'app': 'dns', 'endpoint': 'dns'}]
+        resolver.site['contexts']['context']['dns_servers'] = [{'app': 'dns', 'endpoint': 'dns_endpoint'}]
         before = copy.deepcopy(resolver.guests)
         with patch.object(traffic, 'source_address', return_value='198.18.20.10') as address, \
              patch.object(traffic, 'check') as check:

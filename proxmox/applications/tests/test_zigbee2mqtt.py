@@ -29,10 +29,10 @@ def runtime_app(selected):
         'settings':copy.deepcopy(selected),
         'storage_paths':{'data':{'source':'/srv/homelab/data/zigbee2mqtt','target':'/app/data',
                                  'kind':'directory','read_only':False}},
-        'listeners':{'web':{'service':'zigbee2mqtt','namespace':'app-network','interface':'private',
+        'listeners':{'web_listener':{'service':'zigbee2mqtt','namespace':'app-network','interface':'private_interface',
             'bind':'wildcard','protocol':'tcp','port':selected['frontend_port'],
             'publication_address':selected['bind_address'],
-            'publish':{'scope':'guest-interface','interface':'web','port':selected['frontend_port']}}}}
+            'publish':{'scope':'guest-interface','interface':'web_interface','port':selected['frontend_port']}}}}
 
 
 def settings():
@@ -47,6 +47,22 @@ def settings():
 
 
 class ZigbeeTests(unittest.TestCase):
+    def test_watchdog_changes_only_the_environment_and_refuses_other_modes(self):
+        app = runtime_app(self.selected)
+        guest = {'timezone': 'Etc/UTC', 'memory_mib': 2048}
+        baseline = component_runtime._zigbee2mqtt(app, guest)
+        self.assertNotIn('Z2M_WATCHDOG', baseline['zigbee2mqtt']['environment'])
+        app['properties'] = {'watchdog': 'default'}
+        original = copy.deepcopy(app)
+        selected = component_runtime._zigbee2mqtt(app, guest)
+        self.assertEqual(selected['zigbee2mqtt']['environment'].pop('Z2M_WATCHDOG'), 'default')
+        self.assertEqual(selected, baseline)
+        self.assertEqual(app, original)
+        for value in (None, False, True, 1, '', '1,5', [], {}):
+            app['properties']['watchdog'] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                component_runtime._zigbee2mqtt(app, guest)
+
     def test_nested_user_namespace_can_bind_the_device_without_a_guest_tty_alias(self):
         app = runtime_app(self.selected)
         original = copy.deepcopy(app)

@@ -33,13 +33,13 @@
       "adapter": "mqtt",
       "display_name": "Broker",
       "interfaces": {
-        "backend": {
+        "backend_interface": {
           "required": true,
           "accepts": [
             "guest-interface"
           ]
         },
-        "frontend": {
+        "frontend_interface": {
           "required": true,
           "accepts": [
             "guest-interface"
@@ -47,20 +47,20 @@
         }
       },
       "listeners": {
-        "mqtt": {
+        "mqtt_listener": {
           "service": "mqtt",
           "namespace": "host",
-          "interface": "backend",
+          "interface": "backend_interface",
           "bind": "wildcard",
           "protocol": "tcp",
           "port": 1883
         }
       },
       "endpoints": {
-        "backend": {
-          "listener": "mqtt",
+        "backend_endpoint": {
+          "listener": "mqtt_listener",
           "protocol": "tcp",
-          "via": "backend"
+          "via": "backend_interface"
         }
       },
       "storage": {
@@ -105,19 +105,19 @@
       "adapter": "mqtt_explorer",
       "display_name": "Browser",
       "interfaces": {
-        "web": {
+        "web_interface": {
           "required": true,
           "accepts": [
             "guest-interface"
           ]
         },
-        "broker": {
+        "broker_interface": {
           "required": true,
           "accepts": [
             "guest-interface"
           ]
         },
-        "private": {
+        "private_interface": {
           "required": true,
           "accepts": [
             "app-network"
@@ -125,33 +125,33 @@
         }
       },
       "listeners": {
-        "web": {
+        "web_listener": {
           "service": "explorer_gateway",
           "namespace": "app-network",
-          "interface": "private",
+          "interface": "private_interface",
           "bind": "wildcard",
           "protocol": "tcp",
           "port": 4180,
           "publish": {
             "scope": "guest-interface",
-            "interface": "web",
+            "interface": "web_interface",
             "port": 80
           }
         },
-        "application": {
+        "application_listener": {
           "service": "mqtt_explorer",
           "namespace": "app-network",
-          "interface": "private",
+          "interface": "private_interface",
           "bind": "wildcard",
           "protocol": "tcp",
           "port": 3000
         }
       },
       "endpoints": {
-        "web": {
-          "listener": "web",
+        "web_endpoint": {
+          "listener": "web_listener",
           "protocol": "http",
-          "via": "web"
+          "via": "web_interface"
         }
       },
       "connections": {
@@ -192,7 +192,7 @@
       "adapter": "traefik",
       "display_name": "Ingress",
       "interfaces": {
-        "frontend": {
+        "frontend_interface": {
           "required": true,
           "accepts": [
             "guest-interface"
@@ -200,28 +200,28 @@
         }
       },
       "listeners": {
-        "http": {
+        "http_listener": {
           "service": "traefik",
           "namespace": "host",
-          "interface": "frontend",
+          "interface": "frontend_interface",
           "bind": "interface",
           "protocol": "tcp",
           "port": 80
         },
-        "https": {
+        "https_listener": {
           "service": "traefik",
           "namespace": "host",
-          "interface": "frontend",
+          "interface": "frontend_interface",
           "bind": "interface",
           "protocol": "tcp",
           "port": 443
         }
       },
       "endpoints": {
-        "https": {
-          "listener": "https",
+        "https_endpoint": {
+          "listener": "https_listener",
           "protocol": "https",
-          "via": "frontend"
+          "via": "frontend_interface"
         }
       },
       "storage": {

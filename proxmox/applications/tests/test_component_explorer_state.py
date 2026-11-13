@@ -318,7 +318,7 @@ class ExplorerFileContractTests(unittest.TestCase):
             'credential':{'principal':'fixture-existing','secret':'existing-password'}}
         self.app={'id':'browser','adapter':'mqtt_explorer','identity':{'services':{'mqtt_explorer':'browser2','explorer_gateway':'gateway2'},
             'runtime_directory':'/opt/homelab-app/runtime/browser2','runtime_id':'browser2'},'project_name':'gui-project',
-            'origin_url':'https://gui.example.invalid','role_addresses':{'web':'198.18.30.37'},
+            'origin_url':'https://gui.example.invalid','role_addresses':{'web_interface':'198.18.30.37'},
             'properties':{'connection_name':'Broker'},
             'settings':{'authentik_outpost_url':'http://198.18.30.20:9000','broker':self.broker},
             'storage_paths':{'data':{'source':'/srv/example/gui'}},'software_selection':{'images':{

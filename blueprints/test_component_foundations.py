@@ -10,14 +10,14 @@ from component_errors import ComponentError
 
 def props():
     return {
-        'unbound': {'publish_port': 5336}, 'pihole': {}, 'homeassistant': {'mdns': {'interface': 'home', 'startup': 'startup'}},
+        'unbound': {'publish_port': 5336}, 'pihole': {}, 'homeassistant': {'mdns': {'interface': 'home_interface', 'startup': 'startup'}},
         'mqtt': {'password_file': '/mosquitto/config/passwords'},
         'mqtt_explorer': {'connection_name': 'Broker'},
         'authentik': {'database': {'name': 'authentik', 'user': 'authentik'}, 'smtp': {
             'host': 'smtp.example.invalid', 'port': 587, 'use_tls': True, 'use_ssl': False,
             'from': 'sso@example.invalid', 'username': '', 'timeout': 30}, 'callbacks': {'evidence': 'callbacks'}},
         'zabbix': {'database': {'name': 'zabbix', 'user': 'zabbix'}},
-        'postgresql': {'client_access': [{'source': {'app': 'identity', 'interface': 'database'},
+        'postgresql': {'client_access': [{'source': {'app': 'identity', 'interface': 'database_interface'},
             'database': 'all', 'user': 'all', 'method': 'scram-sha-256'}]},
         'mariadb': {}, 'influxdb': {}, 'music_assistant': {},
         'zigbee2mqtt': {'adapter': 'ember', 'mqtt_base_topic': 'home'},
@@ -43,8 +43,8 @@ class FoundationPropertyTests(unittest.TestCase):
     def test_scalar_property_negatives_are_not_generic_environment_or_command_bags(self):
         values = [
             ('unbound', {'publish_port': True}), ('unbound', {'publish_port': 65536}),
-            ('homeassistant', {'mdns': {'interface': 'home'}}),
-            ('homeassistant', {'mdns': {'interface': '../outside', 'startup': 'startup'}}),
+            ('homeassistant', {'mdns': {'interface': 'home_interface'}}),
+            ('homeassistant', {'mdns': {'interface': '../outside_interface', 'startup': 'startup'}}),
             ('mqtt', {'password_file': '/mosquitto/config/..'}),
             ('mqtt', {'password_file': '/other/passwords'}),
             ('mqtt_explorer', {'connection_name': 'Broker\nPRIVATE_SENTINEL'}),
@@ -105,7 +105,7 @@ class FoundationPropertyTests(unittest.TestCase):
 class FoundationBindingTests(unittest.TestCase):
     def fixture(self, adapter):
         app = {'id': 'application', 'guest': 'host', 'adapter': adapter, 'properties': props()[adapter],
-               'interfaces': {'database': {'interface': 'database'}, 'web': {'interface': 'web'}},
+               'interfaces': {'database_interface': {'interface': 'database'}, 'web_interface': {'interface': 'web'}},
                'secret_bindings': {}, 'resolved_connections': {}, 'origin_url': 'https://app.example.invalid'}
         endpoints = {'dns': {'address': '198.18.20.53', 'protocol': 'udp', 'port': 53},
                      'api': {'address': '198.18.20.2', 'protocol': 'https', 'port': 8006}}
@@ -118,7 +118,7 @@ class FoundationBindingTests(unittest.TestCase):
     def test_explicit_physical_client_policy_binds_no_other_incoming_connections(self):
         resolver = self.fixture('postgresql')
         resolver.apps['identity'] = {'id': 'identity', 'adapter': 'node_red',
-                                     'interfaces': {'database': {'interface': 'database'}}}
+                                     'interfaces': {'database_interface': {'interface': 'database'}}}
         with patch.object(settings, 'validate') as check:
             settings.bind(resolver)
         check.assert_called_once()
@@ -128,7 +128,7 @@ class FoundationBindingTests(unittest.TestCase):
             copy.deepcopy(resolver.apps['application']['properties']['client_access'][0]))
         with self.assertRaisesRegex(ComponentError, 'database-access'):
             settings.bind(resolver)
-        resolver.apps['identity']['interfaces']['database'] = {'scope': 'app-network', 'network': 'private'}
+        resolver.apps['identity']['interfaces']['database_interface'] = {'scope': 'app-network', 'network': 'private'}
         with self.assertRaisesRegex(ComponentError, 'physical-role'):
             settings.bind(resolver)
 

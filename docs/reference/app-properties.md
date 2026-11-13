@@ -50,7 +50,13 @@ The current adapter requires the selected cloudflare_dns_token and proxmox_token
 
 ## Zigbee2MQTT
 
-Both properties are required: `adapter` must match `[a-z][a-z0-9_-]{0,62}`, and `mqtt_base_topic` must match `[a-zA-Z0-9][a-zA-Z0-9/_-]{0,127}`. The app also requires retained lifecycle, a declared serial coordinator, a broker connection and the exact settings owned by the adapter. Commissioning a new radio is unsupported.
+The required `adapter` must match `[a-z][a-z0-9_-]{0,62}`, and the required `mqtt_base_topic` must match `[a-zA-Z0-9][a-zA-Z0-9/_-]{0,127}`. The app also requires retained lifecycle, a declared serial coordinator, a broker connection and the exact settings owned by the adapter. Commissioning a new radio is unsupported.
+
+| Property | Presence / default | Effect |
+| --- | --- | --- |
+| `watchdog` | Optional string; only `default` is accepted. Omission leaves the environment variable unset. Null, Booleans and custom delays are rejected. | Sets `Z2M_WATCHDOG=default` on the owned Zigbee2MQTT container. |
+
+The [upstream watchdog](https://www.zigbee2mqtt.io/guide/installation/15_watchdog.html) retries recognized soft failures internally after 1, 5, 15, 30 and 60 minutes, then exits after repeated failed recovery. It requires an initial successful start and respects deliberate stops and configuration errors. Enabling it through protected CD can recreate the service; it preserves the image, coordinator, network identity, data and MQTT settings. It does not commission a radio or establish that an underlying serial fault is fixed.
 
 ## Bitwarden
 
@@ -80,7 +86,11 @@ CloudBeaver accepts at most 16 unmanaged and 8 managed connections, with a total
 
 The JDBC object contains exactly version, sha256 and image_filename. The version must be 3.5.N, where N is 11–999. SHA256 must contain 64 lowercase hexadecimal characters. The filename must match that version's JAR or the fixed compatibility filename mariadb-java-client-3.5.10.jar. The compiler derives the official Maven URL. The library controls this software selection; app properties cannot override it. The retired pgAdmin image is not an active property.
 
-CloudBeaver requires an HTTPS origin it owns and a selected OIDC configuration. Deployment checks protect its recovery administrator, workspace and private files, SQL accounts, HOLDs and private roles. Its generated health checks also require an explicit `public` HTTPS connection to IPv4 ingress port 443. Music Assistant has the same public-route requirement and uses its physical web interface as the source. See [Connections](connections.md).
+CloudBeaver requires an HTTPS origin it owns and a selected OIDC configuration. Deployment checks protect its recovery administrator, workspace and private files, SQL accounts, HOLDs and private roles. Its generated health checks also require an explicit `public` HTTPS connection to IPv4 ingress port 443. Music Assistant has the same public-route requirement. Its HTTPS probe binds the connection's resolved source address, which must belong to a declared app interface role; this can differ from its local web and player addresses. Local web and stream probes still check their own listeners. See [Connections](connections.md).
+
+Pi-hole profiles can opt into a separate `web_interface` role with an interface-bound host `web_listener` on TCP 80 and `web_endpoint` through that role. The runtime derives `FTLCONF_webserver_port` from the resolved address and verifies the selected socket, rejecting wildcard or other-address web binds. DNS listeners, upstreams, data, image and authentication remain unchanged. The ordinary profile without this role retains its existing environment and behavior. The [Pi-hole FTL reference](https://docs.pi-hole.net/ftldns/configfile/#port) documents the address-and-port setting; a declared endpoint alone does not rebind FTL.
+
+A retained Home Assistant profile can explicitly declare `web_interface` and `transition_web_interface`, each with its corresponding interface-bound host TCP 8123 listener and endpoint. This opt-in dual-web check requires both distinct declared IPv4 sockets plus `127.0.0.1`; it permits optional `::1` and rejects wildcard or additional addresses. Its ordinary loopback HTTP/API probe remains unchanged. Prepare the matching HTTP settings through the supported configuration path before deployment: declaring listeners does not rewrite Home Assistant configuration, environment, data or authentication. Existing single-web profiles and other apps retain their original checks.
 
 ## Changes and validation
 
@@ -92,17 +102,25 @@ Each value below is a complete **effective properties object for the named adapt
 
 <!-- example: properties-adapters -->
 ```yaml
-unbound: {publish_port: 5335}
+unbound:
+  publish_port: 5335
 pihole: {}
-homeassistant: {mdns: {interface: web, startup: startup}}
+homeassistant:
+  mdns:
+    interface: web_interface
+    startup: startup
 node_red: {}
-mqtt: {password_file: /mosquitto/config/passwords}
-mqtt_explorer: {connection_name: Example broker}
+mqtt:
+  password_file: /mosquitto/config/passwords
+mqtt_explorer:
+  connection_name: Example broker
 music_assistant: {}
 mariadb: {}
 influxdb: {}
 authentik:
-  database: {name: example_identity, user: example_identity}
+  database:
+    name: example_identity
+    user: example_identity
   smtp:
     host: mail.example.invalid
     port: 587
@@ -111,32 +129,56 @@ authentik:
     from: identity@example.invalid
     username: ""
     timeout: 30
-zabbix: {database: {name: example_monitoring, user: example_monitoring}}
+zabbix:
+  database:
+    name: example_monitoring
+    user: example_monitoring
 postgresql:
   client_access:
-    - source: {app: client, interface: database}
+    - source:
+        app: client
+        interface: database_interface
       database: all
       user: all
       method: scram-sha-256
 traefik:
   dashboard: false
-  provider: {context: lab, token_id: reader@pve!discovery}
-  acme: {email: ops@example.invalid, resolvers: [{external: dns}]}
-zigbee2mqtt: {adapter: zstack, mqtt_base_topic: example/zigbee}
+  provider:
+    context: lab
+    token_id: reader@pve!discovery
+  acme:
+    email: ops@example.invalid
+    resolvers:
+    - external: dns
+zigbee2mqtt:
+  adapter: zstack
+  mqtt_base_topic: example/zigbee
+  watchdog: default
 bitwarden:
-  issuer: {protocol: https, domain: vault}
+  issuer:
+    protocol: https
+    domain: vault
   database_name: example_vault
   data_uid: 1000
   data_gid: 1000
-pegaprox: {trusted_proxy: {app: ingress, interface: web}}
-winet: {mqtt_prefix: example/inverter}
+pegaprox:
+  trusted_proxy:
+    app: ingress
+    interface: web_interface
+winet:
+  mqtt_prefix: example/inverter
 cloudbeaver:
   server_name: Example database browser
   recovery_admin: recovery_admin
   heap_mib: 512
-  auth_headers: {user: X-Example-User, team: X-Example-Team}
+  auth_headers:
+    user: X-Example-User
+    team: X-Example-Team
   connections:
-    reporting: {name: Reporting, database: reports, sslmode: require}
+    reporting:
+      name: Reporting
+      database: reports
+      sslmode: require
 ```
 
 The CloudBeaver `reporting` example describes an **unmanaged PostgreSQL** connection. Declare its connection and existing credential separately. A managed connection omits `sslmode` and uses its managed account, so do not copy that key into managed PostgreSQL or any MariaDB metadata. To complete a supported CloudBeaver app, include at least one managed database connection and account, plus the public connection, OIDC and origin prerequisites above.

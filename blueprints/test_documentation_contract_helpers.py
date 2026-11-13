@@ -41,6 +41,7 @@ BINDINGS = (
     Binding('guest-nic.address', 'interface', 'address', 'all', 'field-guest-nic-address', 'nic-minimal'),
     Binding('guest-nic.default_route', 'interface', 'default_route', 'all', 'field-guest-nic-default-route', 'nic-minimal'),
     Binding('guest-nic.ipv6', 'interface', 'ipv6', 'all', 'field-guest-nic-ipv6', 'nic-minimal'),
+    Binding('guest-nic.ip_filter', 'interface', 'ip_filter', 'all', 'field-guest-nic-ip-filter', 'nic-ip-filter'),
     Binding('guest-nic.address.static.mode', 'interface', 'address.mode', 'static', 'field-guest-nic-address-mode', 'nic-minimal'),
     Binding('guest-nic.address.static.value', 'interface', 'address.value', 'static', 'field-guest-nic-address-value', 'nic-minimal'),
     Binding('guest-nic.address.dhcp.mode', 'interface', 'address.mode', 'dhcp', 'field-guest-nic-address-mode', 'nic-minimal'),

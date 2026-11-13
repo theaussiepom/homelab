@@ -22,16 +22,30 @@ def callback():
 
 
 class FoundationValidatorEdges(unittest.TestCase):
+    def test_zigbee_watchdog_accepts_only_explicit_default_and_preserves_omission(self):
+        base = {'adapter': 'ember', 'mqtt_base_topic': 'owned/topic'}
+        for partial in (False, True):
+            for value in (base, dict(base, watchdog='default')):
+                original_value = copy.deepcopy(value)
+                foundation.validate('zigbee2mqtt', value, partial=partial)
+                self.assertEqual(value, original_value)
+            for watchdog in (None, False, True, 1, '', 'Default', '1,5,15', [], {}, 'default\n'):
+                with self.subTest(partial=partial, watchdog=watchdog), self.assertRaises(ComponentError):
+                    foundation.validate('zigbee2mqtt', dict(base, watchdog=watchdog), partial=partial)
+        foundation.validate('zigbee2mqtt', {'watchdog': 'default'}, partial=True)
+        with self.assertRaises(ComponentError):
+            foundation.validate('zigbee2mqtt', dict(base, watchdog='default', environment={}))
+
     def test_direct_line_database_digest_and_physical_success_and_refusal_boundaries(self):
         self.assertEqual(foundation._line('metadata'), 'metadata')
         self.assertEqual(foundation._line('',empty=True), '')
         self.assertEqual(foundation._sql('owned_database'), 'owned_database')
-        foundation._digest('a'*64);foundation.physical({'app':'owned','interface':'database'})
+        foundation._digest('a'*64);foundation.physical({'app':'owned','interface':'database_interface'})
         cases=[(foundation._line,value) for value in (None,False,'','x'*4097,'a\r','a\n','a\0')]
         cases += [(foundation._sql,value) for value in (None,'template0','template1','Upper','a-b','x'*64)]
         cases += [(foundation._digest,value) for value in (None,64,'A'*64,'a'*63)]
-        cases += [(foundation.physical,value) for value in ({'app':'a'}, {'app':'a','interface':'x','extra':True},
-                     {'app':False,'interface':'x'},{'app':'../escape','interface':'x'})]
+        cases += [(foundation.physical,value) for value in ({'app':'a'}, {'app':'a','interface':'x_interface','extra':True},
+                     {'app':False,'interface':'x_interface'},{'app':'../escape','interface':'x_interface'})]
         for index,(check,value) in enumerate(cases):
             with self.subTest(case=index),self.assertRaises(ComponentError):check(value)
 
@@ -252,7 +266,7 @@ class FoundationBindingEdges(unittest.TestCase):
         self.assertEqual(app['settings'],{'serial_device':'/dev/serial/by-id/usb-synthetic',
             'bind_address':'198.18.40.6','frontend_port':8099,'adapter':'ember','mqtt_base_topic':'home',
             'mqtt_server':'mqtt://198.18.41.2:1883'})
-        resolver.endpoint.assert_called_once_with({'app':'application','endpoint':'web'})
+        resolver.endpoint.assert_called_once_with({'app':'application','endpoint':'web_endpoint'})
         app['resolved_connections']['broker']['hostname']='broker.example.invalid';foundation.bind(resolver)
         self.assertEqual(app['settings']['mqtt_server'],'mqtt://broker.example.invalid:1883')
         for case in ('fresh','device','broker','type','port','web'):
@@ -329,15 +343,15 @@ class FoundationBindingEdges(unittest.TestCase):
 
     def test_physical_address_resolution_refuses_unknown_nonphysical_or_unassigned_addresses(self):
         resolver,app=fixture('postgresql');app['properties']['client_access']=[]
-        resolver.apps['peer']={'adapter':'node_red','interfaces':{'database':{'interface':'backend'}}}
-        ref={'app':'peer','interface':'database'}
+        resolver.apps['peer']={'adapter':'node_red','interfaces':{'database_interface':{'interface':'backend'}}}
+        ref={'app':'peer','interface':'database_interface'}
         self.assertEqual(foundation._address(resolver,ref),'198.18.21.10')
         for value in ('0.0.0.0','127.0.0.1','224.0.0.1','169.254.1.2','invalid'):
             resolver.role_address.return_value=value
             with self.subTest(address=value),self.assertRaises(ComponentError):foundation._address(resolver,ref)
-        for value in ({'app':'missing','interface':'database'},{'app':'peer','interface':'missing'}):
+        for value in ({'app':'missing','interface':'database_interface'},{'app':'peer','interface':'missing_interface'}):
             with self.subTest(reference=value),self.assertRaises(ComponentError):foundation._address(resolver,value)
-        resolver.apps['peer']['interfaces']['database']={'scope':'guest-loopback'}
+        resolver.apps['peer']['interfaces']['database_interface']={'scope':'guest-loopback'}
         with self.assertRaisesRegex(ComponentError,'physical-role'):foundation._address(resolver,ref)
 
 

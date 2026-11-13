@@ -72,10 +72,15 @@ The complete tested [broker/browser/ingress composition](../examples/relationshi
 
 <!-- example: connection-managed -->
 ```yaml
-consumer: {app: browser, connection: broker}
-target: {app: broker, endpoint: backend}
-source_interface: broker
-hostname: {domain: broker}
+consumer:
+  app: browser
+  connection: broker
+target:
+  app: broker
+  endpoint: backend_endpoint
+source_interface: broker_interface
+hostname:
+  domain: broker
 account: client
 ```
 
@@ -85,7 +90,9 @@ Declare the account as `accounts.client` and its generated source as `secret_sou
 ```yaml
 adapter: mqtt-client
 owner: browser
-target: {app: broker, endpoint: backend}
+target:
+  app: broker
+  endpoint: backend_endpoint
 principal: browser
 credential: browser_password
 access: read-write-all

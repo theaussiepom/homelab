@@ -20,18 +20,18 @@ def rule(direction='out',protocol='tcp',port='5335',**fields):
 
 def composition():
     spec=library();source=site();profile=spec['app_profiles']['recursive']
-    profile['interfaces']['web']={'required':True,'accepts':['guest-interface']}
-    profile['listeners']['udp']['publish']={'scope':'guest-interface','interface':'web','port':5335}
-    profile['endpoints']['dns']['via']='web'
+    profile['interfaces']['web_interface']={'required':True,'accepts':['guest-interface']}
+    profile['listeners']['udp_listener']['publish']={'scope':'guest-interface','interface':'web_interface','port':5335}
+    profile['endpoints']['dns_endpoint']['via']='web_interface'
     profile['connections']={'upstream':{'type':'dns','required':False,'readiness':[]}}
-    source['apps']['recursive_a']['interfaces']['web']={'interface':'backend'}
+    source['apps']['recursive_a']['interfaces']['web_interface']={'interface':'backend'}
     guest=copy.deepcopy(source['guests']['resolver']);guest['identity']={'vmid':611,'hostname':'other-dns'}
     for row in guest['interfaces'].values():
         row['mac']=row['mac'][:-2]+'11';row['address']['value']=row['address']['value'][:-2]+'11'
     source['guests']['other']=guest
     source['apps']['other']=copy.deepcopy(source['apps']['recursive_a']);source['apps']['other']['guest']='other'
     source['connections']={'upstream':{'consumer':{'app':'recursive_a','connection':'upstream'},
-        'target':{'app':'other','endpoint':'dns'},'source_interface':'web'}}
+        'target':{'app':'other','endpoint':'dns_endpoint'},'source_interface':'web_interface'}}
     source['policies']={'network':{direction:{'rules':[
         rule(direction,protocol,interface='wire')for protocol in ('tcp','udp')]}
         for direction in ('out','in')}}
@@ -154,7 +154,7 @@ class TrafficCompilerTests(unittest.TestCase):
     def test_preparation_uses_the_explicit_control_interface_and_value_refs_create_no_waits(self):
         self.source['connections']={}
         plan=self.resolve();self.assertEqual(plan.resolved['guest_dependencies'],{'resolver':[],'other':[]})
-        self.source['guests']['resolver']['readiness']=[{'stage':'preparation','target':{'app':'other','endpoint':'dns'}}]
+        self.source['guests']['resolver']['readiness']=[{'stage':'preparation','target':{'app':'other','endpoint':'dns_endpoint'}}]
         with self.assertRaisesRegex(ComponentError,'traffic-egress at guests.resolver.readiness'):self.resolve()
         for direction in ('out','in'):
             for row in self.source['policies']['network'][direction]['rules']:row['source']='198.18.20.10/32'

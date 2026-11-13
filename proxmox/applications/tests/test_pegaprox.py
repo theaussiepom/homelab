@@ -43,9 +43,9 @@ class PegaProxTests(unittest.TestCase):
         for fields in ({'memory_mib':2000},{'cpu_limit':3},{'pids_limit':513},{'cpu_limit':True}):
             value=descriptor();value['containers']['pegaprox'].update(fields)
             with self.subTest(fields=fields),self.assertRaises(ValueError):component_runtime._pegaprox(value,guest())
-        for change in (lambda a:a['listeners']['web'].update(publication_address='198.18.25.35'),
-                       lambda a:a['listeners']['web']['publish'].update(scope='guest-loopback'),
-                       lambda a:a['listeners']['web']['publish'].update(port=5001)):
+        for change in (lambda a:a['listeners']['web_listener'].update(publication_address='198.18.25.35'),
+                       lambda a:a['listeners']['web_listener']['publish'].update(scope='guest-loopback'),
+                       lambda a:a['listeners']['web_listener']['publish'].update(port=5001)):
             value=descriptor();change(value)
             with self.subTest(change=change),self.assertRaises(ValueError):component_runtime._pegaprox(value,guest())
 

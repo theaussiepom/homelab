@@ -187,7 +187,7 @@ def _mqtt_explorer(app, secrets, records, public_ca, context):
                  'connection':{key:value for key,value in connection.items() if key!='profile_id'},'password':password}
         if runtime:private['runtime']=runtime
         filename='mqtt-explorer-profile.json'
-    value={'public_url':app['origin_url'],'bind_address':app['role_addresses']['web'],
+    value={'public_url':app['origin_url'],'bind_address':app['role_addresses']['web_interface'],
         'authentik_outpost_url':settings['authentik_outpost_url'],'data_path':app['storage_paths']['data']['source'],
         'broker_connection':connection,'broker_address':broker['target']['address']}
     static,dynamic=explorer.configuration(value,explorer_service=names['mqtt_explorer'])
