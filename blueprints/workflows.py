@@ -193,8 +193,8 @@ if actual != expected:
     raise SystemExit('Regenerate the exact selected component workflow graph and scalar bindings')
 PYCODE
 """
-    return {'name': 'Check guests', 'if': PRIVATE_MAIN, 'runs-on': 'ubuntu-24.04',
-            'timeout-minutes': 2, 'steps': [*setup, {'name': 'Check guests', 'id': 'selection',
+    return {'name': 'Validate deployment', 'if': PRIVATE_MAIN, 'runs-on': 'ubuntu-24.04',
+            'timeout-minutes': 2, 'steps': [*setup, {'name': 'Validate deployment', 'id': 'selection',
                 'env': {'DISABLED': '${{ inputs.disabled }}',
                         'EXPECTED_MODEL': json.dumps(graph, sort_keys=True)}, 'run': run}]}
 
@@ -219,16 +219,17 @@ def models(stack, *, site_source, disabled=None):
     result = {'deploy.yml': deploy}
     if 'backup' in graph:
         condition = PRIVATE_MAIN + " && !failure() && !cancelled() && needs.selection.result == 'success'"
-        deploy['jobs']['_backup'] = {'name':'Backup','needs':graph['backup']['needs'],'if':condition,
+        backup_name = graph['backup']['name']
+        deploy['jobs']['_backup'] = {'name':backup_name,'needs':graph['backup']['needs'],'if':condition,
             'uses':'./.github/workflows/backup.yml','with':arguments(),
             'secrets':{'PBS_API_TOKEN':'${{ secrets.PBS_API_TOKEN }}'}}
-        job = {'name':'Backup','if':PRIVATE_MAIN,'environment':'backup','runs-on':'${{ fromJSON(inputs.runner_labels) }}',
+        job = {'name':backup_name,'if':PRIVATE_MAIN,'environment':'backup','runs-on':'${{ fromJSON(inputs.runner_labels) }}',
             'timeout-minutes':45,'env':copy.deepcopy(recipe['env']),
             'steps':[{'name':'Setup','uses':action_source+'guest-setup'+action_revision},
                 {'name':'Backup setup','env':{'DISABLED':'${{ inputs.disabled }}',
                     'PBS_API_TOKEN':'${{ secrets.PBS_API_TOKEN }}'},
                  'run':'"$HOMELAB_CONFIG_PYTHON" framework-source/blueprints/backup_deploy.py --stack stack-source --site-root . --disabled "$DISABLED"'}]}
-        result['backup.yml'] = {'name':'Backup','on':workflow_call(['PBS_API_TOKEN']),
+        result['backup.yml'] = {'name':backup_name,'on':workflow_call(['PBS_API_TOKEN']),
             'permissions':{'contents':'read'},'defaults':copy.deepcopy(defaults),'jobs':{'deploy':job}}
         result['backup.yml']['on']['workflow_call']['secrets'] = {'PBS_API_TOKEN': {'required': True}}
     for guest, metadata in graph['guests'].items():

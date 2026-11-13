@@ -196,7 +196,7 @@ def model(plan):
                                   'needs': ['selection', *(['_backup'] if operational_backup and 'backup' in guests[guest] else []), *dependencies[guest]],
                                   'phases': phases, 'workflow_secrets': secrets}
     if operational_backup:
-        result['backup'] = {'name':'Backup', 'needs':['selection'],
+        result['backup'] = {'name':'Configure backups', 'needs':['selection'],
                             'environment':'backup', 'workflow_secrets':['PBS_API_TOKEN']}
     plan.check()
     return result
