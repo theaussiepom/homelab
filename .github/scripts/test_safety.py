@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 import source_safety as safety
 
 spec = importlib.util.spec_from_file_location('push_guard', safety.ROOT / '.githooks/push_guard.py')
@@ -94,6 +95,18 @@ class SafetyTests(unittest.TestCase):
         self.git('config', 'user.email', 'fixture@example.invalid')
         self.commit()
         self.assert_blocked('maintainer_identity_mismatch')
+
+    def test_public_author_display_name_passes_the_normal_history_scan(self):
+        """Scan a real commit with a display-name author and independent committer."""
+        with patch.dict(os.environ, {
+            'GIT_AUTHOR_NAME': 'Public display name',
+            'GIT_AUTHOR_EMAIL': safety.OWN_EMAIL,
+        }):
+            self.commit()
+        self.assertEqual(self.git('show', '-s', '--format=%an'), 'Public display name')
+        self.assertEqual(self.git('show', '-s', '--format=%ae'), safety.OWN_EMAIL)
+        self.assertEqual(self.git('show', '-s', '--format=%cn'), 'fixture')
+        self.assertEqual(self.check()['status'], 'passed')
 
     def test_base_limits_history_but_not_full_head_tree(self):
         base = self.commit('unchanged.txt')

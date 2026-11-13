@@ -1,0 +1,72 @@
+---
+- name: Read the effective remote identity
+  ansible.builtin.command: {argv: [id, -u]}
+  register: web_uid
+  changed_when: false
+- name: Read the current host name
+  ansible.builtin.command: {argv: [hostname]}
+  register: web_hostname
+  changed_when: false
+- name: Read actual link identities and assigned addresses
+  ansible.builtin.command: {argv: [ip, -j, address, show]}
+  register: web_addresses
+  changed_when: false
+- name: Inspect only the owned persistence paths without following links
+  ansible.builtin.stat:
+    path: '{{ item }}'
+    follow: false
+    get_checksum: false
+    get_mime: false
+  loop:
+    - /etc/homelab-device-web
+    - /etc/homelab-device-web/web.nft
+    - /etc/systemd/system/homelab-device-web-firewall.service
+  register: web_paths
+- name: Preserve unsafe paths before any content read
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (not item.stat.islnk and item.stat.uid == 0 and item.stat.gid == 0 and ((item.item == '/etc/homelab-device-web' and item.stat.isdir and item.stat.mode == '0755') or (item.item != '/etc/homelab-device-web' and item.stat.isreg and item.stat.nlink == 1 and item.stat.size <= 16384 and item.stat.mode == ('0600' if item.item.endswith('web.nft') else '0644'))))
+  loop: '{{ web_paths.results }}'
+- name: Read only admitted owned files
+  ansible.builtin.slurp:
+    src: '{{ item.item }}'
+  loop: '{{ web_paths.results[1:] }}'
+  when: item.stat.exists
+  register: web_contents
+- name: Read table names without changing any policy
+  ansible.builtin.command: {argv: [nft, -j, list, tables]}
+  register: web_tables
+  changed_when: false
+- name: Select this capability's table
+  ansible.builtin.set_fact:
+    web_table_present: '{{ ((web_tables.stdout | from_json).nftables | selectattr("table", "defined") | map(attribute="table") | selectattr("family", "equalto", "inet") | selectattr("name", "equalto", "homelab_device_web") | list | length) > 0 }}'
+- name: Read the complete owned table when present
+  ansible.builtin.command: {argv: [nft, -j, list, table, inet, homelab_device_web]}
+  register: web_kernel
+  changed_when: false
+  when: web_table_present
+- name: Read only the dedicated unit's loaded identity
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - 'import json,subprocess; r=subprocess.run(["systemctl","show","homelab-device-web-firewall.service","-p","FragmentPath","-p","DropInPaths","-p","ActiveState","-p","UnitFileState","-p","NeedDaemonReload"],capture_output=True,text=True); assert r.returncode in (0,1); d=dict(line.split("=",1) for line in r.stdout.splitlines()); assert set(d)=={"FragmentPath","DropInPaths","ActiveState","UnitFileState","NeedDaemonReload"}; print(json.dumps(d))'
+  register: web_unit
+  changed_when: false
+- name: Project only this capability's observation
+  ansible.builtin.set_fact:
+    device_web_observed:
+      uid: '{{ web_uid.stdout | int }}'
+      hostname: '{{ web_hostname.stdout }}'
+      addresses: '{{ web_addresses.stdout | from_json }}'
+      parent_stat: '{{ web_paths.results[0].stat }}'
+      config_stat: '{{ web_paths.results[1].stat }}'
+      config: '{{ (web_contents.results[0].content | b64decode) if web_paths.results[1].stat.exists else none }}'
+      unit_stat: '{{ web_paths.results[2].stat }}'
+      unit: '{{ (web_contents.results[1].content | b64decode) if web_paths.results[2].stat.exists else none }}'
+      ruleset: '{{ (web_kernel.stdout | from_json) if web_table_present else {"nftables": []} }}'
+      fragment: '{{ (web_unit.stdout | from_json).FragmentPath }}'
+      dropins: '{{ (web_unit.stdout | from_json).DropInPaths }}'
+      active: '{{ (web_unit.stdout | from_json).ActiveState }}'
+      enabled: '{{ (web_unit.stdout | from_json).UnitFileState }}'
+      reload_needed: '{{ (web_unit.stdout | from_json).NeedDaemonReload }}'

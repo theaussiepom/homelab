@@ -507,6 +507,63 @@ def query_error_projection(errors):
     return result
 
 
+def community_exception_projection(log):
+    """Observe closed log symbols, which need not be the failed query's cause."""
+    value = {'log_status': 'unavailable', 'log_available': False,
+             'log_truncated': False, 'symbol_limit_reached': False,
+             'observed_exception_types': [], 'observed_frames': [],
+             'unknown_exception_lines': 0, 'unknown_frame_lines': 0}
+    if not isinstance(log, str):
+        return value
+    types = {'java.lang.NullPointerException', 'java.util.ConcurrentModificationException',
+             'java.lang.IllegalStateException', 'java.lang.IllegalArgumentException',
+             'java.util.NoSuchElementException', 'java.lang.ClassCastException',
+             'java.io.IOException', 'org.jkiss.dbeaver.DBException', 'io.cloudbeaver.DBWebException'}
+    frames = {'io.cloudbeaver.service.core.impl.WebServiceCore.getUserConnections': 'WebServiceCore.getUserConnections',
+              'io.cloudbeaver.model.session.WebSession.getAccessibleProjects': 'WebSession.getAccessibleProjects',
+              'io.cloudbeaver.WebServiceUtils.getApplicableDriversIds': 'WebServiceUtils.getApplicableDriversIds'}
+    value.update(log_available=True, log_status='no-matching-lines', log_truncated=len(log) > 65536)
+    selected = log[-65536:]
+    if value['log_truncated'] and log[-65537] not in '\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029':
+        selected = selected.partition('\n')[2]  # Discard a possible partial first line.
+    for line in selected.splitlines():
+        line = line.strip()
+        kind = line.removeprefix('Caused by: ').partition(':')[0]
+        if kind in types:
+            if kind not in value['observed_exception_types']:
+                if len(value['observed_exception_types']) < 8:
+                    value['observed_exception_types'].append(kind)
+                else:
+                    value['symbol_limit_reached'] = True
+        elif kind.endswith(('Exception', 'Error')) and not any(c.isspace() for c in kind):
+            value['symbol_limit_reached'] |= value['unknown_exception_lines'] == 999
+            value['unknown_exception_lines'] = min(999, value['unknown_exception_lines'] + 1)
+        if not line.startswith('at '):
+            continue
+        for actual, code in frames.items():
+            prefix = 'at ' + actual + '(' + actual.rsplit('.', 2)[1] + '.java:'
+            if not line.startswith(prefix) or not line.endswith(')'):
+                continue
+            number = line[len(prefix):-1]
+            if not (0 < len(number) <= 7 and number.isascii() and number.isdecimal()
+                    and 1 <= int(number) <= 1000000):
+                continue
+            frame = {'frame': code, 'line': int(number)}
+            if frame not in value['observed_frames']:
+                if len(value['observed_frames']) < 12:
+                    value['observed_frames'].append(frame)
+                else:
+                    value['symbol_limit_reached'] = True
+            break
+        else:
+            value['symbol_limit_reached'] |= value['unknown_frame_lines'] == 999
+            value['unknown_frame_lines'] = min(999, value['unknown_frame_lines'] + 1)
+    if any(value[key] for key in ('observed_exception_types', 'observed_frames',
+                                 'unknown_exception_lines', 'unknown_frame_lines')):
+        value['log_status'] = 'symbols-observed'
+    return value
+
+
 def combined_checks(cfg):
     forged = {name: 'admin' if name in {'X-Team', 'X-Role', 'X-Role-TE', 'X-Forwarded-Groups'} else 'local-recovery'
               for name in HEADERS}
@@ -757,6 +814,9 @@ def execute():
         result.update(status='FAIL', error_type=type(error).__name__, error=str(error))
         write(ROOT/'exception.log', traceback.format_exc())
     finally:
+        query_failed = result.get('status') == 'FAIL' and 'query_error_diagnostics' in result
+        if query_failed:
+            result['community_exception_diagnostics'] = community_exception_projection(None)
         for owned in (container_id or container_name, container_name+'-config', ce_id or ce_name):
             info = docker('inspect', owned, check=False)
             if info.returncode == 0:
@@ -765,8 +825,12 @@ def execute():
                     logs = docker('logs', details['Id'], check=False)
                     logfile = 'community.log' if owned == (ce_id or ce_name) else 'config-container.log' if owned == container_name+'-config' else 'gateway.log'
                     write(ROOT/logfile, logs.stdout+logs.stderr)
+                    if query_failed and logfile == 'community.log' and logs.returncode == 0:
+                        result['community_exception_diagnostics'] = community_exception_projection(logs.stdout+logs.stderr)
                     removed = docker('rm', '--force', details['Id'], check=False)
                     result['owned_fixture_container_removed'] = removed.returncode == 0
+                elif query_failed and owned == (ce_id or ce_name):
+                    result['community_exception_diagnostics']['log_status'] = 'unowned'
         if network_id:
             info = docker('network', 'inspect', network_id, check=False)
             if info.returncode == 0:
@@ -784,6 +848,8 @@ def execute():
             'result': str(ROOT/'result.json')}
         if 'query_error_diagnostics' in result:
             summary['query_error_diagnostics'] = result['query_error_diagnostics']
+        if 'community_exception_diagnostics' in result:
+            summary['community_exception_diagnostics'] = result['community_exception_diagnostics']
         print(json.dumps(summary))
     if result['status'] != 'PASS':
         raise SystemExit(1)

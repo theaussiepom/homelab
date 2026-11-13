@@ -115,6 +115,6 @@ Keep guest and app keys and persistent identities stable. Even a change to a dom
 
 ## PBS client preparation
 
-Enable the root [`backup`](backup.md) feature by adding the property. Null or an empty object selects the sole registered backup profile; `{profile: id}` selects one explicitly. Only guests with their own [`backup:` marker](backup.md#backup-guest) receive client software and recovery coverage. Add the closed [`backup.job`](backup.md#operational-job) object and its management/recovery inputs for a coordinated encrypted backup schedule. Its membership includes exactly the enrolled guests, even when deployment to an enrolled guest is disabled. Complete [backup setup](../backup/README.md) before deployment.
+Enable the root [`backup`](backup.md) feature by adding the property. Null or an empty object selects the sole registered backup profile; `{profile: id}` selects one explicitly. Only guests with their own [`backup:` marker](backup.md#backup-guest) receive client software and recovery coverage. Optional [`backup.defaults`](backup.md#binding-defaults-and-guest-overrides) supplies interface/staging identifiers to enrolled guests; guest fields override them. Add the closed [`backup.job`](backup.md#operational-job) object and its management/recovery inputs for a coordinated encrypted backup schedule. Its membership includes exactly the enrolled guests, even when deployment to an enrolled guest is disabled. Complete [backup setup](../backup/README.md) before deployment.
 
 [Reference index](README.md) · [Library](library.md) · [Sources](sources.md)

@@ -113,7 +113,7 @@ additions in place and is never an automatic retry or rollback.
 
 ## Backup enrollment
 
-The optional guest-level `backup` accepts null or an empty object; omission leaves the guest unenrolled. Root shared backup settings are required. This selects client preparation for this guest without duplicating paths or credentials. See the [canonical guest backup field](backup.md#backup-guest), [volume selection](backup.md#backup-volume) and [setup guide](../backup/README.md). Boolean values and unknown fields are rejected.
+The optional guest-level `backup` accepts null or a closed binding object; omission leaves the guest unenrolled. Null and `{}` inherit shared binding defaults. With an operational job, guest fields may override interface, staging volume, backup ID and byte/file limits; see the [binding precedence and accepted fields](backup.md#binding-defaults-and-guest-overrides). Root shared backup settings are required. This selects client preparation for this guest without duplicating paths or credentials. See the [canonical guest backup field](backup.md#backup-guest), [volume selection](backup.md#backup-volume) and [setup guide](../backup/README.md). Boolean values and unknown fields are rejected.
 
 ## Resolution and relationships
 
