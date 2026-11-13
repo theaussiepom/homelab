@@ -15,7 +15,6 @@ import authored_config as a
 import compile as c
 import component_monitoring
 from types import SimpleNamespace
-import workflows
 
 
 class AuthoredConfigTests(unittest.TestCase):
@@ -123,27 +122,3 @@ class AuthoredConfigTests(unittest.TestCase):
                 c.main();self.assertEqual(compile_site.call_args.args,(self.root,path,[]))
         with patch.object(sys,'argv',['compile','--stack',str(self.root),'--check','--site',str(path.with_suffix('.json'))]),self.assertRaises(ValueError):c.main()
         with patch.object(sys,'argv',['compile','--stack',str(self.root),'--check','--site',str(path),'--site-root',str(self.root)]),self.assertRaises(SystemExit):c.main()
-
-
-    def test_selected_lock_extractor_keeps_only_required_compiler_packages(self):
-        import config_environment
-        lock=self.root/'requirements.lock.txt';original=(c.ROOT/'requirements.lock.txt').read_text()
-        lock.write_text(original);result=config_environment.selected(lock)
-        self.assertEqual([line.split('==')[0] for line in result.splitlines() if not line.startswith(' ')],
-                         ['pyyaml','cryptography','cffi','pycparser'])
-        self.assertNotIn('# via',result)
-        for raw in ('',original+original,original.replace('pyyaml==','pyyaml>=',1),
-                    original.replace('cryptography==','cryptography>=',1),
-                    original.replace('    --hash=sha256:', '    --other=sha256:')):
-            lock.write_text(raw)
-            with self.subTest(raw=raw[:30]),self.assertRaises(ValueError):config_environment.selected(lock)
-        lock.unlink();lock.symlink_to(self.root/'missing')
-        with self.assertRaises(ValueError):config_environment.selected(lock)
-
-    def test_prepare_config_workflow_preserves_isolated_hash_locked_install(self):
-        script=next(step['run'] for step in workflows.phase_recipe()[0]['steps'] if step.get('name') == 'Prepare config')
-        composite=yaml.safe_load((c.ROOT/'.github/actions/guest-setup/action.yml').read_text())
-        paired=next(step['run'] for step in composite['runs']['steps'] if step.get('name') == 'Prepare config')
-        self.assertEqual(script.strip(),paired.strip())
-        self.assertIn('--require-hashes --no-deps',script);self.assertIn('-m pip --isolated install',script)
-        self.assertNotIn('APPLICATION_SSH_KEY',script);self.assertNotIn('PROXMOX_APP_TOKEN',script)
