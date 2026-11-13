@@ -27,21 +27,11 @@ This command requires `--stack PATH` and `--site FILE`. It also accepts `--disab
 
 This command requires `--stack PATH` and `--site PATH`, and optionally accepts `--check`. It generates the consumer workflow, or checks that the existing workflow matches, using the selected published library and framework workflow references and the site configuration. Checks preserve the existing CI and security policy fields. The wrapper uses the existing parser and deployment engine.
 
-If the consumer includes the supported local `.github/workflows/pbs-firewall.yml`,
-the generated Deploy calls it as `PBS` after selection, alongside the guest
-jobs. That workflow must retain pure PR validation and declare only the named
-required `PBS_FIREWALL_SSH_KEY`, with its native job using `homelab-bootstrap`.
-It cannot retain a standalone push trigger or a nested deployment queue.
-Without this optional file, generation is unchanged; unsupported present files
-are refused. The caller forwards only that named secret, never inherited secrets.
+The generated Deploy has one early **Backup** job when operational backup or the supported local `.github/workflows/pbs-firewall.yml` is selected. There is no final group activation job. Operationally enrolled guests depend on early setup and finish their own Backup step; nightly readiness comes from their genuine completion receipts and sealed worker inputs.
 
-The selected PBS server participates in every main Deploy, not only policy-path
-pushes. An absent real binding skips target contact; successful validation still
-allows ordinary activation. A selected PBS failure or cancellation blocks final
-Backup, which also keeps all existing guest dependencies. This remains enrollment
-and user-schedule setup, not PBS server installation or a manual backup start.
-The outer Deploy owns the shared queue once. Guest graphs, phase operations and
-their credential subsets are unchanged; queueing does not create a DNS/PBS edge.
+The optional PBS workflow retains its pure PR validation and fixed named `PBS_FIREWALL_SSH_KEY` contract. Generation combines its pure check and selected native policy steps into the early Backup job, retaining its protected `homelab-bootstrap` Environment, 15-minute bound and target-selection condition. An absent real binding skips host contact while still permitting schedule maintenance. Source checkouts and dependency installation are supplied by the shared immutable job setup; any framework checkout quoted in the local workflow must select the same framework revision. PBS commands must use the selected job tools, not absolute shared-environment executables. Step identifiers are scoped to keep their output references distinct. Unsupported contexts, source drift, permissive failure flags and unsafe present files are refused.
+
+Only the existing named PBS host key reaches its native policy step. The PBS API token reaches early schedule setup and each enrolled guest Backup step; it is never placed in a guest payload. The early combined job uses the existing PBS protected environment, while a public schedule without local PBS policy uses `backup`. The site owner supplies the existing named secret bindings in those protected environments. The outer Deploy retains its one shared queue. Setup does not install PBS, start a backup or change application/database capture ordering.
 
 ## Coverage: tools/measure_coverage.py
 

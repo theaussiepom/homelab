@@ -103,3 +103,13 @@ def inputs(value):
     result['pbs-recovery-public.pem'] = job['recovery_public_key']['pem'].encode()
     require(all(result.values()), 'A selected private backup input is empty')
     return result
+
+
+def verify_inputs(value, payload):
+    """Pin the complete worker payload against current owned credential references."""
+    from private_io import digest, encoded
+    values = {'application.json': encoded(value), **inputs(value)}
+    payload.check()
+    require(json.loads(payload.manifest)['files'] == {name: digest(raw) for name, raw in values.items()},
+            'Complete this guest Backup step with its exact current private inputs before capture')
+    return values

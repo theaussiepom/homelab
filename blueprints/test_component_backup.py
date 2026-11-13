@@ -231,7 +231,10 @@ class BackupIntegration(unittest.TestCase):
             shared = component_plan.resolve(stack, path)
             shared_packet = component_packet.lower_plan(shared)['resolver']
             self.assertEqual(shared_packet, before)
-            self.assertNotIn('PBS agent', str(component_workflows.model(shared)))
+            shared_graph=component_workflows.model(shared)
+            self.assertNotIn('backup',shared_graph)
+            self.assertFalse(any(phase['id']=='pbs-agent' for row in shared_graph['guests'].values()
+                                 for phase in row['phases']))
             selected['guests']['resolver']['backup'] = None
             path.write_text(yaml.safe_dump(selected))
             plan = component_plan.resolve(stack, path, disabled=['resolver'])
@@ -243,7 +246,7 @@ class BackupIntegration(unittest.TestCase):
             self.assertTrue(cfg['guest']['volumes']['data']['backup'])
             self.assertFalse(cfg['guest']['volumes']['cache']['backup'])
             self.assertEqual(cfg['deployment']['phases'][-1], backup.PHASE)
-            self.assertEqual(component_workflows.model(plan)['guests']['resolver']['phases'][-1]['name'], 'PBS agent')
+            self.assertEqual(component_workflows.model(plan)['guests']['resolver']['phases'][-1]['name'], 'Backup')
             component_guest.packet(packet, component_packet.INPUTS)
             from test_component_backup_job import fixture as operational_fixture
             job, _ = operational_fixture()

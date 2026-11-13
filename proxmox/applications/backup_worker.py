@@ -3,6 +3,7 @@
 from contextlib import ExitStack
 import datetime
 import hashlib
+import json
 import os
 from pathlib import Path
 import resource
@@ -159,9 +160,11 @@ def ready(rows, operation, engine):
 
 
 def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrier=None,
-        backup_time=None, group_config=None, control_files=None, abort_stream=None):
+        backup_time=None, group_config=None, control_files=None, abort_stream=None, preflight=False):
     """Publish success only after export, local manifest, upload and snapshot check."""
     os.umask(0o077)
+    require(type(preflight) is bool and (not preflight or barrier is None),
+            'Readiness checks cannot open a coordinated capture window')
     root = Path(value['job']['staging']['path'])/'.homelab-backup' if root is None else root
     private_directory(root); private_directory(config)
     require(not (root/'PENDING').exists() and not (root/'PENDING').is_symlink(),
@@ -231,6 +234,9 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
             running = output.read_text().splitlines()
             require(len(running) == len(row['services']) and set(running) == set(row['services']),
                     'Every selected service must be running before opening a capture window')
+        if preflight:
+            write_new(operation/'ready.json', encoded({**receipt, 'status': 'ready'}))
+            return {'status': 'ready', 'generation': generation}
         if barrier is not None:
             barrier('prepared', {})
             engine.begin_phase()
@@ -394,7 +400,8 @@ def serve(value, incoming, outgoing, *, runner=run, receive=None):
 
 def main():
     """Serve only the installed coordinator protocol and coverage configuration."""
-    require(sys.argv[1:] == ['--serve'], 'The backup worker accepts only the bounded coordinator protocol')
+    require(sys.argv[1:] in (['--serve'], ['--check-ready']),
+            'Use only the bounded coordinator protocol or non-capturing readiness check')
     value = read_json(CONFIG/'coverage.json', private=True)
     import backup_policy
     backup_policy.validate(value['job']); staging(value)
@@ -402,7 +409,10 @@ def main():
         """Abort through finally cleanup so originally running services can restart."""
         raise InterruptedError('Recovery worker interrupted')
     signal.signal(signal.SIGTERM, interrupted); signal.signal(signal.SIGINT, interrupted)
-    serve(value, sys.stdin.buffer, sys.stdout.buffer)
+    if sys.argv[1:] == ['--check-ready']:
+        print(json.dumps(run(value, preflight=True)))
+    else:
+        serve(value, sys.stdin.buffer, sys.stdout.buffer)
 
 
 if __name__ == '__main__':

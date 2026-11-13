@@ -28,7 +28,7 @@ PRIVATE_MAIN = "github.event.repository.private == true && github.event_name == 
 
 def secret_declarations(names=None):
     """The leaf admits finite slots; actual guest calls declare selected aliases."""
-    selected = SCALAR_SLOTS if names is None else names
+    selected = (*SCALAR_SLOTS, 'PBS_API_TOKEN') if names is None else names
     compiler.require(isinstance(selected, (tuple, list)) and
                      all(isinstance(name, str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name)
                          for name in selected) and len(selected) == len(set(selected)),
@@ -95,7 +95,7 @@ def phase_recipe(*, check_actions=True):
     step_env = {
         7: {"GUEST", "PHASE", "DISABLED"},
         8: {"GUEST", "PHASE", *COMMON_SECRETS},
-        9: {"GUEST", "PHASE", *(PREFIX + slot.upper() for slot in SCALAR_SLOTS)},
+        9: {"GUEST", "PHASE", "PBS_API_TOKEN", *(PREFIX + slot.upper() for slot in SCALAR_SLOTS)},
     }
     for index, step in enumerate(job["steps"]):
         compiler.require(isinstance(step, dict) and set(step) == step_keys[index]
@@ -189,8 +189,6 @@ if not set(active) <= set(expected['guests']):
     raise SystemExit('Regenerate the selected component workflow before enabling another guest')
 expected['guest_order'] = active
 expected['guests'] = {key: expected['guests'][key] for key in active}
-if 'backup' in expected:
-    expected['backup']['needs'] = ['selection', *active]
 if actual != expected:
     raise SystemExit('Regenerate the exact selected component workflow graph and scalar bindings')
 PYCODE
@@ -214,11 +212,25 @@ def models(stack, *, site_source, disabled=None):
     action_revision = '@' + framework['revision']
     names = list(dict.fromkeys(name for guest in graph['guests'].values()
                                for name in guest['workflow_secrets']))
-    if 'backup' in graph:
+    if 'backup' in graph and 'PBS_API_TOKEN' not in names:
         names.append('PBS_API_TOKEN')
     deploy = {'name': 'Deployment', 'on': workflow_call(names), 'permissions': {'contents': 'read'},
               'jobs': {'selection': selection_job(recipe, graph)}}
     result = {'deploy.yml': deploy}
+    if 'backup' in graph:
+        condition = PRIVATE_MAIN + " && !failure() && !cancelled() && needs.selection.result == 'success'"
+        deploy['jobs']['_backup'] = {'name':'Backup','needs':graph['backup']['needs'],'if':condition,
+            'uses':'./.github/workflows/backup.yml','with':arguments(),
+            'secrets':{'PBS_API_TOKEN':'${{ secrets.PBS_API_TOKEN }}'}}
+        job = {'name':'Backup','if':PRIVATE_MAIN,'environment':'backup','runs-on':'${{ fromJSON(inputs.runner_labels) }}',
+            'timeout-minutes':45,'env':copy.deepcopy(recipe['env']),
+            'steps':[{'name':'Setup','uses':action_source+'guest-setup'+action_revision},
+                {'name':'Backup setup','env':{'DISABLED':'${{ inputs.disabled }}',
+                    'PBS_API_TOKEN':'${{ secrets.PBS_API_TOKEN }}'},
+                 'run':'"$HOMELAB_CONFIG_PYTHON" framework-source/blueprints/backup_deploy.py --stack stack-source --site-root . --disabled "$DISABLED"'}]}
+        result['backup.yml'] = {'name':'Backup','on':workflow_call(['PBS_API_TOKEN']),
+            'permissions':{'contents':'read'},'defaults':copy.deepcopy(defaults),'jobs':{'deploy':job}}
+        result['backup.yml']['on']['workflow_call']['secrets'] = {'PBS_API_TOKEN': {'required': True}}
     for guest, metadata in graph['guests'].items():
         guest_name = label(metadata['name'])
         parent = {'name': guest_name, 'needs': metadata['needs'],
@@ -246,19 +258,6 @@ def models(stack, *, site_source, disabled=None):
                              **{name: '${{ secrets.' + name + ' }}' for name in COMMON_SECRETS}, **scoped)})
         workflow['jobs']['deploy'] = job
         result['guest-' + guest + '.yml'] = workflow
-    if 'backup' in graph:
-        condition = PRIVATE_MAIN + " && !failure() && !cancelled() && needs.selection.result == 'success'"
-        deploy['jobs']['_backup'] = {'name':'Backup','needs':graph['backup']['needs'],'if':condition,
-            'uses':'./.github/workflows/backup.yml','with':arguments(),
-            'secrets':secret_forwarding(['PBS_API_TOKEN'])}
-        job = {'name':'Backup','if':PRIVATE_MAIN,'environment':'backup','runs-on':'${{ fromJSON(inputs.runner_labels) }}',
-            'timeout-minutes':MAX_JOB_MINUTES,'env':copy.deepcopy(recipe['env']),
-            'steps':[{'name':'Setup','uses':action_source+'guest-setup'+action_revision},
-                {'name':'Backup setup','env':{'DISABLED':'${{ inputs.disabled }}',
-                    **{name:'${{ secrets.'+name+' }}' for name in (*COMMON_SECRETS,'PBS_API_TOKEN')}},
-                 'run':'"$HOMELAB_CONFIG_PYTHON" framework-source/blueprints/backup_deploy.py --stack stack-source --site-root . --disabled "$DISABLED"'}]}
-        result['backup.yml'] = {'name':'Backup','on':workflow_call(['PBS_API_TOKEN']),
-            'permissions':{'contents':'read'},'defaults':copy.deepcopy(defaults),'jobs':{'deploy':job}}
     result['phase.yml'] = {'name': 'Guest phase', 'on': workflow_call(phase=True),
         'permissions': {'contents': 'read'}, 'jobs': {'run': {
             'uses': framework['repository'] + '/.github/workflows/guest-phase.yml@' + framework['revision'],

@@ -1,0 +1,9 @@
+---
+- name: Maintain the existing controller recovery schedule
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Install and verify the declared controller schedule
+      ansible.builtin.import_tasks: tasks/backup-controller.yml
