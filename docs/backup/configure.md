@@ -121,11 +121,11 @@ Guests disabled for one CD selection remain in the complete backup membership. N
 
 ## Review the generated change
 
-Use [validate and generate](../guides/validate-and-generate.md) with the exact framework/library/site combination. Inspect the generated management and guest jobs before publication:
+Use [validate and generate](../guides/validate-and-generate.md) with the exact framework/library/site combination. Inspect the generated management and guest jobs before publication, then use the [credential-placement matrix](access.md#what-goes-where) to prepare their actual protected Environments:
 
-- One early **Configure backups** job verifies the declared datastore and maintains the controller-owned schedule. If local PBS host policy is selected, its existing pure checks and host-policy steps share that job. It precedes enrolled guest jobs and never waits for a last guest.
+- In the private wrapper, **Validate config** and **Validate deployment** run independently; setup requires both successful checks and refuses failure/cancellation. One early **Configure backups** job verifies the declared datastore and maintains the controller-owned schedule. If local PBS host policy is selected, its existing pure checks and host-policy steps share that job. It precedes enrolled guest jobs and never waits for a last guest.
 - Each enrolled guest has its own **Backup** step after its app/agent phases. It enrolls its client, seals and installs worker inputs, verifies non-capturing readiness and completes the existing ordinary receipt.
-- Scope `PBS_API_TOKEN` to the early setup step and guest Backup steps. It is never a guest input or payload file. Provide the existing named secret in the protected environments used by those jobs; combining PBS policy retains `homelab-bootstrap`.
+- Supply only the inputs in the [credential-placement matrix](access.md#what-goes-where) to each reviewed job/step. The named management token is a controller workflow input, never a guest file or payload input.
 - The native client creates its encryption key once. Controller records and later deployments preserve the same key and namespace-scoped client token; the recovery private key stays offline.
 - The nightly controller requires genuine readiness matching every declared member before opening the existing coordinated capture window. There is no final activation job or group-activation record to manufacture readiness.
 

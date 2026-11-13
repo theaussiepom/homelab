@@ -264,11 +264,11 @@ flowchart LR
 
 This option gives **bootstrap CD a separate Proxmox Administrator API token**. That credential can administer the host. Only enable it if you trust the private repository, its main-branch changes and its deployment runner. The regular application token keeps its individual guest permissions; the operator SSH key stays on your workstation. The CD token has no expiry and can be revoked in Proxmox under **Permissions → API Tokens**.
 
-Run the normal bootstrap command from your workstation, using the same private bundle and SSH environment variables from step 4:
+Run the normal bootstrap command from your workstation, in the same shell, using `bootstrap_bundle` and the SSH environment variables prepared in step 4:
 
 ```sh
 ./proxmox/bootstrap/bootstrap cd-access \
-  --bundle "$bootstrap_private/bundle" \
+  --bundle "$bootstrap_bundle" \
   --out "$bootstrap_private/cd-access"
 ```
 

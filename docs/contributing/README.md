@@ -4,6 +4,8 @@ The framework defines the configuration language, validation, reference resoluti
 
 ## Change workflow
 
+Before preparing a public commit, install and verify the existing [repository hooks](../../.githooks/README.md); keep their source-safety and signing checks enabled.
+
 1. Establish the current behavior and the requested change. Read [component boundaries](components.md), the [reference](../reference/README.md) and existing evidence. Distinguish behavior established by source tests from behavior tested on a target.
 2. Make the smallest change that defines the accepted fields and types, provides useful diagnostics and uses explicit references. Preserve the existing architecture and ownership rules.
 3. Update the canonical [property/rule records](documentation-standard.md#4-property-records-and-nested-types), contextual links and complete examples. Update test-local source/document pointers where the [conformance scope](documentation-assurance.md) applies.

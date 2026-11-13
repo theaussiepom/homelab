@@ -37,7 +37,7 @@ Environment creation, package installation or the Ansible version check failing 
 
 ### Guest phases
 
-The generator creates one job for each enabled guest and preserves the declared dependencies between guests. Each job runs infrastructure, preparation, app phases and, when selected, a final monitoring-agent phase in that order. The infrastructure phase uses OpenTofu with the required plan and state checks. Preparation uses its defined data transfer object (DTO), which contains the inputs for that phase. Each app phase then selects its own fixed payload and protected inputs, plus the Ansible tasks owned by its adapter.
+The generator creates one job for each enabled guest and preserves the declared dependencies between guests. Each job runs infrastructure, preparation, app phases and, when selected, the monitoring agent followed by the enrolled guest’s **Backup** phase. See the [backup sequence and readiness boundary](../backup/configure.md#review-the-generated-change). The infrastructure phase uses OpenTofu with the required plan and state checks. Preparation uses its defined data transfer object (DTO), which contains the inputs for that phase. Each app phase then selects its own fixed payload and protected inputs, plus the Ansible tasks owned by its adapter.
 
 Declared readiness dependencies change the order in which phases run. Value references alone do not. The workflow rejects a selection that disables a required dependency or required monitoring server. Failure stops the chain; the normal CD workflow does not retry, release a HOLD or relabel an incomplete phase as success.
 
