@@ -1,13 +1,31 @@
 #!/usr/bin/env python3
 """Reconcile one admitted component guest through the existing deployment engines."""
 import argparse
+import builtins
 import json
 import os
 from pathlib import Path
+import subprocess
 import commands
 from deployment_state import DeploymentAttempt,bootstrap_closed
 import proxmox_guest
 from private_io import require,read_json
+
+
+def failure_diagnostic(error):
+    """Bound public source locations; never format exception values or locals."""
+    kind = type(error)
+    known = (getattr(builtins, kind.__name__, None) is kind
+             or kind in (subprocess.CalledProcessError, subprocess.TimeoutExpired))
+    owned = {str(path): path.name for path in Path(__file__).resolve().parent.glob('*.py')}
+    source = []
+    current = error.__traceback__
+    while current is not None:
+        name = owned.get(current.tb_frame.f_code.co_filename)
+        if name is not None:
+            source = (source + [{'file': name, 'line': current.tb_lineno}])[-4:]
+        current = current.tb_next
+    return {'error_type': kind.__name__ if known else 'Exception', 'source': source}
 
 
 def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), environment=None):
@@ -72,9 +90,14 @@ def main():
     try:
         os.umask(0o077)
         print(json.dumps(run(args.phase, args.packet)))
-    except Exception:
+    except Exception as error:
+        try:
+            diagnostic = failure_diagnostic(error)
+        except Exception:
+            diagnostic = {'error_type': 'Exception', 'source': []}
         raise SystemExit(
             "Deployment held; preserve private inputs, state and all attempt evidence. No automatic replay or restore."
+            + '\n' + json.dumps(diagnostic, sort_keys=True)
         ) from None
 
 
