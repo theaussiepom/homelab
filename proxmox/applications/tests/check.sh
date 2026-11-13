@@ -10,7 +10,7 @@ python3 /src/proxmox/applications/tests/database_server_fixture.py
 python3 /src/proxmox/applications/tests/runner_network_guard_fixture.py
 cp -R /src/proxmox/applications/tofu /tmp/app-tofu
 cd /tmp/app-tofu
-tofu fmt -check -recursive
+tofu fmt -check -recursive -diff
 tofu init -backend=false -input=false -lockfile=readonly -no-color
 tofu validate -no-color
 tofu test -no-color

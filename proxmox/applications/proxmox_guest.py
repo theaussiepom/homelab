@@ -356,7 +356,8 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
         },
     )
     if changed:
-        new_ip_filters_absent(cfg, value)
+        if existing:
+            new_ip_filters_absent(cfg, value)
         window = {
             "plan_sha256": sha(operation / "guest.tfplan"),
             "started_at_ns": time.time_ns(),

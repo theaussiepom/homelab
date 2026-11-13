@@ -99,6 +99,12 @@ resource "proxmox_virtual_environment_firewall_ipset" "ip_filter" {
 }
 
 locals {
+  identity_interfaces = [
+    for nic in var.guest.interfaces : {
+      for key, value in nic : key => value if key != "ip_filter" || nic.ip_filter
+    }
+  ]
+
   # Keep the validated logical rules intact. Bound only adjacent, otherwise
   # identical transport allowances into the provider's literal destination list.
   firewall_rule_keys = [
@@ -152,11 +158,5 @@ resource "proxmox_virtual_environment_firewall_rules" "guest" {
 }
 
 output "identity" {
-  value = {
-    vmid       = var.guest.vmid
-    hostname   = var.guest.hostname
-    interfaces = [for nic in var.guest.interfaces : {
-      for key, value in nic : key => value if key != "ip_filter" || nic.ip_filter
-    }]
-  }
+  value = { vmid = var.guest.vmid, hostname = var.guest.hostname, interfaces = local.identity_interfaces }
 }

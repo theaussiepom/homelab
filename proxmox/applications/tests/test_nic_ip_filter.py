@@ -52,6 +52,35 @@ def state_with_filter():
 
 
 class PerNicFilterTests(unittest.TestCase):
+    def test_fresh_infrastructure_does_not_read_an_uncreated_guests_ipset_endpoint(self):
+        import deployment_inputs
+        import proxmox_guest as provider
+        from test_component_deployment import DeploymentIntegrationTests
+        from private_io import encoded, sha, write_new
+        infrastructure = provider.infrastructure
+        case = DeploymentIntegrationTests(); case.setUp(); self.addCleanup(case.doCleanups)
+        cfg = copy.deepcopy(case.cfg)
+        cfg['site']['node'] = 'fixture-pve'; cfg['guest']['vmid'] = cfg['app']['vmid'] = 6100
+        cfg['guest']['interfaces'][1]['ip_filter'] = True
+        cfg['paths']['api_token'] = str(case.root/'fresh-provider-token')
+        write_new(case.root/'fresh-provider-token', b'fixture@pve!deploy=synthetic')
+        work = case.root/'fresh-state'; work.mkdir(mode=0o700)
+        operation = case.root/'fresh-attempt'; operation.mkdir(mode=0o700)
+        applied = []
+        def quiet(argv, environment, log):
+            if 'plan' in argv: write_new(operation/'guest.tfplan', b'fresh saved plan')
+            if 'apply' in argv:
+                applied.append(True)
+                save(work/'terraform.tfstate', state_with_filter())
+        with patch.object(deployment_inputs, 'binding', return_value={}), \
+             patch.object(provider, 'backup'), patch.object(provider, 'quiet', side_effect=quiet), \
+             patch.object(provider.subprocess, 'check_output', return_value=encoded(planned(existing=False))), \
+             patch.object(provider, 'api_get', side_effect=AssertionError('Fresh endpoint does not exist')), \
+             patch.object(provider.guest_identity, 'pin') as pin:
+            result = infrastructure(cfg, case.root/'site', work, operation, {})
+        self.assertEqual(applied, [True]); pin.assert_called_once()
+        self.assertTrue(result['created']); self.assertEqual(result['state_sha256'], sha(work/'terraform.tfstate'))
+
     def test_preflight_refuses_collision_or_missing_evidence_and_skips_owned_repeats(self):
         import proxmox_guest as provider
         cfg = {'site': {'node': 'fixture-pve'}, 'guest': {'vmid': 6100}}
