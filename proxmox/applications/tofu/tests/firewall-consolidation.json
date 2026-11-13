@@ -1,0 +1,3182 @@
+{
+  "transport_order_and_duplicates": {
+    "rules": [
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.2/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.2/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.4/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.5/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.6/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.7/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.8/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.9/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "2001:db8:1::1/128",
+        "destination": "2001:db8::1/128",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "2001:db8:1::1/128",
+        "destination": "2001:db8::2/128",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmpv6",
+        "port": "130",
+        "source": "fe80::1/128",
+        "destination": "ff02::1/128",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmpv6",
+        "port": "130",
+        "source": "fe80::1/128",
+        "destination": "ff02::2/128",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "igmp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "224.0.0.22/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "igmp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "224.0.0.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "in",
+        "proto": "tcp",
+        "port": "22",
+        "source": "198.18.100.20/32",
+        "destination": null,
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      }
+    ],
+    "expected_rows": 8
+  },
+  "field_boundaries": {
+    "rules": [
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.2/32",
+        "comment": "Different comment",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.3/32",
+        "comment": "Different comment",
+        "interface": null
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.4/32",
+        "comment": "Different comment",
+        "interface": null
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.21/32",
+        "destination": "192.0.2.5/32",
+        "comment": "Different comment",
+        "interface": null
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.21/32",
+        "destination": "192.0.2.6/32",
+        "comment": "Different comment",
+        "interface": null
+      },
+      {
+        "direction": "in",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.21/32",
+        "destination": "192.0.2.7/32",
+        "comment": "Different comment",
+        "interface": null
+      }
+    ],
+    "expected_rows": 7
+  },
+  "family_and_nonadjacency": {
+    "rules": [
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": null,
+        "destination": "192.0.2.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": null,
+        "destination": "2001:db8::1/128",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": null,
+        "destination": "192.0.2.2/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      }
+    ],
+    "expected_rows": 3
+  },
+  "empty": {
+    "rules": [],
+    "expected_rows": 0
+  },
+  "single": {
+    "rules": [
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      }
+    ],
+    "expected_rows": 1
+  },
+  "at_512_bytes": {
+    "rules": [
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.1/00000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.2/00000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.3/00000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.4/00000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.5/00000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.6/00000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.7/00000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.8/000000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      }
+    ],
+    "expected_rows": 1
+  },
+  "over_512_bytes": {
+    "rules": [
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.1/00000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.2/00000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.3/00000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.4/00000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.5/00000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.6/00000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.7/000000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": "443",
+        "source": "198.18.100.20/32",
+        "destination": "192.0.2.8/000000000000000000000000000000000000000000000000000032",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      }
+    ],
+    "expected_rows": 8
+  },
+  "large_logical_set": {
+    "rules": [
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.2/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.3/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.4/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.5/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.6/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.7/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.8/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.9/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.10/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.11/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.12/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.13/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.14/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.15/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.16/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.17/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.18/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.19/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.20/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.21/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.22/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.23/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.24/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.25/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.26/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.27/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.28/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.29/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.30/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.31/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.32/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.33/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.34/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.35/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.36/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.37/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.38/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.39/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.40/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.41/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.42/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.43/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.44/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.45/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.46/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.47/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.48/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.49/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.50/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.51/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.52/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.53/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.54/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.55/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.56/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.57/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.58/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.59/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.60/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.61/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.62/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.63/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.64/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.65/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.66/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.67/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.68/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.69/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.70/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.71/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.72/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.73/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.74/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.75/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.76/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.77/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.78/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.79/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.80/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.81/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.82/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.83/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.84/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.85/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.86/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.87/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.88/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.89/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.90/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.91/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.92/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.93/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.94/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.95/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.96/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.97/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.98/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.99/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.100/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.101/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.102/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.103/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.104/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.105/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.106/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.107/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.108/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.109/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.110/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.111/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.112/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.113/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.114/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.115/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "tcp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.116/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.2/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.3/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.4/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.5/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.6/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.7/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.8/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.9/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.10/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.11/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.12/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.13/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.14/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.15/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.16/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.17/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.18/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.19/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.20/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.21/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.22/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.23/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.24/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.25/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.26/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.27/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.28/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.29/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.30/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.31/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.32/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.33/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.34/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.35/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.36/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.37/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.38/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.39/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.40/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.41/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.42/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.43/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.44/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.45/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.46/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.47/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.48/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.49/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.50/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.51/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.52/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.53/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.54/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.55/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.56/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.57/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.58/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.59/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.60/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.61/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.62/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.63/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.64/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.65/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.66/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.67/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.68/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.69/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.70/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.71/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.72/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.73/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.74/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.75/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.76/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.77/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.78/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.79/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.80/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.81/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.82/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.83/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.84/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.85/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.86/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.87/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.88/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.89/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.90/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.91/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.92/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.93/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.94/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.95/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.96/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.97/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.98/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.99/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.100/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.101/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.102/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.103/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.104/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.105/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.106/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.107/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.108/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.109/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.110/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.111/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.112/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.113/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.114/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.115/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "udp",
+        "port": null,
+        "source": "198.18.100.20/32",
+        "destination": "198.51.100.116/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "0",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "1",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "2",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "3",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "4",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "5",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "6",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "7",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "8",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "9",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "10",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "11",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "12",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "13",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "14",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "15",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "16",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "17",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "18",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "19",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "20",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "21",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "22",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "23",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "24",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "25",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "26",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "27",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "28",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "29",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "30",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "31",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "32",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "33",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "34",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "35",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "36",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "37",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "38",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "39",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "40",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "41",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "42",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "43",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "44",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "45",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "46",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "47",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "48",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "49",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "50",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "51",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "52",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "53",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "54",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "55",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "56",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "57",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "58",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "59",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "60",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "61",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "62",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "63",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "64",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "65",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "66",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "67",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "68",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "69",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "70",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "71",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "72",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      },
+      {
+        "direction": "out",
+        "proto": "icmp",
+        "port": "73",
+        "source": "198.18.100.20/32",
+        "destination": "203.0.113.1/32",
+        "comment": "Synthetic selected peers",
+        "interface": "net0"
+      }
+    ],
+    "expected_rows": 104
+  }
+}

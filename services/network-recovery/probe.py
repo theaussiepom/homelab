@@ -29,7 +29,8 @@ def exchange(check):
     with socket.create_connection((check["address"], check["port"]), timeout=3) as client:
         if protocol == "tcp":
             return {"healthy": True, "protocol": protocol}
-        authority = check["address"] + ":" + str(check["port"])
+        host = "[" + check["address"] + "]" if ":" in check["address"] else check["address"]
+        authority = host + ":" + str(check["port"])
         key = base64.b64encode(os.urandom(16)).decode()
         headers = [f"GET {path} HTTP/1.1", "Host: " + authority]
         if protocol == "websocket":
@@ -40,18 +41,33 @@ def exchange(check):
         client.sendall(("\r\n".join(headers) + "\r\n\r\n").encode())
         response = b""
         while b"\r\n\r\n" not in response and len(response) < 16384:
-            piece = client.recv(2048)
+            piece = client.recv(min(2048, 16384 - len(response)))
             if not piece:
                 break
             response += piece
+        if b"\r\n\r\n" not in response:
+            raise ValueError("Incomplete HTTP response")
         rows = response.split(b"\r\n\r\n", 1)[0].decode("iso-8859-1").split("\r\n")
-        code = int(rows[0].split()[1])
+        status = re.fullmatch(r"HTTP/(1\.[01]) ([1-5][0-9]{2}) [^\x00-\x1f\x7f]*", rows[0])
+        if status is None:
+            raise ValueError("Invalid HTTP status line")
+        code = int(status[2])
+        fields = {}
+        for line in rows[1:]:
+            name, separator, value = line.partition(":")
+            if (not separator or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name)
+                    or re.search(r"[\x00-\x08\x0a-\x1f\x7f]", value)):
+                raise ValueError("Invalid HTTP header")
+            fields.setdefault(name.lower(), []).append(value.strip())
         if protocol == "http":
             return {"healthy": code in check.get("statuses", [200]), "protocol": protocol, "http_status": code}
         expected = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
         # Header field names are case-insensitive, but the accept token is case-sensitive.
-        fields = {line.split(":", 1)[0].lower(): line.split(":", 1)[1].strip() for line in rows[1:] if ":" in line}
-        return {"healthy": code == 101 and fields.get("sec-websocket-accept") == expected,
+        connections = {token.strip().lower() for value in fields.get("connection", []) for token in value.split(",")}
+        return {"healthy": status[1] == "1.1" and code == 101
+                and [value.lower() for value in fields.get("upgrade", [])] == ["websocket"]
+                and "upgrade" in connections and fields.get("sec-websocket-accept") == [expected]
+                and "sec-websocket-extensions" not in fields and "sec-websocket-protocol" not in fields,
                 "protocol": protocol, "http_status": code}
 
 

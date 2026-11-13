@@ -1,4 +1,4 @@
-"""Reconcile one isolated backend bridge and explicit application-token grants."""
+"""Reconcile declared isolated bridges and explicit application-token grants."""
 import argparse
 import hashlib
 import json
@@ -36,7 +36,8 @@ def save(path, value):
 def validate(c):
     fields = {'schema', 'endpoint', 'node', 'deploy', 'bridge', 'applications',
               'existing_grants', 'backup_source'}
-    require(set(c) in (fields, fields | {'service_discovery'}), 'Use the closed bootstrap CD configuration')
+    require(fields <= set(c) <= fields | {'service_discovery', 'private_bridges', 'service_discovery_extension', 'application_networks', 'monitoring'},
+            'Use the closed bootstrap CD configuration')
     require(c['schema'] == 'homelab-bootstrap-cd-v1', 'Unsupported bootstrap CD schema')
     endpoint = urlsplit(c['endpoint'])
     require(endpoint.scheme == 'https' and endpoint.hostname and endpoint.port == 8006
@@ -48,6 +49,18 @@ def validate(c):
             and re.fullmatch(r'02(:[0-9a-fA-F]{2}){5}', d['mac']), 'Select the existing deployment guest 900')
     require(re.fullmatch(r'vmbr[1-9][0-9]{0,3}', c['bridge']) and c['bridge'] not in ('vmbr0', 'vmbr1'),
             'Choose a separate private bridge')
+    if 'private_bridges' in c:
+        require(isinstance(c['private_bridges'], list) and 1 <= len(c['private_bridges']) <= 8,
+                'Declare a finite private bridge list')
+        names = set()
+        for bridge in c['private_bridges']:
+            require(isinstance(bridge, dict) and set(bridge) == {'name', 'description'}
+                    and isinstance(bridge['name'], str) and re.fullmatch(r'vmbr[1-9][0-9]{0,3}', bridge['name'])
+                    and bridge['name'] not in {'vmbr0', 'vmbr1', c['bridge']} and bridge['name'] not in names
+                    and isinstance(bridge['description'], str) and 1 <= len(bridge['description']) <= 200
+                    and all(32 <= ord(char) < 127 for char in bridge['description']),
+                    'Declare distinct private bridges with printable purpose descriptions')
+            names.add(bridge['name'])
     require(isinstance(c['applications'], list) and 1 <= len(c['applications']) <= 32,
             'Declare a finite application list')
     seen = {900, 4914, 4915, 4920}
@@ -67,6 +80,21 @@ def validate(c):
     require(isinstance(c['backup_source'], str) and ':' in c['backup_source'], 'Declare the existing NAS backup source')
     if 'service_discovery' in c:
         provider_access.validate(c)
+    require('service_discovery_extension' not in c or 'service_discovery' in c,
+            'A discovery extension requires the declared discovery configuration')
+    networks = c.get('application_networks', [])
+    require(isinstance(networks, list) and len(networks) <= 32, 'Declare a finite application network list')
+    for row in networks:
+        require(isinstance(row, dict) and set(row) == {'vmid', 'bridge', 'vlan'}
+                and type(row['vmid']) is int and row['vmid'] in {app['vmid'] for app in c['applications']}
+                and re.fullmatch(r'vmbr[0-9]{1,4}', row['bridge'])
+                and (row['vlan'] is None or type(row['vlan']) is int and 1 <= row['vlan'] <= 4094),
+                'Network access must select a declared application and existing VLAN bridge')
+    require(len({(r['vmid'],r['bridge'],r['vlan']) for r in networks}) == len(networks),
+            'Duplicate application network access')
+    if 'monitoring' in c:
+        import monitoring_access
+        monitoring_access.bootstrap_configuration(c)
 
 
 def rows(items):
@@ -76,7 +104,17 @@ def rows(items):
 def desired(c):
     return rows(c['existing_grants']) | {('/vms/' + str(a['vmid']), 'PVEVMAdmin', 0)
                                       for a in c['applications']} | {
-        ('/sdn/zones/localnetwork/' + c['bridge'], 'PVESDNUser', 0)}
+        ('/sdn/zones/localnetwork/' + name, 'PVESDNUser', 0) for name in bridge_definitions(c)} | {
+        (path, 'PVESDNUser', 0) for row in c.get('application_networks', []) for path in
+        (['/sdn/zones/localnetwork/' + row['bridge']] +
+         ([] if row['vlan'] is None else ['/sdn/zones/localnetwork/' + row['bridge'] + '/' + str(row['vlan'])]))}
+
+
+def bridge_definitions(c):
+    # Preserve the original v1 bridge and its saved receipts. Additional names
+    # can only be supplied by the finite, closed private_bridges input.
+    return {c['bridge']: 'HomeLab CD private backend; no physical uplink',
+            **{row['name']: row['description'] for row in c.get('private_bridges', [])}}
 
 
 def network_state(data):
@@ -175,11 +213,18 @@ def inspect(api, c):
     network = api.call(node + '/network')
     require(not network.get('changes'), 'Unrelated pending host-network changes need review')
     interfaces = network['data']
-    bridge = [r for r in interfaces if r['iface'] == c['bridge']]
-    require(len(bridge) <= 1, 'Duplicate bridge identity')
-    if bridge:
-        isolated(bridge[0], active=True)
-    return {'networks': network_state(interfaces), 'bridge_exists': bool(bridge),
+    for row in c.get('application_networks', []):
+        selected = [nic for nic in interfaces if nic['iface'] == row['bridge']]
+        require(len(selected) == 1 and selected[0].get('type') == 'bridge'
+                and selected[0].get('active') == 1
+                and (row['vlan'] is None or selected[0].get('bridge_vlan_aware') == 1),
+                'Declared application VLAN bridge must already be active and VLAN-aware; no host-network correction')
+    for name in bridge_definitions(c):
+        bridge = [r for r in interfaces if r['iface'] == name]
+        require(len(bridge) <= 1, 'Duplicate bridge identity')
+        if bridge:
+            isolated(bridge[0], active=True)
+    return {'networks': network_state(interfaces), 'bridge_exists': c['bridge'] in network_state(interfaces),
             'token_metadata': meta, 'acl': [list(r) for r in sorted(actual)],
             'missing': [list(r) for r in sorted(missing)]}
 
@@ -192,18 +237,33 @@ def reconcile(api, c, before, evidence, root=None, backup=None):
         require(provider_access.inspect(api, c, root, backup) == before['service_discovery'],
                 'Service discovery changed after the saved plan')
     node = '/nodes/' + c['node']
-    if not before['bridge_exists']:
-        # Omit bridge_ports: the API treats 'none' as a literal device name.
-        # PVE serializes an absent port list as `bridge-ports none` itself.
-        api.call(node + '/network', 'POST', {'iface': c['bridge'], 'type': 'bridge',
-                 'autostart': 1,
-                 'comments': 'HomeLab CD private backend; no physical uplink'})
+    definitions = bridge_definitions(c)
+    explicit = {r['name'] for r in c.get('private_bridges', [])}
+    expected = dict(before['networks'])
+    changed = False
+    for name, description in definitions.items():
+        if name in expected:
+            # Existing legacy configurations do not acquire a new comment edit.
+            if name not in explicit or expected[name].get('comments', '').rstrip('\n') == description:
+                continue
+            api.call(node + '/network/' + name, 'PUT', {'type': 'bridge', 'comments': description})
+            expected[name] = dict(expected[name], comments=description)
+        else:
+            # Omit bridge_ports: the API treats 'none' as a literal device name.
+            # PVE serializes an absent port list as `bridge-ports none` itself.
+            api.call(node + '/network', 'POST', {'iface': name, 'type': 'bridge',
+                     'autostart': 1, 'comments': description})
+            expected[name] = None
         pending = api.call(node + '/network')
         proposed = network_state(pending['data'])
-        require(set(proposed) == set(before['networks']) | {c['bridge']}
-                and {k: v for k, v in proposed.items() if k != c['bridge']} == before['networks'],
+        require(set(proposed) == set(expected)
+                and all(value is None or proposed[k] == value for k, value in expected.items()),
                 'Network delta contains more than the isolated bridge; reload refused')
-        isolated(proposed[c['bridge']])
+        isolated(proposed[name])
+        require(proposed[name].get('comments', '').rstrip('\n') == description, 'Bridge purpose readback differs')
+        expected = proposed
+        changed = True
+    if changed:
         save(evidence / 'network-before-reload.json', pending)
         task = api.call(node + '/network', 'PUT', {})['data']
         require(isinstance(task, str) and task.startswith('UPID:'), 'Missing network task identity')
@@ -223,8 +283,7 @@ def reconcile(api, c, before, evidence, root=None, backup=None):
     after = inspect(api, c)
     require(after['bridge_exists'] and not after['missing'] and after['token_metadata'] == before['token_metadata'],
             'Bootstrap CD readback failed')
-    require({k: v for k, v in after['networks'].items() if k != c['bridge']}
-            == {k: v for k, v in before['networks'].items() if k != c['bridge']}, 'Existing host networks changed')
+    require(after['networks'] == expected, 'Existing host networks changed')
     permissions = api.call('/access/permissions?' + urlencode({'userid': 'root@pam!homelab-deploy-900'}))['data']
     for path, role, _ in desired(c):
         required = {'PVEVMAdmin': 'VM.Allocate', 'PVEAuditor': 'Sys.Audit' if path.startswith('/nodes/') else 'Datastore.Audit',
@@ -235,9 +294,16 @@ def reconcile(api, c, before, evidence, root=None, backup=None):
     result = {'status': 'passed', 'bridge': c['bridge'], 'bridge_created': not before['bridge_exists'],
             'new_acl_rows': len(before['missing']), 'token_lifetime_changed': False,
             'guest_lifecycle_changed': False, 'trigger_commit': os.environ.get('GITHUB_SHA')}
+    if 'private_bridges' in c:
+        result['private_bridges'] = [{'name': name, 'description': purpose,
+            'created': name not in before['networks']} for name, purpose in definitions.items()]
     if 'service_discovery' in c:
         result['service_discovery'] = provider_access.reconcile(
             api, c, before['service_discovery'], root, backup)
+    if 'monitoring' in c:
+        import monitoring_access
+        result['monitoring'] = monitoring_access.initialize(
+            api, monitoring_access.bootstrap_configuration(c), root, backup)
     return result
 
 
@@ -247,6 +313,128 @@ def check_backup(c, backup):
     require(len(entries) == 1 and entries[0]['target'] == str(backup)
             and entries[0]['source'] == c['backup_source'] and entries[0]['fstype'] in ('nfs', 'nfs4'),
             'The declared NAS backup must be an actual mounted filesystem')
+
+
+def owned_scope_configuration(value):
+    """A finite owned extension never declares the historical whole host plan."""
+    require(isinstance(value, dict) and set(value) == {'schema', 'endpoint', 'node', 'backup_source',
+            'application_vmids', 'service_discovery', 'service_discovery_extension', 'added_guests'}
+            and value['schema'] == 'homelab-owned-discovery-extension-v1', 'Use the closed owned discovery extension configuration')
+    endpoint = value['endpoint']
+    require(isinstance(endpoint, str) and len(endpoint) <= 2048
+            and not any(char.isspace() or char in '\\?#' for char in endpoint), 'Use a pinned credential-free Proxmox HTTPS endpoint')
+    try:
+        parsed = urlsplit(endpoint)
+        valid = (parsed.scheme == 'https' and parsed.hostname and parsed.port == 8006
+                 and not parsed.username and not parsed.password and parsed.path in ('', '/'))
+    except ValueError:
+        valid = False
+    require(valid, 'Use a pinned credential-free Proxmox HTTPS endpoint')
+    require(isinstance(value['node'], str) and re.fullmatch('[A-Za-z0-9][A-Za-z0-9-]{0,62}', value['node'])
+            and isinstance(value['backup_source'], str) and 1 <= len(value['backup_source']) <= 2048
+            and ':' in value['backup_source'] and not any(char in value['backup_source'] for char in '\r\n\x00'),
+            'Declare the retained node and actual NAS mount source')
+    vmids = value['application_vmids']
+    require(isinstance(vmids, list) and 1 <= len(vmids) <= 32
+            and all(type(vmid) is int and 100 <= vmid <= 999999999 for vmid in vmids)
+            and len(set(vmids)) == len(vmids), 'Use a finite configured application guest catalogue')
+    cfg = {key: value[key] for key in ('endpoint', 'node', 'backup_source', 'service_discovery', 'service_discovery_extension')}
+    cfg['applications'] = [{'vmid': vmid} for vmid in vmids]
+    provider_access.validate(cfg)
+    identities = value['added_guests']
+    require(isinstance(identities, list) and len(identities) == len(cfg['service_discovery_extension']['guests']),
+            'Bind each added guest to its exact expected native identity')
+    for row in identities:
+        require(isinstance(row, dict) and set(row) == {'node', 'vmid', 'hostname', 'type'}
+                and row['node'] == cfg['node'] and type(row['vmid']) is int
+                and isinstance(row['hostname'], str) and re.fullmatch('[a-z][a-z0-9-]{0,62}', row['hostname'])
+                and isinstance(row['type'], str) and row['type'] in {'lxc', 'qemu'},
+                'Bind each added guest to its exact expected native identity')
+    require([row['vmid'] for row in identities] == cfg['service_discovery_extension']['guests'],
+            'Bind identities in the exact added-guest order')
+    return cfg
+
+
+def added_discovery_identities(api, value):
+    result = []
+    for row in value['added_guests']:
+        actual = api.call('/nodes/'+row['node']+'/'+row['type']+'/'+str(row['vmid'])+'/config')['data']
+        require(isinstance(actual, dict) and actual.get('hostname' if row['type'] == 'lxc' else 'name') == row['hostname'],
+                'An added discovery guest differs from its declared native identity')
+        result.append(dict(row))
+    return result
+
+
+def owned_scope_complete(cfg, before, root):
+    """An unchanged repeat requires the actual mirrored completed extension."""
+    local = root/'service-discovery'
+    folder = local/'scope-extensions'
+    require(folder.exists() and not folder.is_symlink(), 'The requested completed discovery extension is absent')
+    files = sorted(folder.iterdir())
+    require(files, 'The requested completed discovery extension is absent')
+    latest = json.loads(provider_access.read_private(files[-1]))
+    previous = json.loads(provider_access.read_private(local/'owner.json')) if len(files) == 1 else json.loads(provider_access.read_private(files[-2]))['owner']
+    require(latest['owner'] == before['scope_owner'] == provider_access.owner(cfg)
+            and latest['previous_owner_sha256'] == cfg['service_discovery_extension']['owner_sha256']
+            and provider_access.owner_sha256(previous) == latest['previous_owner_sha256']
+            and provider_access.extension_guests(previous, latest['owner']) == cfg['service_discovery_extension']['guests'],
+            'The requested discovery extension is not the exact owned completed operation')
+
+
+def run_owned_discovery_extension(value, api, root=Path('/var/lib/homelab-bootstrap'), backup=Path('/srv/homelab-backups')):
+    cfg = owned_scope_configuration(value)
+    provider_access.private_directory(root)
+    hold, marker = root/'BOOTSTRAP-CD-HOLD.json', root/'CONFIGURING'
+    require(not any(path.exists() or path.is_symlink() for path in (hold, marker)),
+            'Existing bootstrap hold or maintenance marker needs review')
+    check_backup(cfg, backup)
+    before = provider_access.inspect(api, cfg, root, backup)
+    require(before['exists'] is True and 'scope_owner' in before, 'Extend only existing owned discovery access; never mint or adopt')
+    identities = added_discovery_identities(api, value)
+    if before['scope_owner'] == provider_access.owner(cfg):
+        owned_scope_complete(cfg, before, root)
+        return {'status': 'ready', 'created': False, 'already_owned': True, 'new_acl_rows': 0, 'firewall_rule_created': False}
+    expected = [list(row) for row in sorted(('/vms/'+str(vmid), provider_access.identity(cfg)[2], 0)
+                                          for vmid in cfg['service_discovery_extension']['guests'])]
+    require(before['missing_acl'] == expected
+            and provider_access.owner_sha256(before['scope_owner']) == cfg['service_discovery_extension']['owner_sha256']
+            and provider_access.extension_guests(before['scope_owner'], provider_access.owner(cfg)) == cfg['service_discovery_extension']['guests'],
+            'The discovery change must be exactly the declared owned guest extension')
+    evidence = root/('discovery-cd-'+str(time.time_ns()))
+    evidence.mkdir(mode=0o700)
+    destination = backup/evidence.name; destination.mkdir(mode=0o700)
+    def save_owned(path, data):
+        provider_access.save_new(path, data)
+    plan = {'configuration': value, 'service_discovery': before, 'added_identities': identities}
+    for folder in (evidence, destination):
+        save_owned(folder/'plan.json', plan)
+    require(provider_access.read_private(evidence/'plan.json') == provider_access.read_private(destination/'plan.json'),
+            'Owned discovery NAS plan readback failed')
+    receipt = {'attempt': evidence.name, 'operation': 'owned-discovery-extension', 'automatic_retry': False}
+    save_owned(marker, receipt); save_owned(hold, receipt)
+    try:
+        require(added_discovery_identities(api, value) == identities, 'Added discovery guest identity changed after its plan')
+        result = provider_access.reconcile(api, cfg, before, root, backup)
+        require(result['created'] is False and result['firewall_rule_created'] is False
+                and result['new_acl_rows'] == len(expected), 'Owned discovery changed more than its declared ACL scope')
+        result['plan_sha256'] = hashlib.sha256(provider_access.read_private(evidence/'plan.json')).hexdigest()
+        for folder in (evidence, destination):
+            save_owned(folder/'result.json', result)
+        require(provider_access.read_private(evidence/'result.json') == provider_access.read_private(destination/'result.json')
+                and json.loads(provider_access.read_private(marker)) == receipt
+                and json.loads(provider_access.read_private(hold)) == receipt, 'Owned discovery result or maintenance custody differs')
+    except Exception as exc:
+        failure = {'status': 'held', 'error_type': type(exc).__name__, 'automatic_retry': False}
+        for folder in (evidence, destination):
+            save_owned(folder/'failure.json', failure)
+        raise
+    hold.unlink(); marker.unlink()
+    directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+    return result
 
 
 def archive_markers(hold, marker, evidence):
@@ -311,8 +499,9 @@ def resume_discovery(c, api, root, backup, packet):
         original = saved['plan']
         require(inspect(api, c) == after and after['bridge_exists'] and not after['missing']
                 and after['token_metadata'] == original['token_metadata']
-                and {k:v for k,v in after['networks'].items() if k != c['bridge']} ==
-                    {k:v for k,v in original['networks'].items() if k != c['bridge']},
+                and all(name in after['networks'] for name in bridge_definitions(c))
+                and {k:v for k,v in after['networks'].items() if k not in bridge_definitions(c)} ==
+                    {k:v for k,v in original['networks'].items() if k not in bridge_definitions(c)},
                 'Base bootstrap changed or did not finish; continuation refused')
         minted = provider_access.admit_minted_continuation(api, c, original['service_discovery'],
                                                          root, backup, packet['minted_sha256'])
@@ -364,7 +553,8 @@ def run(c, api, root=Path('/var/lib/homelab-bootstrap'), backup=Path('/srv/homel
     evidence.mkdir(mode=0o700)
     before = inspect(api, c)
     if 'service_discovery' in c:
-        before['service_discovery'] = provider_access.inspect(api, c, root, backup)
+        before['service_discovery'] = provider_access.inspect(
+            api, c, root, backup)
     payload = {'configuration': c, 'plan': before}
     save(evidence / 'plan.json', payload)
     destination = backup / evidence.name
@@ -397,15 +587,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', required=True, type=Path)
     parser.add_argument('--ca', type=Path, default=Path('/usr/local/share/ca-certificates/homelab-pve.crt'))
-    parser.add_argument('--resume-discovery', type=Path, help='Exact separately reviewed failed-mint continuation packet')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--resume-discovery', type=Path, help='Exact separately reviewed failed-mint continuation packet')
+    mode.add_argument('--owned-discovery-extension', action='store_true', help='Extend only an existing owned discovery scope')
     args = parser.parse_args()
     os.umask(0o077)
     try:
         c = json.loads(args.config.read_text())
-        validate(c)
+        if args.owned_discovery_extension:
+            owned_scope_configuration(c)
+        else:
+            validate(c)
         api = API(c['endpoint'], os.environ['PROXMOX_BOOTSTRAP_TOKEN'], args.ca)
         resume = json.loads(args.resume_discovery.read_text()) if args.resume_discovery else None
-        print(json.dumps(run(c, api, resume=resume)))
+        print(json.dumps(run_owned_discovery_extension(c, api) if args.owned_discovery_extension else run(c, api, resume=resume)))
     except (BootstrapDiagnostic, provider_access.ProviderAccessError) as exc:
         raise SystemExit('Bootstrap CD stopped: ' + str(exc) + '. Inspect its private plan/hold; do not automatically rerun.') from None
     except Exception:

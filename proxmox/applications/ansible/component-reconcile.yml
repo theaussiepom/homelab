@@ -1,0 +1,44 @@
+---
+- name: Reconcile one owned component application
+  hosts: application
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  vars:
+    application_reconcile: true
+  tasks:
+    - name: Check guest identity
+      ansible.builtin.import_tasks: tasks/component-ready.yml
+
+    - name: Prepare the private application directory
+      ansible.builtin.file:
+        path: /opt/homelab-app
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Reconcile the selected native server
+      ansible.builtin.import_tasks: tasks/database.yml
+      when: component_native_services is defined
+
+    - name: Reconcile the selected native application web frontend
+      ansible.builtin.import_tasks: tasks/influxdb-web-frontend.yml
+      when: component_native_frontend is defined
+
+    - name: Reconcile the selected Compose services
+      ansible.builtin.include_tasks: tasks/component-compose.yml
+      when: component_compose_file is defined
+
+    - name: Check this application
+      ansible.builtin.command:
+        argv: "{{ item.argv }}"
+      loop: "{{ app.health_checks }}"
+      register: component_health
+      changed_when: false
+      failed_when: component_health.rc != 0 or (item.expect | default('')) not in component_health.stdout
+      no_log: true
+
+    - name: Preserve the dedicated monitoring database through its PostgreSQL owner
+      ansible.builtin.include_tasks: tasks/monitoring-storage.yml
+      when: component_application.adapter == 'postgresql' and app.monitoring.storage_password_file is defined

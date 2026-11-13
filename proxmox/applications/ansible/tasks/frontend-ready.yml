@@ -1,0 +1,137 @@
+---
+- name: Reconcile declared source routing during ordinary preparation
+  when: component_preparation_app is defined
+  block:
+    - name: Inspect the fixed owned frontend paths without following links
+      ansible.builtin.stat:
+        path: '{{ item.path }}'
+        follow: false
+      loop:
+        - {path: /opt/homelab-app, kind: directory, modes: ['0700']}
+        - {path: /opt/homelab-app/ingress-routing.py, kind: file, modes: ['0700']}
+        - {path: /opt/homelab-app/frontend-routing.json, kind: file, modes: ['0600']}
+        - {path: /etc/systemd/system/homelab-frontend-routing.service, kind: file, modes: ['0600', '0644']}
+      register: frontend_owned_paths
+
+    - name: Refuse foreign frontend paths or file ownership
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or (not item.stat.islnk and item.stat.uid == 0 and item.stat.gid == 0 and item.stat.mode in item.item.modes)
+          - not item.stat.exists or ((item.stat.isdir | default(false)) if item.item.kind == 'directory' else (item.stat.isreg | default(false) and item.stat.nlink == 1))
+      loop: '{{ frontend_owned_paths.results }}'
+
+    - name: Read existing frontend settings before touching their owner
+      ansible.builtin.slurp:
+        src: /opt/homelab-app/frontend-routing.json
+      register: frontend_settings_before
+      when: frontend_owned_paths.results[2].stat.exists
+      no_log: true
+
+    - name: Preserve the selected frontend address gateway and MAC
+      ansible.builtin.assert:
+        that: (frontend_settings_before.content | b64decode | from_json) == app.frontend_routing
+      when: frontend_owned_paths.results[2].stat.exists
+      no_log: true
+
+    - name: Require the actual Debian interface setup to have completed
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, is-active, networking.service]
+      changed_when: false
+
+    - name: Prepare the fixed frontend configuration directory
+      ansible.builtin.file:
+        path: /opt/homelab-app
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Install the selected add-only frontend helper
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../ingress_routing.py'
+        dest: /opt/homelab-app/ingress-routing.py
+        owner: root
+        group: root
+        mode: '0700'
+        follow: false
+
+    - name: Create selected frontend settings without replacing existing bytes
+      ansible.builtin.copy:
+        content: '{{ app.frontend_routing | to_nice_json(indent=2, sort_keys=true) }}'
+        dest: /opt/homelab-app/frontend-routing.json
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+        follow: false
+      no_log: true
+
+    - name: Install the frontend boot service after actual interface setup
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/homelab-frontend-routing.service
+        owner: root
+        group: root
+        mode: '0600'
+        follow: false
+        content: |
+          [Unit]
+          Description=Frontend routing
+          Wants=network-online.target
+          Requires=networking.service
+          After=networking.service network-online.target
+          Before=docker.service
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/bin/python3 /opt/homelab-app/ingress-routing.py --config /opt/homelab-app/frontend-routing.json --apply
+          RemainAfterExit=yes
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Load the selected frontend unit without starting a service
+      ansible.builtin.systemd_service:
+        name: homelab-frontend-routing.service
+        daemon_reload: true
+      register: frontend_loaded_unit
+
+    - name: Read frontend overrides explicitly instead of assuming module status contains empty arrays
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, show, --property=DropInPaths, --value, homelab-frontend-routing.service]
+      register: frontend_dropins
+      changed_when: false
+
+    - name: Preserve unexpected frontend overrides rather than executing them
+      ansible.builtin.assert:
+        that:
+          - frontend_loaded_unit.status.FragmentPath == '/etc/systemd/system/homelab-frontend-routing.service'
+          - frontend_dropins.rc == 0 and frontend_dropins.stdout == '' and frontend_dropins.stderr == ''
+          - frontend_loaded_unit.status.NeedDaemonReload == 'no'
+          - frontend_loaded_unit.status.Type == 'oneshot'
+          - frontend_loaded_unit.status.RemainAfterExit == 'yes'
+          - frontend_loaded_unit.status.Restart == 'no'
+
+    - name: Reconcile only missing declared frontend routes and read them back
+      ansible.builtin.command:
+        argv: [python3, /opt/homelab-app/ingress-routing.py, --config, /opt/homelab-app/frontend-routing.json, --apply]
+      register: frontend_reconciled
+      changed_when: (frontend_reconciled.stdout | from_json).changed
+
+    - name: Enable the verified frontend boot service without restarting workloads
+      ansible.builtin.systemd_service:
+        name: homelab-frontend-routing.service
+        enabled: true
+        state: started
+
+- name: Read separately prepared frontend routing settings
+  ansible.builtin.slurp:
+    src: /opt/homelab-app/frontend-routing.json
+  register: ordinary_frontend_routing
+
+- name: Require the intended settings without converting them in ordinary deployment
+  ansible.builtin.assert:
+    that:
+      - (ordinary_frontend_routing.content | b64decode | from_json) == app.frontend_routing
+
+- name: Verify existing frontend reply routing without changing it
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/ingress-routing.py, --config, /opt/homelab-app/frontend-routing.json]
+  changed_when: false

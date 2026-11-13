@@ -1,0 +1,31 @@
+{
+  "site": {
+    "id": "example-lab",
+    "environment": "synthetic",
+    "node": "pve-lab",
+    "api_endpoint": "https://pve-lab.example.invalid:8006/",
+    "ssh_public_keys": []
+  },
+  "guests": [
+    {
+      "key": "deploy",
+      "vmid": 914,
+      "runtime": "unprivileged_lxc",
+      "cpu": 2,
+      "memory_mib": 2048,
+      "root_gib": 8,
+      "storage_id": "example-zfs",
+      "template_file_id": "local:vztmpl/example-amd64.tar.zst",
+      "protection": true,
+      "idmaps": [],
+      "interfaces": [
+        {
+          "vlan": 25,
+          "ipv4": "198.18.25.34",
+          "mac": "02:aa:0e:00:00:01",
+          "bridge": "vmbr0"
+        }
+      ]
+    }
+  ]
+}

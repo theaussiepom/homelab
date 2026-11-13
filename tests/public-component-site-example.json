@@ -1,0 +1,179 @@
+{
+  "apps": {
+    "recursive_dns": {
+      "guest": "resolver",
+      "interfaces": {
+        "private_interface": {
+          "network": "default",
+          "scope": "app-network"
+        },
+        "service_interface": {
+          "scope": "guest-loopback"
+        }
+      },
+      "lifecycle": "fresh",
+      "profile": "unbound"
+    }
+  },
+  "contexts": {
+    "lab": {
+      "api_endpoint": {
+        "external": "proxmox"
+      },
+      "backend": "proxmox-lxc",
+      "credentials": {
+        "api_token": "api",
+        "ssh_private_key": "ssh"
+      },
+      "dns_servers": [
+        {
+          "external": "resolver"
+        }
+      ],
+      "node": "example-node",
+      "paths": {
+        "backup_directory": "/mnt/example/backups",
+        "backup_mount": "/mnt/example",
+        "backup_source": "nas.example.invalid:/backups",
+        "state_root": "/var/lib/example/state"
+      },
+      "protected_guests": [],
+      "ssh_public_keys": [],
+      "trust": {
+        "ca_file": "/etc/example/ca.pem",
+        "known_hosts": "/etc/example/known_hosts"
+      }
+    }
+  },
+  "external_endpoints": {
+    "proxmox": {
+      "address": "192.0.2.10",
+      "port": 8006,
+      "protocol": "https"
+    },
+    "resolver": {
+      "address": "192.0.2.53",
+      "port": 53,
+      "protocol": "udp"
+    },
+    "runner": {
+      "address": "198.18.20.2",
+      "port": 22,
+      "protocol": "tcp"
+    }
+  },
+  "guests": {
+    "resolver": {
+      "context": "lab",
+      "control_interface": "primary",
+      "identity": {
+        "hostname": "example-resolver",
+        "vmid": 610
+      },
+      "interfaces": {
+        "primary": {
+          "address": {
+            "mode": "static",
+            "value": "198.18.20.10"
+          },
+          "default_route": true,
+          "ipv6": "manual",
+          "mac": "02:00:00:20:00:10",
+          "network": "services",
+          "slot": 0
+        }
+      },
+      "lifecycle": "fresh",
+      "network_policy": [
+        {
+          "endpoints": {
+            "runner": {
+              "external": "runner"
+            }
+          },
+          "policy": "deployment"
+        },
+        "downloads",
+        "recursive_dns"
+      ],
+      "root_storage": "local",
+      "template": "base",
+      "template_file_id": "example:vztmpl/debian.tar.zst"
+    }
+  },
+  "kind": "site",
+  "networks": {
+    "services": {
+      "bridge": "vmbr-example",
+      "cidr": "198.18.20.0/24",
+      "context": "lab",
+      "gateway": "198.18.20.1",
+      "vlan": 220
+    }
+  },
+  "policies": {
+    "network": {
+      "deployment": {
+        "rules": [
+          {
+            "comment": "Deployment SSH",
+            "direction": "in",
+            "port": {
+              "endpoint": "runner"
+            },
+            "proto": "tcp",
+            "source": {
+              "endpoint": "runner"
+            }
+          }
+        ]
+      },
+      "downloads": {
+        "rules": [
+          {
+            "comment": "Package and image downloads",
+            "destination": "0.0.0.0/0",
+            "direction": "out",
+            "port": "80,443",
+            "proto": "tcp"
+          }
+        ]
+      },
+      "recursive_dns": {
+        "rules": [
+          {
+            "comment": "Recursive DNS",
+            "destination": "0.0.0.0/0",
+            "direction": "out",
+            "port": "53",
+            "proto": "udp"
+          },
+          {
+            "comment": "Recursive DNS",
+            "destination": "0.0.0.0/0",
+            "direction": "out",
+            "port": "53",
+            "proto": "tcp"
+          }
+        ]
+      }
+    }
+  },
+  "schema": "homelab-components-v1",
+  "secret_sources": {
+    "api": {
+      "path": "/run/example/api-token",
+      "type": "file"
+    },
+    "ssh": {
+      "path": "/run/example/ssh-key",
+      "type": "file"
+    }
+  },
+  "storage": {
+    "local": {
+      "context": "lab",
+      "pool": "example-local"
+    }
+  }
+}

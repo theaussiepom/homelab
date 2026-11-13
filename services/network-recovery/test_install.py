@@ -62,8 +62,19 @@ class PathGuards(unittest.TestCase):
         with patch.object(mod.os, "geteuid", return_value=1000):
             with self.assertRaisesRegex(mod.InstallError, "root"):
                 installer.preflight()
-        with patch.object(mod.os, "geteuid", return_value=0), patch.object(mod.socket, "gethostname", return_value="wrong"):
-            with self.assertRaisesRegex(mod.InstallError, "ben-beast"):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            (source / 'network-recovery.json').write_text(json.dumps({'schema':1,'hostname':'fixture-host'}))
+            installer = mod.Installer(source)
+            with patch.object(mod.os, "geteuid", return_value=0), patch.object(mod.socket, "gethostname", return_value="wrong"):
+                with self.assertRaisesRegex(mod.InstallError, "host differs"):
+                    installer.preflight()
+            for hostname in (None, '', 'bad/name', 'bad\nname', 'x'*254):
+                (source / 'network-recovery.json').write_text(json.dumps({'hostname':hostname}))
+                with patch.object(mod.os, "geteuid", return_value=0), self.assertRaisesRegex(mod.InstallError, 'explicit valid host'):
+                    installer.preflight()
+            (source / 'network-recovery.json').write_text('[]')
+            with patch.object(mod.os, 'geteuid', return_value=0), self.assertRaisesRegex(mod.InstallError, 'explicit valid host'):
                 installer.preflight()
 
     def test_audit_requires_success_and_explicit_true(self):
@@ -154,7 +165,7 @@ class Installation(unittest.TestCase):
         for name, (_, mode) in mod.REQUIRED.items():
             dest = self.config if name.endswith(".json") else (self.units if name.endswith((".service", ".timer")) else self.runtime) / name
             required[name] = (dest, mode)
-            content = b'{}\n' if name.endswith(".json") else b'# fixture\n'
+            content = b'{"schema":1,"hostname":"fixture-host"}\n' if name.endswith(".json") else b'# fixture\n'
             (self.source / name).write_bytes(content)
 
         # Path security has dedicated tests above. These transaction tests use an
@@ -170,7 +181,7 @@ class Installation(unittest.TestCase):
                         patch.object(mod, "UNITS", self.units), patch.object(mod, "CONFIG", self.config),
                         patch.object(mod, "STATE", self.state), patch.object(mod, "secure_path", confined),
                         patch.object(mod.os, "geteuid", return_value=0), patch.object(mod.os, "fchown"),
-                        patch.object(mod.os, "chown"), patch.object(mod.socket, "gethostname", return_value="ben-beast")]
+                        patch.object(mod.os, "chown"), patch.object(mod.socket, "gethostname", return_value="fixture-host")]
         for item in self.patches:
             item.start()
         self.installer = mod.Installer(self.source, self.system)
@@ -205,6 +216,19 @@ class Installation(unittest.TestCase):
         self.assertFalse(self.runtime.exists())
         self.assertTrue(all(call[0] == "/usr/bin/findmnt" or call[1] in ("show", "is-active", "is-enabled")
                             for call in self.system.calls))
+
+    def test_two_explicit_host_identities_work_and_foreign_host_refuses_before_destinations(self):
+        for hostname in ('fixture-alpha', 'fixture-beta.example.invalid'):
+            (self.source/'network-recovery.json').write_text(json.dumps({'schema':1,'hostname':hostname}))
+            with patch.object(mod.socket,'gethostname',return_value=hostname):
+                result=mod.Installer(self.source,self.system).install()
+            self.assertEqual(result['host'],hostname)
+            self.assertFalse(self.state.exists())
+        self.system.calls.clear()
+        with self.assertRaisesRegex(mod.InstallError,'host differs'):
+            mod.Installer(self.source,self.system).install()
+        self.assertEqual(self.system.calls,[])
+        self.assertFalse(self.runtime.exists())
 
     def test_success_audits_before_timer_and_preserves_runtime_state(self):
         self.old_files()

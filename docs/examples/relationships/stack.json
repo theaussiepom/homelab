@@ -1,0 +1,303 @@
+{
+  "schema": "homelab-components-v1",
+  "kind": "library",
+  "guest_templates": {
+    "base": {
+      "resources": {
+        "cpu_cores": 1,
+        "memory_mib": 512,
+        "root_gib": 8,
+        "os_reserve_mib": 128
+      },
+      "startup": {
+        "started": true,
+        "start_on_boot": true,
+        "boot_order": 30
+      },
+      "security": {
+        "unprivileged": true,
+        "protection": true,
+        "nesting": true,
+        "keyctl": false
+      }
+    }
+  },
+  "app_profiles": {
+    "broker": {
+      "health": {
+        "ready": {
+          "type": "adapter",
+          "check": "readiness"
+        }
+      },
+      "adapter": "mqtt",
+      "display_name": "Broker",
+      "interfaces": {
+        "backend_interface": {
+          "required": true,
+          "accepts": [
+            "guest-interface"
+          ]
+        },
+        "frontend_interface": {
+          "required": true,
+          "accepts": [
+            "guest-interface"
+          ]
+        }
+      },
+      "listeners": {
+        "mqtt_listener": {
+          "service": "mqtt",
+          "namespace": "host",
+          "interface": "backend_interface",
+          "bind": "wildcard",
+          "protocol": "tcp",
+          "port": 1883
+        }
+      },
+      "endpoints": {
+        "backend_endpoint": {
+          "listener": "mqtt_listener",
+          "protocol": "tcp",
+          "via": "backend_interface"
+        }
+      },
+      "storage": {
+        "config": {
+          "required": true,
+          "target": "/mosquitto/config",
+          "kind": "directory",
+          "read_only": false
+        },
+        "data": {
+          "required": true,
+          "target": "/mosquitto/data",
+          "kind": "directory",
+          "read_only": false
+        },
+        "log": {
+          "required": true,
+          "target": "/mosquitto/log",
+          "kind": "directory",
+          "read_only": false
+        }
+      },
+      "software": [
+        "broker"
+      ],
+      "runtime": [
+        "broker"
+      ],
+      "secrets": {
+        "probe": {
+          "required": true
+        }
+      }
+    },
+    "browser": {
+      "health": {
+        "ready": {
+          "type": "adapter",
+          "check": "readiness"
+        }
+      },
+      "adapter": "mqtt_explorer",
+      "display_name": "Browser",
+      "interfaces": {
+        "web_interface": {
+          "required": true,
+          "accepts": [
+            "guest-interface"
+          ]
+        },
+        "broker_interface": {
+          "required": true,
+          "accepts": [
+            "guest-interface"
+          ]
+        },
+        "private_interface": {
+          "required": true,
+          "accepts": [
+            "app-network"
+          ]
+        }
+      },
+      "listeners": {
+        "web_listener": {
+          "service": "explorer_gateway",
+          "namespace": "app-network",
+          "interface": "private_interface",
+          "bind": "wildcard",
+          "protocol": "tcp",
+          "port": 4180,
+          "publish": {
+            "scope": "guest-interface",
+            "interface": "web_interface",
+            "port": 80
+          }
+        },
+        "application_listener": {
+          "service": "mqtt_explorer",
+          "namespace": "app-network",
+          "interface": "private_interface",
+          "bind": "wildcard",
+          "protocol": "tcp",
+          "port": 3000
+        }
+      },
+      "endpoints": {
+        "web_endpoint": {
+          "listener": "web_listener",
+          "protocol": "http",
+          "via": "web_interface"
+        }
+      },
+      "connections": {
+        "broker": {
+          "type": "mqtt",
+          "required": true,
+          "accounts": [
+            "mqtt-client"
+          ]
+        },
+        "outpost": {
+          "type": "http",
+          "required": true
+        }
+      },
+      "storage": {
+        "data": {
+          "required": true,
+          "target": "/app/data",
+          "kind": "directory",
+          "read_only": false
+        }
+      },
+      "software": [
+        "browser"
+      ],
+      "runtime": [
+        "browser"
+      ]
+    },
+    "ingress": {
+      "health": {
+        "ready": {
+          "type": "adapter",
+          "check": "readiness"
+        }
+      },
+      "adapter": "traefik",
+      "display_name": "Ingress",
+      "interfaces": {
+        "frontend_interface": {
+          "required": true,
+          "accepts": [
+            "guest-interface"
+          ]
+        }
+      },
+      "listeners": {
+        "http_listener": {
+          "service": "traefik",
+          "namespace": "host",
+          "interface": "frontend_interface",
+          "bind": "interface",
+          "protocol": "tcp",
+          "port": 80
+        },
+        "https_listener": {
+          "service": "traefik",
+          "namespace": "host",
+          "interface": "frontend_interface",
+          "bind": "interface",
+          "protocol": "tcp",
+          "port": 443
+        }
+      },
+      "endpoints": {
+        "https_endpoint": {
+          "listener": "https_listener",
+          "protocol": "https",
+          "via": "frontend_interface"
+        }
+      },
+      "storage": {
+        "certs": {
+          "required": true,
+          "target": "/var/traefik/certs",
+          "kind": "directory",
+          "read_only": false
+        }
+      },
+      "software": [
+        "ingress"
+      ],
+      "runtime": [
+        "ingress"
+      ],
+      "secrets": {
+        "cloudflare_dns_token": {
+          "required": true
+        },
+        "proxmox_token": {
+          "required": true
+        }
+      }
+    }
+  },
+  "software": {
+    "broker": {
+      "images": {
+        "mqtt": "broker"
+      }
+    },
+    "browser": {
+      "images": {
+        "mqtt_explorer": "browser",
+        "explorer_gateway": "gateway"
+      }
+    },
+    "ingress": {
+      "images": {
+        "traefik": "gateway"
+      }
+    }
+  },
+  "runtime_profiles": {
+    "broker": {
+      "containers": {
+        "mqtt": {
+          "memory_mib": 256,
+          "pids_limit": 128,
+          "cpu_limit": 1
+        }
+      }
+    },
+    "browser": {
+      "containers": {
+        "mqtt_explorer": {
+          "memory_mib": 256,
+          "pids_limit": 128,
+          "cpu_limit": 1
+        },
+        "explorer_gateway": {
+          "memory_mib": 128,
+          "pids_limit": 128,
+          "cpu_limit": 1
+        }
+      }
+    },
+    "ingress": {
+      "containers": {
+        "traefik": {
+          "memory_mib": 512,
+          "pids_limit": 256,
+          "cpu_limit": 1
+        }
+      }
+    }
+  }
+}

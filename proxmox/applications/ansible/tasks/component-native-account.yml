@@ -1,0 +1,13 @@
+---
+- name: Prepare fixed native account identity
+  ansible.builtin.include_tasks: database-account.yml
+  vars:
+    app: "{{ component_native_app }}"
+  when: component_native_app.database.account_mode | default('fixed') == 'fixed'
+
+- name: Check package native account identity
+  ansible.builtin.include_tasks: database-package-account.yml
+  vars:
+    app: "{{ component_native_app }}"
+    database_account_after_packages: false
+  when: component_native_app.database.account_mode | default('fixed') == 'package'

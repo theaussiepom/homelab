@@ -21,8 +21,9 @@ This reads one local JSON file and prints a review report. It contacts no host,
 reads no capture and emits no Compose file or runnable guest profile. Receipt
 values remain private. `deployable` always stays false, even when every receipt
 reference is filled. `enabled: true` and claimed decoder selections are refused.
-The normal installer explicitly refuses Scrypted before reading target or
-credential files. No Actions deployment integration is added in this preparation.
+The component application contract has no Scrypted adapter and refuses that
+selection during source validation. No Actions deployment integration is added
+in this preparation.
 
 The proposed starting budget is 6 guest CPUs and 5 GiB guest RAM, with 4 CPUs,
 4 GiB RAM and 512 tasks for the container. Container logs would rotate at
@@ -53,11 +54,13 @@ it does not become a deployment pin. Do not invent a configuration switch or upg
 obtain a green health check. Driver/kernel changes and passthrough need separate
 review and maintenance authority.
 
-## Continue through the existing installer
+## Continue through the component deployment path
 
-Reuse the application OpenTofu guest module, `deploy.py`, restore helper,
-Ansible tasks, saved-plan fingerprint, trusted TLS/SSH identity, NAS state copies
-and failure hold. This local review helper is not a deployment engine. Keep an
+The earlier fixed-bundle installer has been retired. A later Scrypted adapter
+must use the current component contracts, OpenTofu guest module, Ansible phases,
+trusted TLS/SSH identity, ownership receipts and failure holds. Initial data
+transfer needs a separately reviewed procedure; ordinary deployment does not
+restore data. This local review helper is not a deployment engine. Keep an
 independent private Scrypted source lock without repinning commissioned services.
 
 1. Admit the exact new guest, networks, packages, capture and metadata,

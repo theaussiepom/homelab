@@ -1,16 +1,16 @@
 [
   {
-    "path": "proxmox/applications/tests/native_package_fixture.py",
-    "sha256": "6208e61546d82c0f66ea85271e8785cbca7170559f0f2e601d92a0c9a91e400e",
+    "path": "proxmox/applications/tests/protocol-compose-baseline.json",
+    "sha256": "c28c55c71341b34b46afcda51692aa6ef8d8bd717ec1580eae478eae2ec962bc",
     "rule": "generic-api-key",
-    "line": 21,
-    "reason": "SHA256 of the public MariaDB signing-key download, verified from https://mariadb.org/mariadb_release_signing_key.asc; not a credential."
+    "line": 328,
+    "reason": "Expected SHA-256 of public synthetic OAuth fixture output, frozen from the old renderer for byte-parity verification; not an API credential."
   },
   {
-    "path": "proxmox/applications/tests/native_package_fixture.py",
-    "sha256": "6208e61546d82c0f66ea85271e8785cbca7170559f0f2e601d92a0c9a91e400e",
+    "path": "proxmox/applications/tests/protocol-compose-baseline.json",
+    "sha256": "c28c55c71341b34b46afcda51692aa6ef8d8bd717ec1580eae478eae2ec962bc",
     "rule": "generic-api-key",
-    "line": 31,
-    "reason": "SHA256 of the public PostgreSQL signing-key download, verified from https://www.postgresql.org/media/keys/ACCC4CF8.asc; not a credential."
+    "line": 329,
+    "reason": "Expected SHA-256 of public synthetic OAuth fixture output, frozen from the old renderer for byte-parity verification; not an API credential."
   }
 ]

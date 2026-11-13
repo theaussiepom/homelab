@@ -229,8 +229,13 @@ class PolicyTests(unittest.TestCase):
 
     def test_unsafe_policy_rejected(self):
         baseline = copy.deepcopy(CONFIG)
-        baseline['hostname'] = 'ben-beast'
+        baseline['hostname'] = 'fixture-host'
         recovery.validate_config(baseline)
+        for hostname in ('fixture-alpha','fixture-beta.example.invalid'):
+            recovery.validate_config(dict(baseline,hostname=hostname))
+        for hostname in (None,'','bad/name','bad\nname','x'*254):
+            with self.subTest(hostname=hostname),self.assertRaises(ValueError):
+                recovery.validate_config(dict(baseline,hostname=hostname))
         for key in CONFIG['policy']:
             bad = copy.deepcopy(baseline)
             bad['policy'][key] = 0

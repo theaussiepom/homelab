@@ -1,16 +1,179 @@
-name: Public synthetic validation
+name: Validate HomeLab
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '21 5 * * 1'
 permissions:
   contents: read
 concurrency:
-  group: validation-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: validation-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  blueprints:
+    name: Guest blueprint contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+      - name: Install pinned source tooling
+        run: python3 -m pip install --require-hashes -r requirements.lock.txt
+      - name: Check coverage measurement and required documentation collection
+        run: python3 -m pytest -q .github/scripts/test_coverage_metrics.py
+      - name: Check repository boundaries
+        run: python3 tools/check_boundaries.py --mode framework --root .
+      - name: Measure blueprint unit coverage
+        # Discovers the source-backed documentation and navigation checks too.
+        run: python3 tools/measure_coverage.py --suite blueprints --output "$RUNNER_TEMP/blueprint-coverage"
+      - name: WiNet health
+        run: |
+          image='ghcr.io/theaussiepom/winet-extractor@sha256:82c6b886967995f0a3cfe6fb5e20eeef70d10aa525d5bd824064eb272e1ce51a'
+          docker pull "$image"
+          python3 proxmox/applications/tests/winet_health_fixture.py "$image"
+  cloudflare-runtime:
+    name: Cloudflare source boundary (race and Traefik)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Test middleware behavior and concurrent refresh
+        run: |
+          image='golang@sha256:4f43b271f9673eb7bd0cb3a49cc17b08d8d6ee110277e26dbacc93c43a5a7793'
+          docker pull "$image"
+          docker run --rm --network none -v "$PWD/proxmox/applications/traefik_cloudflare:/src:ro" \
+            -w /src "$image" go test -race -cover ./...
+      - name: Verify actual Traefik visitor headers, internal HTTPS and websocket
+        run: |
+          traefik='traefik@sha256:1336e85aaed293bd63d005086e0dd013b04078b26aaeb1c18b26a2f928af7e65'
+          python='python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de'
+          docker pull "$traefik"
+          docker pull "$python"
+          python3 proxmox/applications/tests/cloudflare_runtime_fixture.py \
+            --traefik-image "$traefik" --python-image "$python"
+  changes:
+    name: Detect installer changes
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      iso: ${{ steps.paths.outputs.iso }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: paths
+        run: python3 .github/scripts/ci_changes.py >> "$GITHUB_OUTPUT"
+  monitoring:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    name: Clean Zabbix schema and active PSK fixture (Docker)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+      - name: Install pinned blueprint fixture dependencies
+        run: python3 -m pip install --require-hashes -r requirements.lock.txt
+      - name: Check SAML entry and local recovery
+        run: |
+          image="$(python3 -c 'import json; print(json.load(open("proxmox/applications/monitoring/versions.json"))["zabbix_web"])')"
+          docker run --rm --platform linux/amd64 --network none --entrypoint php \
+            -v "$PWD:/src:ro" "$image" \
+            /src/proxmox/applications/tests/saml_login_fixture.php \
+            /src/proxmox/applications/monitoring/saml-login.php
+      - name: Build the existing pinned application test tools
+        run: docker build --platform linux/amd64 -t homelab-app-test -f proxmox/bootstrap/docker/Dockerfile proxmox/bootstrap/docker
+      - name: Install only verified upstream Zabbix API collections
+        run: |
+          mkdir -p "$RUNNER_TEMP/zabbix-collections"
+          docker run --rm --platform linux/amd64 -v "$PWD:/src:ro" \
+            -v "$RUNNER_TEMP/zabbix-collections:/collections" homelab-app-test \
+            python3 /src/proxmox/applications/monitoring/install-collections.py --output /collections
+      - name: Test fresh schema, templates, idempotence and active PSK data
+        run: |
+          docker build --platform linux/amd64 -t homelab-zabbix-db-test:1 proxmox/applications/tests/monitoring-database
+          python3 proxmox/applications/tests/monitoring_database_fixture.py
+          python3 proxmox/applications/tests/monitoring_fixture.py \
+            --collections "$RUNNER_TEMP/zabbix-collections" --output "$RUNNER_TEMP/zabbix-evidence"
+      - name: Test the exact Debian13 Agent2 binary without network access
+        run: |
+          curl --fail --silent --show-error --max-time 120 \
+            'https://repo.zabbix.com/zabbix/7.0/debian/pool/main/z/zabbix/zabbix-agent2_7.0.32-1%2Bdebian13_amd64.deb' \
+            --output "$RUNNER_TEMP/zabbix-agent2.deb"
+          docker run --rm --platform linux/amd64 --network none -v "$PWD:/src:ro" \
+            -v "$RUNNER_TEMP/zabbix-agent2.deb:/fixture-agent.deb:ro" homelab-app-test \
+            python3 /src/proxmox/applications/tests/native_agent_fixture.py /fixture-agent.deb
+      - name: Test root blueprint API, active Docker data and native database plugins
+        run: |
+          docker run --rm --platform linux/amd64 --network none -v "$PWD:/src:ro" homelab-app-test \
+            python3 /src/proxmox/applications/tests/monitoring_agent_guard_fixture.py
+          curl --fail --silent --show-error --max-time 120 \
+            'https://repo.zabbix.com/zabbix/7.0/debian/pool/main/z/zabbix-agent2-plugin-postgresql/zabbix-agent2-plugin-postgresql_7.0.32-1%2Bdebian13_amd64.deb' \
+            --output "$RUNNER_TEMP/zabbix-postgresql.deb"
+          python3 proxmox/applications/tests/monitoring_blueprint_fixture.py \
+            --output "$RUNNER_TEMP/zabbix-blueprint-evidence"
+          python3 proxmox/applications/tests/monitoring_workload_fixture.py \
+            --agent "$RUNNER_TEMP/zabbix-agent2.deb" --postgresql "$RUNNER_TEMP/zabbix-postgresql.deb" \
+            --output "$RUNNER_TEMP/zabbix-workload-evidence"
+  bitwarden-runtime:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    name: Bitwarden startup and attachment persistence (Docker)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+      - name: Install pinned source requirements
+        run: python3 -m pip install --require-hashes -r requirements.lock.txt
+      - name: Build pinned source test tools
+        run: docker build --platform linux/amd64 -t homelab-app-test -f proxmox/bootstrap/docker/Dockerfile proxmox/bootstrap/docker
+      - name: Fetch the selected synthetic runtime images
+        run: |
+          docker pull --platform linux/amd64 ghcr.io/bitwarden/lite@sha256:94484fe9382df51ad755151ea360663e922e60a32385500454dd1f38045bf6a6
+          docker pull --platform linux/amd64 mariadb@sha256:805c8e104bd563d5bfa24fadd3f31cd419ea859cb5277f32b5dbf2db714f9ed1
+      - name: Exercise current rendering, startup, restart and attachment preservation
+        run: python3 proxmox/applications/tests/bitwarden_runtime_fixture.py
+  retained-runtimes:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    name: PegaProx retained runtime (Docker)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+      - name: Install pinned source requirements
+        run: python3 -m pip install --require-hashes -r requirements.lock.txt
+      - name: Build pinned source test tools
+        run: docker build --platform linux/amd64 -t homelab-app-test -f proxmox/bootstrap/docker/Dockerfile proxmox/bootstrap/docker
+      - name: Fetch only the selected immutable application images
+        run: |
+          docker pull --platform linux/amd64 ghcr.io/pegaprox/pegaprox@sha256:8d295a524a52f0b923616a3eb415ff6422fe62beba5bb441f35c75d8985f1add
+      - name: Replace retained PegaProx TLS with HTTP and verify proxy trust and restart
+        run: python3 proxmox/applications/tests/pegaprox_runtime_fixture.py
   applications:
-    name: Application source and restore fixtures (Docker)
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    name: Application contracts and runtime components (Docker)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -19,34 +182,96 @@ jobs:
           persist-credentials: false
       - name: Build pinned source tools
         run: docker build --platform linux/amd64 -t homelab-app-test -f proxmox/bootstrap/docker/Dockerfile proxmox/bootstrap/docker
-      - name: Test without network, host devices or deployment credentials
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+      - name: Install pinned fixture dependencies
+        run: python3 -m pip install --require-hashes -r requirements.lock.txt
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.15.0'
+      - name: Check preserved Node-RED runtime helpers
+        run: node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include='**/proxmox/applications/node-red-*.js' proxmox/applications/tests/node-red-*.test.cjs proxmox/applications/tests/mqtt-explorer-startup.test.cjs
+      - name: Test the current deployment contract and retained runtime components
         run: |
           docker run --rm --platform linux/amd64 --network none --cpus 2 --memory 2g \
             --tmpfs /tmp:rw,exec,nosuid,nodev,size=768m,mode=1777 \
-            -v "$PWD:/src:ro" -e HOME=/tmp homelab-app-test \
+            -v "$PWD:/src:ro" -v "$RUNNER_TEMP/application-coverage:/coverage" \
+            -e HOME=/tmp -e HOMELAB_COVERAGE_OUTPUT=/coverage/report -e GITHUB_SHA homelab-app-test \
             sh /src/proxmox/applications/tests/check.sh
-      - name: Rehearse the bootstrap with synthetic provider and runner fixtures
+      - name: Verify separate native web frontend
+        run: python3 proxmox/applications/tests/influx_frontend_fixture.py
+      - name: Verify PBS archive exclusions with GNU tar
+        run: python3 proxmox/applications/tests/backup_tar_fixture.py
+      - name: Verify Linux PBS staging preimages
         run: |
-          docker run --rm --platform linux/amd64 --network none --read-only \
-            --cap-drop ALL --security-opt no-new-privileges --cpus 2 --memory 2g \
-            --tmpfs /tmp:rw,exec,nosuid,nodev,size=768m,mode=1777 \
-            -v "$PWD:/src:ro" -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 \
-            -e ANSIBLE_LOCAL_TEMP=/tmp/ansible-local -e ANSIBLE_REMOTE_TEMP=/tmp/ansible-remote \
-            homelab-app-test python3 /src/proxmox/bootstrap/bootstrap.py rehearse --evidence /tmp/evidence
-      - name: Validate rendered stacks with Docker Compose
+          docker run --rm --platform linux/amd64 --network none \
+            -v "$PWD:/src:ro" homelab-app-test \
+            python3 /src/proxmox/applications/tests/backup_staging_fixture.py
+      - name: Community sign-in
+        run: |
+          community='dbeaver/cloudbeaver:26.2.3@sha256:a537c60a7ca98d8d791c11c01172c1354e8dedfe222d04a54795ceeb32f12bbc'
+          gateway='quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:0d989b27d90d5e527fb2b045d864c4001c3104bdd763b3211b7e9ba2110380ea'
+          docker pull "$community"
+          docker pull "$gateway"
+          docker run --rm --platform linux/amd64 --network none --entrypoint /bin/sh \
+            -v "$PWD:/src:ro" "$community" -c 'mkdir /tmp/health-classes && javac -d /tmp/health-classes /src/proxmox/applications/CloudBeaverHealth.java /src/proxmox/applications/tests/CloudBeaverHealthFixture.java && java -cp /tmp/health-classes CloudBeaverHealthFixture /tmp/health-classes'
+          python3 proxmox/applications/tests/cloudbeaver_gateway_fixture.py --real-ce
+          python3 proxmox/applications/tests/cloudbeaver_gateway_fixture.py --real-ce --explicit-oidc
+      - name: Show application coverage summary
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/application-coverage/report/summary.md"; then
+            cat "$RUNNER_TEMP/application-coverage/report/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          python3 - "$RUNNER_TEMP/application-coverage/report" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          import uuid
+          root = Path(sys.argv[1])
+          try:
+              summary = json.loads((root / 'summary.json').read_text())
+          except (OSError, ValueError):
+              raise SystemExit(0)
+          if summary.get('tests_passed') is not False:
+              raise SystemExit(0)
+          try:
+              with (root / 'applications.txt').open('rb') as stream:
+                  stream.seek(0, 2)
+                  stream.seek(max(0, stream.tell() - 16 * 1024))
+                  tail = stream.read(16 * 1024).decode('utf-8', errors='replace')
+          except OSError:
+              print('Failed applications suite log unavailable.')
+              raise SystemExit(0)
+          token = uuid.uuid4().hex
+          selected = '\n'.join(tail.splitlines()[-120:])
+          # Only the possible partial leading UTF-8 codepoint is discarded.
+          bounded = selected.encode('utf-8')[-(16 * 1024 - 1):].decode('utf-8', errors='ignore')
+          print(f'::stop-commands::{token}')
+          print(bounded)
+          print(f'::{token}::')
+          PY
+      - name: Validate current stack structure with Docker Compose
         run: |
           python3 proxmox/applications/tests/compose_fixture.py "$RUNNER_TEMP/app-compose"
-          for kind in dns identity ingress automation db-tools; do
-            docker compose -f "$RUNNER_TEMP/app-compose/$kind.json" config --quiet
+          for composition in "$RUNNER_TEMP/app-compose/"*.json; do
+            docker compose -f "$composition" config --quiet
           done
-      - name: Prove symmetric frontend replies through an isolated stateful router
+      - name: Reconcile owned MQTT DNS records against the pinned Pi-hole image
+        run: python3 proxmox/applications/tests/dns_records_fixture.py --output "$RUNNER_TEMP/service-dns-records"
+      - name: Test the generated Zigbee health command without a coordinator
+        run: python3 proxmox/applications/tests/zigbee_health_fixture.py
+      - name: Exercise isolated frontend routing
         run: |
           docker build --platform linux/amd64 --build-arg TOOLS_IMAGE=homelab-app-test -t homelab-routing-test:1 proxmox/applications/tests/routing
           python3 proxmox/applications/tests/ingress_routing_fixture.py --output "$RUNNER_TEMP/ingress-routing"
-      - name: Exercise ingress aliases and login boundaries through pinned Traefik
+      - name: Exercise the current Authentik runtime with synthetic credentials
         run: |
-          docker pull --platform linux/amd64 traefik@sha256:6b9cbca6fac42ab0075f5437d8dc1685cfd188626d8d515839ea94f8b6271c42
-          python3 proxmox/applications/tests/ingress_fixture.py
+          docker pull --platform linux/amd64 ghcr.io/goauthentik/server@sha256:dc07e81b4462a1dad9c6720f4c73993e37d7cb2d2f94a306187318704d112e71
+          docker pull --platform linux/amd64 redis@sha256:6cbef353e480a8a6e7f10ec545f13d7d3fa85a212cdcc5ffaf5a1c818b9d3798
+          docker pull --platform linux/amd64 postgres@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
+          python3 proxmox/applications/tests/identity_fixture.py
       - name: Fetch the exact service discovery fixture source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -54,7 +279,7 @@ jobs:
           ref: e35cce5af139328b8e424836a0b32638ed777016
           path: provider-fixture-source
           persist-credentials: false
-      - name: Exercise the pinned Proxmox provider over trusted HTTPS
+      - name: Exercise the pinned provider over trusted HTTPS
         run: |
           curl --fail --silent --show-error --max-time 60 --max-filesize 1048576 \
             --user-agent 'Go-http-client/1.1' \
@@ -63,36 +288,8 @@ jobs:
           python3 proxmox/applications/tests/provider_fixture.py \
             --plugin-source provider-fixture-source --tools-image homelab-app-test \
             --plugin-archive "$RUNNER_TEMP/provider.zip"
-      - name: Exercise a preserved pgAdmin profile and its HTTPS OAuth redirect
-        run: |
-          docker pull --platform linux/amd64 dpage/pgadmin4@sha256:cefc4cc6b7d9d71a9e81e76fb9d7e14038ab5661b539a190eea1b63fa612589a
-          python3 proxmox/applications/tests/pgadmin_fixture.py
-      - name: Exercise the selected DNS updates with synthetic offline records
-        run: |
-          docker pull --platform linux/amd64 pihole/pihole@sha256:70a9c11171ded2eee735d88c127996da209284a329d50f5ae59c06b861d401b3
-          docker pull --platform linux/amd64 mvance/unbound@sha256:76906da36d1806f3387338f15dcf8b357c51ce6897fb6450d6ce010460927e90
-          python3 proxmox/applications/tests/foundation_dns_docker_fixture.py --output "$RUNNER_TEMP/foundation-dns"
-          python3 proxmox/applications/tests/foundation_unbound_docker_fixture.py --output "$RUNNER_TEMP/foundation-unbound"
-      - name: Exercise the pinned identity stack with file-backed secrets
-        run: |
-          docker pull --platform linux/amd64 ghcr.io/goauthentik/server@sha256:dc07e81b4462a1dad9c6720f4c73993e37d7cb2d2f94a306187318704d112e71
-          docker pull --platform linux/amd64 redis@sha256:6cbef353e480a8a6e7f10ec545f13d7d3fa85a212cdcc5ffaf5a1c818b9d3798
-          docker pull --platform linux/amd64 postgres@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
-          python3 proxmox/applications/tests/identity_fixture.py
-      - name: Prove the selected PostgreSQL clean SQL adapter with synthetic databases
-        run: |
-          docker pull --platform linux/amd64 postgres@sha256:9d4951e6dc70422022512ff05ac86e0ae360da051c563accbed85d6f654c3357
-          python3 proxmox/applications/tests/pg_fixture.py
-      - name: Show bounded synthetic PostgreSQL diagnostics on failure
-        if: failure()
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          for path in sorted(Path('.work/pg-clean-fixtures').glob('run-*/postgresql-clean.stderr')):
-              print(path.name, flush=True)
-              print(path.read_text()[:6000], flush=True)
-          PY
   iso-unit:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     name: ISO source tests (Docker)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -114,39 +311,162 @@ jobs:
               print(receipt.name, flush=True)
               print(receipt.read_text(), flush=True)
           PY
-  validate:
-    name: Repository validation
+  python:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    name: Python coverage
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
           python-version: '3.12'
       - run: python -m pip install --require-hashes -r requirements.lock.txt
-      - run: python -m pytest -q tests --basetemp "$RUNNER_TEMP/pytest-homelab"
-      - run: python -m pytest -q -p no:cacheprovider services/network-recovery
-      - run: python bin/homelab validate --catalog examples/site/catalog/site.json
-      - run: python bin/homelab plan --catalog examples/site/catalog/site.json --workspace .work/rehearsal --target synthetic
-      - run: python bin/homelab approve --catalog examples/site/catalog/site.json --workspace .work/rehearsal --target synthetic
-      - run: python bin/homelab apply --catalog examples/site/catalog/site.json --workspace .work/rehearsal --target synthetic
-      - run: python bin/homelab verify --catalog examples/site/catalog/site.json --workspace .work/rehearsal --target synthetic
-      - run: python tools/bootstrap-tools.py --directory .work/tools
-      - run: python tools/native_tofu_fixture.py --tofu .work/tools/tofu --work .work/encryption
-      - name: Validate OpenTofu configuration with backend initialization disabled
-        shell: bash
+      - name: Install the pinned source scanner
+        run: python .github/scripts/install_gitleaks.py "$RUNNER_TEMP/coverage-tools"
+      - name: Measure all current framework Python code
+        env:
+          GITLEAKS_BIN: ${{ runner.temp }}/coverage-tools/gitleaks
         run: |
-          set -euo pipefail
-          export TF_VAR_state_passphrase="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
-          for root in foundation critical application-guests security-vm; do
-            .work/tools/tofu -chdir="infrastructure/proxmox/$root" init -backend=false -input=false -no-color -lockfile=readonly
-            .work/tools/tofu -chdir="infrastructure/proxmox/$root" validate -no-color
-          done
-      - name: Check Ansible syntax without contacting inventory hosts
-        working-directory: ansible
+          coverage_status=0
+          python tools/measure_coverage.py --all --fail-under 100 --output "$RUNNER_TEMP/framework-coverage" || coverage_status=$?
+          if [ "$coverage_status" -ne 0 ]; then
+            python - "$RUNNER_TEMP/framework-coverage" <<'PY' || true
+          import json
+          from pathlib import Path
+          import sys
+          import uuid
+          root = Path(sys.argv[1])
+          try:
+              summary = json.loads((root / 'summary.json').read_text())
+          except (OSError, ValueError):
+              print('Per-suite failure diagnostics unavailable; see the measurement error above.')
+              raise SystemExit(0)
+          failed = {row.get('suite') for row in summary.get('suites', [])
+                    if isinstance(row, dict) and row.get('exit_code') not in (0, None)}
+          for suite in ('framework', 'blueprints', 'applications', 'bootstrap', 'installer', 'network-recovery', 'source-tooling'):
+              if suite not in failed:
+                  continue
+              token = uuid.uuid4().hex
+              print(f'::group::{suite} failure details')
+              print(f'::stop-commands::{token}')
+              try:
+                  with (root / (suite + '.txt')).open('rb') as stream:
+                      stream.seek(0, 2)
+                      stream.seek(max(0, stream.tell() - 16384))
+                      print(stream.read(16384).decode('utf-8', errors='replace'))
+              except OSError:
+                  print('Suite log unavailable.')
+              print(f'::{token}::')
+              print('::endgroup::')
+          PY
+          fi
+          exit "$coverage_status"
+  source-safety:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    name: Source safety
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.12'
+      - name: Install verified scanner
+        run: python .github/scripts/install_gitleaks.py "$RUNNER_TEMP/source-tools"
+      - name: Exercise staged and history guards
+        env:
+          GITLEAKS_BIN: ${{ runner.temp }}/source-tools/gitleaks
         run: |
-          ansible-playbook -i localhost, --syntax-check playbooks/discover.yml
-          ansible-playbook -i localhost, --syntax-check playbooks/prepare.yml
-          ansible-playbook -i localhost, --syntax-check playbooks/verify.yml
+          python -B -m unittest discover -s .githooks -p 'test_*.py'
+          python -B -m unittest discover -s .github/scripts -p 'test_safety.py'
+      - name: Check conditional ISO selection
+        run: python3 -B -m unittest discover -s .github/scripts -p 'test_ci_changes.py' -v
+      - name: Scan complete trees, introduced history and maintainer identity
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python .github/scripts/source_safety.py --head "$HEAD_SHA" --base "$BASE_SHA" --scanner "$RUNNER_TEMP/source-tools/gitleaks"
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: never
+  analyze:
+    if: github.event_name != 'workflow_dispatch'
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, java-kotlin]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-extended
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066
+        with:
+          category: /language:${{ matrix.language }}
+  installer-disk-safety:
+    name: Installer disk safety
+    needs: changes
+    if: needs.changes.outputs.iso == 'true'
+    uses: ./.github/workflows/installer-disk-safety.yml
+  installer-config-validation:
+    name: Installer config validation
+    needs: changes
+    if: needs.changes.outputs.iso == 'true'
+    uses: ./.github/workflows/installer-config-validation.yml
+  validate:
+    name: Repository validation
+    if: always() && github.event_name != 'schedule'
+    needs: [blueprints, cloudflare-runtime, changes, monitoring, bitwarden-runtime, retained-runtimes, applications, iso-unit, python, source-safety, dependency-review, analyze, installer-disk-safety, installer-config-validation]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require all applicable checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          jobs = json.loads(os.environ['RESULTS'])
+          expected = {name: 'success' for name in jobs}
+          expected['dependency-review'] = 'success' if os.environ['EVENT'] == 'pull_request' else 'skipped'
+          if os.environ['EVENT'] == 'workflow_dispatch':
+              for name in ('monitoring', 'bitwarden-runtime', 'retained-runtimes', 'applications', 'iso-unit', 'python', 'source-safety', 'analyze'):
+                  expected[name] = 'skipped'
+          selection = jobs['changes']['outputs'].get('iso')
+          if selection not in {'true', 'false'}:
+              raise SystemExit('Installer change selection is missing or invalid')
+          applicable = selection == 'true'
+          for name in ('installer-disk-safety', 'installer-config-validation'):
+              expected[name] = 'success' if applicable else 'skipped'
+              if applicable and jobs[name]['outputs'].get('qualified') != 'true':
+                  raise SystemExit('Installer suite did not qualify all cases: ' + name)
+          if not applicable:
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+                  summary.write('Installer disk safety and Installer config validation skipped: no installer-relevant source changes.\n')
+          failures = [name for name, result in jobs.items() if result['result'] != expected[name]]
+          if failures: raise SystemExit('Required checks did not pass: ' + ', '.join(failures))
+          PYCODE

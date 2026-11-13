@@ -1,86 +1,369 @@
-"""Typed Proxmox discovery notes and the bounded first-deployment plan policy."""
+"""One HTTP route model, rendered as guest discovery notes or file configuration."""
+
+import copy
 import ipaddress
+import network_endpoints
+from pathlib import PurePosixPath
 import re
+import ssl
 from urllib.parse import urlsplit
 
-from plan import check_plan, RESOURCES
+PRIVATE_BACKENDS = tuple(
+    ipaddress.IPv4Network(value)
+    for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/15")
+)
+DEFAULT_MIDDLEWARES = {"security-headers": {"headers": {"contentTypeNosniff": True}}}
+AUTHENTIK_PREFIX = "/outpost.goauthentik.io/"
+AUTHENTIK_AUTH_PATH = AUTHENTIK_PREFIX + "auth/traefik"
+CALLBACK_FIELDS = {"host", "aliases", "middlewares", "authentik_forward_auth"}
 
-PRIVATE_BACKENDS = tuple(ipaddress.IPv4Network(value) for value in
-                         ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'))
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def certificate(value):
+    """Validate one explicit public TLS trust anchor without reading files."""
+    require(isinstance(value, str) and 0 < len(value) <= 65536 and '\x00' not in value,
+            "Declare one bounded public trust certificate")
+    require(len(value.encode()) <= 65536
+            and value.count('-----BEGIN CERTIFICATE-----') == 1
+            and value.count('-----END CERTIFICATE-----') == 1
+            and value.strip().startswith('-----BEGIN CERTIFICATE-----')
+            and value.strip().endswith('-----END CERTIFICATE-----')
+            and 'PRIVATE KEY' not in value, "Declare only one public trust certificate")
+    try:
+        ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).load_verify_locations(cadata=value)
+    except ssl.SSLError:
+        raise ValueError("Declare a valid public trust certificate") from None
+    return value
+
+
+def name(value):
+    require(
+        isinstance(value, str) and re.fullmatch(r"[a-z][a-z0-9_-]{0,62}", value),
+        "Use a literal routing name",
+    )
+    return value
+
+
+def hostname(value):
+    require(
+        isinstance(value, str)
+        and len(value) <= 253
+        and "." in value
+        and all(
+            re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", part)
+            for part in value.split(".")
+        ),
+        "Use a literal fully qualified route hostname",
+    )
+    return value
+
+
+def origin(value, addresses=None):
+    message = "Use a private HTTP(S) backend origin on the selected interface"
+    require(
+        isinstance(value, str)
+        and not any(c.isspace() for c in value)
+        and "\\" not in value,
+        message,
+    )
+    try:
+        parsed = urlsplit(value)
+        ip = ipaddress.IPv4Address(parsed.hostname)
+        port = parsed.port
+    except (ValueError, TypeError):
+        raise ValueError(message) from None
+    require(
+        parsed.scheme in {"http", "https"}
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path in {"", "/"}
+        and not parsed.query
+        and not parsed.fragment
+        and (port is None or 1 <= port <= 65535)
+        and any(ip in network for network in PRIVATE_BACKENDS)
+        and (addresses is None or str(ip) in addresses),
+        message,
+    )
+    return parsed
+
+
+def validate_routes(routes, addresses=None):
+    require(
+        isinstance(routes, dict) and len(routes) <= 64, "Use a bounded named routes map"
+    )
+    hosts, published = set(), set()
+    for key, route in routes.items():
+        name(key)
+        require(
+            isinstance(route, dict)
+            and 'host' in route and (('url' in route) != ('service' in route))
+            and not route.keys()
+            - {"host", "url", "service", "aliases", "middlewares", "transport", "authentik_forward_auth"},
+            "Use only the resolved routing contract fields",
+        )
+        aliases = route.get("aliases", [])
+        require(
+            isinstance(aliases, list) and len(aliases) <= 8,
+            "Use a bounded hostname aliases list",
+        )
+        selected = [hostname(value) for value in [route["host"], *aliases]]
+        folded = {host.lower() for host in selected}
+        require(
+            len(folded) == len(selected) and not hosts.intersection(folded),
+            "Route hostnames must be globally unique",
+        )
+        hosts.update(folded)
+        published.update(selected)
+        if 'service' in route:
+            require(route['service'] == 'api@internal' and addresses is None
+                    and 'authentik_forward_auth' in route and 'transport' not in route,
+                    'Expose only the authenticated internal dashboard through ingress')
+            name(key + '-dashboard-root')
+        else:
+            backend = origin(route["url"], addresses)
+        middleware = route.get("middlewares", ["security-headers"])
+        require(
+            isinstance(middleware, list) and len(middleware) <= 16,
+            "Use an ordered middleware reference list",
+        )
+        require(
+            len({name(value) for value in middleware}) == len(middleware),
+            "Middleware references must be unique",
+        )
+        if "authentik_forward_auth" in route:
+            reference = name(route["authentik_forward_auth"])
+            require(reference in middleware, "Apply the selected Authentik middleware to the app route")
+            require(callback_name(key) not in routes, "Preserve unique generated Authentik callback names")
+        if "transport" in route:
+            name(route["transport"])
+            require(
+                backend.scheme == "https", "A TLS transport requires an HTTPS backend"
+            )
+    return published
+
+
+def callback_name(key):
+    return name(key + "-authentik-callback")
+
+
+def callback_fields(route):
+    return {key: copy.deepcopy(value) for key, value in route.items() if key in CALLBACK_FIELDS}
+
+
+def authentik_outpost(route, settings):
+    reference = name(route["authentik_forward_auth"])
+    selected = settings.get("middlewares", {}).get(reference)
+    require(isinstance(selected, dict) and set(selected) == {"forwardAuth"}
+            and isinstance(selected["forwardAuth"], dict),
+            "Select one defined Authentik forwardAuth provider")
+    auth = selected["forwardAuth"]
+    address = auth.get("address")
+    require(isinstance(address, str) and not any(c.isspace() for c in address)
+            and "\\" not in address and "tls" not in auth,
+            "Use the fixed Authentik endpoint with verified default backend TLS")
+    try:
+        parsed = urlsplit(address)
+    except ValueError:
+        raise ValueError("Use the fixed Authentik forwardAuth endpoint") from None
+    require(parsed.path == AUTHENTIK_AUTH_PATH and not parsed.query and not parsed.fragment,
+            "Use the fixed Authentik forwardAuth endpoint")
+    backend = parsed._replace(path="").geturl()
+    origin(backend)
+    middleware = route.get("middlewares", ["security-headers"])
+    require(isinstance(middleware, list) and reference in middleware,
+            "Apply the selected Authentik middleware to the app route")
+    for key in middleware:
+        name(key)
+        if key == reference:
+            continue
+        definition = DEFAULT_MIDDLEWARES.get(key, settings.get("middlewares", {}).get(key))
+        require(isinstance(definition, dict) and len(definition) == 1
+                and set(definition) <= {"headers", "ipAllowList", "rateLimit", "compress"},
+                "Callbacks retain direct non-auth security middleware; no extra auth or chains")
+    return backend.rstrip("/")
+
+
+def router(key, route):
+    hosts = [route["host"], *route.get("aliases", [])]
+    rule = " || ".join(f"Host(`{value}`)" for value in hosts)
+    return {
+        "rule": "(" + rule + ")" if len(hosts) > 1 else rule,
+        "priority": 10,
+        "service": route.get('service', key),
+        "entryPoints": ["websecure"],
+        "tls": {"certResolver": "letsencrypt"},
+        "middlewares": [
+            value + "@file" for value in route.get("middlewares", ["security-headers"])
+        ],
+    }
 
 
 def labels(cfg):
-    """Compile only public routing facts; profiles never supply raw Notes labels."""
-    if 'routing_labels' in cfg.get('guest', {}):
-        raise ValueError('Supply typed discovery_routes, never arbitrary guest routing labels')
-    routes = cfg.get('app', {}).get('discovery_routes', [])
-    if not isinstance(routes, list) or len(routes) > 16:
-        raise ValueError('Discovery routes must be a finite list of at most 16 routes')
-    names, hosts, result = set(), set(), {}
-    addresses = {nic['ipv4'].split('/')[0] for nic in cfg.get('guest', {}).get('interfaces', [])}
-    for route in routes:
-        if not isinstance(route, dict) or set(route) != {'name', 'host', 'url'}:
-            raise ValueError('Use only name, host and url in a discovery route')
-        name, host, url = route['name'], route['host'], route['url']
-        if not isinstance(name, str) or not re.fullmatch(r'[a-z][a-z0-9-]{0,62}', name):
-            raise ValueError('Use a literal discovery service name')
-        if (not isinstance(host, str) or len(host) > 253 or '.' not in host
-                or any(not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', label)
-                       for label in host.split('.'))):
-            raise ValueError('Use a literal fully qualified route hostname')
-        if name in names or host in hosts:
-            raise ValueError('Discovery names and hostnames must be unique within the guest')
-        if not isinstance(url, str) or any(c.isspace() for c in url) or '\\' in url:
-            raise ValueError('Use an explicit private backend HTTP origin')
-        parsed = urlsplit(url)
-        try:
-            ip = ipaddress.IPv4Address(parsed.hostname)
-            port = parsed.port
-        except (ValueError, TypeError):
-            raise ValueError('Use an explicit private backend HTTP origin') from None
-        if (parsed.scheme != 'http' or parsed.username is not None or parsed.password is not None
-                or parsed.path not in ('', '/') or parsed.query or parsed.fragment
-                or port is not None and not 1 <= port <= 65535
-                or not any(ip in network for network in PRIVATE_BACKENDS)
-                or str(ip) not in addresses):
-            raise ValueError('The private backend HTTP origin must select an interface on this guest')
-        names.add(name); hosts.add(host)
-        router, service = f'traefik.http.routers.{name}', f'traefik.http.services.{name}'
-        result.update({'traefik.enable': 'true', f'{router}.rule': f'Host(`{host}`)',
-                       f'{router}.service': name, f'{router}.entrypoints': 'websecure',
-                       f'{router}.tls': 'true', f'{router}.tls.certresolver': 'letsencrypt',
-                       f'{router}.middlewares': 'security-headers@file',
-                       f'{service}.loadbalancer.server.url': url.rstrip('/')})
+    """Guest Notes contain public route facts, with no application or login policy."""
+    require(
+        "routing_labels" not in cfg.get("guest", {}),
+        "Use typed routes, never arbitrary routing labels",
+    )
+    routes = cfg.get("routes", {})
+    validate_routes(
+        routes, network_endpoints.addresses(cfg["guest"])
+    )
+    result = {}
+    for key, route in routes.items():
+        selected = router(key, route)
+        prefix = f"traefik.http.routers.{key}"
+        result.update(
+            {
+                "traefik.enable": "true",
+                f"{prefix}.rule": selected["rule"],
+                f"{prefix}.priority": "10",
+                f"{prefix}.service": key,
+                f"{prefix}.entrypoints": "websecure",
+                f"{prefix}.tls": "true",
+                f"{prefix}.tls.certresolver": "letsencrypt",
+            }
+        )
+        if selected["middlewares"]:
+            result[f"{prefix}.middlewares"] = ",".join(selected["middlewares"])
+        service = f"traefik.http.services.{key}.loadbalancer"
+        result[f"{service}.server.url"] = route["url"].rstrip("/")
+        if "transport" in route:
+            result[f"{service}.serverstransport"] = route["transport"] + "@file"
     return result
 
 
-def check_merge_create_plan(value, node, vmid):
-    """Admit a merge-triggered *new* guest, never convergence or a continuation.
+def ca_path(key):
+    return "/etc/ssl/certs/route-" + key + ".pem"
 
-    The original check_plan remains the guard for reviewed legacy plans. This
-    narrower policy adds only automatic admission of the three fresh resources
-    selected by an explicit morning merge; it cannot approve an existing guest.
-    """
-    check_plan(value, node, vmid)
-    if not isinstance(node, str) or not node:
-        raise ValueError('The selected Proxmox node must be known')
-    if (value.get('errored') is True or value.get('complete') is False
-            or value.get('applyable') is False or value.get('deferred_changes')
-            or value.get('resource_drift')):
-        raise ValueError('Automatic creation requires a complete plan without deferred changes or drift')
-    for row in value['resource_changes']:
-        change = row['change']
-        key = RESOURCES[row['address']]
-        after = change['after']
-        expected_type = row['address'].split('.')[2]
-        if (row.get('mode', 'managed') != 'managed' or row.get('type') != expected_type
-                or change.get('actions') != ['create'] or change.get('before') is not None
-                or row.get('previous_address') is not None or row.get('deposed') is not None
-                or 'importing' in change or 'importing' in row
-                or change.get('generated_config') is not None):
-            raise ValueError('Automatic admission permits only three fresh creates, without import or adoption')
-        if type(after.get(key)) is not int or after[key] != vmid or after.get('node_name') != node:
-            raise ValueError('Every fresh resource must have the exact known guest and node identity')
-        unknown = change.get('after_unknown', {})
-        if not isinstance(unknown, dict) or unknown.get(key) or unknown.get('node_name'):
-            raise ValueError('Automatic creation cannot defer the selected guest or node identity')
+
+def validate_ingress(settings):
+    require(
+        isinstance(settings, dict)
+        and not settings.keys() - {"routes", "middlewares", "transports", "authentik_callbacks"},
+        "Use the ingress routing contract",
+    )
+    validate_routes(settings.get("routes", {}))
+    middleware, transports = settings.get("middlewares", {}), settings.get(
+        "transports", {}
+    )
+    require(
+        isinstance(middleware, dict) and isinstance(transports, dict),
+        "Use named ingress definitions",
+    )
+    for key, definition in middleware.items():
+        name(key)
+        require(
+            key not in DEFAULT_MIDDLEWARES
+            and isinstance(definition, dict)
+            and len(definition) == 1
+            and all(isinstance(value, dict) for value in definition.values()),
+            "Declare one middleware definition; preserve shared defaults",
+        )
+    for key, definition in transports.items():
+        name(key)
+        require(
+            isinstance(definition, dict)
+            and definition
+            and not definition.keys() - {"server_name", "ca_file", "certificate"}
+            and not {'ca_file', 'certificate'} <= definition.keys(),
+            "Declare verified TLS transport settings",
+        )
+        if "server_name" in definition:
+            hostname(definition["server_name"])
+        if "certificate" in definition:
+            certificate(definition["certificate"])
+        if "ca_file" in definition:
+            path = definition["ca_file"]
+            require(
+                isinstance(path, str)
+                and PurePosixPath(path).is_absolute()
+                and ".." not in PurePosixPath(path).parts
+                and not any(c.isspace() for c in path),
+                "Use an absolute public CA file path",
+            )
+    callbacks = settings.get("authentik_callbacks", {})
+    require(isinstance(callbacks, dict) and len(callbacks) <= 64,
+            "Use bounded compiler-derived Authentik callbacks")
+    combined = dict(settings.get("routes", {}))
+    for key, route in callbacks.items():
+        require(isinstance(route, dict) and {"host", "authentik_forward_auth"} <= route.keys()
+                and not route.keys() - CALLBACK_FIELDS and key not in combined,
+                "Use only compiler-derived Authentik callback fields")
+        combined[key] = dict(route, url=authentik_outpost(route, settings))
+    validate_routes(combined)
+    for route in combined.values():
+        references(route, settings)
+    return settings
+
+
+def references(route, settings):
+    require(
+        set(route.get("middlewares", ["security-headers"]))
+        <= DEFAULT_MIDDLEWARES.keys() | settings.get("middlewares", {}).keys(),
+        "Select declared middleware references",
+    )
+    require(
+        "transport" not in route
+        or route["transport"] in settings.get("transports", {}),
+        "Select a declared TLS transport",
+    )
+    if "authentik_forward_auth" in route:
+        authentik_outpost(route, settings)
+
+
+def shared(settings):
+    """External backends and shared middleware/transports belong to the file provider."""
+    validate_ingress(settings)
+    http = {
+        "middlewares": copy.deepcopy(
+            dict(DEFAULT_MIDDLEWARES, **settings.get("middlewares", {}))
+        ),
+        "routers": {},
+        "services": {},
+        "serversTransports": {},
+    }
+    for key, route in settings.get("routes", {}).items():
+        http["routers"][key] = router(key, route)
+        if 'service' in route:
+            selected = name(key + '-dashboard-root')
+            require(selected not in http['middlewares'], 'Preserve unique dashboard middleware names')
+            http['middlewares'][selected] = {'redirectRegex': {
+                'regex': r'^https://([^/]+)/?$', 'replacement': 'https://${1}/dashboard/', 'permanent': False}}
+            http['routers'][key]['middlewares'].append(selected + '@file')
+            continue
+        backend = {"servers": [{"url": route["url"].rstrip("/")}]}
+        if "transport" in route:
+            backend["serversTransport"] = route["transport"] + "@file"
+        http["services"][key] = {"loadBalancer": backend}
+    callbacks = {key: route for key, route in settings.get("routes", {}).items()
+                 if "authentik_forward_auth" in route}
+    callbacks.update(settings.get("authentik_callbacks", {}))
+    for key, route in callbacks.items():
+        selected = callback_name(key)
+        callback = router(selected, route)
+        callback['service'] = selected
+        callback["rule"] += " && PathPrefix(`" + AUTHENTIK_PREFIX + "`)"
+        callback["priority"] = 15
+        callback["middlewares"] = [value for value in callback["middlewares"]
+                                   if value != route["authentik_forward_auth"] + "@file"]
+        http["routers"][selected] = callback
+        http["services"][selected] = {"loadBalancer": {"servers": [
+            {"url": authentik_outpost(route, settings)}]}}
+    for key, definition in settings.get("transports", {}).items():
+        http["serversTransports"][key] = {
+            **(
+                {"serverName": definition["server_name"]}
+                if "server_name" in definition
+                else {}
+            ),
+            **({"rootCAs": [ca_path(key)]}
+               if "ca_file" in definition or "certificate" in definition else {}),
+        }
+    return {
+        "tls": {"options": {"default": {"minVersion": "VersionTLS12"}}},
+        "http": http,
+    }

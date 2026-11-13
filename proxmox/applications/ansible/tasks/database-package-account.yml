@@ -1,9 +1,9 @@
 ---
-- name: Require the explicit new empty MariaDB package-account selection
+- name: Require the current MariaDB package-account contract
   ansible.builtin.assert:
     that:
       - app.kind == 'mariadb'
-      - app.new_target | default(false) | bool
+      - app.new_target is not defined
       - app.database.account_mode == 'package'
       - app.database.user == 'mysql'
       - app.database.group == 'mysql'

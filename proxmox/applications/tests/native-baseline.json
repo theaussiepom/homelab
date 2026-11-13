@@ -1,0 +1,75 @@
+{
+  "postgresql": {
+    "files": {
+      "homelab.conf": "listen_addresses = '127.0.0.1,198.18.31.23'\npassword_encryption = 'scram-sha-256'\nshared_buffers = '256MB'\nmax_connections = 100\n",
+      "pg_hba.conf": "# homelab managed administrator accounts\nhostssl all,replication fixture_pg_admin_a 198.18.31.32/32 scram-sha-256\nlocal all,replication fixture_pg_admin_a reject\nhost all,replication fixture_pg_admin_a 0.0.0.0/0 reject\nhost all,replication fixture_pg_admin_a ::/0 reject\n# Root Zabbix: dedicated storage and local statistics only\nhost postgres zbx_monitor 127.0.0.1/32 scram-sha-256\nhost zabbix zabbix 127.0.0.1/32 scram-sha-256\nhostssl zabbix zabbix 198.18.31.36/32 scram-sha-256\nhostnossl zabbix zabbix 198.18.31.36/32 reject\nlocal all postgres peer\nlocal all all peer\nhost all all 127.0.0.1/32 scram-sha-256\nhost all all ::1/128 scram-sha-256\nhost all all 198.18.31.32/32 scram-sha-256\nhost all all 198.18.31.20/32 scram-sha-256\n"
+    },
+    "database": {
+      "config_files": [
+        {
+          "destination": "/etc/postgresql/16/main/conf.d/homelab.conf",
+          "source": "${inputs}/homelab.conf"
+        },
+        {
+          "destination": "/etc/postgresql/16/main/pg_hba.conf",
+          "source": "${inputs}/pg_hba.conf"
+        }
+      ],
+      "gid": 1000,
+      "group": "postgres",
+      "home": "/var/lib/postgresql",
+      "uid": 70,
+      "user": "postgres",
+      "version_command": [
+        "/usr/lib/postgresql/16/bin/postgres",
+        "--version"
+      ],
+      "version_pattern": "16.10"
+    }
+  },
+  "mariadb": {
+    "files": {
+      "homelab.cnf": "[mysqld]\nbind-address = 198.18.32.24\nskip-name-resolve\nmax_connections = 100\ninnodb_buffer_pool_size = 256M\n"
+    },
+    "database": {
+      "account_mode": "package",
+      "config_files": [
+        {
+          "destination": "/etc/mysql/mariadb.conf.d/99-homelab.cnf",
+          "source": "${inputs}/homelab.cnf"
+        }
+      ],
+      "group": "mysql",
+      "home": "/var/lib/mysql",
+      "user": "mysql",
+      "version_command": [
+        "mariadb",
+        "--version"
+      ],
+      "version_pattern": "12.3.3"
+    }
+  },
+  "influxdb": {
+    "files": {
+      "config.toml": "bolt-path = \"/var/lib/influxdb/influxd.bolt\"\nengine-path = \"/var/lib/influxdb/engine\"\nhttp-bind-address = \"198.18.33.26:8086\"\nreporting-disabled = true\n"
+    },
+    "database": {
+      "config_files": [
+        {
+          "destination": "/etc/influxdb/config.toml",
+          "source": "${inputs}/config.toml"
+        }
+      ],
+      "gid": 1000,
+      "group": "influxdb",
+      "home": "/var/lib/influxdb",
+      "uid": 1000,
+      "user": "influxdb",
+      "version_command": [
+        "influxd",
+        "version"
+      ],
+      "version_pattern": "2.7.12"
+    }
+  }
+}

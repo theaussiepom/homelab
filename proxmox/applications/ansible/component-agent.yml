@@ -1,0 +1,16 @@
+---
+- name: Reconcile this guest's selected monitoring agent
+  hosts: application
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Check guest identity
+      ansible.builtin.import_tasks: tasks/component-ready.yml
+
+    - name: Preserve the selected database statistics identity
+      ansible.builtin.include_tasks: tasks/monitoring-database-account.yml
+      when: zabbix_agent is defined
+
+    - name: Reconcile this guest's monitoring agent
+      ansible.builtin.import_tasks: tasks/monitoring-agent.yml

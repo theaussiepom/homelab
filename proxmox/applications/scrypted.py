@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Validate a Scrypted preparation packet locally; emit no executable stack.
 
-This is a review helper for the existing application installer, not a deployment
-entry point. Decoder and recording-source admission require a later source PR.
+This is a standalone review helper, not a deployment entry point. Decoder and
+recording-source admission require a later component adapter implementation.
 """
 import argparse
 import copy
@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 import re
 
-from site_config import read
+from private_io import read_json
 
 SCHEMA = 'homelab-scrypted-preparation-v1'
 PRESERVE = {
@@ -80,7 +80,7 @@ def main():
     parser.add_argument('--config', required=True, type=Path)
     args = parser.parse_args()
     # Deliberately omit receipt values and any runtime configuration from stdout.
-    print(json.dumps(review(read(args.config)), indent=2))
+    print(json.dumps(review(read_json(args.config)), indent=2))
 
 
 if __name__ == '__main__':

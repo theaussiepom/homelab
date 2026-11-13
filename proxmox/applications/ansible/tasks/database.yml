@@ -24,6 +24,24 @@
       - "'..' not in item.destination.split('/')"
   loop: "{{ app.database.config_files }}"
 
+- name: Install the declared native database administrator lifecycle
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../database-admin-runtime.py"
+    dest: /usr/local/bin/homelab-database-admin.py
+    owner: root
+    group: root
+    mode: '0700'
+  when: app.database_administrators is defined
+
+- name: Check owned administrator identities before database configuration changes
+  ansible.builtin.command:
+    argv: [python3, /usr/local/bin/homelab-database-admin.py, --preflight]
+    stdin: "{{ {'engine': app.kind, 'account': item.value, 'credential': (lookup('ansible.builtin.file', item.value.credential_file) | from_json)} | to_json }}"
+  loop: "{{ app.database_administrators | default({}) | dict2items }}"
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
 - name: Install the selected database configuration
   ansible.builtin.copy:
     src: "{{ item.source }}"
@@ -34,6 +52,7 @@
     backup: true
   loop: "{{ app.database.config_files }}"
   no_log: true
+  register: database_configuration
 
 - name: Prepare guest networking before native database startup
   ansible.builtin.import_tasks: ../../../common/ansible/network-ready.yml
@@ -44,6 +63,15 @@
 - name: Start and enable only the selected native database server
   ansible.builtin.systemd_service:
     name: "{{ {'mariadb': 'mariadb', 'postgresql': 'postgresql', 'influxdb': 'influxdb'}[app.kind] }}"
-    state: started
+    state: "{{ 'restarted' if application_reconcile | default(false) | bool and database_configuration.changed else 'started' }}"
     enabled: true
+  when: app.start_services | default(false) | bool and not ansible_check_mode
+
+- name: Verify only declared TLS server-administrator accounts
+  ansible.builtin.command:
+    argv: [python3, /usr/local/bin/homelab-database-admin.py]
+    stdin: "{{ {'engine': app.kind, 'account': item.value, 'credential': (lookup('ansible.builtin.file', item.value.credential_file) | from_json)} | to_json }}"
+  loop: "{{ app.database_administrators | default({}) | dict2items }}"
+  changed_when: false
+  no_log: true
   when: app.start_services | default(false) | bool and not ansible_check_mode

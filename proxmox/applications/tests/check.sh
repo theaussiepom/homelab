@@ -1,24 +1,29 @@
 #!/bin/sh
-# Run inside the pinned bootstrap Docker tools, without network or target access.
+# Disposable source fixture container; no target credentials or host devices.
 set -eu
 export PYTHONDONTWRITEBYTECODE=1
-python3 -m unittest discover -s /src/proxmox/applications/tests -v
-python3 /src/proxmox/applications/tests/restore_fixture.py
+python3 /src/tools/measure_coverage.py --suite applications --output "${HOMELAB_COVERAGE_OUTPUT:-/tmp/application-coverage}"
+python3 /src/proxmox/applications/tests/cloudbeaver_workspace_fixture.py
+python3 /src/proxmox/applications/tests/package_install_fixture.py
 python3 /src/proxmox/applications/tests/database_account_fixture.py
 python3 /src/proxmox/applications/tests/database_server_fixture.py
 python3 /src/proxmox/applications/tests/runner_network_guard_fixture.py
-python3 /src/proxmox/applications/tests/ingress_network_guard_fixture.py
 cp -R /src/proxmox/applications/tofu /tmp/app-tofu
 cd /tmp/app-tofu
+tofu fmt -check -recursive -diff
+tofu init -backend=false -input=false -lockfile=readonly -no-color
+tofu validate -no-color
+tofu test -no-color
+cp -R /src/proxmox/bootstrap/host-firewall /tmp/host-firewall-tofu
+cp /src/proxmox/bootstrap/docker/versions.tf /src/proxmox/bootstrap/docker/.terraform.lock.hcl /tmp/host-firewall-tofu/
+cd /tmp/host-firewall-tofu
 tofu fmt -check -recursive
 tofu init -backend=false -input=false -lockfile=readonly -no-color
 tofu validate -no-color
 tofu test -no-color
 export ANSIBLE_LOCAL_TEMP=/tmp/ansible-local
 export ANSIBLE_CONFIG=/src/proxmox/applications/ansible/ansible.cfg
-ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/site.yml
-ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/verify.yml
-ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/network-startup.yml
-ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/ingress-network-startup.yml
-ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-image.yml
-ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-acme.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-preparation.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-reconcile.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/applications/ansible/component-agent.yml
+ansible-playbook -i localhost, --syntax-check /src/proxmox/bootstrap/ansible/host-device.yml

@@ -1,0 +1,119 @@
+{
+  "schema": "homelab-components-v1",
+  "kind": "library",
+  "guest_templates": {
+    "base": {
+      "resources": {
+        "cpu_cores": 1,
+        "memory_mib": 512,
+        "root_gib": 8,
+        "os_reserve_mib": 128
+      },
+      "startup": {
+        "started": true,
+        "start_on_boot": true,
+        "boot_order": 30
+      },
+      "security": {
+        "unprivileged": true,
+        "protection": true,
+        "nesting": true,
+        "keyctl": false
+      }
+    }
+  },
+  "app_profiles": {
+    "recursive": {
+      "adapter": "unbound",
+      "display_name": "Recursive DNS",
+      "interfaces": {
+        "private_interface": {
+          "required": true,
+          "accepts": [
+            "app-network"
+          ]
+        },
+        "local_interface": {
+          "required": true,
+          "accepts": [
+            "guest-loopback"
+          ]
+        }
+      },
+      "listeners": {
+        "udp_listener": {
+          "service": "unbound",
+          "namespace": "app-network",
+          "interface": "private_interface",
+          "bind": "wildcard",
+          "protocol": "udp",
+          "port": 53,
+          "publish": {
+            "scope": "guest-loopback",
+            "port": 5335
+          }
+        }
+      },
+      "endpoints": {
+        "dns_endpoint": {
+          "listener": "udp_listener",
+          "protocol": "udp",
+          "via": "local_interface"
+        }
+      },
+      "software": [
+        "resolver"
+      ],
+      "runtime": [
+        "resolver"
+      ],
+      "health": {
+        "ready": {
+          "type": "adapter",
+          "check": "readiness"
+        }
+      },
+      "backup": {
+        "include": {},
+        "exclude": {}
+      }
+    }
+  },
+  "software": {
+    "resolver": {
+      "images": {
+        "unbound": "unbound"
+      }
+    },
+    "pbs-client": {
+      "packages": [
+        "proxmox-backup-client=4.2.8-1"
+      ]
+    }
+  },
+  "runtime_profiles": {
+    "resolver": {
+      "containers": {
+        "unbound": {
+          "memory_mib": 256,
+          "cpu_limit": 1,
+          "pids_limit": 128
+        }
+      }
+    }
+  },
+  "backup_profiles": {
+    "pbs-client": {
+      "type": "pbs-client",
+      "software": [
+        "pbs-client"
+      ],
+      "configuration": {
+        "hostname": {
+          "path": "/etc/hostname",
+          "kind": "file"
+        }
+      }
+    }
+  }
+}

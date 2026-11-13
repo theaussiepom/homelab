@@ -1,0 +1,164 @@
+{
+  "schema": "frozen-public-synthetic-proxy-row-oracles-v1",
+  "expected_computed_using_new_builder": false,
+  "private_reads": false,
+  "pre_removal_source_sha256": {
+    "cloudbeaver.py": "a84536a49581d0d3ec4ab0444b82794648981fc21461caf9679fa23246495f6a",
+    "mqtt_explorer.py": "6907f96271e104b76c02c3658025671faa51a09b6d0efdda5b1a6557c177fa46",
+    "monitoring.py": "aa52c6196551a21bc694b8cabfcef58e49713b0d97051c97bfb71b0e046c1e43",
+    "test_component_proxy_files.py": "48dc05d851e87c8b8eef31a80ebdc2302604a21060138e36e26202adbff668a8",
+    "test_component_explorer_state.py": "a6f406eaf611741300dcaeca79871eacc02dbd6f2c3188a2f2afafdb8e22c2f1"
+  },
+  "database_document_type": "bytes",
+  "database_document_sha256": "ba531fe2c87ce31d97c0d486e894edf3db686f24058a6ae71f2c13206c00dbee",
+  "rows": {
+    "cloudbeaver": {
+      "CloudBeaverHealth.java": {
+        "sha256": "7df3c32ddbb805d1eda16ce14ed2bfaadb7b82416f99d9f618968496e75d509c",
+        "content_type": "str",
+        "uid": 8978,
+        "gid": 8978,
+        "mode": "0400"
+      },
+      "cloudbeaver.conf": {
+        "sha256": "2f142f33830387fde18b27f926ea9f34f7bb89e242b2939e7bca0f0f3dd16f75",
+        "content_type": "str",
+        "uid": 8978,
+        "gid": 8978,
+        "mode": "0400"
+      },
+      "cloudbeaver.auto.conf": {
+        "sha256": "c478f3f4cfa1de8495ef89ea3353cca2966ad34107a2c1aee405a7ce8aade887",
+        "content_type": "str",
+        "uid": 8978,
+        "gid": 8978,
+        "mode": "0400"
+      },
+      "cloudbeaver-connections.json": {
+        "sha256": "251acc2f4f3795f7b9c6b60fb31a9e05f28480a592448c6e7bc845c9a88d4b3c",
+        "content_type": "str",
+        "uid": 8978,
+        "gid": 8978,
+        "mode": "0400"
+      },
+      "cloudbeaver-permissions.json": {
+        "sha256": "242d822c0dd4e911f56197b39b83a0185885c104ae88f32a60f9b84a8de8017d",
+        "content_type": "str",
+        "uid": 8978,
+        "gid": 8978,
+        "mode": "0400"
+      },
+      "oauth2-alpha.json": {
+        "sha256": "216e2331991fc39799d29a81a5efa70a56fdf682172d10778239eb9328746211",
+        "content_type": "str",
+        "uid": 65532,
+        "gid": 65532,
+        "mode": "0400"
+      },
+      "oauth2.cfg": {
+        "sha256": "7e6a638d60e87eb487fe6d1388fbf42815dc96272cef62206f3051932d6b5208",
+        "content_type": "str",
+        "uid": 65532,
+        "gid": 65532,
+        "mode": "0400"
+      },
+      "cloudbeaver-public.json": {
+        "sha256": "5e898126c36659c7cb4545c6ff235de90116cc3805361096bda7bd61a717441c",
+        "content_type": "str",
+        "uid": 0,
+        "gid": 0,
+        "mode": "0400"
+      },
+      "cloudbeaver-admin-connections.json": {
+        "sha256": "04e8eeddcff36726ca2abb2d13a8b0090d5110678cf554d47831d4aca5e85acf",
+        "content_type": "str",
+        "uid": 0,
+        "gid": 0,
+        "mode": "0400"
+      },
+      "CloudBeaverDatabaseHealth.java": {
+        "sha256": "e15ca02d9bb645a02559845c5e88941f0d69bbaeb09fbf5984422f59964b4fc4",
+        "content_type": "str",
+        "uid": 8978,
+        "gid": 8978,
+        "mode": "0400"
+      }
+    },
+    "mqtt_explorer": {
+      "explorer-traefik.json": {
+        "sha256": "5b574293b8ba72c5f35cbf3fbff66984d838b0c1aeb644ebf4de79277561cfb1",
+        "content_type": "str",
+        "uid": 65532,
+        "gid": 65532,
+        "mode": "0400"
+      },
+      "explorer-routes.yml": {
+        "sha256": "9838fa3a68d5701c115052b659abd33ac67df11854580c791c12186e3de0ef2e",
+        "content_type": "str",
+        "uid": 65532,
+        "gid": 65532,
+        "mode": "0400"
+      },
+      "mqtt-explorer-account.json": {
+        "sha256": "9f9dab5fef22d7fe600ba74b65d871c58b0269d763166bded4e10872e7c74574",
+        "content_type": "str",
+        "uid": 0,
+        "gid": 0,
+        "mode": "0600"
+      },
+      "mqtt-explorer-public.json": {
+        "sha256": "09548d0c66ecadba58e047e7f22f1901d0a4889ecee708a6e764b3aa6fee63be",
+        "content_type": "str",
+        "uid": 0,
+        "gid": 0,
+        "mode": "0400"
+      }
+    },
+    "monitoring": {
+      "database-password": {
+        "sha256": "72cf7b2f62578a706c5c80be2c79446dfdf0f1f9c14b33fd577b9a68b85d6a22",
+        "content_type": "str",
+        "uid": 1997,
+        "gid": 1995,
+        "mode": "0400"
+      },
+      "proxmox-ca.pem": {
+        "sha256": "baea7de3d3208b0565b1b911c105a549335a5f98b301b6cc41d9e2ec8e35b40d",
+        "content_type": "str",
+        "uid": 1997,
+        "gid": 1995,
+        "mode": "0400"
+      }
+    }
+  },
+  "explorer_state_rows": {
+    "explorer-traefik.json": {
+      "sha256": "5b574293b8ba72c5f35cbf3fbff66984d838b0c1aeb644ebf4de79277561cfb1",
+      "content_type": "str",
+      "uid": 65532,
+      "gid": 65532,
+      "mode": "0400"
+    },
+    "explorer-routes.yml": {
+      "sha256": "d703551ea4d360ed924937d2c16eabc0440fc0244ea357d29753635b25eac976",
+      "content_type": "str",
+      "uid": 65532,
+      "gid": 65532,
+      "mode": "0400"
+    },
+    "mqtt-explorer-account.json": {
+      "sha256": "7112863dfef1ed39fe97fb7c648dbb07ad96a030cd089e05a12d05d4a4f58677",
+      "content_type": "str",
+      "uid": 0,
+      "gid": 0,
+      "mode": "0600"
+    },
+    "mqtt-explorer-public.json": {
+      "sha256": "96aacd21b239456e56596d9a4ac8398a0f688c2a68dc6a31ceb1e51b8b38914c",
+      "content_type": "str",
+      "uid": 0,
+      "gid": 0,
+      "mode": "0400"
+    }
+  }
+}

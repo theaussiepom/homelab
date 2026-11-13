@@ -1,0 +1,115 @@
+name: Guest phase
+description: Run one guarded admitted deployment phase
+inputs:
+  guest:
+    description: Selected guest
+    required: true
+  phase:
+    description: Selected phase
+    required: true
+  disabled:
+    description: Selected disabled
+    required: false
+    default: '[]'
+  APPLICATION_SSH_KEY:
+    description: Existing scoped credential
+    required: true
+  PROXMOX_APP_TOKEN:
+    description: Existing scoped credential
+    required: true
+  authentik_postgresql_password:
+    description: Existing scoped credential
+    required: false
+  authentik_secret_key:
+    description: Existing scoped credential
+    required: false
+  authentik_smtp_password:
+    description: Existing scoped credential
+    required: false
+  bitwarden_runtime_environment:
+    description: Existing scoped credential
+    required: false
+  cloudbeaver_client_secret:
+    description: Existing scoped credential
+    required: false
+  mqtt_explorer_broker_password:
+    description: Existing scoped credential
+    required: false
+  mqtt_probe:
+    description: Existing scoped credential
+    required: false
+  node_red_api_token:
+    description: Existing scoped credential
+    required: false
+  pegaprox_database_key:
+    description: Existing scoped credential
+    required: false
+  traefik_cloudflare_dns_token:
+    description: Existing scoped credential
+    required: false
+  traefik_cloudflare_origin_token:
+    description: Existing scoped credential
+    required: false
+  traefik_proxmox_token:
+    description: Existing scoped credential
+    required: false
+  winet_options:
+    description: Existing scoped credential
+    required: false
+  zabbix_database_password:
+    description: Existing scoped credential
+    required: false
+runs:
+  using: composite
+  steps:
+  - name: Check readiness
+    run: 'test ! -e /var/lib/homelab-bootstrap/CONFIGURING
+
+      test ! -e /var/lib/homelab-bootstrap/BOOTSTRAP-CD-HOLD.json
+
+      '
+    shell: bash
+  - name: Check inputs
+    env:
+      GUEST: ${{ inputs.guest }}
+      PHASE: ${{ inputs.phase }}
+      DISABLED: ${{ inputs.disabled }}
+    run: "umask 077\n\"$HOMELAB_CONFIG_PYTHON\" framework-source/blueprints/compile.py --stack stack-source --site-root .\
+      \ \\\n  --guest \"$GUEST\" --disabled \"$DISABLED\" --admit \\\n  --output \"$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json\"\
+      \n"
+    shell: bash
+  - name: Load credentials
+    env:
+      GUEST: ${{ inputs.guest }}
+      PHASE: ${{ inputs.phase }}
+      PROXMOX_APP_TOKEN: ${{ inputs.PROXMOX_APP_TOKEN }}
+      APPLICATION_SSH_KEY: ${{ inputs.APPLICATION_SSH_KEY }}
+    run: python3 framework-source/blueprints/credentials.py --packet "$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json"
+    shell: bash
+  - name: Deploy
+    env:
+      GUEST: ${{ inputs.guest }}
+      PHASE: ${{ inputs.phase }}
+      HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD: ${{ inputs.authentik_postgresql_password }}
+      HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY: ${{ inputs.authentik_secret_key }}
+      HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD: ${{ inputs.authentik_smtp_password }}
+      HOMELAB_APP_SECRET_BITWARDEN_RUNTIME_ENVIRONMENT: ${{ inputs.bitwarden_runtime_environment }}
+      HOMELAB_APP_SECRET_CLOUDBEAVER_CLIENT_SECRET: ${{ inputs.cloudbeaver_client_secret }}
+      HOMELAB_APP_SECRET_MQTT_EXPLORER_BROKER_PASSWORD: ${{ inputs.mqtt_explorer_broker_password }}
+      HOMELAB_APP_SECRET_MQTT_PROBE: ${{ inputs.mqtt_probe }}
+      HOMELAB_APP_SECRET_NODE_RED_API_TOKEN: ${{ inputs.node_red_api_token }}
+      HOMELAB_APP_SECRET_PEGAPROX_DATABASE_KEY: ${{ inputs.pegaprox_database_key }}
+      HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_DNS_TOKEN: ${{ inputs.traefik_cloudflare_dns_token }}
+      HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_ORIGIN_TOKEN: ${{ inputs.traefik_cloudflare_origin_token }}
+      HOMELAB_APP_SECRET_TRAEFIK_PROXMOX_TOKEN: ${{ inputs.traefik_proxmox_token }}
+      HOMELAB_APP_SECRET_WINET_OPTIONS: ${{ inputs.winet_options }}
+      HOMELAB_APP_SECRET_ZABBIX_DATABASE_PASSWORD: ${{ inputs.zabbix_database_password }}
+    run: "# Elide only absent optional action defaults; preserve every supplied value.\nfor app_secret_slot in HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD\
+      \ HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD HOMELAB_APP_SECRET_BITWARDEN_RUNTIME_ENVIRONMENT\
+      \ HOMELAB_APP_SECRET_CLOUDBEAVER_CLIENT_SECRET HOMELAB_APP_SECRET_MQTT_EXPLORER_BROKER_PASSWORD HOMELAB_APP_SECRET_MQTT_PROBE\
+      \ HOMELAB_APP_SECRET_NODE_RED_API_TOKEN HOMELAB_APP_SECRET_PEGAPROX_DATABASE_KEY HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_DNS_TOKEN\
+      \ HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_ORIGIN_TOKEN HOMELAB_APP_SECRET_TRAEFIK_PROXMOX_TOKEN HOMELAB_APP_SECRET_WINET_OPTIONS\
+      \ HOMELAB_APP_SECRET_ZABBIX_DATABASE_PASSWORD; do\n  if [ -z \"${!app_secret_slot}\" ]; then unset \"$app_secret_slot\"\
+      ; fi\ndone\nexec python3 framework-source/proxmox/applications/deploy.py --phase \"$PHASE\" --packet \"$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json\"\
+      \n"
+    shell: bash

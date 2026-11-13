@@ -1,6 +1,0 @@
-{
-  "format": "homelab-recovery-files-v1",
-  "files": [
-    {"path": "database/export.native", "size_bytes": 1, "sha256": "REPLACE_WITH_ACTUAL_SHA256"}
-  ]
-}

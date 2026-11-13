@@ -160,6 +160,9 @@
         network_ready_unit: homelab-deploy.service
         network_ready_interfaces: [eth0]
 
+    - name: Prepare the persistent non-root backup scheduler
+      ansible.builtin.import_tasks: user-manager.yml
+
     - name: Configure the qualified private runner
       ansible.builtin.import_tasks: runner-common.yml
       vars:

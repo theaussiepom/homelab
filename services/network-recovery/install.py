@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install only the fixed BenBeast recovery payload; dry-run unless --apply."""
+"""Install a reviewed local recovery payload; dry-run unless --apply."""
 from __future__ import annotations
 
 import argparse
@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import socket
 import stat
@@ -160,16 +161,21 @@ class Installer:
     def preflight(self) -> None:
         if os.geteuid() != 0:
             raise InstallError("installer must run as root, including dry-run")
-        if socket.gethostname() != "ben-beast":
-            raise InstallError("installer is restricted to hostname ben-beast")
+        configuration = source_bytes(self.source / 'network-recovery.json')
+        selected = json.loads(configuration)
+        hostname = selected.get('hostname') if isinstance(selected, dict) else None
+        if (not isinstance(hostname, str) or len(hostname) > 253 or not re.fullmatch(
+                r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*', hostname)):
+            raise InstallError('configuration requires an explicit valid host identity')
+        if socket.gethostname() != hostname:
+            raise InstallError('installer host differs from the selected configuration')
+        self.hostname = hostname
         self.mounts = self.local_filesystems()
         for name, (target, _) in self.files.items():
             secure_path(target, leaf_file=True)
-            self.payload[name] = source_bytes(self.source / name)
+            self.payload[name] = configuration if name == 'network-recovery.json' else source_bytes(self.source / name)
             if name.endswith(".py"):
                 compile(self.payload[name], name, "exec")
-        if not isinstance(json.loads(self.payload["network-recovery.json"]), dict):
-            raise InstallError("configuration must be a JSON object")
         for path in (STATE, STATE / "installations", UNITS / "timers.target.wants"):
             secure_path(path)
         link = UNITS / "timers.target.wants" / TIMER
@@ -219,7 +225,7 @@ class Installer:
         plan = [{"source": name, "target": str(target), "mode": oct(mode),
                  "sha256": sha(self.payload[name])} for name, (target, mode) in self.files.items()]
         if not apply:
-            return {"status": "dry_run", "host": "ben-beast", "files": plan,
+            return {"status": "dry_run", "host": self.hostname, "files": plan,
                     "units_before": before, "audit_required_before_timer": True,
                     "destination_filesystems": self.mounts,
                     "runtime_state_preserved": True}
@@ -250,7 +256,7 @@ class Installer:
             raise InstallError("installation evidence directory must have mode 0700")
         directory = STATE / "installations" / (dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + secrets.token_hex(4))
         self.mkdir(directory, 0o700)
-        receipt = {"status": "started", "host": "ben-beast", "files": plan,
+        receipt = {"status": "started", "host": self.hostname, "files": plan,
                    "units_before": before, "runtime_state_preserved": True, "backups": {},
                    "destination_filesystems": self.mounts}
         receipt_path = directory / "receipt.json"

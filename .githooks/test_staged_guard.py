@@ -48,7 +48,7 @@ class StagedGuardTests(unittest.TestCase):
         r = subprocess.run([sys.executable, str(GUARD)], cwd=self.root,
                            env=env or self.env, capture_output=True, timeout=8)
         result = json.loads(r.stdout)
-        self.assertEqual(r.returncode, expected, result)
+        self.assertIn(r.returncode, expected if isinstance(expected, tuple) else (expected,), result)
         self.assertNotIn(self.token().encode(), r.stdout + r.stderr)
         return result
 
@@ -257,7 +257,15 @@ class StagedGuardTests(unittest.TestCase):
 
     def test_missing_scanner_blocks(self):
         self.write('safe.txt', 'safe\n')
-        self.assertEqual(self.check_guard(2, env=dict(self.env, GITLEAKS_BIN='/absent'))['reason'], 'check_error')
+        # Under QEMU, posix_spawn reports an absent executable as child exit 127
+        # rather than raising FileNotFoundError. Both paths must fail closed.
+        result = self.check_guard((1, 2), env=dict(self.env, GITLEAKS_BIN='/absent'))
+        self.assertEqual(result['status'], 'blocked')
+        if 'error_type' in result:
+            self.assertEqual(result['reason'], 'check_error')
+            self.assertEqual(result['error_type'], 'FileNotFoundError')
+        else:
+            self.assertEqual(result['reason'], 'command_failed')
 
     def test_wrong_scanner_version_blocks(self):
         self.write('safe.txt', 'safe\n')

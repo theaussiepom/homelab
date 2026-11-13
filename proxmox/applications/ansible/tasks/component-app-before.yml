@@ -1,0 +1,14 @@
+---
+- name: Verify retained Music state before starting
+  ansible.builtin.command:
+    argv: "{{ music_state.argv }}"
+  changed_when: false
+  no_log: true
+  when: music_state is defined
+
+- name: Verify the selected Zigbee network before starting
+  ansible.builtin.command:
+    argv: "{{ zigbee_state.validate_argv }}"
+  changed_when: false
+  no_log: true
+  when: zigbee_state is defined

@@ -1,5 +1,12 @@
 variable "node" { type = string }
 variable "ssh_public_keys" { type = list(string) }
+variable "protected_guests" {
+  type = list(number)
+  validation {
+    condition     = length(distinct(var.protected_guests)) == length(var.protected_guests) && alltrue([for vmid in var.protected_guests : vmid >= 1 && floor(vmid) == vmid])
+    error_message = "Declare unique positive protected guest identities in the execution context."
+  }
+}
 variable "guest" {
   type = object({
     vmid           = number, hostname = string, cpu = number, memory_mib = number,
@@ -9,25 +16,30 @@ variable "guest" {
     routing_labels = optional(map(string), {}),
     interfaces = list(object({
       bridge  = string, vlan = optional(number), mac = string, ipv4 = string,
-      gateway = optional(string), ipv6 = optional(string)
+      gateway = optional(string), ipv6 = optional(string), ip_filter = optional(bool, false)
     })),
-    volumes = map(object({ path = string, size_gib = number })),
+    volumes      = map(object({ path = string, size_gib = number, backup = optional(bool, true) })),
+    volume_order = optional(list(string)),
     rules = list(object({
       direction = string, proto = string, port = optional(string),
-      source    = optional(string), destination = optional(string), comment = string
+      source    = optional(string), destination = optional(string), comment = string, interface = optional(string)
     }))
   })
+  validation {
+    condition     = var.guest.started
+    error_message = "Deploy active guests."
+  }
   validation {
     condition = alltrue([for key, value in var.guest.routing_labels :
       can(regex("^traefik\\.[A-Za-z0-9_.-]+$", key)) && length(value) <= 2048 &&
       length(regexall("[\r\n]", value)) == 0
     ])
-    error_message = "Discovery labels must be single-line Traefik routing facts generated from typed app routes."
+    error_message = "Discovery labels must be single-line Traefik facts generated from resolved stack routes."
   }
   validation {
     condition = (
       var.guest.vmid >= 100 && floor(var.guest.vmid) == var.guest.vmid &&
-      !contains([900, 4914, 4915, 4920], var.guest.vmid) &&
+      !contains(var.protected_guests, var.guest.vmid) &&
       can(regex("^[a-z][a-z0-9-]{0,62}$", var.guest.hostname)) &&
       var.guest.cpu >= 1 && floor(var.guest.cpu) == var.guest.cpu &&
       var.guest.memory_mib >= 256 && floor(var.guest.memory_mib) == var.guest.memory_mib &&
@@ -52,15 +64,41 @@ variable "guest" {
     error_message = "Use static IPv4 or one DHCP interface, unique literal MACs, valid VLANs and exactly one default route. DHCP supplies its own gateway."
   }
   validation {
+    condition = alltrue([for nic in var.guest.interfaces : !nic.ip_filter || (
+      nic.ipv4 != "dhcp" && can(cidrnetmask(nic.ipv4)) &&
+      (nic.ipv6 == null ? true : nic.ipv6 == "manual")
+    )])
+    error_message = "Per-interface IP filters require a configured static IPv4 address and manual IPv6."
+  }
+  validation {
+    condition = var.guest.volume_order == null ? true : (
+      length(var.guest.volume_order) == length(var.guest.volumes) &&
+      length(distinct(var.guest.volume_order)) == length(var.guest.volume_order) &&
+      alltrue([for key in var.guest.volume_order : contains(keys(var.guest.volumes), key)])
+    )
+    error_message = "Bind every provider volume once in its validated persistent slot order."
+  }
+  validation {
     condition = alltrue([for volume in values(var.guest.volumes) :
-      volume.size_gib >= 1 && floor(volume.size_gib) == volume.size_gib && can(regex("^(/srv/homelab|/var/lib/(mysql|postgresql|influxdb))(/[a-z0-9_-]+)*$", volume.path))
+      volume.size_gib >= 1 && floor(volume.size_gib) == volume.size_gib && can(regex("^(/srv/[a-z0-9_-]+|/var/lib/(mysql|postgresql|influxdb))(/[a-z0-9_-]+)*$", volume.path))
     ])
     error_message = "Data volumes must be managed guest volumes at explicit service paths, never host bind mounts."
   }
   validation {
     condition = alltrue([for rule in var.guest.rules :
-      contains(["in", "out"], rule.direction) && contains(["tcp", "udp", "icmp", "icmpv6"], rule.proto) &&
-      (rule.direction == "in" ? rule.source != null && rule.source != "0.0.0.0/0" && rule.source != "::/0" : rule.destination != null)
+      contains(["in", "out"], rule.direction) && contains(["tcp", "udp", "icmp", "icmpv6", "igmp"], rule.proto) &&
+      (rule.interface == null ? true : contains([for index, nic in var.guest.interfaces : "net${index}"], rule.interface)) &&
+      (rule.direction == "in" ? rule.source != null && try(tonumber(split("/", rule.source)[1]) > 0, true) : rule.destination != null) &&
+      alltrue([for address in [rule.source, rule.destination] : address == null ? true : (
+        !strcontains(address, "%") && can(cidrhost(strcontains(address, "/") ? address : "${address}/${strcontains(address, ":") ? 128 : 32}", 0))
+      )]) &&
+      (rule.source == null || rule.destination == null ? true : strcontains(rule.source, ":") == strcontains(rule.destination, ":")) &&
+      alltrue([for address in [rule.source, rule.destination] : address == null ? true : (
+        rule.proto == "icmpv6" ? strcontains(address, ":") : contains(["icmp", "igmp"], rule.proto) ? !strcontains(address, ":") : true
+      )]) &&
+      (rule.proto == "igmp" ? rule.port == null : contains(["icmp", "icmpv6"], rule.proto) ? (
+        rule.port == null ? true : can(regex("^(0|[1-9][0-9]{0,2})$", rule.port)) && try(tonumber(rule.port) <= 255, false)
+      ) : true)
     ])
     error_message = "Declare each guest firewall allowance; inbound access must name a restricted source."
   }

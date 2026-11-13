@@ -1,8 +1,0 @@
-[
-  {
-    "by_id": "/dev/disk/by-id/example-disk",
-    "serial": "EXAMPLE-SERIAL",
-    "size_bytes": 1073741824000,
-    "read_only": false
-  }
-]

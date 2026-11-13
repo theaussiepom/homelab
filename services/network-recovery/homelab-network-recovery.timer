@@ -1,5 +1,5 @@
 [Unit]
-Description=Check BenBeast local network every 30 seconds
+Description=Check Configured host local network every 30 seconds
 
 [Timer]
 OnActiveSec=30s

@@ -1,7 +1,0 @@
----
-- name: Verify metadata without application/device actions
-  hosts: pve_guests
-  gather_facts: false
-  become: false
-  roles:
-    - role: homelab_identity_guard

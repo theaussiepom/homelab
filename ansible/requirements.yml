@@ -1,3 +1,0 @@
----
-# The initial drafts use ansible.builtin only. Add collections only with exact pins.
-collections: []

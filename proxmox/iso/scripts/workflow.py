@@ -74,6 +74,10 @@ def main():
         if action=='build-production':run(ROOT/'scripts/verify_metadata.py')
     elif action=='test-boot':
         for case in ['matching-check','wrong-machine','missing-member','ambiguous-member','cancel-install']:run(ROOT/'scripts/boot_test.py',case)
+    elif action=='test-case':
+        if len(sys.argv)!=3 or sys.argv[2] not in {'matching-check','wrong-machine','missing-member','ambiguous-member','cancel-install','profile-wrong-machine'}:
+            raise ValueError('Choose one bounded synthetic VM case')
+        run(ROOT/'scripts/boot_test.py',sys.argv[2])
     elif action=='test-profile':run(ROOT/'scripts/boot_test.py','profile-wrong-machine')
     elif action=='qualify':qualify()
     elif action=='unit':unit()

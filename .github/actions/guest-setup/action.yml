@@ -1,0 +1,86 @@
+name: Setup
+description: Select immutable settings, services and tools
+runs:
+  using: composite
+  steps:
+  - name: Check readiness
+    run: 'test ! -e /var/lib/homelab-bootstrap/CONFIGURING
+
+      test ! -e /var/lib/homelab-bootstrap/BOOTSTRAP-CD-HOLD.json
+
+      '
+    shell: bash
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+    with:
+      fetch-depth: 0
+      persist-credentials: false
+    name: Get settings
+  - name: Choose services
+    id: stack
+    run: 'python3 - <<''PYCODE'' >> "$GITHUB_OUTPUT"
+
+      import pathlib, re
+
+      text = pathlib.Path(''.github/workflows/deploy.yml'').read_text()
+
+      pins = re.findall(r''^(?:\s*uses:|  HOMELAB_STACK_SOURCE:) ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/\.github/workflows/deploy\.yml@([0-9a-f]{40})\s*$'',
+      text, re.M)
+
+      if len(pins) != 1: raise SystemExit(''Select one immutable stack workflow'')
+
+      print(''repository=''+pins[0][0]); print(''revision=''+pins[0][1])
+
+      PYCODE
+
+      '
+    shell: bash
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+    with:
+      repository: ${{ steps.stack.outputs.repository }}
+      ref: ${{ steps.stack.outputs.revision }}
+      path: stack-source
+      persist-credentials: false
+    name: Get services
+  - name: Choose tools
+    id: framework
+    run: 'python3 - <<''PYCODE'' >> "$GITHUB_OUTPUT"
+
+      import pathlib, re
+
+      text = pathlib.Path(''stack-source/.github/workflows/phase.yml'').read_text()
+
+      pins = re.findall(r''^\s*uses: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/\.github/workflows/guest-phase\.yml@([0-9a-f]{40})\s*$'',
+      text, re.M)
+
+      if len(pins) != 1: raise SystemExit(''Select one immutable framework workflow'')
+
+      print(''repository=''+pins[0][0]); print(''revision=''+pins[0][1])
+
+      PYCODE
+
+      '
+    shell: bash
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+    with:
+      repository: ${{ steps.framework.outputs.repository }}
+      ref: ${{ steps.framework.outputs.revision }}
+      path: framework-source
+      persist-credentials: false
+    name: Get tools
+  - name: Prepare tools
+    run: 'umask 077
+
+      job_tools=$(mktemp -d "$RUNNER_TEMP/homelab-tools-XXXXXX")
+
+      python3 -m venv "$job_tools"
+
+      "$job_tools/bin/python" -m pip --isolated install --disable-pip-version-check --require-hashes --no-deps -r framework-source/requirements.lock.txt
+
+      "$job_tools/bin/ansible-playbook" --version
+
+      printf ''HOMELAB_CONFIG_PYTHON=%s/bin/python\n'' "$job_tools" >> "$GITHUB_ENV"
+
+      printf ''%s/bin\n'' "$job_tools" >> "$GITHUB_PATH"
+
+      '
+    shell: bash

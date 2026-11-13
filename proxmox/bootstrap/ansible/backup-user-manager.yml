@@ -1,0 +1,15 @@
+---
+- name: Prepare the existing deployment account for its declared backup timer
+  hosts: deploy
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Select the supported controller and existing account
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == 'Debian'
+          - ansible_distribution_major_version == '13'
+          - runner_owner == 'homelab-runner'
+  tasks:
+    - name: Prepare only the persistent account manager
+      ansible.builtin.import_tasks: user-manager.yml

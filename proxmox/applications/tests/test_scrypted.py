@@ -7,8 +7,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import deploy
-import render
+import application_contract
 import scrypted
 
 
@@ -73,11 +72,9 @@ class ScryptedPreparationTests(unittest.TestCase):
             cfg['preserve'][key] = value
             with self.assertRaises(ValueError): scrypted.review(cfg)
 
-    def test_existing_installer_refuses_before_reading_target_or_private_files(self):
-        for approval in [False, True]:
-            with self.assertRaisesRegex(deploy.InputNeeded, 'Scrypted.*decoder'):
-                deploy.validate({'app': {'kind': 'scrypted', 'enabled': approval}})
-        with self.assertRaises(ValueError): render.compose({'kind': 'scrypted'})
+    def test_component_contract_has_no_scrypted_deployment_adapter(self):
+        with self.assertRaisesRegex(ValueError, 'supported independent application adapter'):
+            application_contract.adapter('scrypted')
 
     def test_no_runnable_compose_even_when_missing_inputs_are_filled(self):
         cfg = copy.deepcopy(self.cfg)
