@@ -173,6 +173,8 @@ class Resolver:
                     provider['ipv4_endpoint'] = address + '/' + str(selected.prefixlen)
                 if 'ipv6' in row:
                     provider['ipv6'] = row['ipv6']
+                if row.get('ip_filter', False):
+                    provider['ip_filter'] = True
                 guest['provider_interfaces'].append(provider)
                 guest['interface_addresses'][key] = address
             control = value['interfaces'][value['control_interface']]

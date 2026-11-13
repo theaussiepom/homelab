@@ -2,6 +2,7 @@
 
 from private_io import require
 from host_device_helper import device_spec
+import ipaddress
 import re
 
 GUEST_RESOURCE = "module.guest.proxmox_virtual_environment_container.guest"
@@ -10,6 +11,46 @@ RESOURCES = {
     "module.guest.proxmox_virtual_environment_firewall_options.guest": "container_id",
     "module.guest.proxmox_virtual_environment_firewall_rules.guest": "container_id",
 }
+IP_FILTER_RESOURCE = "module.guest.proxmox_virtual_environment_firewall_ipset.ip_filter"
+IP_FILTER_COMMENT = "HomeLab per-interface source IP filter"
+
+
+def resource_fields(ip_filter_slots=()):
+    require(isinstance(ip_filter_slots, (list, tuple))
+            and all(type(slot) is int and 0 <= slot <= 31 for slot in ip_filter_slots)
+            and len(set(ip_filter_slots)) == len(ip_filter_slots),
+            'Select unique declared NIC slots for IP filters')
+    return dict(RESOURCES, **{f'{IP_FILTER_RESOURCE}["{slot}"]': 'container_id'
+                             for slot in ip_filter_slots})
+
+
+def ip_filter_slots(interfaces):
+    require(isinstance(interfaces, list) and len(interfaces) <= 32,
+            'Select the compiled guest NICs for IP filters')
+    selected = []
+    for slot, nic in enumerate(interfaces):
+        require(isinstance(nic, dict) and type(nic.get('ip_filter', False)) is bool,
+                'Use Boolean per-interface IP filter selections')
+        if nic.get('ip_filter', False):
+            try:
+                address = ipaddress.IPv4Interface(nic['ipv4'])
+            except (ValueError, TypeError, KeyError):
+                raise ValueError('IP filters require a configured static IPv4 NIC') from None
+            require(str(address) == nic['ipv4'] and nic.get('ipv6') in (None, 'manual'),
+                    'IP filters require static IPv4 and manual IPv6')
+            selected.append(slot)
+    return selected
+
+
+def ip_filter_values(value, slot):
+    return (isinstance(value, dict)
+            and set(value) <= {'id', 'node_name', 'container_id', 'vm_id', 'name', 'comment', 'cidr'}
+            and value.get('name') == f'ipfilter-net{slot}'
+            and value.get('id') in (None, f'ipfilter-net{slot}')
+            and value.get('comment') == IP_FILTER_COMMENT
+            and value.get('cidr') in (None, []) and value.get('vm_id') in (None, 0))
+
+
 IMMUTABLE_GUEST_FIELDS = (
     "node_name",
     "vm_id",
@@ -49,11 +90,12 @@ def refresh_values(value):
 
 
 def owned_resource_drift(rows, changes, node, vmid, serial_device, *, backup_selection=None,
-                         backup_staging=None):
+                         backup_staging=None, resources=None):
     """Retain ownership evidence without vetoing mutable current-to-target updates."""
     if rows is None or rows == []:
         return True
-    if not isinstance(rows, list) or len(rows) > len(RESOURCES):
+    resources = RESOURCES if resources is None else resources
+    if not isinstance(rows, list) or len(rows) > len(resources):
         return False
     current = {row['address']: row['change']['before'] for row in changes}
     seen = set()
@@ -61,14 +103,14 @@ def owned_resource_drift(rows, changes, node, vmid, serial_device, *, backup_sel
         if not isinstance(row, dict):
             return False
         address = row.get('address')
-        if not isinstance(address, str) or address not in RESOURCES or address in seen:
+        if not isinstance(address, str) or address not in resources or address in seen:
             return False
         seen.add(address)
         change = row.get('change')
         if not isinstance(change, dict):
             return False
         before, after = change.get('before'), change.get('after')
-        key = RESOURCES[address]
+        key = resources[address]
         if (
             row.get('mode', 'managed') != 'managed'
             or row.get('type', address.split('.')[2]) != address.split('.')[2]
@@ -200,7 +242,7 @@ def fresh_mount_unknowns(after, unknown):
 
 
 def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=None,
-               backup_selection=None, backup_staging=None):
+               backup_selection=None, backup_staging=None, ip_filter_slots=()):
     """Validate the exact saved plan under an explicit backend custody decision."""
     require(type(existing) is bool, "Select creation or reconciliation explicitly")
     protected = protected_guests
@@ -218,12 +260,13 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
         and not value.get("deferred_changes"),
         "Review incomplete or deferred plans before deployment",
     )
+    resources = resource_fields(ip_filter_slots)
     rows = value.get("resource_changes", [])
     require(
         isinstance(rows, list)
         and all(isinstance(row, dict) for row in rows)
-        and len(rows) == len(RESOURCES)
-        and {row.get("address") for row in rows} == set(RESOURCES),
+        and len(rows) == len(resources)
+        and {row.get("address") for row in rows} == set(resources),
         "The plan must contain only this guest and its firewall resources",
     )
     for row in rows:
@@ -241,7 +284,7 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
             "Never import, move, adopt or replace a guest resource",
         )
         before, after = change.get("before"), change.get("after")
-        key = RESOURCES[row["address"]]
+        key = resources[row["address"]]
         require(isinstance(after, dict), "Require known planned resource identity")
         for side in (before, after):
             require(
@@ -261,6 +304,17 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
             and not unknown.get("node_name"),
             "Do not defer the selected guest or node identity",
         )
+        ip_filter = row['address'] not in RESOURCES
+        if ip_filter:
+            slot = next(slot for slot in ip_filter_slots
+                        if row['address'] == f'{IP_FILTER_RESOURCE}["{slot}"]')
+            require(all(side is None or ip_filter_values(side, slot) for side in (before, after))
+                    and not has_unknown({k: v for k, v in unknown.items() if k != 'id'}),
+                    'Preserve only the selected empty per-NIC IP filter')
+            if before is None:
+                require(change.get('actions') == ['create'] and value.get('applyable') is not False,
+                        'Only create a missing selected IP filter')
+                continue
         if row["address"] == "module.guest.proxmox_virtual_environment_container.guest":
             require(
                 after.get("started", True) is True
@@ -306,8 +360,9 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
                 value.get("applyable") is not False
                 and change.get("actions") == ["create"]
                 and before is None,
-                "Fresh creation requires exactly three new resources",
+                "Fresh creation requires exactly the selected guest and firewall resources",
             )
     require(owned_resource_drift(value.get('resource_drift'), rows, node, vmid, serial_device,
-                                backup_selection=backup_selection, backup_staging=backup_staging),
+                                backup_selection=backup_selection, backup_staging=backup_staging,
+                                resources=resources),
             'Preserve owned resource identities, immutable data and complete refreshed evidence')

@@ -16,7 +16,7 @@ variable "guest" {
     routing_labels = optional(map(string), {}),
     interfaces = list(object({
       bridge  = string, vlan = optional(number), mac = string, ipv4 = string,
-      gateway = optional(string), ipv6 = optional(string)
+      gateway = optional(string), ipv6 = optional(string), ip_filter = optional(bool, false)
     })),
     volumes      = map(object({ path = string, size_gib = number, backup = optional(bool, true) })),
     volume_order = optional(list(string)),
@@ -62,6 +62,13 @@ variable "guest" {
       ])
     )
     error_message = "Use static IPv4 or one DHCP interface, unique literal MACs, valid VLANs and exactly one default route. DHCP supplies its own gateway."
+  }
+  validation {
+    condition = alltrue([for nic in var.guest.interfaces : !nic.ip_filter || (
+      nic.ipv4 != "dhcp" && can(cidrnetmask(nic.ipv4)) &&
+      (nic.ipv6 == null ? true : nic.ipv6 == "manual")
+    )])
+    error_message = "Per-interface IP filters require a configured static IPv4 address and manual IPv6."
   }
   validation {
     condition = var.guest.volume_order == null ? true : (

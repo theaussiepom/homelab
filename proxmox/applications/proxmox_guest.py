@@ -32,7 +32,7 @@ from private_io import (
     private_writer,
 )
 from commands import quiet
-from plan_policy import check_plan
+from plan_policy import check_plan, ip_filter_slots, IP_FILTER_RESOURCE
 
 
 class InputNeeded(ValueError):
@@ -225,6 +225,20 @@ def backup(cfg, state, label):
         write_new(f"{stamp}.json", encoded(receipt), dir_fd=directory)
 
 
+def new_ip_filters_absent(cfg, plan):
+    """Preflight selected creates; the pinned provider otherwise adopts collisions."""
+    names = {row['change']['after']['name'] for row in plan['resource_changes']
+             if row['address'].startswith(IP_FILTER_RESOURCE+'[') and row['change']['before'] is None}
+    if not names:
+        return
+    rows = api_get(cfg, f"/nodes/{cfg['site']['node']}/lxc/{cfg['guest']['vmid']}/firewall/ipset")
+    require(isinstance(rows, list) and all(isinstance(row, dict)
+            and isinstance(row.get('name'), str) and row['name'] for row in rows),
+            'Require complete live IP-set name evidence before creating a filter')
+    require(not names & {row['name'] for row in rows},
+            'A selected new IP filter already exists; preserve it without adoption')
+
+
 def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
                    previous_configuration=None):
     """Plan the existing backend; apply only this reviewed guest's safe delta."""
@@ -302,6 +316,7 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
         existing=existing,
         serial_device=cfg["guest"].get("serial_device"),
         protected_guests=cfg['deployment']['protected_guests'],
+        ip_filter_slots=ip_filter_slots(cfg['guest']['interfaces']),
         **({'backup_selection': {row['path']: row['backup'] for row in cfg['guest'].get('volumes', {}).values()}}
            if 'backup' in cfg['app'] else {}),
         **({'backup_staging': {'path': cfg['app']['backup']['job']['staging']['path'],
@@ -311,7 +326,7 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
     )
     if state_identity is not None:
         from component_generation import plan_identity
-        plan_identity(value, state_identity)
+        plan_identity(value, state_identity, ip_filter_slots=ip_filter_slots(cfg['guest']['interfaces']))
     if existing and 'job' in cfg['app'].get('backup', {}):
         import backup_staging
         path = cfg['app']['backup']['job']['staging']['path']
@@ -341,6 +356,8 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
         },
     )
     if changed:
+        if existing:
+            new_ip_filters_absent(cfg, value)
         window = {
             "plan_sha256": sha(operation / "guest.tfplan"),
             "started_at_ns": time.time_ns(),

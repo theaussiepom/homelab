@@ -189,6 +189,47 @@ class MusicSplitTests(unittest.TestCase):
 
 
 class BoundAutomationTests(unittest.TestCase):
+    def dual_homeassistant(self):
+        from test_component_checks import case
+        app = case('homeassistant')['app']
+        app['role_addresses'] = {'web_interface': '198.18.30.21', 'transition_web_interface': '198.18.40.21'}
+        app['listeners'] = {name: {'service': 'homeassistant', 'namespace': 'host', 'protocol': 'tcp',
+            'port': 8123, 'bind': 'interface', 'interface': role, 'actual_bind': app['role_addresses'][role]}
+            for name, role in (('web_listener', 'web_interface'), ('transition_web_listener', 'transition_web_interface'))}
+        return app
+
+    def test_ha_dual_declared_sockets_require_both_and_ipv4_loopback_without_extra_binds(self):
+        import io
+        from contextlib import redirect_stdout
+        from test_component_checks import case
+        app = self.dual_homeassistant(); rows = checks._homeassistant(app, None)
+        self.assertEqual(rows[0], checks._homeassistant(case('homeassistant')['app'], None)[0])
+        self.assertEqual(len(rows), 2)
+        required = ['198.18.30.21', '198.18.40.21', '127.0.0.1']
+        cases = [(required, True), (required+['[::1]'], True), (required[:-1], False),
+                 (required[1:], False), ([required[0], required[2]], False)]
+        cases += [(required+[extra], False) for extra in ('0.0.0.0', '[::]', '198.18.25.21', '[fd00::1]')]
+        for addresses, valid in cases:
+            text = '\n'.join('LISTEN 0 128 '+address+':8123 0.0.0.0:*' for address in addresses)
+            with self.subTest(addresses=addresses), patch('subprocess.check_output', return_value=text), redirect_stdout(io.StringIO()):
+                if valid: exec(rows[1]['argv'][-1], {})
+                else:
+                    with self.assertRaises(AssertionError): exec(rows[1]['argv'][-1], {})
+
+    def test_ha_dual_contract_rejects_undeclared_inconsistent_or_fresh_listeners(self):
+        changes = [lambda app: app.update(lifecycle='fresh'),
+                   lambda app: app['listeners'].pop('transition_web_listener'),
+                   lambda app: app['role_addresses'].update(transition_web_interface='198.18.30.21')]
+        changes += [lambda app, value=value: app['role_addresses'].update(transition_web_interface=value)
+                    for value in ('0.0.0.0', '127.0.0.1', '169.254.0.1', '224.0.0.1', '240.0.0.1', 'invalid')]
+        changes += [lambda app, key=key, value=value: app['listeners']['transition_web_listener'].update({key: value})
+                    for key, value in (('service', 'other'), ('namespace', 'app-network'), ('protocol', 'udp'),
+                        ('port', 8124), ('bind', 'wildcard'), ('interface', 'web_interface'),
+                        ('actual_bind', '198.18.40.22'), ('publish', {}))]
+        for change in changes:
+            app = self.dual_homeassistant(); change(app)
+            with self.subTest(change=change), self.assertRaises(ValueError): checks._homeassistant(app, None)
+
     def test_node_bound_listener_must_match_its_web_role(self):
         """Reject a listener on another interface or actual bind address."""
         from test_component_handlers import case, base_service
