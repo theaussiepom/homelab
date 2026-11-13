@@ -91,6 +91,7 @@ resource "proxmox_virtual_environment_firewall_ipset" "ip_filter" {
   container_id = var.guest.vmid
   name         = "ipfilter-net${each.key}"
   comment      = "HomeLab per-interface source IP filter"
+
   # Empty LXC sets inherit only this NIC's configured addresses and MAC-derived
   # IPv6 link-local address. Do not enable the guest-wide ipfilter option.
   depends_on = [proxmox_virtual_environment_firewall_options.guest]
