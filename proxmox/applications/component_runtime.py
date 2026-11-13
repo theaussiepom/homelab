@@ -279,6 +279,15 @@ def _pihole(app, guest):
     require(upstream['protocol'] in ('tcp', 'udp'), 'Select an explicit DNS upstream')
     service['environment'].update(FTLCONF_dhcp_active='false',
         FTLCONF_dns_upstreams=upstream['address'] + '#' + str(upstream['port']))
+    if 'web_interface' in app.get('role_addresses', {}):
+        address = foundation.address(app['role_addresses']['web_interface'])
+        listener = app['listeners'].get('web_listener', {})
+        require(listener.get('service') == 'pihole' and listener.get('namespace') == 'host'
+                and listener.get('interface') == 'web_interface' and listener.get('bind') == 'interface'
+                and listener.get('protocol') == 'tcp' and listener.get('port') == 80
+                and listener.get('actual_bind') == address and 'publish' not in listener,
+                'Bind Pi-hole web only to its selected web role')
+        service['environment']['FTLCONF_webserver_port'] = address + ':80'
     return {'pihole': service}
 
 

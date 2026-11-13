@@ -56,14 +56,26 @@ class GatewayUnits(unittest.TestCase):
    with self.subTest(path=path),self.assertRaises(ComponentError):rows('mqtt_explorer',v)
 
 class OwnedHelperUnits(unittest.TestCase):
- def test_music_uses_owned_compose_service_and_same_home_source_for_https(self):
+ def test_music_uses_owned_local_probe_and_declared_source_for_https(self):
   v=case('music_assistant')
   with patch.object(h,'_compose_exec',return_value=['OWNED','COMPOSE']) as compose:
    r=rows('music_assistant',v)
   self.assertEqual(r[0]['argv'],['OWNED','COMPOSE']);self.assertEqual(compose.call_args.args[2:5],('music_assistant','python3','-c'))
   source=v['app']['role_addresses']['web_interface'];self.assertEqual(r[1]['argv'][r[1]['argv'].index('--interface')+1],source)
+  baseline=rows('music_assistant',v)
+  v['app']['role_addresses']['stream_interface']='198.18.100.40'
+  v['app']['resolved_connections']['public']['source_address']='198.18.100.40'
+  selected=rows('music_assistant',v)
+  self.assertEqual(selected[1]['argv'][selected[1]['argv'].index('--interface')+1],'198.18.100.40')
+  self.assertEqual(selected[1]['expect'],baseline[1]['expect'])
+  self.assertEqual(selected[1]['argv'][-3:],baseline[1]['argv'][-3:])
+  self.assertIn('http://'+source+':8095/info',selected[0]['argv'][-1])
+  self.assertIn("'198.18.100.40',8097",selected[0]['argv'][-1])
   v['app']['resolved_connections']['public']['source_address']='198.18.44.7'
   with self.assertRaises(ComponentError):rows('music_assistant',v)
+  for invalid in (None,'invalid','198.18.100.40\n','::1'):
+   v['app']['resolved_connections']['public']['source_address']=invalid
+   with self.subTest(source=invalid),self.assertRaises(ComponentError):rows('music_assistant',v)
  def test_winet_uses_selected_project_service_and_bounded_docker_json(self):
   v=case('winet');v['app']['project_name']='other-project';v['app']['identity']['services']['winet']='other-winet';code=rows('winet',v)[0]['argv'][-1]
   self.assertIn('other-project-other-winet-1',code);self.assertIn("len(d)==1",code);self.assertIn("get('Status')=='healthy'",code)

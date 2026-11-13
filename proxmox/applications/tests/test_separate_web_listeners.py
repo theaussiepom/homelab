@@ -19,6 +19,54 @@ from test_component_music import descriptor, settings, make_data
 from protocol_component_fixtures import influx_web_listeners
 
 
+class PiholeWebTests(unittest.TestCase):
+    def original(self):
+        return {'role_addresses': {'service_interface': '198.18.40.2'},
+                'listeners': {'web_listener': {'service': 'pihole', 'namespace': 'host',
+                    'interface': 'service_interface', 'bind': 'wildcard', 'protocol': 'tcp',
+                    'port': 80, 'actual_bind': '0.0.0.0'}},
+                'resolved_connections': {'upstream': {'type': 'dns', 'target': {
+                    'address': '127.0.0.1', 'port': 5335, 'protocol': 'udp'}}},
+                'settings': {'dns_records': {}}}
+
+    def split(self):
+        app = self.original()
+        app['role_addresses']['web_interface'] = '198.18.30.2'
+        app['listeners']['web_listener'].update(interface='web_interface', bind='interface',
+                                               actual_bind='198.18.30.2')
+        return app
+
+    def service(self, app):
+        with patch.object(runtime, '_service', return_value={'environment': {}}), \
+             patch.object(runtime, '_mounts', return_value=[]):
+            return runtime._pihole(app, {})['pihole']
+
+    def test_only_the_selected_web_bind_changes_the_service_and_adds_socket_verification(self):
+        original = self.original(); app = self.split(); before = copy.deepcopy(app)
+        old = self.service(original); new = self.service(app)
+        self.assertEqual(new['environment'].pop('FTLCONF_webserver_port'), '198.18.30.2:80')
+        self.assertEqual(new, old)
+        self.assertEqual(app, before)
+        with patch.object(checks, '_compose_exec', return_value=['OWNED']):
+            old_checks = checks._pihole(original, 'compose.yml')
+            new_checks = checks._pihole(app, 'compose.yml')
+        self.assertEqual(new_checks[:-1], old_checks)
+        self.assertEqual(new_checks[-1]['expect'], 'WEB_BIND_OK')
+        self.assertIn("'198.18.30.2:80'", new_checks[-1]['argv'][-1])
+
+    def test_malformed_web_binding_refuses_without_changing_the_dns_contract(self):
+        changes = [lambda app: app['listeners'].pop('web_listener'),
+                   lambda app: app['role_addresses'].update(web_interface='0.0.0.0')]
+        changes += [lambda app, key=key, value=value: app['listeners']['web_listener'].update({key: value})
+                    for key, value in (('service', 'other'), ('namespace', 'app-network'),
+                        ('interface', 'service_interface'), ('bind', 'wildcard'), ('protocol', 'udp'),
+                        ('port', 8080), ('actual_bind', '198.18.30.3'), ('publish', {}))]
+        for change in changes:
+            app = self.split(); change(app)
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.service(app)
+
+
 def influx():
     """Build a synthetic native API with a distinct optional web listener."""
     value = native_app('influxdb')
@@ -171,7 +219,7 @@ class BoundAutomationTests(unittest.TestCase):
         """Exercise generated socket checks with allowed and forbidden listeners."""
         import io
         from contextlib import redirect_stdout
-        for port in (8123,1880):
+        for port in (80,8123,1880):
             app={'role_addresses':{'web_interface':'198.18.40.21'},'listeners':{'web_listener':{'bind':'interface'}}}
             row=checks._bound_web_checks(app,port)[0]
             for sockets,passed in [(['198.18.40.21', '127.0.0.1'],True),(['0.0.0.0'],False),

@@ -127,6 +127,8 @@ def _pihole(app, compose_file):
         rows.append(_row('DNS service record ' + name,
             ['python3', '/opt/homelab-app/dns_records.py', 'probe', name, address],
             '"read_only_dns_check": "passed"'))
+    if 'web_interface' in app.get('role_addresses', {}):
+        rows.extend(_bound_web_checks(app, 80))
     return rows
 
 
@@ -273,11 +275,12 @@ def _music_assistant(app, compose_file):
                     for r in app['listeners'].values()) for port in (8095,8097)),'component.health-listener')
     address=_ipv4(app['role_addresses']['web_interface']);origin,host,ingress,public=_public(app)
     stream=_ipv4(app['role_addresses'].get('stream_interface',address))
-    require(public.get('source_address')==address,'component.health-source')
+    source=_ipv4(public.get('source_address'))
+    require(source in app['role_addresses'].values(),'component.health-source')
     code="import socket,urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://"+address+":8095/info',timeout=5).close(); socket.create_connection(('"+stream+"',8097),timeout=3).close(); print('core service only: passed')"
     return [_row('Music Assistant core info and stream listener',_compose_exec(app,compose_file,'music_assistant',
         'python3','-c',code),'core service only: passed'),
-        _row('Music Assistant HTTPS route',_curl()+['--interface',address,'--resolve',host+':443:'+ingress,
+        _row('Music Assistant HTTPS route',_curl()+['--interface',source,'--resolve',host+':443:'+ingress,
          origin+'/info'],'server_version')]
 
 
