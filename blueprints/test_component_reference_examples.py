@@ -34,7 +34,7 @@ EXAMPLES = {
     'library.md': ['template-minimal'],
     'sources.md': ['source-app'],
     'contexts.md': ['context-minimal', 'context-capability'],
-    'networks.md': ['network-minimal', 'nic-minimal', 'network-groups'],
+    'networks.md': ['network-minimal', 'nic-minimal', 'nic-ip-filter', 'network-groups'],
     'guests.md': ['guest-minimal'],
     'apps.md': ['app-minimal', 'app-overrides'],
     'app-properties.md': ['properties-adapters'],
@@ -186,6 +186,29 @@ class ReferenceExamples(unittest.TestCase):
         before, packets = self.resolve(selected)
         self.assertEqual(set(packets), {'resolver'})
         self.assertEqual(before.resolved['guests']['resolver']['provider_interfaces'][0]['ipv4'], '198.18.20.10/24')
+        import component_lower
+        filtered = copy.deepcopy(selected)
+        filtered['guests']['resolver']['interfaces']['backend'] = example('networks.md', 'nic-ip-filter')
+        new, _ = self.resolve(filtered)
+        original_provider = component_lower.provider_config(before, 'resolver')
+        new_provider = component_lower.provider_config(new, 'resolver')
+        self.assertIs(new_provider['guest']['interfaces'][1].pop('ip_filter'), True)
+        self.assertEqual(new_provider, original_provider)
+        self.assertEqual(component_lower.runtime_config(new, 'resolver'),
+                         component_lower.runtime_config(before, 'resolver'))
+        filtered['guests']['resolver']['interfaces']['backend']['ip_filter'] = False
+        disabled, _ = self.resolve(filtered)
+        self.assertEqual(component_lower.provider_config(disabled, 'resolver'), original_provider)
+        for invalid in (None, 0, 1, 'true', {}, []):
+            bad = copy.deepcopy(filtered)
+            bad['guests']['resolver']['interfaces']['backend']['ip_filter'] = invalid
+            expect_component_refusal(lambda: self.resolve(bad), 'component.interface-ip-filter',
+                                     ('guests', 'resolver', 'interfaces', 'backend'))
+        for address in ({'mode': 'manual'}, {'mode': 'dhcp', 'endpoint': '198.18.21.10'}):
+            bad = copy.deepcopy(filtered)
+            bad['guests']['resolver']['interfaces']['backend'].update(address=address, ip_filter=True)
+            expect_component_refusal(lambda: self.resolve(bad), 'component.interface-ip-filter',
+                                     ('guests', 'resolver', 'interfaces', 'backend'))
         dhcp = copy.deepcopy(selected)
         nic = dhcp['guests']['resolver']['interfaces']['management']
         nic['address'] = {'mode': 'dhcp', 'endpoint': '198.18.20.10'}

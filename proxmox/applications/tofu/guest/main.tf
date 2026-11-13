@@ -84,6 +84,19 @@ resource "proxmox_virtual_environment_firewall_options" "guest" {
   lifecycle { prevent_destroy = true }
 }
 
+resource "proxmox_virtual_environment_firewall_ipset" "ip_filter" {
+  for_each = { for slot, nic in var.guest.interfaces : tostring(slot) => nic if nic.ip_filter }
+
+  node_name    = var.node
+  container_id = var.guest.vmid
+  name         = "ipfilter-net${each.key}"
+  comment      = "HomeLab per-interface source IP filter"
+  # Empty LXC sets inherit only this NIC's configured addresses and MAC-derived
+  # IPv6 link-local address. Do not enable the guest-wide ipfilter option.
+  depends_on = [proxmox_virtual_environment_firewall_options.guest]
+  lifecycle { prevent_destroy = true }
+}
+
 locals {
   # Keep the validated logical rules intact. Bound only adjacent, otherwise
   # identical transport allowances into the provider's literal destination list.
@@ -133,7 +146,7 @@ resource "proxmox_virtual_environment_firewall_rules" "guest" {
       comment = rule.value.comment
     }
   }
-  depends_on = [proxmox_virtual_environment_firewall_options.guest]
+  depends_on = [proxmox_virtual_environment_firewall_options.guest, proxmox_virtual_environment_firewall_ipset.ip_filter]
   lifecycle { prevent_destroy = true }
 }
 

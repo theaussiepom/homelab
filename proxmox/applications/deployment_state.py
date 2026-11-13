@@ -257,7 +257,8 @@ class DeploymentAttempt:
     def infrastructure_complete(self, result):
         state_hash, identity = component_generation.backend(self.work,
             {'vmid':self.vmid,'node':self.cfg['site']['node']})
-        require((self.custody_identity is None or identity == self.custody_identity)
+        require(component_generation.identity_extension(self.custody_identity, identity,
+                    component_generation.ip_filter_slots(self.cfg['guest']['interfaces']))
                 and result['state_sha256'] == state_hash,
                 'The applied backend differs from its owned identity')
         self.custody_identity = identity

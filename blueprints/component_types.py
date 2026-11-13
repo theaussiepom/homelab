@@ -157,7 +157,7 @@ def network(value):
 
 
 def interface(value):
-    closed(value, ('network', 'slot', 'mac', 'address'), ('default_route', 'ipv6'))
+    closed(value, ('network', 'slot', 'mac', 'address'), ('default_route', 'ipv6', 'ip_filter'))
     require(identifier(value['network']))
     integer(value['slot'], 0, 31)
     require(isinstance(value['mac'], str) and re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}', value['mac']))
@@ -170,6 +170,9 @@ def interface(value):
     if field:
         ip(address[field])
     require(address['mode'] == 'static' or not value.get('default_route', False))
+    require(type(value.get('ip_filter', False)) is bool
+            and (not value.get('ip_filter', False) or address['mode'] == 'static'),
+            'component.interface-ip-filter')
 
 
 def policy_binding(value):
