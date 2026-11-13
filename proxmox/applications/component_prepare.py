@@ -1,6 +1,7 @@
 """Prepare only one admitted app's immutable payload, never a peer's secrets."""
 import copy
 import json
+import os
 from pathlib import Path
 import re
 

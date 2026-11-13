@@ -65,6 +65,23 @@ class GuestReadinessTests(unittest.TestCase):
         admitted={name:backup_controller.admit(name,row) for name,row in value['group']['members'].items()}
         return value,admitted
 
+    def test_prepare_backup_defaults_to_process_environment_and_preserves_explicit_override(self):
+        for phase in ['infrastructure', *self.fixture.cfg['deployment']['phases'][:-1]]:
+            deploy.run(phase,self.fixture.fixture.packet,inputs=self.fixture.fixture.inputs,environment={})
+        enrollment = backup_setup.enroll  # Existing native API/key boundaries remain fakes.
+        explicit = {'PBS_API_TOKEN':'explicit-management-sentinel'}
+        with patch.dict(os.environ, {'PBS_API_TOKEN':'process-management-sentinel'}, clear=True):
+            default = component_prepare.prepare_backup(self.fixture.cfg)
+            self.assertIs(enrollment.call_args.args[1],os.environ)
+            self.assertEqual(enrollment.call_args.args[1]['PBS_API_TOKEN'],'process-management-sentinel')
+            override = component_prepare.prepare_backup(self.fixture.cfg,explicit)
+            self.assertIs(enrollment.call_args.args[1],explicit)
+            default.check();override.check()
+        self.assertEqual((default.directory,default.manifest),(override.directory,override.manifest))
+        self.assertEqual(self.events,['helpers','create-key','read-key'])
+        self.assertTrue(all(b'management-sentinel' not in path.read_bytes()
+            for path in default.directory.iterdir() if path.is_file()))
+
     def test_own_completed_deployment_is_ready_without_final_job_and_repeat_preserves_keys(self):
         with patch.dict(os.environ,{'PBS_API_TOKEN':'management-sentinel'}):self.ordinary()
         value,admitted=self.admitted();subject.verify(value,admitted)
