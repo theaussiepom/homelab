@@ -1,0 +1,139 @@
+# Own only PBS host configuration; existing PVE firewall CD remains separate.
+name: PBS firewall
+on:
+  pull_request:
+    paths: [bootstrap/pbs-firewall.yaml, bootstrap/pbs-known_hosts, tests/fixtures/pbs-firewall.example.yaml, .github/workflows/pbs-firewall.yml]
+  workflow_call:
+    secrets:
+      PBS_FIREWALL_SSH_KEY:
+        required: true
+permissions:
+  contents: read
+jobs:
+  validate:
+    name: Check PBS policy
+    runs-on: ubuntu-24.04
+    outputs:
+      selected: ${{ steps.selection.outputs.selected }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Select only a real authored PBS binding
+        id: selection
+        run: |
+          python3 -I -B - <<'PYCODE' >> "$GITHUB_OUTPUT"
+          from pathlib import Path
+          parent = Path('bootstrap')
+          selected = parent / 'pbs-firewall.yaml'
+          if parent.is_symlink() or selected.is_symlink():
+              raise SystemExit('Refuse a symlinked PBS policy binding')
+          if parent.exists() and not parent.is_dir():
+              raise SystemExit('Use the repository bootstrap directory')
+          if not selected.exists():
+              print('selected=false')
+          elif selected.is_file():
+              print('selected=true')
+          else:
+              raise SystemExit('Select a regular authored PBS policy')
+          PYCODE
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: theaussiepom/homelab
+          ref: 17d6e2a0375358479882a7b898f9871499ee79c7
+          path: framework-source
+          persist-credentials: false
+      - name: Install pinned source dependencies
+        run: python3 -m pip install --require-hashes -r framework-source/requirements.lock.txt
+      - name: Validate the fictional complete contract example
+        run: python3 -B framework-source/proxmox/bootstrap/pbs_firewall.py --config tests/fixtures/pbs-firewall.example.yaml --check
+      - name: Validate authored PBS policy without target contact
+        if: steps.selection.outputs.selected == 'true'
+        run: python3 -B framework-source/proxmox/bootstrap/pbs_firewall.py --config bootstrap/pbs-firewall.yaml --check
+  firewall:
+    name: PBS firewall
+    needs: validate
+    if: github.event.repository.private == true && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.validate.outputs.selected == 'true'
+    runs-on: [self-hosted, linux, x64, example-runner]
+    environment: homelab-bootstrap
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: theaussiepom/homelab
+          ref: 17d6e2a0375358479882a7b898f9871499ee79c7
+          path: framework-source
+          persist-credentials: false
+      - name: Preserve bootstrap custody
+        run: |
+          python3 -B - <<'PYCODE'
+          import sys
+          sys.path.insert(0, 'framework-source/proxmox/applications')
+          from deployment_state import bootstrap_closed
+          bootstrap_closed()
+          PYCODE
+      - name: Validate policy and prepare one explicit inventory
+        id: inputs
+        run: |
+          set -euo pipefail
+          umask 077
+          work="$(mktemp -d "${RUNNER_TEMP:?}/homelab-pbs-firewall.XXXXXX")"
+          python3 -B framework-source/proxmox/bootstrap/pbs_firewall.py \
+            --config bootstrap/pbs-firewall.yaml --emit > "$work/policy.json"
+          python3 -B - "$work" <<'PYCODE' >> "$GITHUB_OUTPUT"
+          import json, os, pathlib, shlex, sys
+          work = pathlib.Path(sys.argv[1])
+          root = pathlib.Path.cwd()
+          trust = root / 'bootstrap/pbs-known_hosts'
+          if trust.is_symlink() or not trust.is_file():
+              raise SystemExit('Provide the reviewed regular PBS known-host file')
+          policy = json.loads((work / 'policy.json').read_text())
+          inventory = {'pbs': {'hosts': {policy['target']['hostname']: {
+              'ansible_host': policy['target']['address'], 'ansible_user': 'root',
+              'ansible_connection': 'ssh'}}}}
+          with (work / 'inventory.json').open('x') as stream:
+              json.dump(inventory, stream)
+          with (work / 'variables.json').open('x') as stream:
+              json.dump({'pbs_firewall_config': str(root / 'bootstrap/pbs-firewall.yaml')}, stream)
+          args = ['-F', '/dev/null', '-o', 'StrictHostKeyChecking=yes', '-o', 'BatchMode=yes',
+                  '-o', 'ControlMaster=no', '-o', 'GlobalKnownHostsFile=/dev/null',
+                  '-o', 'VerifyHostKeyDNS=no', '-o', 'UpdateHostKeys=no', '-o', 'IdentitiesOnly=yes',
+                  '-o', 'UserKnownHostsFile=' + str(trust)]
+          print('work=' + str(work))
+          print('ssh_args=' + shlex.join(args))
+          PYCODE
+      - name: Deploy only the declared PBS host policy
+        env:
+          PBS_FIREWALL_SSH_KEY: ${{ secrets.PBS_FIREWALL_SSH_KEY }}
+          PBS_WORK: ${{ steps.inputs.outputs.work }}
+          PBS_SSH_ARGS: ${{ steps.inputs.outputs.ssh_args }}
+          ANSIBLE_CONFIG: ${{ github.workspace }}/framework-source/proxmox/applications/ansible/ansible.cfg
+          ANSIBLE_HOST_KEY_CHECKING: 'True'
+          ANSIBLE_SSH_USETTY: 'False'
+          ANSIBLE_SSH_ARGS: -F /dev/null -o StrictHostKeyChecking=yes -o BatchMode=yes -o ControlMaster=no -o IdentitiesOnly=yes -o GlobalKnownHostsFile=/dev/null -o VerifyHostKeyDNS=no -o UpdateHostKeys=no
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "${PBS_FIREWALL_SSH_KEY:?Provide the approved protected PBS configuration key}"
+          set -C
+          printf '%s\n' "$PBS_FIREWALL_SSH_KEY" > "$PBS_WORK/ssh-key"
+          unset PBS_FIREWALL_SSH_KEY
+          ansible-playbook \
+            -i "$PBS_WORK/inventory.json" --private-key "$PBS_WORK/ssh-key" \
+            --ssh-common-args "$PBS_SSH_ARGS" \
+            framework-source/proxmox/bootstrap/ansible/pbs-firewall.yml \
+            --extra-vars "@$PBS_WORK/variables.json"
+      - name: Remove only the temporary SSH input
+        if: always() && steps.inputs.outputs.work != ''
+        env:
+          PBS_WORK: ${{ steps.inputs.outputs.work }}
+        run: |
+          set -euo pipefail
+          case "$PBS_WORK" in
+            "${RUNNER_TEMP:?}"/homelab-pbs-firewall.*) rm -f -- "$PBS_WORK/ssh-key" ;;
+            *) exit 1 ;;
+          esac
