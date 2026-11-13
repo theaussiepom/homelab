@@ -95,6 +95,18 @@ ansible-playbook -i /private/reviewed/inventory.json \
 
 This command is invocation notation: the paths must be replaced with reviewed private inputs. Local revalidation and inventory assertions are delegated with `become:false` before any remote facts. Remote configuration uses the existing explicitly authorized SSH account; no credential/grant creation or PBS token extension is implemented.
 
+The consumer boundary checker recognises the supported thin caller in the protected `firewall` job of `.github/workflows/pbs-firewall.yml`. It validates that workflow's existing events, named secret, environment, runner and selection guard, then admits only this fixed command in a literal `run: |` block:
+
+```sh
+ansible-playbook \
+  -i "$PBS_WORK/inventory.json" --private-key "$PBS_WORK/ssh-key" \
+  --ssh-common-args "$PBS_SSH_ARGS" \
+  framework-source/proxmox/bootstrap/ansible/pbs-firewall.yml \
+  --extra-vars "@$PBS_WORK/variables.json"
+```
+
+`PBS_WORK` and `PBS_SSH_ARGS` must come from the `inputs` step's matching outputs, and `PBS_FIREWALL_SSH_KEY` from its named workflow secret. Other playbooks, added options, target commands and calls outside that job remain refused. Workflow generation separately checks the immutable framework selection. This finite source check does not authorise target execution or prove absence of every possible shell operation.
+
 ## Installation, updates and verification
 
 Before first CD, independently establish console/management recovery, installed package/service, a disconnected positively identified extra NIC and an approved maintenance window. The selected NIC must not be enslaved to a bridge/bond/master or own management, a default route, another global address or an existing NFS storage route. Bridged/bonded interface filtering and multipath or unresolved default routes are unsupported; CD does not add another route-resolution mechanism. Mounted NFS sources must name literal IPv4/IPv6 servers so the existing storage route can be checked without guessing hostname resolution; ambiguous sources are unsupported. Retain its disconnected state until CD's exact policy/persistence checks succeed; subsequent network exposure remains a separate operation.

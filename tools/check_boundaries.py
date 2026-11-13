@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blueprints"))
 import authored_config
@@ -24,6 +25,36 @@ SOURCE_SUFFIXES = {'.py','.md','.json','.yml','.yaml','.sh','.service','.timer',
 TARGET_IMPORTS = {'fcntl','socket','paramiko','fabric','requests','http.client','urllib.request','subprocess'}
 TARGET_COMMANDS = {'ssh','scp','rsync','docker','pct','pvesh','tofu','terraform','ansible-playbook'}
 ROLE_HOSTS = {'deploy'}  # Existing bootstrap role identity, not a site hostname.
+PBS_CALL = ('ansible-playbook -i "$PBS_WORK/inventory.json" '
+    '--private-key "$PBS_WORK/ssh-key" --ssh-common-args "$PBS_SSH_ARGS" '
+    'framework-source/proxmox/bootstrap/ansible/pbs-firewall.yml '
+    '--extra-vars "@$PBS_WORK/variables.json"')
+
+
+def pbs_framework_lines(root, name, text):
+    """Admit only the supported PBS playbook call inside its protected job."""
+    import private_workflows
+    if name != private_workflows.PBS_WORKFLOW:
+        return set()
+    source = authored_config.parse(text.encode(), '.yml')
+    value = private_workflows.pbs_workflow(root, source['jobs']['firewall']['runs-on'])
+    mapping = lambda node: {key.value: item for key, item in node.value}
+    document = yaml.compose(text, Loader=authored_config.Loader)
+    job = mapping(mapping(mapping(document)['jobs'])['firewall'])
+    allowed = set()
+    for step, node in zip(value['jobs']['firewall']['steps'], job['steps'].value, strict=True):
+        run = mapping(node).get('run')
+        environment = step.get('env', {})
+        if (run is None or run.style != '|'
+                or environment.get('PBS_WORK') != '${{ steps.inputs.outputs.work }}'
+                or environment.get('PBS_SSH_ARGS') != '${{ steps.inputs.outputs.ssh_args }}'
+                or environment.get('PBS_FIREWALL_SSH_KEY') != '${{ secrets.PBS_FIREWALL_SSH_KEY }}'):
+            continue
+        for match in re.finditer(r'(?m)^ *ansible-playbook(?:[^\n]*\\\n)*[^\n]*$', run.value):
+            command = re.sub(r'\\\n[ \t]*', ' ', match.group())
+            if ' '.join(command.split()) == PBS_CALL:
+                allowed.add(run.start_mark.line + 2 + run.value[:match.start()].count('\n'))
+    return allowed
 
 
 def source_files(root):
@@ -172,8 +203,9 @@ def check(root, mode):
         if name.endswith('.py'):
             findings.extend({'path':name,'line':line,'code':code} for line,code in python_rules(text,consumer=mode=='consumer',fixture=test_source(name)))
         if mode=='consumer' and name.endswith(('.yml','.yaml','.sh')):
+            allowed = pbs_framework_lines(root,name,text)
             for line,value in enumerate(text.splitlines(),1):
-                if re.match(r'^\s*(?:-\s+run:\s*|run:\s*)?(?:sudo\s+)?(?:ssh|scp|rsync|docker|pct|pvesh|tofu|terraform|ansible-playbook)(?=$|[\s;&|<>])',value):
+                if line not in allowed and re.match(r'^\s*(?:-\s+run:\s*|run:\s*)?(?:sudo\s+)?(?:ssh|scp|rsync|docker|pct|pvesh|tofu|terraform|ansible-playbook)(?=$|[\s;&|<>])',value):
                     findings.append({'path':name,'line':line,'code':'consumer-target-workflow'})
     if mode=='stack':findings.extend({'path':path,'line':line,'code':code} for path,line,code in stack_allocations(root,files))
     return {'status':'failed' if findings else 'passed','mode':mode,'source_files':len(files),
