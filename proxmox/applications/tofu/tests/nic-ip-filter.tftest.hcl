@@ -11,7 +11,11 @@ run "omission_has_no_ipsets_or_global_filter" {
   command = plan
   module { source = "./guest" }
   assert {
-    condition     = length(proxmox_virtual_environment_firewall_ipset.ip_filter) == 0 && proxmox_virtual_environment_firewall_options.guest.ipfilter != true
+    condition = (
+      length(proxmox_virtual_environment_firewall_ipset.ip_filter) == 0 &&
+      proxmox_virtual_environment_firewall_options.guest.ipfilter != true &&
+      alltrue([for nic in output.identity.interfaces : !contains(keys(nic), "ip_filter")])
+    )
     error_message = "Existing consumers must not acquire per-NIC or guest-wide IP filters."
   }
 }
@@ -30,6 +34,7 @@ run "one_selected_static_nic_only" {
     condition = (
       length(proxmox_virtual_environment_firewall_ipset.ip_filter) == 1 &&
       contains(keys(proxmox_virtual_environment_firewall_ipset.ip_filter), "1") &&
+      output.identity.interfaces[1].ip_filter && !contains(keys(output.identity.interfaces[0]), "ip_filter") &&
       proxmox_virtual_environment_firewall_ipset.ip_filter["1"].name == "ipfilter-net1" &&
       proxmox_virtual_environment_firewall_ipset.ip_filter["1"].node_name == var.node &&
       proxmox_virtual_environment_firewall_ipset.ip_filter["1"].container_id == var.guest.vmid &&

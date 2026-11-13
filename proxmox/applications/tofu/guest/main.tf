@@ -151,5 +151,10 @@ resource "proxmox_virtual_environment_firewall_rules" "guest" {
 }
 
 output "identity" {
-  value = { vmid = var.guest.vmid, hostname = var.guest.hostname, interfaces = var.guest.interfaces }
+  value = {
+    vmid = var.guest.vmid, hostname = var.guest.hostname,
+    interfaces = [for nic in var.guest.interfaces : {
+      for key, value in nic : key => value if key != "ip_filter" || nic.ip_filter
+    }]
+  }
 }
