@@ -21,7 +21,7 @@ The Python APIs are `compile.resolve_plan(stack_root, site_source, disabled=None
 
 ## Generate: blueprints/workflows.py
 
-This command requires `--stack PATH` and `--site FILE`. It also accepts `--disabled JSON` (default []) and `--check`. With `--check`, it compares existing files with the expected generated files and fails if they differ. Otherwise, it synchronizes three library workflows and selected composite actions from the current framework recipe. It generates files without executing a workflow. Supply the input filename explicitly; this command has no site-root option.
+This command requires `--stack PATH` and `--site FILE`. It also accepts `--disabled JSON` (default []) and `--check`. With `--check`, it compares existing files with the expected generated files and fails if they differ. Otherwise, it synchronizes the library deployment, guest and phase workflows and selected composite actions from the current framework recipe; operational backup also generates `backup.yml`. It generates files without executing a workflow. Supply the input filename explicitly; this command has no site-root option.
 
 ## Consumer wrapper: blueprints/private_workflows.py
 
