@@ -88,7 +88,8 @@ Use the [canonical backup syntax and field reference](../reference/backup.md#syn
 | `backup.recovery_public_key.source` | Site-relative verified public PEM |
 | `backup.job.destination` | One declared PBS HTTPS endpoint, datastore, namespace and actual certificate fingerprint |
 | `backup.job.schedule` | Your permitted backup interval and jitter; use the reference's UTC semantics |
-| `backup.job.clients` | Staging and transport bindings for exactly the enrolled guests; optional client byte/file limits |
+| `backup.defaults` | Shared guest interface and staging-volume identifiers; each explicitly enrolled guest may override them |
+| Guest `backup` | Explicit enrollment, with optional binding, backup-ID and byte/file-limit overrides |
 | `backup.job.capture` | Explicitly reviewed application pauses, database locking and export inputs |
 | `backup.job.limits` | Default byte/file bounds and one shared phase timeout |
 
@@ -96,7 +97,7 @@ Declare the endpoint once and reference it. The management job uses the same des
 
 ## Size each client and review later changes
 
-Use `backup.job.limits` for common defaults. A client's optional [capacity override](../reference/backup.md#backup-client-limits) may contain `max_bytes`, `max_files` or both; omitted fields inherit their root defaults. `timeout_seconds` remains root-only because every member participates in the same coordinated pause window. Work through the complete [mixed-client example](../examples/backup/README.md#size-clients-independently) before selecting real values.
+Use `backup.job.limits` for common defaults. A guest's optional `backup.limits` [capacity override](../reference/backup.md#backup-client-limits) may contain `max_bytes`, `max_files` or both; omitted fields inherit their root defaults. `timeout_seconds` remains root-only because every member participates in the same coordinated pause window. Work through the complete [mixed-client example](../examples/backup/README.md#size-clients-independently) before selecting real values.
 
 Size each byte bound from that guest's complete native database exports, selected-file archive and metadata, with measured growth allowance. Live database-directory usage is not an export size. The [staging volume](../reference/backup.md#backup-client-staging-volume) must be at least four times the effective byte bound; the worker checks three times that bound free before starting. These are per-filesystem checks, not host thin-pool reservations. Review the combined allocations, other workload growth and pool reserve separately. A successful run releases its verified payload/readback copies but retains operation records and logs; failures preserve remaining artifacts. There is no automatic local history pruning to make an undersized allocation pass.
 
@@ -109,6 +110,8 @@ Add `backup:` to each guest that needs protection. The following is a **guest-fi
 ```yaml
 backup:
 ```
+
+Use `backup.defaults: {interface: storage, staging_volume: pbs_stage}` when those identifiers are shared across your guests. Each enrolled guest must declare the referenced interface and volume; defaults create neither. Put exceptions directly under that guest’s `backup`, such as `backup: {interface: archive, limits: {max_bytes: 67108864}}`. Omitted binding fields inherit defaults; byte/file limits inherit `backup.job.limits`. Do not add a duplicate `job.clients` map. Existing explicit client maps remain supported as a separate [legacy form](../reference/backup.md#binding-defaults-and-guest-overrides). Preparation-only enrollment uses bare `backup:` without operational defaults or overrides.
 
 Root shared settings alone do not install clients everywhere. An enrolled guest's apps must have complete recovery classifications in their selected library profiles. For each managed volume whose contents belong in native full-guest backups, add the volume-level marker; keep staging and transient volumes unmarked. See [coverage](../reference/backup.md#application-recovery-declarations) and [volume selection](../reference/backup.md#backup-volume).
 

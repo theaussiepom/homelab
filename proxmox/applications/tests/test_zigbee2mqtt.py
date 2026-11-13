@@ -47,6 +47,22 @@ def settings():
 
 
 class ZigbeeTests(unittest.TestCase):
+    def test_watchdog_changes_only_the_environment_and_refuses_other_modes(self):
+        app = runtime_app(self.selected)
+        guest = {'timezone': 'Etc/UTC', 'memory_mib': 2048}
+        baseline = component_runtime._zigbee2mqtt(app, guest)
+        self.assertNotIn('Z2M_WATCHDOG', baseline['zigbee2mqtt']['environment'])
+        app['properties'] = {'watchdog': 'default'}
+        original = copy.deepcopy(app)
+        selected = component_runtime._zigbee2mqtt(app, guest)
+        self.assertEqual(selected['zigbee2mqtt']['environment'].pop('Z2M_WATCHDOG'), 'default')
+        self.assertEqual(selected, baseline)
+        self.assertEqual(app, original)
+        for value in (None, False, True, 1, '', '1,5', [], {}):
+            app['properties']['watchdog'] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                component_runtime._zigbee2mqtt(app, guest)
+
     def test_nested_user_namespace_can_bind_the_device_without_a_guest_tty_alias(self):
         app = runtime_app(self.selected)
         original = copy.deepcopy(app)

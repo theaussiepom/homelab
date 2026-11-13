@@ -50,7 +50,13 @@ The current adapter requires the selected cloudflare_dns_token and proxmox_token
 
 ## Zigbee2MQTT
 
-Both properties are required: `adapter` must match `[a-z][a-z0-9_-]{0,62}`, and `mqtt_base_topic` must match `[a-zA-Z0-9][a-zA-Z0-9/_-]{0,127}`. The app also requires retained lifecycle, a declared serial coordinator, a broker connection and the exact settings owned by the adapter. Commissioning a new radio is unsupported.
+The required `adapter` must match `[a-z][a-z0-9_-]{0,62}`, and the required `mqtt_base_topic` must match `[a-zA-Z0-9][a-zA-Z0-9/_-]{0,127}`. The app also requires retained lifecycle, a declared serial coordinator, a broker connection and the exact settings owned by the adapter. Commissioning a new radio is unsupported.
+
+| Property | Presence / default | Effect |
+| --- | --- | --- |
+| `watchdog` | Optional string; only `default` is accepted. Omission leaves the environment variable unset. Null, Booleans and custom delays are rejected. | Sets `Z2M_WATCHDOG=default` on the owned Zigbee2MQTT container. |
+
+The [upstream watchdog](https://www.zigbee2mqtt.io/guide/installation/15_watchdog.html) retries recognized soft failures internally after 1, 5, 15, 30 and 60 minutes, then exits after repeated failed recovery. It requires an initial successful start and respects deliberate stops and configuration errors. Enabling it through protected CD can recreate the service; it preserves the image, coordinator, network identity, data and MQTT settings. It does not commission a radio or establish that an underlying serial fault is fixed.
 
 ## Bitwarden
 
@@ -143,6 +149,7 @@ traefik:
 zigbee2mqtt:
   adapter: zstack
   mqtt_base_topic: example/zigbee
+  watchdog: default
 bitwarden:
   issuer:
     protocol: https

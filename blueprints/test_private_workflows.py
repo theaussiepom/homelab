@@ -7,6 +7,7 @@ import runpy
 import subprocess
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 import yaml
 
@@ -72,6 +73,22 @@ def composition():
     return spec, source
 
 
+def pbs_document(labels):
+    """Only the fixed local-call ABI; private tests own the real shell body."""
+    return {'name': 'PBS firewall', 'on': {
+        'pull_request': {'paths': ['bootstrap/pbs-firewall.yaml', 'bootstrap/pbs-known_hosts',
+            'tests/fixtures/pbs-firewall.example.yaml', p.PBS_WORKFLOW]},
+        'workflow_call': {'secrets': {p.PBS_SECRET: {'required': True}}}},
+        'permissions': {'contents': 'read'}, 'jobs': {
+            'validate': {'runs-on': 'ubuntu-24.04',
+                'outputs': {'selected': '${{ steps.selection.outputs.selected }}'},
+                'steps': [{'run': 'echo synthetic pure validation'}]},
+            'firewall': {'needs': 'validate', 'if': workflows.PRIVATE_MAIN + " && needs.validate.outputs.selected == 'true'",
+                'environment': 'homelab-bootstrap', 'runs-on': labels, 'timeout-minutes': 15,
+                'steps': [{'env': {p.PBS_SECRET: '${{ secrets.' + p.PBS_SECRET + ' }}'},
+                    'run': 'test -n "$PBS_FIREWALL_SSH_KEY"'}]}}}
+
+
 class PrivateWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -105,6 +122,140 @@ class PrivateWorkflowTests(unittest.TestCase):
 
     def write(self):
         (self.site/'.github/workflows/deploy.yml').write_text(yaml.safe_dump({'env':self.env},sort_keys=False))
+
+    def write_pbs(self, value=None):
+        """Author only public synthetic metadata, never contact a target."""
+        path = self.site / p.PBS_WORKFLOW
+        path.write_text(yaml.safe_dump(pbs_document(['self-hosted', 'linux']) if value is None else value))
+        return path
+
+    def with_backup(self, plan):
+        """Supply only component graph metadata; retain real workflow/recipe lowering."""
+        graph = self.original_graph(plan)
+        graph['backup'] = {'name': 'Backup', 'needs': ['selection', *graph['guest_order']],
+                          'environment': 'backup', 'workflow_secrets': ['PBS_API_TOKEN']}
+        return graph
+
+    def test_pbs_call_is_a_sibling_with_one_named_secret_and_no_inner_queue(self):
+        baseline = p.model(self.stack, self.site)
+        self.write_pbs(); value = p.model(self.stack, self.site)
+        self.assertEqual(value['jobs']['_pbs'], {'name': 'PBS', 'needs': ['selection'],
+            'if': "github.repository == 'owner/site' && " + workflows.PRIVATE_MAIN,
+            'uses': './.github/workflows/pbs-firewall.yml',
+            'secrets': {'PBS_FIREWALL_SSH_KEY': '${{ secrets.PBS_FIREWALL_SSH_KEY }}'}})
+        restored = copy.deepcopy(value); del restored['jobs']['_pbs']
+        self.assertEqual(restored, baseline)
+        self.assertEqual(list(value['jobs'])[:3], ['validate', 'selection', '_pbs'])
+
+    def test_pbs_backup_edge_preserves_old_jobs_and_explicitly_requires_success(self):
+        self.original_graph = workflows.component_workflows.model
+        with patch.object(workflows.component_workflows, 'model', side_effect=self.with_backup):
+            before = p.model(self.stack, self.site); self.write_pbs(); after = p.model(self.stack, self.site)
+        backup = after['jobs']['_backup']; old = before['jobs']['_backup']
+        self.assertEqual(backup['needs'], [*old['needs'], '_pbs'])
+        self.assertEqual(backup['if'], '(' + old['if'] + ") && needs._pbs.result == 'success'")
+        restored = copy.deepcopy(after); del restored['jobs']['_pbs']
+        restored['jobs']['_backup']['needs'].remove('_pbs'); restored['jobs']['_backup']['if'] = old['if']
+        self.assertEqual(restored, before)
+        expression = backup['if'].replace('&&', ' and ').replace('!failure()', 'not failure()').replace('!cancelled()', 'not cancelled()').replace('true', 'True')
+        github = SimpleNamespace(repository='owner/site', event=SimpleNamespace(repository=SimpleNamespace(private=True)), event_name='push', ref='refs/heads/main')
+        for case, result, failed, cancelled, expected in [
+                ('selected', 'success', False, False, True), ('absent-native-skip', 'success', False, False, True),
+                ('PBS-failed', 'failure', True, False, False), ('PBS-cancelled', 'cancelled', False, True, False),
+                ('PBS-skipped', 'skipped', False, False, False), ('guest-failed', 'success', True, False, False),
+                ('guest-cancelled', 'success', False, True, False)]:
+            needs = SimpleNamespace(selection=SimpleNamespace(result='success'), _pbs=SimpleNamespace(result=result))
+            with self.subTest(case=case):
+                self.assertEqual(eval(expression, {'__builtins__': {}}, {'github': github, 'needs': needs,
+                    'failure': lambda: failed, 'cancelled': lambda: cancelled}), expected)
+        # A permissive status function cannot remove the explicit PBS result guard.
+        for result in ('failure', 'cancelled', 'skipped'):
+            needs = SimpleNamespace(_pbs=SimpleNamespace(result=result))
+            self.assertFalse(eval("(always()) and needs._pbs.result == 'success'", {'__builtins__': {}},
+                                  {'always': lambda: True, 'needs': needs}))
+
+    def test_pbs_rejects_job_id_collision_without_overwriting(self):
+        self.write_pbs(); original = workflows.models
+        def collision(*args, **kwargs):
+            value = original(*args, **kwargs); value['deploy.yml']['jobs']['_pbs'] = {'name': 'Foreign guest'}; return value
+        with patch.object(workflows, 'models', side_effect=collision), self.assertRaisesRegex(ValueError, 'Reserve _pbs'):
+            p.model(self.stack, self.site)
+
+    def test_pbs_step_named_inputs_is_not_a_reusable_workflow_input(self):
+        value = pbs_document(['self-hosted', 'linux'])
+        value['jobs']['firewall']['steps'].append({'id': 'inputs', 'run': 'echo synthetic'})
+        value['jobs']['firewall']['steps'].append({'run': 'echo "${{ steps.inputs.outputs.work }}"'})
+        self.write_pbs(value)
+        self.assertIn('_pbs', p.model(self.stack, self.site)['jobs'])
+
+    def test_pbs_present_unsupported_workflow_refuses_before_recipe_generation(self):
+        original = pbs_document(['self-hosted', 'linux']); variants = [[], {}, {'on': {}}]
+        for key, value in [('env', {}), ('concurrency', {'group': 'homelab-private-deployment'}), ('permissions', {'contents': 'write'})]:
+            row = copy.deepcopy(original); row[key] = value; variants.append(row)
+        for events in [{}, {'push': {'branches': ['main']}},
+                       {**original['on'], 'push': {}}, {**original['on'], 'workflow_dispatch': {}},
+                       {**original['on'], 'workflow_call': {'secrets': {p.PBS_SECRET: {'required': False}}}},
+                       {**original['on'], 'workflow_call': {'secrets': {p.PBS_SECRET: {'required': True}, 'FOREIGN': {'required': True}}}},
+                       {**original['on'], 'workflow_call': {'inputs': {}, 'secrets': {p.PBS_SECRET: {'required': True}}}}]:
+            row = copy.deepcopy(original); row['on'] = events; variants.append(row)
+        row = copy.deepcopy(original); row['on']['pull_request']['paths'].append('site.yaml'); variants.append(row)
+        for jobs in [{}, {'validate': None, 'firewall': {}}, {**original['jobs'], 'other': {}}]:
+            row = copy.deepcopy(original); row['jobs'] = jobs; variants.append(row)
+        for job, key, value in [('validate', 'runs-on', ['self-hosted']), ('validate', 'environment', 'homelab-bootstrap'),
+                ('validate', 'outputs', {}), ('validate', 'steps', None),
+                ('validate', 'steps', [{'run': '${{ secrets.PBS_FIREWALL_SSH_KEY }}'}]),
+                ('validate', 'steps', [{'run': "${{ secrets['FOREIGN'] }}"}]),
+                ('validate', 'steps', [{'run': '${{ secrets \n .PBS_FIREWALL_SSH_KEY }}'}]),
+                ('validate', 'steps', [{'run': "${{ secrets \n ['PBS_FIREWALL_SSH_KEY'] }}"}]),
+                ('firewall', 'environment', '${{ inputs.environment }}'), ('firewall', 'needs', []),
+                ('firewall', 'if', 'always()'), ('firewall', 'timeout-minutes', 30),
+                ('firewall', 'runs-on', 'ubuntu-24.04'), ('firewall', 'runs-on', [{}]),
+                ('firewall', 'runs-on', ['self-hosted']), ('firewall', 'steps', None),
+                ('firewall', 'steps', [{'run': "${{ inputs['extra'] }}"}]),
+                ('firewall', 'concurrency', {'group': 'homelab-private-deployment'})]:
+            row = copy.deepcopy(original); row['jobs'][job][key] = value; variants.append(row)
+        for value in variants:
+            self.write_pbs(value)
+            with self.subTest(value=value), patch.object(workflows, 'models') as generate:
+                with self.assertRaises(ValueError): p.model(self.stack, self.site)
+                generate.assert_not_called()
+
+    def test_pbs_whole_context_values_refuse_without_confusing_step_ids(self):
+        """Whole contexts and case/whitespace variants cannot bypass PBS admission."""
+        for context, job in [('secrets', 'validate'), ('inputs', 'firewall')]:
+            for name in (context, context.upper(), context.title(),
+                         ''.join(c.upper() if i % 2 == 0 else c for i, c in enumerate(context))):
+                expressions = ['${{ toJSON(' + name + ') }}', '${{ ' + name + ' }}',
+                        '${{\n' + name + ' }}', '${{\t' + name + ' }}',
+                        '${{ ' + name + '\n .value }}', '${{ ' + name + "\t ['value'] }}"]
+                for space in ('\t', '\n', '\r', '\v', '\f', '\u0085', '\u00a0', '\u1680',
+                              '\u2000', '\u2003', '\u2028', '\u2029', '\u202f', '\u205f', '\u3000'):
+                    expressions.extend(('${{' + space + name + ' }}', '${{ ' + name + space + '}}'))
+                for expression in expressions:
+                    value = pbs_document(['self-hosted', 'linux'])
+                    value['jobs'][job]['steps'].append({'env': {'ALL': expression}, 'run': 'true'})
+                    self.write_pbs(value)
+                    with self.subTest(expression=expression, job=job), \
+                            patch.object(workflows, 'models') as generate:
+                        with self.assertRaisesRegex(ValueError,
+                                'without protected credentials' if job == 'validate' else 'unbound inputs'):
+                            p.model(self.stack, self.site)
+                        generate.assert_not_called()
+        value = pbs_document(['self-hosted', 'linux'])
+        value['jobs']['firewall']['steps'].append({'id': 'inputs', 'run': 'echo synthetic'})
+        value['jobs']['firewall']['steps'].append({'run': 'echo "${{ steps.inputs.outputs.work }}"'})
+        self.write_pbs(value)
+        self.assertIn('_pbs', p.model(self.stack, self.site)['jobs'])
+
+    def test_pbs_unsafe_file_or_parent_is_not_treated_as_absence(self):
+        path = self.site / p.PBS_WORKFLOW
+        path.symlink_to(self.site / 'missing')
+        with self.assertRaises(ValueError): p.pbs_workflow(self.site, ['self-hosted', 'linux'])
+        path.unlink(); path.mkdir()
+        with self.assertRaises(ValueError): p.pbs_workflow(self.site, ['self-hosted', 'linux'])
+        path.rmdir()
+        directory = path.parent; moved = directory.with_name('moved'); directory.rename(moved); directory.symlink_to(moved, target_is_directory=True)
+        with self.assertRaises(ValueError): p.pbs_workflow(self.site, ['self-hosted', 'linux'])
 
     def test_native_jobs_use_only_guest_names_and_preserve_operations(self):
         value=p.model(self.stack,self.site);public=workflows.models(self.stack, site_source=self.site / 'site.json')

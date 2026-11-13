@@ -28,7 +28,8 @@ backup:
 | <a id="backup-site"></a>Site `backup` | Null or closed object | Optional; omission adds no client phase | Presence defines shared settings; only guests with their own `backup:` marker receive client preparation. Boolean values are rejected. |
 | <a id="backup-site-profile"></a>`backup.profile` | [Identifier](supporting-types.md#scalar-and-path-types) | Optional when exactly one profile exists | Reference to `backup_profiles`; omission selects the sole registered profile. |
 | <a id="backup-site-job"></a>`backup.job` | Closed [operational job](#operational-job) | Optional; no timer without it | Selects the destination, protected inputs, transport, schedule and permission to capture data. |
-| <a id="backup-guest"></a>Guest `backup` | Null or empty object | Optional; omission leaves guest unenrolled | Presence opts the guest into the shared configuration. Root `backup` is required. Booleans and unknown fields are rejected. |
+| <a id="backup-site-defaults"></a>`backup.defaults` | Closed [binding defaults](#binding-defaults-and-guest-overrides) object | Optional; no implicit interface or volume | Supplies interface and staging-volume identifiers for explicitly enrolled guests. Requires `job`; cannot accompany legacy `job.clients`. |
+| <a id="backup-guest"></a>Guest `backup` | Null or closed [binding](#binding-defaults-and-guest-overrides) object | Optional; omission leaves guest unenrolled | Presence opts the guest into shared configuration. Null and `{}` inherit defaults. Nonempty fields require a job without legacy `clients`. Root `backup` is required. Booleans and unknown fields are rejected. |
 | <a id="backup-volume"></a>Guest `volumes.<id>.backup` | Null or empty object | Optional | On an enrolled guest, presence includes the managed volume in native full-guest backup; omission excludes it. It is not a native database export. |
 
 A bare root `backup` key, null or an empty object selects a shared profile; guest markers select where to install its client software and derive recovery coverage. You can use this form while preparing the server. It selects no destination or credential and grants no permission to interrupt a service. Supply `job` to configure scheduled backups. Validation rejects unknown fields and Boolean values. Compilation does not contact a network service or read secrets. Preparation without a job creates no accounts or keys. An operational job requires the management and recovery-public-key bindings below; its protected CD job creates client credentials once and preserves them on updates.
@@ -137,6 +138,7 @@ This is a **site-root fragment**, not a standalone site. Define the referenced H
 <!-- example: backup-job -->
 ```yaml
 backup:
+  defaults: {interface: primary, staging_volume: backup-stage}
   management:
     credential: pbs-management
     datastore_path: /mnt/backup/recovery
@@ -150,18 +152,13 @@ backup:
       namespace: guests
       fingerprint: ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab:ab
     schedule: {calendar: '02:00', jitter_seconds: 300}
-    clients:
-      resolver:
-        staging_volume: backup-stage
-        interface: primary
-        limits: {max_bytes: 67108864}
     capture: {pause: [], database_lock: [], influx_tokens: {}}
     limits: {max_bytes: 33554432, max_files: 10000, timeout_seconds: 300}
 ```
 
 ### Job fields
 
-All six top-level job fields are required when `job` is present. Validation rejects null values and unknown keys. The compiler resolves these values once into the versioned deployment packet.
+The five job fields `name`, `destination`, `schedule`, `capture` and `limits` are required. New configurations omit `clients`: membership comes from explicitly enrolled guests. Validation rejects null values and unknown keys. The compiler resolves these values once into the versioned deployment packet.
 
 | Field | Type | Required/default | Constraints and effect |
 | --- | --- | --- | --- |
@@ -174,21 +171,39 @@ All six top-level job fields are required when `job` is present. Validation reje
 | <a id="backup-job-schedule"></a>`schedule` | Closed object | Required | Configures one controller timer for all group members, with no independent guest timers. |
 | <a id="backup-job-schedule-calendar"></a>`schedule.calendar` | String | Required | `hourly`, `daily` or quoted 24-hour `HH:MM`. All schedules use UTC. |
 | <a id="backup-job-schedule-jitter-seconds"></a>`schedule.jitter_seconds` | Integer | Required | 0–3600; randomized timer delay. Missed runs are not replayed on restart. |
-| <a id="backup-job-clients"></a>`clients` | Named map | Required | Must include exactly the enrolled configured guests, including enrolled guests disabled for CD; the group has 1–64 members. |
+| <a id="backup-job-clients"></a>`clients` | Named map | Optional legacy form | Must include exactly the enrolled guests, including disabled members. Cannot coexist with `backup.defaults` or nonempty guest bindings. Both forms produce the same 1–64-member group. |
 | <a id="backup-job-capture"></a>`capture` | Closed object | Required | Declares permission to pause apps and the inputs required by native database export commands; see below. |
 | <a id="backup-job-limits"></a>`limits` | Closed object | Required | Supplies the default capture-size and entry-count bounds, plus the shared duration of each phase. A client may override only its byte/file bounds below. |
 | <a id="backup-job-limits-max-bytes"></a>`limits.max_bytes` | Integer | Required | 1 MiB through 1 PiB. Bounds native command output, the complete recovery files and readback, and the selected source files. Metadata counts toward the budget. |
 | <a id="backup-job-limits-max-files"></a>`limits.max_files` | Integer | Required | 1–1,000,000 selected entries or artifacts. |
 | <a id="backup-job-limits-timeout-seconds"></a>`limits.timeout_seconds` | Integer | Required | 60–86,400 seconds for each preflight, capture or upload phase. The coordinator also limits the total run duration. |
 
+### Binding defaults and guest overrides
+
+The full paths in new configurations are `backup.defaults` and `guests.<guest-id>.backup`. Defaults accepts only optional `interface` and `staging_volume` identifiers; `{}` supplies neither, and null is rejected. A guest may override either field and additionally set `backup_id` or `limits`. The compiler merges these direct binding fields, guest over defaults; it does not merge arbitrary YAML or invent an interface or volume. Both identifiers must exist in each enrolled guest after inheritance. Missing effective fields or references are refused even for guests disabled for CD. Root defaults never enroll a guest.
+
+This **guest-file fragment** uses shared bindings and changes only its byte budget:
+
+<!-- example: backup-guest-override -->
+```yaml
+backup:
+  limits: {max_bytes: 67108864}
+```
+
+With root defaults `{interface: primary, staging_volume: backup-stage}` and job limits `{max_bytes: 33554432, max_files: 10000, timeout_seconds: 300}`, this guest uses `primary`, `backup-stage`, 64 MiB, 10,000 entries and 300 seconds. An unmodified `backup:` inherits 32 MiB instead. The complete [mixed-client example](../examples/backup/README.md#size-clients-independently) compiles both cases.
+
+Without an operational `job`, only null or `{}` guest enrollment is accepted; `backup.defaults` and nonempty guest bindings fail with `component.backup-job-required`. This preserves preparation-only installation without silently ignoring operational settings. The volume-level `backup:` marker remains null/empty only and accepts no binding fields.
+
+Existing configurations may keep `job.clients.<guest-id>` with the complete fields below, but must omit `backup.defaults` and keep guest enrollment null or `{}`. Mixing forms fails with `component.backup-client-form`, including when values agree. No runtime mode, identity conversion or deployment action is selected by the authored form. To change syntax, move the same binding values to defaults/guests and remove the complete `clients` map; review the compiled result before ordinary CD.
+
 ### Client fields
 
-Each `clients.<guest-id>` selects an enrolled guest. CD creates and preserves its namespace-scoped PBS token and native client encryption key. Do not declare secret values or per-client credential-source fields here.
+These records apply to `guests.<guest-id>.backup.<field>` and the legacy `backup.job.clients.<guest-id>.<field>`. Only `interface` and `staging_volume` may also appear under `backup.defaults`. CD creates and preserves each client's namespace-scoped PBS token and native client encryption key. Do not declare secret values or per-client credential-source fields here.
 
 | Field | Type | Required/default | Constraints and effect |
 | --- | --- | --- | --- |
-| <a id="backup-client-staging-volume"></a>`staging_volume` | Guest volume identifier | Required | Dedicated managed ZFS-pool subvolume, no app binding and no `backup:` marker. Size must be at least four times this client's effective `max_bytes`. Its path is reused from the volume declaration. CD verifies selected `zfspool` type before any creation/apply; other storage formats are unsupported for this job. |
-| <a id="backup-client-interface"></a>`interface` | Guest interface identifier | Required | Selects an existing interface with a resolved static IPv4 address. Before capture, the route check on the guest must report that exact device and source address. |
+| <a id="backup-client-staging-volume"></a>`staging_volume` | Guest volume identifier | Required after inheritance; no scalar default | Dedicated managed ZFS-pool subvolume, no app binding and no `backup:` marker. Size must be at least four times this client's effective `max_bytes`. Its path is reused from the volume declaration. CD verifies selected `zfspool` type before any creation/apply; other storage formats are unsupported for this job. |
+| <a id="backup-client-interface"></a>`interface` | Guest interface identifier | Required after inheritance; no scalar default | Selects an existing interface with a resolved static IPv4 address. Before capture, the route check on the guest must report that exact device and source address. |
 | <a id="backup-client-backup-id"></a>`backup_id` | String | Optional; `guest-<VMID>` | Uses 1–32 ASCII letters, digits, dots, underscores or hyphens, starting with a letter or digit. The 32-character bound is the PBS namespace-leaf limit. It must be unique in the group. Set it explicitly when contexts reuse a VMID. Changing it requires explicit handover of protection. |
 | <a id="backup-client-limits"></a>`limits` | Closed object | Optional; omitted fields inherit `job.limits` | At least one of `max_bytes` or `max_files`; no other fields, null or empty object. Overrides affect this client only and may be above or below the root defaults. |
 | <a id="backup-client-limits-max-bytes"></a>`limits.max_bytes` | Integer | Optional; inherit `job.limits.max_bytes` | Same 1 MiB–1 PiB bound. The dedicated staging volume must still be at least four times this effective value; runtime requires three times it free before capture. |

@@ -95,7 +95,9 @@ def validate(adapter, value, *, partial=False):
                     and row['method'] == 'scram-sha-256', 'component.database-access')
     elif adapter == 'zigbee2mqtt':
         closed(value, () if partial else ('adapter', 'mqtt_base_topic'),
-               ('adapter', 'mqtt_base_topic') if partial else ())
+               ('adapter', 'mqtt_base_topic', 'watchdog') if partial else ('watchdog',))
+        if 'watchdog' in value:
+            require(value['watchdog'] == 'default', 'component.property')
         if 'adapter' in value:
             require(isinstance(value['adapter'], str) and re.fullmatch('[a-z][a-z0-9_-]{0,62}', value['adapter']),
                     'component.property')

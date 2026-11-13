@@ -42,7 +42,38 @@ The final line must match the printed text above. The packet contains public sou
 
 ## Try a meaningful change
 
-Copy this directory to a new disposable location before editing it. Remove the guest's `backup` marker and remove the operational `job`, `management` and `recovery_public_key` objects, leaving root `backup: {}`. Compile again: the guest must receive no PBS phase. Root settings alone do not enroll it. Removing a guest marker while leaving its job-client entry must instead fail with `component.backup-client-coverage`.
+From the framework repository root, run the following commands to make a disposable copy. They remove the guest's `backup` marker and replace shared operational settings with `backup: {}` in that copy only. Compilation and inspection both use the changed copy; the original example stays enrolled.
+
+<!-- example: backup-unenrolment-compile -->
+```bash
+FRAMEWORK=$(pwd -P)
+PBS_CHANGE_WORK=$(mktemp -d "${TMPDIR:-/tmp}/homelab-backup-example.XXXXXXXX")
+PBS_CHANGE_WORK=$(cd "$PBS_CHANGE_WORK" && pwd -P)
+cp -R "$FRAMEWORK/docs/examples/backup" "$PBS_CHANGE_WORK/example"
+PBS_CHANGED_EXAMPLE="$PBS_CHANGE_WORK/example"
+python3 - "$PBS_CHANGED_EXAMPLE/site.yaml" <<'PY_CHANGE'
+from pathlib import Path
+import sys, yaml
+path = Path(sys.argv[1])
+site = yaml.safe_load(path.read_text())
+del site['guests']['resolver']['backup']
+site['backup'] = {}
+path.write_text(yaml.safe_dump(site, sort_keys=False))
+PY_CHANGE
+python3 "$FRAMEWORK/blueprints/compile.py" \
+  --stack "$PBS_CHANGED_EXAMPLE" --site "$PBS_CHANGED_EXAMPLE/site.yaml" \
+  --guest resolver --output "$PBS_CHANGE_WORK/resolver.json"
+python3 - "$PBS_CHANGE_WORK/resolver.json" <<'PY_CHANGE_CHECK'
+import json, sys
+packet = json.load(open(sys.argv[1]))
+cfg = json.loads(packet['files']['site.json'])
+assert 'backup' not in cfg['app']
+assert 'pbs-agent' not in cfg['deployment']['phases']
+print('Unenrolled: resolver; PBS agent: absent')
+PY_CHANGE_CHECK
+```
+
+The last line must match the printed text above. Root settings alone do not enroll guests. Keeping a job with no enrolled guests is refused. Defaults never enroll an omitted guest. Existing configurations with a legacy client map must keep it exclusive of defaults and nonempty guest bindings.
 
 These edits teach source selection only. Removing protection from a real installation needs the [retirement procedure](../../reference/backup.md#later-deployments-and-retirement); this exercise grants no permission to delete credentials or backups.
 
@@ -50,7 +81,7 @@ Continue with [real input preparation](../../backup/configure.md). Replace synth
 
 ## Size clients independently
 
-[client-limits.yaml](client-limits.yaml) is a second complete site using this directory's same library, catalogue and public-key fixture. It adds `replica` and a second DNS app. `resolver` has a 64 MiB/20,000-entry override; `replica` inherits 32 MiB/10,000 entries from the root. Both inherit the 300-second timeout, use one schedule and group, and have distinct guest identities. The numbers teach resolution; they are not real sizing recommendations.
+[client-limits.yaml](client-limits.yaml) is a second complete site using this directory's same library, catalogue and public-key fixture. It adds `replica` and a second DNS app. `backup.defaults` supplies `management` and `backup-stage` to both guests. `resolver.backup.limits` has a 64 MiB/20,000-entry override; `replica` inherits 32 MiB/10,000 entries from the root. Both inherit the 300-second timeout, use one schedule and group, and have distinct guest identities. The numbers teach resolution; they are not real sizing recommendations.
 
 From the repository root with the prepared Python environment, compile both guests into a new private output directory:
 
@@ -78,4 +109,4 @@ print('resolver: overridden; replica: inherited; one group and timeout')
 PY_LIMITS
 ```
 
-The last line must match the printed text above. To test refusal, edit a disposable copy: adding `timeout_seconds` under a client's `limits` fails with `component.fields`. Setting `resolver.limits.max_bytes` to `268435457` exceeds one quarter of its 1 GiB staging volume and fails with `component.backup-staging-volume`. Exactly `268435456` is accepted. A changed effective limit in a real installation needs an enabled deployment and [whole-group activation](../../backup/configure.md#size-each-client-and-review-later-changes); compilation performs neither.
+The last line must match the printed text above. To test refusal, edit a disposable copy: adding `timeout_seconds` under a guest's `backup.limits` fails with `component.fields`. Setting `guests.resolver.backup.limits.max_bytes` to `268435457` exceeds one quarter of its 1 GiB staging volume and fails with `component.backup-staging-volume`. Exactly `268435456` is accepted. A changed effective limit in a real installation needs an enabled deployment and [whole-group activation](../../backup/configure.md#size-each-client-and-review-later-changes); compilation performs neither.

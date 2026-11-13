@@ -22,6 +22,20 @@ def callback():
 
 
 class FoundationValidatorEdges(unittest.TestCase):
+    def test_zigbee_watchdog_accepts_only_explicit_default_and_preserves_omission(self):
+        base = {'adapter': 'ember', 'mqtt_base_topic': 'owned/topic'}
+        for partial in (False, True):
+            for value in (base, dict(base, watchdog='default')):
+                original_value = copy.deepcopy(value)
+                foundation.validate('zigbee2mqtt', value, partial=partial)
+                self.assertEqual(value, original_value)
+            for watchdog in (None, False, True, 1, '', 'Default', '1,5,15', [], {}, 'default\n'):
+                with self.subTest(partial=partial, watchdog=watchdog), self.assertRaises(ComponentError):
+                    foundation.validate('zigbee2mqtt', dict(base, watchdog=watchdog), partial=partial)
+        foundation.validate('zigbee2mqtt', {'watchdog': 'default'}, partial=True)
+        with self.assertRaises(ComponentError):
+            foundation.validate('zigbee2mqtt', dict(base, watchdog='default', environment={}))
+
     def test_direct_line_database_digest_and_physical_success_and_refusal_boundaries(self):
         self.assertEqual(foundation._line('metadata'), 'metadata')
         self.assertEqual(foundation._line('',empty=True), '')

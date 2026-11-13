@@ -36,13 +36,18 @@ def resolve(root, ref):
     return git(root, 'rev-parse', '--verify', ref + '^{commit}').decode().strip()
 
 def check_identity(root, rev):
+    """Check public identity metadata; signatures and access authenticate separately."""
     fields = git(root, 'show', '-s', '--format=%an%x00%ae%x00%cn%x00%ce%x00%B', rev).decode().split('\0', 4)
     if len(fields) != 5:
         raise guard.Blocked('invalid_commit_metadata')
-    for name, email in [fields[:2], fields[2:4]]:
-        if ((name.casefold() == OWN_NAME and email != OWN_EMAIL)
-                or (email == OWN_EMAIL and name != OWN_NAME)):
-            raise guard.Blocked('maintainer_identity_mismatch')
+    name, email = fields[:2]
+    if ((name.casefold() == OWN_NAME and email != OWN_EMAIL)
+            or (email == OWN_EMAIL and not name.strip())):
+        raise guard.Blocked('maintainer_identity_mismatch')
+    name, email = fields[2:4]
+    if ((name.casefold() == OWN_NAME and email != OWN_EMAIL)
+            or (email == OWN_EMAIL and name != OWN_NAME)):
+        raise guard.Blocked('maintainer_identity_mismatch')
     for line in fields[4].splitlines():
         if re.match(r'(?i)(co-authored-by|signed-off-by):\s*theaussiepom\s*<', line):
             if '<' + OWN_EMAIL + '>' not in line:
