@@ -147,15 +147,43 @@ def _bound_web_checks(app, port):
         ['python3','-c',code],'WEB_BIND_OK')]
 
 
+def _homeassistant_dual_web_checks(app):
+    """Keep one explicit retained transition; never permit arbitrary extra binds."""
+    require(app['lifecycle'] == 'retained', 'component.health-lifecycle')
+    roles = ('web_interface', 'transition_web_interface')
+    names = ('web_listener', 'transition_web_listener')
+    require(set(app['listeners']) == set(names), 'component.health-listener')
+    addresses = [_ipv4(app['role_addresses'][role]) for role in roles]
+    require(len(set(addresses)) == 2, 'component.health-address')
+    for role, name, address in zip(roles, names, addresses, strict=True):
+        selected = ipaddress.IPv4Address(address)
+        require(not (selected.is_unspecified or selected.is_loopback or selected.is_link_local
+                     or selected.is_multicast or selected.is_reserved), 'component.health-address')
+        row = app['listeners'][name]
+        require(row.get('service') == 'homeassistant' and row.get('namespace') == 'host'
+                and row.get('protocol') == 'tcp' and row.get('port') == 8123
+                and row.get('bind') == 'interface' and row.get('interface') == role
+                and row.get('actual_bind') == address and 'publish' not in row,
+                'component.health-listener')
+    required = [address+':8123' for address in addresses]+['127.0.0.1:8123']
+    allowed = required+['[::1]:8123']
+    code = "import subprocess; rows=subprocess.check_output(['ss','-H','-ltn','sport = :8123'],text=True).splitlines(); sockets={r.split()[3] for r in rows}; assert set("+repr(required)+") <= sockets and sockets <= set("+repr(allowed)+"); print('WEB_BIND_OK')"
+    return [_row('HA web sockets match both declared addresses and required loopback',
+                 ['python3', '-c', code], 'WEB_BIND_OK')]
+
+
 def _homeassistant(app, compose_file):
     """Keep the local HA challenge probe and optional bound-socket check."""
-    _listener(app, 'homeassistant', 8123, 'host')
+    dual = 'transition_web_interface' in app.get('role_addresses', {})
+    if not dual:
+        _listener(app, 'homeassistant', 8123, 'host')
     require(app['lifecycle'] in ('retained', 'fresh'), 'component.health-lifecycle')
     retained = app['lifecycle'] == 'retained'
     return [_row('HA web responds and unauthenticated API refused' if retained else
         'HA onboarding or login ready and unauthenticated API refused',
         ['python3', AUTOMATION_HELPER, 'homeassistant' if retained else 'homeassistant-fresh'],
-        '"read_only_probe": "passed"'), *_bound_web_checks(app,8123)]
+        '"read_only_probe": "passed"'), *(_homeassistant_dual_web_checks(app)
+            if dual else _bound_web_checks(app,8123))]
 
 
 def _node_red(app, compose_file):
