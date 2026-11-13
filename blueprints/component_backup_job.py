@@ -9,6 +9,7 @@ import backup_group
 import backup_capture
 import backup_policy
 import backup_identity
+from private_io import digest, encoded
 from component_errors import ComponentError, at
 
 
@@ -185,5 +186,7 @@ def bind(resolver, value, bindings=None):
             'hostname': owner['hostname']}
     group = {'name': value['name'], 'members': members}
     backup_group.configuration(group)
-    return {'schema': 'homelab-pbs-schedule-v1', 'group': group,
-        'schedule': copy.deepcopy(value['schedule']), 'limits': copy.deepcopy(value['limits'])}
+    return {'schema': 'homelab-pbs-schedule-v2', 'group': group,
+        'schedule': copy.deepcopy(value['schedule']), 'limits': copy.deepcopy(value['limits']),
+        'coverage': {guest['backup']['job']['group']['member']: digest(encoded(guest['backup']))
+                     for guest in enrolled.values()}}

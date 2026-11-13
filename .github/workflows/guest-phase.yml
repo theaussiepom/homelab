@@ -51,6 +51,8 @@ on:
         required: false
       zabbix_database_password:
         required: false
+      PBS_API_TOKEN:
+        required: false
 permissions:
   contents: read
 defaults:
@@ -136,6 +138,7 @@ jobs:
         env:
           GUEST: ${{ inputs.guest }}
           PHASE: ${{ inputs.phase }}
+          PBS_API_TOKEN: ${{ inputs.phase == 'pbs-agent' && secrets.PBS_API_TOKEN || '' }}
           HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD: ${{ secrets.authentik_postgresql_password }}
           HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY: ${{ secrets.authentik_secret_key }}
           HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD: ${{ secrets.authentik_smtp_password }}
@@ -151,6 +154,7 @@ jobs:
           HOMELAB_APP_SECRET_WINET_OPTIONS: ${{ secrets.winet_options }}
           HOMELAB_APP_SECRET_ZABBIX_DATABASE_PASSWORD: ${{ secrets.zabbix_database_password }}
         run: |
+          if [ -z "${PBS_API_TOKEN:-}" ]; then unset PBS_API_TOKEN; fi
           # Elide only absent optional action defaults; preserve every supplied value.
           for app_secret_slot in HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD HOMELAB_APP_SECRET_BITWARDEN_RUNTIME_ENVIRONMENT HOMELAB_APP_SECRET_CLOUDBEAVER_CLIENT_SECRET HOMELAB_APP_SECRET_MQTT_EXPLORER_BROKER_PASSWORD HOMELAB_APP_SECRET_MQTT_PROBE HOMELAB_APP_SECRET_NODE_RED_API_TOKEN HOMELAB_APP_SECRET_PEGAPROX_DATABASE_KEY HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_DNS_TOKEN HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_ORIGIN_TOKEN HOMELAB_APP_SECRET_TRAEFIK_PROXMOX_TOKEN HOMELAB_APP_SECRET_WINET_OPTIONS HOMELAB_APP_SECRET_ZABBIX_DATABASE_PASSWORD; do
             if [ -z "${!app_secret_slot}" ]; then unset "$app_secret_slot"; fi

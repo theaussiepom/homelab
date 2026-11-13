@@ -42,7 +42,7 @@ class BackupDocumentation(unittest.TestCase):
         self.assertEqual(job['destination']['datastore'], 'recovery')
         self.assertEqual(cfg['deployment']['phases'][-1], 'pbs-agent')
         self.assertEqual(plan.resolved['backup']['management']['credential']['name'], 'PBS_API_TOKEN')
-        self.assertNotIn('PBS_API_TOKEN', json.dumps(packet))
+        self.assertEqual(json.loads(packet['files']['backup-management.json'])['credential']['name'], 'PBS_API_TOKEN')
         public = (self.root / 'assets/master-public.pem.fixture').read_text()
         self.assertEqual(job['recovery_public_key']['pem'], public)
         self.assertEqual(plan.pins['site']['assets/master-public.pem.fixture'], hashlib.sha256(public.encode()).hexdigest())
@@ -59,10 +59,12 @@ class BackupDocumentation(unittest.TestCase):
         directory=self.root/'.github/workflows';directory.mkdir(parents=True)
         (directory/'phase.yml').write_text('jobs:\n  run:\n    uses: example/framework/.github/workflows/guest-phase.yml@'+'1'*40+'\n')
         plan=self.plan();graph=component_workflows.model(plan)
-        self.assertEqual(graph['backup']['needs'],['selection','resolver'])
+        self.assertEqual(graph['backup']['needs'],['selection'])
         model=workflows.models(self.root,site_source=self.path)
         self.assertEqual(model['backup.yml']['jobs']['deploy']['environment'],'backup')
-        self.assertNotIn('PBS_API_TOKEN',json.dumps(model['guest-resolver.yml']))
+        self.assertIn('PBS_API_TOKEN', model['guest-resolver.yml']['on']['workflow_call']['secrets'])
+        steps=model['guest-resolver.yml']['jobs']['deploy']['steps']
+        self.assertEqual([row['name'] for row in steps if 'PBS_API_TOKEN' in row.get('with', {})], ['Backup'])
         env={'HOMELAB_ENVIRONMENT_PREFIX':'example','HOMELAB_REPOSITORY':'example/private'}
         with patch.object(private_workflows,'settings',return_value=(env,['self-hosted'])), \
              patch.object(private_workflows,'validation_workflow',return_value={'name':'Validate'}), \
@@ -73,7 +75,7 @@ class BackupDocumentation(unittest.TestCase):
             (directory/'deploy.yml').write_text('synthetic private source')
             private=private_workflows.model(self.root,self.root)
         self.assertEqual(private['jobs']['_backup']['environment'],'backup')
-        self.assertEqual(private['jobs']['_backup']['needs'],['selection','resolver'])
+        self.assertEqual(private['jobs']['_backup']['needs'],['selection'])
         self.assertNotIn('inputs.',json.dumps(private['jobs']['_backup']))
 
     def test_documented_public_key_handoff_stages_normally_and_preserves_compiled_identity(self):
@@ -184,7 +186,7 @@ class BackupDocumentation(unittest.TestCase):
         result = subprocess.run(['bash', '-eu'], input=source, text=True, cwd=ROOT,
                                 env=env, capture_output=True, timeout=30, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), 'Unenrolled: resolver; PBS agent: absent')
+        self.assertEqual(result.stdout.strip(), 'Unenrolled: resolver; Backup step: absent')
         work = Path(trace.read_text().strip())
         self.assertEqual(work.resolve(), work)
         self.assertTrue(work.is_relative_to(self.root))

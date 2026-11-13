@@ -8,11 +8,11 @@ Create one dedicated PBS management identity, then store its token in the protec
 
 Complete [server setup](server.md). Use its trusted console or authenticated PBS interface. Have administrator access to the deployment repository and a reviewed GitHub Environment policy. Do not perform this task from an untrusted pull request, a recorded terminal, or a shell with tracing enabled.
 
-The examples use PBS user `homelab-cd@pbs`, token name `deployment`, GitHub Environment `backup` and Environment secret `PBS_API_TOKEN`. Keep those names consistent with the [site management binding](../reference/backup.md#backup-management). The token's identity is `homelab-cd@pbs!deployment`; the generated secret is a separate value returned only once.
+The examples use PBS user `homelab-cd@pbs`, token name `deployment`, protected Backup/guest Environments and the named secret `PBS_API_TOKEN`. Keep those names consistent with the [site management binding](../reference/backup.md#backup-management). The token's identity is `homelab-cd@pbs!deployment`; the generated secret is a separate value returned only once.
 
 ## Choose the management permissions
 
-The bootstrap procedure below assigns PBS **Admin at `/`** to the dedicated user and its management token. This is broad server administration, including destructive capabilities. It is intended for an explicitly approved PBS-management job; it is not a backup-only grant. PBS permission-management authority itself can grant wider access, so a source allowlist is not an independent server-enforced security boundary.
+The bootstrap procedure below assigns PBS **Admin at `/`** to the dedicated user and its management token. This is broad server administration, including destructive capabilities. It is intended only for the explicitly approved early PBS setup and guest Backup enrollment steps; it is not a backup-only grant. PBS permission-management authority itself can grant wider access, so a source allowlist is not an independent server-enforced security boundary.
 
 Before creating the identity or token, the installation owner (or their designated security administrator) must approve the specific Admin-at-`/` grant to this automation identity. Record who approved it and its intended use in the private installation notes. If your organisation requires a narrower role matrix, qualify the exact API operations and effective permissions before use; do not weaken checks until deployment works. Ordinary guest tokens receive only their own namespace's backup/restore permissions and never this management credential. See [PBS roles and token permission intersection](https://pbs.proxmox.com/docs/user-management.html#api-token-permissions).
 

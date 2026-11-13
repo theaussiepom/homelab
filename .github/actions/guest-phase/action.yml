@@ -59,6 +59,9 @@ inputs:
   zabbix_database_password:
     description: Existing scoped credential
     required: false
+  PBS_API_TOKEN:
+    description: Existing scoped credential
+    required: false
 runs:
   using: composite
   steps:
@@ -90,6 +93,7 @@ runs:
     env:
       GUEST: ${{ inputs.guest }}
       PHASE: ${{ inputs.phase }}
+      PBS_API_TOKEN: ${{ inputs.phase == 'pbs-agent' && inputs.PBS_API_TOKEN || '' }}
       HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD: ${{ inputs.authentik_postgresql_password }}
       HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY: ${{ inputs.authentik_secret_key }}
       HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD: ${{ inputs.authentik_smtp_password }}
@@ -104,12 +108,12 @@ runs:
       HOMELAB_APP_SECRET_TRAEFIK_PROXMOX_TOKEN: ${{ inputs.traefik_proxmox_token }}
       HOMELAB_APP_SECRET_WINET_OPTIONS: ${{ inputs.winet_options }}
       HOMELAB_APP_SECRET_ZABBIX_DATABASE_PASSWORD: ${{ inputs.zabbix_database_password }}
-    run: "# Elide only absent optional action defaults; preserve every supplied value.\nfor app_secret_slot in HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD\
-      \ HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD HOMELAB_APP_SECRET_BITWARDEN_RUNTIME_ENVIRONMENT\
-      \ HOMELAB_APP_SECRET_CLOUDBEAVER_CLIENT_SECRET HOMELAB_APP_SECRET_MQTT_EXPLORER_BROKER_PASSWORD HOMELAB_APP_SECRET_MQTT_PROBE\
-      \ HOMELAB_APP_SECRET_NODE_RED_API_TOKEN HOMELAB_APP_SECRET_PEGAPROX_DATABASE_KEY HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_DNS_TOKEN\
-      \ HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_ORIGIN_TOKEN HOMELAB_APP_SECRET_TRAEFIK_PROXMOX_TOKEN HOMELAB_APP_SECRET_WINET_OPTIONS\
-      \ HOMELAB_APP_SECRET_ZABBIX_DATABASE_PASSWORD; do\n  if [ -z \"${!app_secret_slot}\" ]; then unset \"$app_secret_slot\"\
-      ; fi\ndone\nexec python3 framework-source/proxmox/applications/deploy.py --phase \"$PHASE\" --packet \"$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json\"\
-      \n"
+    run: "if [ -z \"${PBS_API_TOKEN:-}\" ]; then unset PBS_API_TOKEN; fi\n# Elide only absent optional action defaults; preserve\
+      \ every supplied value.\nfor app_secret_slot in HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY\
+      \ HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD HOMELAB_APP_SECRET_BITWARDEN_RUNTIME_ENVIRONMENT HOMELAB_APP_SECRET_CLOUDBEAVER_CLIENT_SECRET\
+      \ HOMELAB_APP_SECRET_MQTT_EXPLORER_BROKER_PASSWORD HOMELAB_APP_SECRET_MQTT_PROBE HOMELAB_APP_SECRET_NODE_RED_API_TOKEN\
+      \ HOMELAB_APP_SECRET_PEGAPROX_DATABASE_KEY HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_DNS_TOKEN HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_ORIGIN_TOKEN\
+      \ HOMELAB_APP_SECRET_TRAEFIK_PROXMOX_TOKEN HOMELAB_APP_SECRET_WINET_OPTIONS HOMELAB_APP_SECRET_ZABBIX_DATABASE_PASSWORD;\
+      \ do\n  if [ -z \"${!app_secret_slot}\" ]; then unset \"$app_secret_slot\"; fi\ndone\nexec python3 framework-source/proxmox/applications/deploy.py\
+      \ --phase \"$PHASE\" --packet \"$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json\"\n"
     shell: bash

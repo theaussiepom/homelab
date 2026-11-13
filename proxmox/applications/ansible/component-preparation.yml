@@ -19,6 +19,10 @@
     - name: Install declared exact packages
       ansible.builtin.import_tasks: tasks/packages-install.yml
 
+    - name: Prepare the selected PBS client and finite key helper
+      ansible.builtin.import_tasks: tasks/backup-client.yml
+      when: backup_agent is defined
+
     - name: Check package-owned native identities
       ansible.builtin.include_tasks: tasks/database-package-account.yml
       vars:

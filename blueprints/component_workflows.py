@@ -162,6 +162,7 @@ def model(plan):
         require(identifier(key) and app['guest'] in guests and isinstance(app_dependencies[key], list)
                 and all(isinstance(row, str) and row in apps for row in app_dependencies[key]), 'component.workflow-application')
     resolver = SimpleNamespace(apps=apps, site=plan.site)
+    operational_backup = resolved.get('backup', {}).get('mode') == 'scheduled-recovery'
     result = {'guest_order': active, 'dependencies': {key: list(rows) for key, rows in dependencies.items()},
               'monitoring_guest': monitored, 'guests': {}}
     for guest in active:
@@ -187,11 +188,15 @@ def model(plan):
         if monitored is not None:
             phases.append({'id': AGENT_PHASE, 'name': 'Zabbix agent', 'application': None, 'inputs': {}})
         if 'backup' in guests[guest]:
-            phases.append({'id': BACKUP_PHASE, 'name': 'PBS agent', 'application': None, 'inputs': {}})
-        result['guests'][guest] = {'name': guest_title, 'needs': ['selection', *dependencies[guest]],
+            inputs = {'PBS_API_TOKEN': {'environment': 'PBS_API_TOKEN', 'workflow_secret': 'PBS_API_TOKEN'}} if operational_backup else {}
+            phases.append({'id': BACKUP_PHASE, 'name': 'Backup', 'application': None, 'inputs': inputs})
+            if operational_backup:
+                secrets.append('PBS_API_TOKEN')
+        result['guests'][guest] = {'name': guest_title,
+                                  'needs': ['selection', *(['_backup'] if operational_backup and 'backup' in guests[guest] else []), *dependencies[guest]],
                                   'phases': phases, 'workflow_secrets': secrets}
-    if resolved.get('backup', {}).get('mode') == 'scheduled-recovery':
-        result['backup'] = {'name':'Backup', 'needs':['selection', *active],
+    if operational_backup:
+        result['backup'] = {'name':'Backup', 'needs':['selection'],
                             'environment':'backup', 'workflow_secrets':['PBS_API_TOKEN']}
     plan.check()
     return result

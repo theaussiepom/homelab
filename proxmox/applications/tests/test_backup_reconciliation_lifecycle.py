@@ -199,6 +199,8 @@ class BackupReconciliationLifecycleTests(unittest.TestCase):
             ('proxmox_guest.host_devices.attach', {'return_value': False}),
             ('proxmox_guest.guest_identity.pin', {}),
             ('backup_staging.quiet', {'side_effect': self.ssh}),
+            ('backup_setup.enroll', {}),
+            ('backup_agent.inputs', {'return_value': {'pbs-password': b'fixture-password', 'pbs-key': b'fixture-key'}}),
             ('component_ansible.quiet', {'side_effect': self.ansible})]:
             stack.enter_context(patch(target, **values))
         self.probes = []
