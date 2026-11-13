@@ -67,18 +67,20 @@ runs:
       path: framework-source
       persist-credentials: false
     name: Get tools
-  - name: Prepare config
+  - name: Prepare tools
     run: 'umask 077
 
-      config_env=$(mktemp -d "$RUNNER_TEMP/homelab-config-XXXXXX")
+      job_tools=$(mktemp -d "$RUNNER_TEMP/homelab-tools-XXXXXX")
 
-      python3 -m venv "$config_env"
+      python3 -m venv "$job_tools"
 
-      python3 framework-source/blueprints/config_environment.py "$config_env/compiler.lock"
+      "$job_tools/bin/python" -m pip --isolated install --disable-pip-version-check --require-hashes --no-deps -r framework-source/requirements.lock.txt
 
-      "$config_env/bin/python" -m pip --isolated install --disable-pip-version-check --require-hashes --no-deps -r "$config_env/compiler.lock"
+      "$job_tools/bin/ansible-playbook" --version
 
-      printf ''HOMELAB_CONFIG_PYTHON=%s/bin/python\n'' "$config_env" >> "$GITHUB_ENV"
+      printf ''HOMELAB_CONFIG_PYTHON=%s/bin/python\n'' "$job_tools" >> "$GITHUB_ENV"
+
+      printf ''%s/bin\n'' "$job_tools" >> "$GITHUB_PATH"
 
       '
     shell: bash

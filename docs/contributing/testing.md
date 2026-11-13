@@ -1,6 +1,6 @@
 # Testing component changes
 
-Use the selected framework revision's locked Python tools. Install requirements with `--require-hashes` in an isolated environment rather than relying on unpinned global packages. Generated workflow setup installs the selected parser dependency without changing the interpreter used for runtime credentials and deployment.
+Use the selected framework revision's locked Python tools. Install requirements with `--require-hashes` in an isolated environment rather than relying on unpinned global packages. Generated workflow setup installs the selected complete lock in a fresh job-owned environment for compilation, runtime credentials, deployment and Ansible. See [controller tools in CD](../operations/deployment.md#controller-tools-in-cd) for isolation and failure behaviour.
 
 ## Test the boundary you change
 

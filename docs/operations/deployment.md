@@ -27,6 +27,16 @@ Compile offline and check the generated workflow. Review changes to identities, 
 
 ## Phases and ordering
 
+### Controller tools in CD
+
+After checking out the immutable framework selection, each job's **Prepare tools** step creates a private virtual environment under `RUNNER_TEMP`. It installs that selection's complete `requirements.lock.txt` with pip's isolated mode, required package hashes and dependency resolution disabled. It then runs that environment's `ansible-playbook --version` before publishing its Python path and adding its executables to the job's `PATH`. Compilation, credential loading and deployment use the selected Python dependencies; Ansible commands resolve to the same environment.
+
+Every job gets a separate directory, including parallel guest, selection and Backup jobs. The setup does not modify the controller's shared `/opt/homelab-tools`, require root access or reinstall/register the runner. First and later deployments use the same procedure; upgrading the reviewed framework selection selects its locked tools on the next job. OpenTofu and other native controller prerequisites retain their existing preparation path.
+
+Environment creation, package installation or the Ansible version check failing stops setup before tools are published or a deployment phase runs. Keep the failed job's evidence. Package download access and the runner's existing Python/`venv` support must work. Source and isolated setup tests do not establish adoption on a live controller: inspect the actual job's version output and successful affected phases after CD.
+
+### Guest phases
+
 The generator creates one job for each enabled guest and preserves the declared dependencies between guests. Each job runs infrastructure, preparation, app phases and, when selected, a final monitoring-agent phase in that order. The infrastructure phase uses OpenTofu with the required plan and state checks. Preparation uses its defined data transfer object (DTO), which contains the inputs for that phase. Each app phase then selects its own fixed payload and protected inputs, plus the Ansible tasks owned by its adapter.
 
 Declared readiness dependencies change the order in which phases run. Value references alone do not. The workflow rejects a selection that disables a required dependency or required monitoring server. Failure stops the chain; the normal CD workflow does not retry, release a HOLD or relabel an incomplete phase as success.
