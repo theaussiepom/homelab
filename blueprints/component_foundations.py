@@ -11,7 +11,7 @@ import component_types as types
 
 OWNED = {'homeassistant', 'unbound', 'pihole', 'authentik', 'traefik', 'mqtt',
          'mqtt_explorer', 'zabbix', 'music_assistant', 'postgresql', 'mariadb',
-         'influxdb', 'zigbee2mqtt'}
+         'influxdb', 'zigbee2mqtt', 'scrypted'}
 
 
 def _line(value, maximum=4096, *, empty=False):
@@ -48,6 +48,8 @@ def validate(adapter, value, *, partial=False):
         closed(value, (), ('publish_port',))
         if 'publish_port' in value:
             types.integer(value['publish_port'], 1, 65535)
+    elif adapter == 'scrypted':
+        closed(value)
     elif adapter == 'homeassistant':
         closed(value, (), ('mdns',))
         if 'mdns' in value:
@@ -197,6 +199,19 @@ def bind(resolver):
             adapter, props = app['adapter'], app['properties']
             validate(adapter, props)
             values = {}
+            if adapter == 'scrypted':
+                require(not app.get('devices'), 'component.device-unsupported')
+                storage = app.get('storage', {})
+                require(set(storage) == {'data', 'recordings'} and 'volume' in storage['data']
+                        and 'root_path' in storage['recordings']
+                        and storage['recordings']['subpath'] == '', 'component.scrypted-storage')
+                guest = resolver.guests[app['guest']]
+                root = guest['root_paths'][storage['recordings']['root_path']]
+                require('host_bind' in root, 'component.scrypted-storage')
+                mount = root['host_bind']
+                require(mount['slot'] == len(guest.get('volumes', {})), 'component.host-bind-slot')
+                values['recording_mount'] = {'source': mount['filesystem_source'],
+                    'filesystem': mount['filesystem'], 'root': mount['filesystem_root']}
             if adapter == 'pihole':
                 values['dns_records'] = copy.deepcopy(getattr(resolver, 'exposure_values', {}).get(
                     'dns_records', {}).get(app_id, {}))
@@ -309,3 +324,12 @@ def bind(resolver):
                             'certificate': transports[key]['certificate'],
                             'filename': 'route-' + key + '.pem'}
             app['settings'] = values
+    # Host filesystem access is admitted only for the selected NVR recording
+    # role, never as an unused provider mount or another app's storage escape.
+    for guest_id, guest in resolver.guests.items():
+        for name, root in guest.get('root_paths', {}).items():
+            if 'host_bind' in root:
+                users = [app for app in resolver.apps.values()
+                         if app['guest'] == guest_id and app['adapter'] == 'scrypted'
+                         and app.get('storage', {}).get('recordings') == {'root_path': name, 'subpath': ''}]
+                require(len(users) == 1, 'component.host-bind-owner')

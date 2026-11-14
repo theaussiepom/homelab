@@ -53,13 +53,22 @@ resource "proxmox_virtual_environment_container" "guest" {
     }
   }
   dynamic "mount_point" {
-    for_each = [for key in(var.guest.volume_order == null ? sort(keys(var.guest.volumes)) : var.guest.volume_order) : var.guest.volumes[key]]
+    for_each = concat(
+      [for key in(var.guest.volume_order == null ? sort(keys(var.guest.volumes)) : var.guest.volume_order) : {
+        volume = var.guest.storage_id, size = "${var.guest.volumes[key].size_gib}G",
+        path   = var.guest.volumes[key].path, backup = var.guest.volumes[key].backup, replicate = true
+      }],
+      var.guest.recording_mount == null ? [] : [{
+        volume = var.guest.recording_mount.source, size = "",
+        path   = var.guest.recording_mount.path, backup = false, replicate = false
+      }]
+    )
     content {
-      volume    = var.guest.storage_id
-      size      = "${mount_point.value.size_gib}G"
+      volume    = mount_point.value.volume
+      size      = mount_point.value.size
       path      = mount_point.value.path
       backup    = mount_point.value.backup
-      replicate = true
+      replicate = mount_point.value.replicate
     }
   }
   startup { order = var.guest.boot_order }

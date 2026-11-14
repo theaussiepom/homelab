@@ -21,7 +21,7 @@ SCHEMA = 'homelab-pbs-coverage-v1'
 PHASE = 'pbs-agent'
 CATEGORIES = {'configuration', 'state', 'database'}
 CAPTURES = {'files', 'application-export', 'database-export'}
-EXCLUSIONS = {'transient', 'rebuildable'}
+EXCLUSIONS = {'transient', 'rebuildable', 'external-recordings'}
 DATABASES = {'postgresql', 'mariadb', 'influxdb'}
 MONITORING_CONFIGURATION = monitoring_paths.RECOVERY
 
@@ -52,7 +52,7 @@ def dataset(value):
             'component.backup-consistency')
 
 
-def application(value, storage):
+def application(value, storage, *, adapter=None):
     """Every declared storage role has exactly one explicit disposition."""
     closed(value, ('include', 'exclude'), ('configuration',))
     includes, excludes = named(value['include']), named(value['exclude'])
@@ -62,6 +62,12 @@ def application(value, storage):
         checked(dataset, row, 'include', role)
     require(all(row in EXCLUSIONS for row in excludes.values()),
             'component.backup-exclusion')
+    for role, reason in excludes.items():
+        if reason == 'external-recordings':
+            require(adapter == 'scrypted' and role == 'recordings'
+                    and storage[role].get('target') == '/nvr'
+                    and storage[role].get('kind') == 'directory',
+                    'component.backup-external-recordings')
     for role, row in named(value.get('configuration', {})).items():
         with at('configuration', role):
             closed(row, ('path', 'kind'))
@@ -137,7 +143,7 @@ def bind(resolver):
                 definition = resolver.library['app_profiles'][app['profile']]
                 require('backup' in definition, 'component.backup-coverage')
                 rule = definition['backup']
-                application(rule, definition.get('storage', {}))
+                application(rule, definition.get('storage', {}), adapter=app['adapter'])
                 record = {'adapter': app['adapter'], 'storage': {},
                     'configuration': copy.deepcopy(rule.get('configuration', {})),
                     'runtime_files': [str(PurePosixPath(app['runtime_files']['directory']) / leaf)
@@ -177,6 +183,10 @@ def bind(resolver):
                         if kind == 'volumes':
                             require('backup' in root, 'component.backup-authoritative-volume')
                     else:
+                        if rule['exclude'][role] == 'external-recordings':
+                            require(kind == 'root_paths' and binding['subpath'] == ''
+                                    and 'host_bind' in root,
+                                    'component.backup-external-recordings')
                         row.update(include=False, reason=rule['exclude'][role])
                     record['storage'][role] = row
                 for connection, row in app['resolved_connections'].items():

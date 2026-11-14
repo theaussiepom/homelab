@@ -24,6 +24,7 @@ ADAPTERS = {
     'mqtt_explorer': {'services': ('mqtt_explorer', 'explorer_gateway'),
                       'networks': ('explorer',), 'native': ()},
     'music_assistant': {'services': ('music_assistant',), 'networks': (), 'native': ()},
+    'scrypted': {'services': ('scrypted',), 'networks': (), 'native': ()},
     'pegaprox': {'services': ('pegaprox',), 'networks': ('default',), 'native': ()},
     'postgresql': {'services': (), 'networks': (), 'native': ('postgresql',)},
     'zigbee2mqtt': {'services': ('zigbee2mqtt',), 'networks': ('default',), 'native': ()},

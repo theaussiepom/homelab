@@ -107,6 +107,11 @@ def validate(cfg):
     require(path(deployment['runtime_file']) == directory/'component-runtime.json',
             'Bind the actual component runtime input file')
     phases(cfg)
+    if 'recording_mount' in guest:
+        from scrypted_mount import declaration
+        selected = declaration(guest['recording_mount'])
+        require(selected['slot'] == len(guest.get('volumes', {})),
+                'Append recording storage after every managed volume')
     if 'backup' in app:
         import backup_agent
         backup_agent.configuration(cfg)
@@ -150,4 +155,12 @@ def packet(value, inputs):
                     and row['project'] == app['project_name'] and row['compose_file'] == app['project_file']
                     and row['services'] == ordered_services(app),
                     'Bind actual runtime services and file identity')
+    scrypted = [app for app in runtime['applications'].values() if app['adapter'] == 'scrypted']
+    if scrypted or 'recording_mount' in cfg['guest']:
+        mount = cfg['guest'].get('recording_mount')
+        require(len(scrypted) == 1 and isinstance(mount, dict)
+                and scrypted[0]['storage_paths']['recordings']['source'] == mount['path']
+                and scrypted[0]['settings']['recording_mount'] == {
+                    'source': mount['filesystem_source'], 'filesystem': mount['filesystem'],
+                    'root': mount['filesystem_root']}, 'Bind Scrypted to the exact provider recording mount')
     return cfg, directory

@@ -30,6 +30,7 @@ This table describes the framework adapters. It does not establish that every li
 | bitwarden | Compose | Retained only. Verifies the existing environment, installation, database and data identities, and uses the normal declared image. |
 | zigbee2mqtt | Compose | Retained only, with one managed serial coordinator. First-time commissioning is rejected. |
 | music_assistant | Compose host network | Retained only. Requires existing /data, the specified process and listeners, a public HTTPS connection and its own HTTPS origin. |
+| scrypted | Compose host network | Starts prepared local configuration/database and an exact NFS recording bind. Empty installation and automatic restore are unsupported. The startup guard requires software decoding, keeps user0:0 and maps no graphics devices. First guest creation precedes separately authorised NAS bind commissioning; later CD retains its exact mount identity. |
 | pegaprox | Compose | Requires an existing database key and data, plus a trusted private proxy. Does not permit arbitrary backend publication. |
 | winet | Compose | Supports one inverter with the specified existing options and credentials. Arbitrary vendor options are rejected. |
 

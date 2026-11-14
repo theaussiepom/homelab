@@ -192,6 +192,8 @@ jobs:
           node-version: '24.15.0'
       - name: Check preserved Node-RED runtime helpers
         run: node --test --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 --test-coverage-include='**/proxmox/applications/node-red-*.js' proxmox/applications/tests/node-red-*.test.cjs proxmox/applications/tests/mqtt-explorer-startup.test.cjs
+      - name: Check Scrypted software decoder settings
+        run: node --test proxmox/applications/tests/scrypted-datastore.test.js
       - name: Test the current deployment contract and retained runtime components
         run: |
           docker run --rm --platform linux/amd64 --network none --cpus 2 --memory 2g \

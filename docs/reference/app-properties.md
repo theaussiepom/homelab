@@ -13,6 +13,7 @@ Set library defaults in `app_profiles.<id>.properties` and override them in `app
 | mqtt | password_file is optional and must match /mosquitto/config/[A-Za-z0-9_.-]{1,100}, excluding the . and .. filenames. It is required when serving a managed MQTT Explorer account. |
 | mqtt_explorer | connection_name is required: one nonempty line of at most 100 characters. Broker and outpost connections and the app's own HTTPS origin are also required. |
 | music_assistant | Empty object only |
+| scrypted | Empty object only; decoder and NAS admission are fixed adapter checks |
 | mariadb / influxdb | Empty object only |
 
 ## Authentik and Zabbix
@@ -121,6 +122,7 @@ mqtt:
 mqtt_explorer:
   connection_name: Example broker
 music_assistant: {}
+scrypted: {}
 mariadb: {}
 influxdb: {}
 authentik:

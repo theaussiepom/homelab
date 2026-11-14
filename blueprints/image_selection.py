@@ -14,7 +14,7 @@ def image(value):
         "repository": repository,
         "tag": "latest",
         "digest": None,
-    } for repository in ("ghcr.io/bitwarden/lite", "ghcr.io/music-assistant/server")):
+    } for repository in ("ghcr.io/bitwarden/lite", "ghcr.io/music-assistant/server", "ghcr.io/koush/scrypted")):
         return {"image": value["repository"] + ":latest"}
     # A local image ID is a retained private archive selection, never an update.
     if set(value) == {"local_id", "archive", "archive_sha256"}:

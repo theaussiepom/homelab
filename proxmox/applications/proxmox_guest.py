@@ -246,6 +246,11 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
 
     host_devices.check(cfg, operation)
     existing = (work / "terraform.tfstate").is_file()
+    recording_mount = None
+    if 'recording_mount' in cfg['guest']:
+        import scrypted_mount
+        require(existing, 'Create and commission the empty owned guest before selecting Scrypted recordings')
+        recording_mount = scrypted_mount.original(cfg, previous_configuration, work)
     staging = None
     if 'job' in cfg['app'].get('backup', {}):
         import backup_staging
@@ -282,6 +287,10 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
     )
     tofu = ["tofu", "-chdir=" + str(operation / "tofu")]
     log = operation / "infrastructure.log"
+    if recording_mount is not None:
+        guest_trust(cfg, work, persist=False)
+        recording_proof = scrypted_mount.verify(cfg, recording_mount, log,
+            lambda path: api_get(cfg, path), label='before')
     quiet(
         tofu
         + [
@@ -317,12 +326,14 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
         serial_device=cfg["guest"].get("serial_device"),
         protected_guests=cfg['deployment']['protected_guests'],
         ip_filter_slots=ip_filter_slots(cfg['guest']['interfaces']),
-        **({'backup_selection': {row['path']: row['backup'] for row in cfg['guest'].get('volumes', {}).values()}}
+        **({'backup_selection': {**{row['path']: row['backup'] for row in cfg['guest'].get('volumes', {}).values()},
+             **({cfg['guest']['recording_mount']['path']: False} if recording_mount is not None else {})}}
            if 'backup' in cfg['app'] else {}),
         **({'backup_staging': {'path': cfg['app']['backup']['job']['staging']['path'],
             'size': str(cfg['app']['backup']['job']['staging']['size_bytes']//1024**3)+'G',
             'volume': cfg['guest']['storage_id']}}
            if 'job' in cfg['app'].get('backup', {}) else {}),
+        **({'recording_mount': cfg['guest']['recording_mount']} if recording_mount is not None else {}),
     )
     if state_identity is not None:
         from component_generation import plan_identity
@@ -393,6 +404,10 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
                 first=first, label='after', mounts=mounts) == proof,
                 'The declared staging filesystem changed across apply')
     changed = host_devices.attach(cfg, operation) or changed
+    if recording_mount is not None:
+        require(scrypted_mount.verify(cfg, recording_mount, log, lambda path: api_get(cfg, path),
+                                      label='after') == recording_proof,
+                'The recording mount changed across infrastructure reconciliation')
     backup(cfg, work / "terraform.tfstate", "after-ordinary")
     return {
         "changed": changed,

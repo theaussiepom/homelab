@@ -1,4 +1,11 @@
 ---
+- name: Verify Scrypted state and exact recording mount before starting
+  ansible.builtin.command:
+    argv: "{{ scrypted_state.argv }}"
+  changed_when: false
+  no_log: true
+  when: scrypted_state is defined
+
 - name: Verify retained Music state before starting
   ansible.builtin.command:
     argv: "{{ music_state.argv }}"

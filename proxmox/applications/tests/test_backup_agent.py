@@ -32,6 +32,27 @@ def fixture():
 
 
 class BackupAgentTests(unittest.TestCase):
+    def test_nas_recordings_are_explicitly_excluded_without_discarding_local_state(self):
+        cfg = fixture()
+        cfg['deployment']['applications']['app']['adapter'] = 'scrypted'
+        app = cfg['app']['backup']['applications']['app']
+        app['adapter'] = 'scrypted'
+        app['storage']['recordings'] = {
+            'path': '/srv/example/recordings', 'kind': 'directory',
+            'include': False, 'reason': 'external-recordings'}
+        inventory = json.loads(backup_agent.configuration(cfg)['inventory'])
+        self.assertTrue(inventory['applications']['app']['storage']['state']['include'])
+        self.assertEqual(inventory['applications']['app']['storage']['recordings'],
+                         app['storage']['recordings'])
+        for mutate in (
+                lambda a: a.update(adapter='unbound'),
+                lambda a: a['storage'].update(other=a['storage'].pop('recordings')),
+                lambda a: a['storage']['recordings'].update(include=True)):
+            changed = copy.deepcopy(cfg)
+            mutate(changed['app']['backup']['applications']['app'])
+            with self.subTest(mutate=mutate), self.assertRaises(ValueError):
+                backup_agent.configuration(changed)
+
     def test_closed_inventory_renders_without_reading_sources_or_opening_network(self):
         cfg = fixture(); before = copy.deepcopy(cfg)
         value = backup_agent.configuration(cfg)

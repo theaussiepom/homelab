@@ -19,7 +19,7 @@ def props():
         'zabbix': {'database': {'name': 'zabbix', 'user': 'zabbix'}},
         'postgresql': {'client_access': [{'source': {'app': 'identity', 'interface': 'database_interface'},
             'database': 'all', 'user': 'all', 'method': 'scram-sha-256'}]},
-        'mariadb': {}, 'influxdb': {}, 'music_assistant': {},
+        'mariadb': {}, 'influxdb': {}, 'music_assistant': {}, 'scrypted': {},
         'zigbee2mqtt': {'adapter': 'ember', 'mqtt_base_topic': 'home'},
         'traefik': {'dashboard': True, 'provider': {'context': 'lab', 'token_id': 'reader@pve!routes',
             'discovery': {'local_directory': '/example/local/service-discovery',
@@ -103,6 +103,32 @@ class FoundationPropertyTests(unittest.TestCase):
 
 
 class FoundationBindingTests(unittest.TestCase):
+    def test_scrypted_binds_only_its_complete_nas_root_and_local_volume(self):
+        def fixture():
+            r = self.fixture('scrypted')
+            r.apps['application']['storage'] = {'data': {'volume': 'state', 'subpath': 'scrypted'},
+                'recordings': {'root_path': 'recordings', 'subpath': ''}}
+            r.guests['host']['volumes'] = {'state': {'path': '/srv/example/state'}}
+            r.guests['host']['root_paths'] = {'recordings': {'path': '/srv/example/recordings',
+                'host_bind': {'source': '/mnt/example/recordings', 'slot': 1,
+                    'filesystem_source': 'nas.example.invalid:/recordings',
+                    'filesystem': 'nfs4', 'filesystem_root': '/camera'}}}
+            return r
+        r = fixture(); settings.bind(r)
+        self.assertEqual(r.apps['application']['settings'], {'recording_mount': {
+            'source': 'nas.example.invalid:/recordings', 'filesystem': 'nfs4', 'root': '/camera'}})
+        for mutate, error in (
+                (lambda r: r.apps['application'].update(devices={'graphics': 'gpu'}), 'device-unsupported'),
+                (lambda r: r.apps['application']['storage'].pop('data'), 'scrypted-storage'),
+                (lambda r: r.apps['application']['storage'].update(data={'root_path':'other', 'subpath':''}), 'scrypted-storage'),
+                (lambda r: r.apps['application']['storage']['recordings'].update(subpath='camera'), 'scrypted-storage'),
+                (lambda r: r.guests['host']['root_paths']['recordings'].pop('host_bind'), 'scrypted-storage'),
+                (lambda r: r.guests['host']['root_paths'].update(unused={
+                    'path':'/srv/example/unused', 'host_bind':{}}), 'host-bind-owner')):
+            r = fixture(); mutate(r)
+            with self.subTest(error=error), self.assertRaisesRegex(ComponentError, error):
+                settings.bind(r)
+
     def fixture(self, adapter):
         app = {'id': 'application', 'guest': 'host', 'adapter': adapter, 'properties': props()[adapter],
                'interfaces': {'database_interface': {'interface': 'database'}, 'web_interface': {'interface': 'web'}},

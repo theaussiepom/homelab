@@ -32,6 +32,11 @@ def provider_config(plan, guest_id):
     require(len(devices) <= 1, 'component.device-backend')
     if devices:
         selected['serial_device'] = {'path': devices[0]['path']}
+    mounts = [dict(row['host_bind'], path=row['path'])
+              for row in guest.get('root_paths', {}).values() if 'host_bind' in row]
+    require(len(mounts) <= 1, 'component.host-bind-owner')
+    if mounts:
+        selected['recording_mount'] = copy.deepcopy(mounts[0])
     return {'site': {'node': context['node'], 'api_endpoint': context['api_endpoint'].rstrip('/') + '/'},
             'guest': selected,
             'ssh_public_keys': copy.deepcopy(guest.get('ssh_public_keys', context['ssh_public_keys']))}

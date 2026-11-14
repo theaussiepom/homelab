@@ -72,9 +72,10 @@ class ScryptedPreparationTests(unittest.TestCase):
             cfg['preserve'][key] = value
             with self.assertRaises(ValueError): scrypted.review(cfg)
 
-    def test_component_contract_has_no_scrypted_deployment_adapter(self):
-        with self.assertRaisesRegex(ValueError, 'supported independent application adapter'):
-            application_contract.adapter('scrypted')
+    def test_component_adapter_is_separate_from_the_disabled_preparation_review(self):
+        self.assertEqual(application_contract.adapter('scrypted'), {
+            'services': ('scrypted',), 'networks': (), 'native': ()})
+        self.assertIs(scrypted.review(self.cfg)['deployable'], False)
 
     def test_no_runnable_compose_even_when_missing_inputs_are_filled(self):
         cfg = copy.deepcopy(self.cfg)
