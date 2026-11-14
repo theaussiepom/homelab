@@ -5,7 +5,6 @@ and native protocol primitives perform the later protected deployment checks.
 """
 from pathlib import PurePosixPath
 import ipaddress
-from urllib.parse import urlsplit
 import re
 
 import component_native
@@ -227,17 +226,6 @@ def _runtime_file(app, leaf):
     return path+'/'+leaf
 
 
-def _public(app):
-    public=app['resolved_connections']['public'];target=public['target'];origin=app['origin_url']
-    require(public['type']=='https' and target['protocol']=='https' and target['port']==443,'component.health-public')
-    address=_ipv4(target['address']);parsed=urlsplit(origin)
-    require(parsed.scheme=='https' and parsed.hostname and parsed.netloc==parsed.hostname
-            and parsed.path in ('','/') and not parsed.query and not parsed.fragment
-            and '?' not in origin and '#' not in origin,'component.health-public')
-    require(re.fullmatch('[A-Za-z0-9][A-Za-z0-9.-]{0,252}',parsed.hostname),'component.health-public')
-    return origin.rstrip('/'),parsed.hostname,address,public
-
-
 def _curl(*, maximum=15, retry=30, budget=180):
     return ['curl','--retry',str(retry),'--retry-delay','2','--retry-all-errors','--retry-max-time',str(budget),
             '--fail','--silent','--show-error','--max-time',str(maximum)]
@@ -253,11 +241,8 @@ def _traefik(app, compose_file):
 
 
 def _cloudbeaver(app, compose_file):
-    origin,host,address,_=_public(app)
     return [_row('CloudBeaver and authentication gateway',['python3','/opt/homelab-app/cloudbeaver-runtime.py',
-        'health','--config',_runtime_file(app,'cloudbeaver-public.json')],'"cloudbeaver": "passed"'),
-        _row('CloudBeaver HTTPS sign-in redirect',_curl(retry=1200,budget=2250)+['--resolve',host+':443:'+address,
-        '--output','/dev/null','--write-out','%{http_code}',origin+'/'],'302')]
+        'health','--config',_runtime_file(app,'cloudbeaver-public.json')],'"cloudbeaver": "passed"')]
 
 
 def _bitwarden(app, compose_file):
@@ -298,18 +283,14 @@ def _mqtt_explorer(app, compose_file):
 
 
 def _music_assistant(app, compose_file):
-    """Check web and stream roles separately, then the existing HTTPS route."""
+    """Check local web and stream roles; shared CD checks published HTTPS."""
     require(all(any(r.get('protocol')=='tcp' and r.get('namespace')=='host' and r.get('port')==port
                     for r in app['listeners'].values()) for port in (8095,8097)),'component.health-listener')
-    address=_ipv4(app['role_addresses']['web_interface']);origin,host,ingress,public=_public(app)
+    address=_ipv4(app['role_addresses']['web_interface'])
     stream=_ipv4(app['role_addresses'].get('stream_interface',address))
-    source=_ipv4(public.get('source_address'))
-    require(source in app['role_addresses'].values(),'component.health-source')
     code="import socket,urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://"+address+":8095/info',timeout=5).close(); socket.create_connection(('"+stream+"',8097),timeout=3).close(); print('core service only: passed')"
     return [_row('Music Assistant core info and stream listener',_compose_exec(app,compose_file,'music_assistant',
-        'python3','-c',code),'core service only: passed'),
-        _row('Music Assistant HTTPS route',_curl()+['--interface',source,'--resolve',host+':443:'+ingress,
-         origin+'/info'],'server_version')]
+        'python3','-c',code),'core service only: passed')]
 
 
 def _winet(app, compose_file):

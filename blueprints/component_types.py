@@ -393,6 +393,20 @@ def health(value):
     require('source_interface' not in value or identifier(value['source_interface']))
 
 
+def http_check(value):
+    """Optional response expectation on an automatically checked web endpoint."""
+    closed(value, ('path',), ('contains',))
+    path = value['path']
+    require(isinstance(path, str) and 0 < len(path) <= 2048 and path.startswith('/')
+            and not path.startswith('//') and not any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in path)
+            and not any(c in path for c in ('?', '#', '\\', '%'))
+            and not any(part in ('.', '..') for part in path.split('/')), 'component.http-check')
+    if 'contains' in value:
+        marker = value['contains']
+        require(isinstance(marker, str) and 0 < len(marker) <= 256
+                and all(32 <= ord(c) < 127 for c in marker), 'component.http-check')
+
+
 def profile(value):
     closed(value, ('adapter', 'display_name', 'interfaces'),
            ('listeners', 'endpoints', 'storage', 'software', 'runtime', 'authentication',
@@ -426,7 +440,10 @@ def profile(value):
             closed(row, ('internal',))
             require(value['adapter'] == 'traefik' and row['internal'] == 'dashboard')
             continue
-        closed(row, ('listener', 'protocol', 'via'))
+        closed(row, ('listener', 'protocol', 'via'), ('http_check',))
+        if 'http_check' in row:
+            require(row['protocol'] in ('http', 'https'))
+            http_check(row['http_check'])
         require(row['listener'] in value.get('listeners', {}) and row['via'] in value['interfaces']
                 and row['protocol'] in ('http', 'https', 'tcp', 'udp'))
     for key, row in named(value.get('storage', {})).items():

@@ -90,7 +90,7 @@ CloudBeaver requires an HTTPS origin it owns and a selected OIDC configuration. 
 
 ## Music Assistant
 
-Music Assistant requires an explicit `public` HTTPS connection to IPv4 ingress port 443 and an HTTPS origin it owns. Its HTTPS probe binds the connection’s resolved source address, which must belong to a declared app interface role; this can differ from the local web and player addresses. Local web and stream probes still check their own listeners. The separate `health.source_interface` restriction still selects the web role for the local health check; it does not override the public connection’s source. See [connection source selection](connections.md#connection-source-interface).
+Music Assistant checks its local web and stream listeners independently. Published HTTPS routes use the [shared exposure check](exposures.md#https-deployment-checks); the library can declare `http_check: {path: /info, contains: server_version}` on its web endpoint to verify the version response on every alias. The optional `health.source_interface` still selects the physical web role for the local check. No guest-originating HTTPS probe or public-connection source binding is required for readiness.
 
 ## Optional listener selections
 

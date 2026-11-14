@@ -168,32 +168,6 @@
           ],
           "expect": "\"cloudbeaver\": \"passed\"",
           "name": "CloudBeaver and authentication gateway"
-        },
-        {
-          "argv": [
-            "curl",
-            "--retry",
-            "1200",
-            "--retry-delay",
-            "2",
-            "--retry-all-errors",
-            "--retry-max-time",
-            "2250",
-            "--fail",
-            "--silent",
-            "--show-error",
-            "--max-time",
-            "15",
-            "--resolve",
-            "db.example.invalid:443:198.18.40.33",
-            "--output",
-            "/dev/null",
-            "--write-out",
-            "%{http_code}",
-            "https://db.example.invalid/"
-          ],
-          "expect": "302",
-          "name": "CloudBeaver HTTPS sign-in redirect"
         }
       ],
       "guest": {}
@@ -343,30 +317,6 @@
           ],
           "expect": "core service only: passed",
           "name": "Music Assistant core info and stream listener"
-        },
-        {
-          "argv": [
-            "curl",
-            "--retry",
-            "30",
-            "--retry-delay",
-            "2",
-            "--retry-all-errors",
-            "--retry-max-time",
-            "180",
-            "--fail",
-            "--silent",
-            "--show-error",
-            "--max-time",
-            "15",
-            "--interface",
-            "198.19.100.241",
-            "--resolve",
-            "music.example.invalid:443:198.18.40.33",
-            "https://music.example.invalid/info"
-          ],
-          "expect": "server_version",
-          "name": "Music Assistant HTTPS route"
         }
       ],
       "guest": {}

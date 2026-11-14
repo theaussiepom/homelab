@@ -21,7 +21,7 @@ import component_workflows as m
 
 class PlanFake:
     def __init__(self,resolved):
-        self.resolved=copy.deepcopy(resolved);self.site={'secret_sources':{}}
+        self.resolved=copy.deepcopy(resolved);self.site={'secret_sources':{}};self.library={}
         self.snapshot=copy.deepcopy(self.resolved);self.calls=0
     def check(self):
         self.calls+=1

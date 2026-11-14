@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import yaml
 
+import component_https
 import component_secrets
 import component_connections
 from component_plan import RESERVED
@@ -147,7 +148,7 @@ def model(plan):
     plan.check()
     resolved = plan.resolved
     guests, apps = resolved['guests'], resolved['apps']
-    dependencies = resolved['guest_dependencies']
+    dependencies, https_checks = component_https.checks(resolved, plan.site, plan.library)
     require(isinstance(guests, dict) and isinstance(apps, dict), 'component.workflow-plan')
     monitored = resolved.get('monitoring', {}).get('guest')
     planned = resolved['enabled']
@@ -194,7 +195,7 @@ def model(plan):
                 secrets.append('PBS_API_TOKEN')
         result['guests'][guest] = {'name': guest_title,
                                   'needs': ['selection', *(['_backup'] if operational_backup and 'backup' in guests[guest] else []), *dependencies[guest]],
-                                  'phases': phases, 'workflow_secrets': secrets}
+                                  'phases': phases, 'workflow_secrets': secrets, 'https_checks': https_checks[guest]}
     if operational_backup:
         result['backup'] = {'name':'Configure backups', 'needs':['selection'],
                             'environment':'backup', 'workflow_secrets':['PBS_API_TOKEN']}
