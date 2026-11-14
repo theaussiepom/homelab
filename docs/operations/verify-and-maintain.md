@@ -4,7 +4,7 @@ A completed workflow is evidence that its selected phases completed. Establish t
 
 ## Service verification
 
-Choose checks that demonstrate the actual changed behavior. These are review categories, not a generic script that contacts every service.
+Generated CD already runs native readiness and [shared HTTPS exposure checks](../reference/exposures.md#https-deployment-checks). Use additional checks only for changed behaviour those cannot establish, such as authenticated access, data or device operations.
 
 | Intended result | Useful observation | Insufficient on its own |
 | --- | --- | --- |

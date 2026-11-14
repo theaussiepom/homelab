@@ -20,7 +20,7 @@ Canonical paths cannot contain dot or dotdot segments, repeated separators, doll
 | listener.bind | interface, wildcard or loopback | Derives the address; does not accept a raw host override |
 | listener.protocol / port | tcp or udp / integer 1–65535 | Socket collision checks apply |
 | listener.publish | scope, port | guest-interface scope requires an interface role; guest-loopback forbids interface |
-| endpoints.<id> | listener, protocol, via | protocol must be http/https/tcp/udp; listener and interface role must exist |
+| endpoints.<id> | listener, protocol, via; optional http_check | protocol must be http/https/tcp/udp; listener and interface role must exist; [HTTP response expectations](#http-response-expectations) apply only to http/https |
 | endpoints.<id> internal alternative | internal: dashboard | Traefik only; requires an authenticated exposure belonging to that instance |
 
 Maintained app profiles use `<purpose>_interface`, `<purpose>_listener` and `<purpose>_endpoint` to distinguish these namespaces. Guest NIC names such as `primary` keep their own names. A listener references an app interface role; an endpoint references a listener and the app role supplying its address. These names express relationships and do not change bind scope. See [the complete resolution chain](apps.md#instance-interface-role-and-exported-endpoint).
@@ -51,6 +51,20 @@ The library's `images.json` is a named map of image records. A normal record req
 The catalogue parser accepts unpinned-latest records only as exact repository/tag/digest forms for ghcr.io/bitwarden/lite and ghcr.io/music-assistant/server with tag latest and digest null. Catalogue acceptance is structural, not adapter support: the current Bitwarden adapter requires an official immutable digest reference and refuses latest. Music Assistant supports its declared latest selection; that floating policy is not equivalent to an immutable reference.
 
 A custom archive record requires `local_id`, `archive` and `archive_sha256`. `local_id` must be `sha256:` followed by 64 lowercase hexadecimal characters. `archive` must be an absolute path, and `archive_sha256` must contain 64 lowercase hexadecimal characters. This supports a versioned artifact; it does not authorise capturing or upgrading a running image. A site image binding may select only a library record that already uses this exact archive form. Normal registry image versions belong to the library, and an instance cannot replace one with an archive.
+
+## HTTP response expectations
+
+Every HTTP exposure and alias receives a shared HTTPS check during CD. An app profile can optionally set `endpoints.<id>.http_check` to describe its response. This is a reusable endpoint expectation, not an enable flag. Without it, CD requests `/` and requires a nonempty HTTP 200 response after permitted redirects. It uses normal controller DNS and verifies the certificate and hostname. See [HTTPS deployment checks](exposures.md#https-deployment-checks) for scheduling and authentication limits.
+
+| Path | Presence | Type and meaning |
+| --- | --- | --- |
+| `app_profiles.<id>.endpoints.<id>.http_check` | Optional; no null | Closed object, only for an HTTP or HTTPS endpoint backed by a listener. Internal dashboard endpoints retain their existing shape. |
+| `http_check.path` | Required when the object is present | Relative request path, 1–2048 characters, starting with one `/`. Whitespace, control characters, query/fragment delimiters, percent escapes, backslashes and `.`/`..` path segments are rejected. |
+| `http_check.contains` | Optional; no null or empty string | Literal, case-sensitive response text, 1–256 printable ASCII characters. Omission requires only the successful nonempty page. A redirect to the declared identity provider checks its login page instead of applying the application marker there. |
+
+For example, an endpoint exporting a version document can declare `http_check: {path: /info, contains: server_version}`. The compiler carries this expectation with the endpoint reference to every exposure alias. Unknown fields, a missing path, or an expectation on a TCP/UDP endpoint fail source validation; invalid paths or markers report `component.http-check`. The complete [relationship example](../examples/relationships/README.md) supplies the surrounding endpoint/exposure structure; `blueprints/test_component_https.py` compiles that structure with a login-page expectation and tests its refusal on a TCP endpoint.
+
+Changing an expectation changes the read-only acceptance step on subsequent CD. It does not install a service, alter its settings or authenticate a user. Existing profiles need no field to receive the default HTTPS check. Configuration tests prove resolution and refusal; a successful deployed check proves only the unauthenticated browser/API path described above.
 
 ## Health and monitoring
 

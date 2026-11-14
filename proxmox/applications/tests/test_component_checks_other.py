@@ -33,49 +33,34 @@ class BackendUnits(unittest.TestCase):
   self.assertEqual(set(case('traefik')['app']['listeners']),{'http_listener','https_listener'})
 
 class GatewayUnits(unittest.TestCase):
- def test_cloud_uses_selected_runtime_leaf_and_canonical_signin_budget(self):
+ def test_cloud_keeps_local_gateway_check_without_duplicate_route_probe(self):
   v=case('cloudbeaver')
-  with patch.object(h,'_runtime_file',return_value='/opt/homelab-app/runtime/other/cloudbeaver-public.json') as runtime,patch.object(h,'_public',return_value=('https://db.example.invalid','db.example.invalid','198.18.44.9',{})):
+  with patch.object(h,'_runtime_file',return_value='/opt/homelab-app/runtime/other/cloudbeaver-public.json') as runtime:
    r=rows('cloudbeaver',v)
   runtime.assert_called_once_with(v['app'],'cloudbeaver-public.json');self.assertEqual(r[0]['argv'][-1],'/opt/homelab-app/runtime/other/cloudbeaver-public.json')
-  self.assertIn('1200',r[1]['argv']);self.assertIn('2250',r[1]['argv']);self.assertEqual(r[1]['expect'],'302');self.assertNotIn('--location',r[1]['argv'])
+  self.assertEqual(len(r),1);self.assertNotIn('curl',repr(r))
  def test_explorer_uses_installed_path_and_owned_runtime_leaf(self):
   with patch.object(h,'_runtime_file',return_value='/opt/homelab-app/runtime/other/mqtt-explorer-public.json'):
    r=rows('mqtt_explorer')[0]
   self.assertEqual(r['argv'][1],'/usr/local/bin/homelab-mqtt-explorer.py');self.assertEqual(r['argv'][-1],'/opt/homelab-app/runtime/other/mqtt-explorer-public.json')
- def test_public_https_target_and_origin_are_explicit_and_query_free(self):
-  for mutation in ('origin','target'):
-   with self.subTest(mutation=mutation):
-    v=case('cloudbeaver')
-    if mutation=='origin':v['app']['origin_url']+='?'
-    else:v['app']['resolved_connections']['public']['target']['protocol']='http'
-    with self.assertRaises(ComponentError):rows('cloudbeaver',v)
  def test_runtime_path_cannot_escape_selected_runtime_tree(self):
   for path in ('/tmp/elsewhere','/opt/homelab-app/runtime/../other','/opt/homelab-app/runtime/secret\n'):
    v=case('mqtt_explorer');v['app']['identity']['runtime_directory']=path
    with self.subTest(path=path),self.assertRaises(ComponentError):rows('mqtt_explorer',v)
 
 class OwnedHelperUnits(unittest.TestCase):
- def test_music_uses_owned_local_probe_and_declared_source_for_https(self):
-  v=case('music_assistant')
+ def test_music_keeps_both_local_roles_without_requiring_a_public_connection(self):
+  v=case('music_assistant');v['app'].pop('resolved_connections',None);v['app'].pop('origin_url',None)
   with patch.object(h,'_compose_exec',return_value=['OWNED','COMPOSE']) as compose:
    r=rows('music_assistant',v)
-  self.assertEqual(r[0]['argv'],['OWNED','COMPOSE']);self.assertEqual(compose.call_args.args[2:5],('music_assistant','python3','-c'))
-  source=v['app']['role_addresses']['web_interface'];self.assertEqual(r[1]['argv'][r[1]['argv'].index('--interface')+1],source)
-  baseline=rows('music_assistant',v)
+  self.assertEqual(len(r),1);self.assertEqual(r[0]['argv'],['OWNED','COMPOSE'])
+  self.assertEqual(compose.call_args.args[2:5],('music_assistant','python3','-c'))
+  source=v['app']['role_addresses']['web_interface']
   v['app']['role_addresses']['stream_interface']='198.18.100.40'
-  v['app']['resolved_connections']['public']['source_address']='198.18.100.40'
   selected=rows('music_assistant',v)
-  self.assertEqual(selected[1]['argv'][selected[1]['argv'].index('--interface')+1],'198.18.100.40')
-  self.assertEqual(selected[1]['expect'],baseline[1]['expect'])
-  self.assertEqual(selected[1]['argv'][-3:],baseline[1]['argv'][-3:])
   self.assertIn('http://'+source+':8095/info',selected[0]['argv'][-1])
   self.assertIn("'198.18.100.40',8097",selected[0]['argv'][-1])
-  v['app']['resolved_connections']['public']['source_address']='198.18.44.7'
-  with self.assertRaises(ComponentError):rows('music_assistant',v)
-  for invalid in (None,'invalid','198.18.100.40\n','::1'):
-   v['app']['resolved_connections']['public']['source_address']=invalid
-   with self.subTest(source=invalid),self.assertRaises(ComponentError):rows('music_assistant',v)
+  self.assertNotIn('curl',repr(selected))
  def test_winet_uses_selected_project_service_and_bounded_docker_json(self):
   v=case('winet');v['app']['project_name']='other-project';v['app']['identity']['services']['winet']='other-winet';code=rows('winet',v)[0]['argv'][-1]
   self.assertIn('other-project-other-winet-1',code);self.assertIn("len(d)==1",code);self.assertIn("get('Status')=='healthy'",code)
@@ -107,11 +92,11 @@ class OwnedHelperUnits(unittest.TestCase):
    with self.subTest(path=path),self.assertRaises(ValueError):rows('zigbee2mqtt',v)
 
 class PublicMetadataIntegration(unittest.TestCase):
- def test_all_eleven_retained_public_arrays_are_exact_thirteen_rows(self):
+ def test_all_eleven_native_arrays_preserved_after_routed_checks_move_to_cd(self):
   self.assertTrue(DATA['source_is_public_example']);self.assertEqual(len(DATA['cases']),11);total=0
   for name,v in DATA['cases'].items():
    with self.subTest(adapter=name):
     actual=rows(name,v);self.assertEqual(actual,v['expected']);total+=len(actual)
-  self.assertEqual(total,13)
+  self.assertEqual(total,11)
 
 if __name__=='__main__':unittest.main()

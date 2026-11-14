@@ -19,7 +19,7 @@ Use `credential` for an unmanaged endpoint or the supported managed MQTT case. W
 
 Readiness makes execution wait for another app and, when the apps are on different guests, for that guest. Checks reject self-dependencies, cycles, unknown targets and disabled required dependencies. Without readiness, a connection only supplies values; it does not start another app. Communication between guests must match explicit rules on both the source and destination guest. A connection does not grant network access.
 
-A profile can mark a role optional even though the adapter needs it for its generated health checks. CloudBeaver and Music Assistant currently require a `public` HTTPS connection to IPv4 ingress port 443 and an HTTPS origin they own. Music Assistant binds that check to the `public` connection’s resolved source, which can differ from its local web interface; see [Music Assistant source selection](app-properties.md#music-assistant). Resolve **and lower** the complete configuration: check all references and generate the deployment packet. Checking the input shape alone cannot establish that an optional role may be omitted.
+Public HTTPS acceptance comes from the [declared exposures](exposures.md#https-deployment-checks). Music Assistant and CloudBeaver no longer require a `public` connection merely to run their native health checks. Keep a connection when its application actually consumes it; its explicit `readiness` still controls application ordering. Resolve and lower the complete configuration to check the supported combination.
 
 ## Nested references and conditional fields
 

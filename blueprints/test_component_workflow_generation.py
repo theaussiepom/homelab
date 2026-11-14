@@ -26,11 +26,11 @@ def graph():
     empty = lambda ident, title: {'id': ident, 'name': title, 'application': None, 'inputs': {}}
     return {'guest_order': ['store', 'viewer'], 'dependencies': {'store': [], 'viewer': ['store']},
         'monitoring_guest': None, 'guests': {
-            'store': {'name': 'Database', 'needs': ['selection'], 'workflow_secrets': [],
+            'store': {'name': 'Database', 'needs': ['selection'], 'workflow_secrets': [], 'https_checks': [],
                 'phases': [empty('infrastructure', 'Infrastructure'), empty('preparation', 'Prepare'),
                            empty('database', 'Database')]},
             'viewer': {'name': 'Tools', 'needs': ['selection', 'store'],
-                'workflow_secrets': ['EXAMPLE_OIDC_SECRET'], 'phases': [
+                'workflow_secrets': ['EXAMPLE_OIDC_SECRET'], 'https_checks': [], 'phases': [
                     empty('infrastructure', 'Infrastructure'), empty('preparation', 'Prepare'),
                     {'id': 'browser', 'name': 'Database tools', 'application': 'browser',
                      'inputs': {'cloudbeaver_client_secret': {'environment': 'EXAMPLE_CLIENT_SECRET',

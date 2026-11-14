@@ -24,6 +24,8 @@ Expected result: `All component guests compile offline`. The real compiler resol
 | policies.middlewares / address_groups | Explicit selected headers and ordered client ranges |
 | guests.resolver.network_policy | Explicit outpost access, independent of readiness/value references |
 
+The browser profile explicitly selects `http_check: {path: /}` on its web endpoint. This uses the same default root-page check applied to any exposed HTTP endpoint; it does not add a bespoke script. Changing the path to `//outside` is rejected with `component.http-check` during source validation.
+
 The individual [connection](../../reference/connections.md), [exposure](../../reference/exposures.md), [policy](../../reference/policies.md) and [identity/account](../../reference/identity-and-secrets.md) pages explain the fields and refusal cases. Copy the whole directory to a disposable physical path before experimenting. The compiler must reject either of these changes: adding `credential` beside `account` on the broker connection, or duplicating the exposure's domain in its aliases.
 
 ## First installation and later deployments
