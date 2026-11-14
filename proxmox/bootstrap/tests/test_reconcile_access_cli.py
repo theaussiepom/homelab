@@ -15,7 +15,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import host_access
 import reconcile_access as cli
-from test_reconcile_access import ReconcileTests
+import test_reconcile_access as cases
 
 
 class AccessCommandTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class AccessCommandTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.work = self.root / 'access'
         self.path = self.root / 'request.json'
-        self.case = ReconcileTests()
+        self.case = cases.ReconcileTests()
         self.case.setUp()
         original = self.case.request
         fields = ['node', 'vmid', 'storage_id', 'template_storage', 'bridge', 'guest_mac', 'applications']
