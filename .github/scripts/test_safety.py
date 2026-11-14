@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Behavioural tests against disposable repositories; never push anything."""
 import importlib.util
+import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -114,6 +116,117 @@ class SafetyTests(unittest.TestCase):
         result = self.check(base)
         self.assertEqual(result['commits_checked'], 1)
         self.assertEqual(result['head_files'], 2)
+
+    def digest_history(self, text=None):
+        """Invented integrity metadata deliberately exercises default rules."""
+        text = text or 'key_sha256 = "' + hashlib.sha256(b'synthetic vendor key').hexdigest() + '"\n'
+        revision = self.commit('settings.txt', text)
+        with self.assertRaises(safety.guard.Blocked) as blocked:
+            safety.scan_tree(self.root, revision, self.scanner)
+        self.assertEqual(blocked.exception.reason, 'secret_pattern_findings')
+        entries = [dict(finding, sha256=hashlib.sha256(text.encode()).hexdigest(),
+                        reason='Reviewed synthetic integrity digest')
+                   for finding in blocked.exception.findings]
+        self.git('rm', '-q', 'settings.txt')
+        self.git('commit', '-qm', 'Remove obsolete fixture')
+        return entries, text, revision
+
+    def test_committed_head_review_clears_exact_historical_finding_without_index_changes(self):
+        entries, _, _ = self.digest_history()
+        self.commit(safety.guard.REVIEW_FILE, json.dumps(entries))
+        before = (self.root / '.git/index').read_bytes()
+        self.assertEqual(self.check()['status'], 'passed')
+        self.assertEqual((self.root / '.git/index').read_bytes(), before)
+
+    def test_historical_review_does_not_approve_changed_file_bytes(self):
+        entries, text, _ = self.digest_history()
+        self.commit('settings.txt', text + '# changed bytes\n')
+        self.git('rm', '-q', 'settings.txt')
+        self.git('commit', '-qm', 'Remove changed fixture')
+        self.commit(safety.guard.REVIEW_FILE, json.dumps(entries))
+        self.assert_blocked('secret_pattern_findings')
+
+    def test_historical_review_does_not_approve_other_findings_in_same_file(self):
+        text = ''.join('key_sha256 = "' + hashlib.sha256(label).hexdigest() + '"\n'
+                       for label in (b'first synthetic key', b'second synthetic key'))
+        entries, _, _ = self.digest_history(text)
+        self.assertGreater(len(entries), 1)
+        self.commit(safety.guard.REVIEW_FILE, json.dumps(entries[:1]))
+        self.assert_blocked('secret_pattern_findings')
+
+    def test_real_transient_secret_still_blocks_with_unrelated_digest_review(self):
+        entries, _, _ = self.digest_history()
+        self.commit('transient.txt', 'token = ' + 'ghp_' + 'AbCd1234' * 5 + '\n')
+        self.git('rm', '-q', 'transient.txt')
+        self.git('commit', '-qm', 'Remove transient fixture')
+        self.commit(safety.guard.REVIEW_FILE, json.dumps(entries))
+        self.assert_blocked('secret_pattern_findings')
+
+    def test_uncommitted_head_review_is_never_used(self):
+        entries, _, _ = self.digest_history()
+        self.commit(safety.guard.REVIEW_FILE, '[]')
+        (self.root / safety.guard.REVIEW_FILE).write_text(json.dumps(entries))
+        self.git('add', safety.guard.REVIEW_FILE)
+        self.assert_blocked('secret_pattern_findings')
+
+    def test_malformed_committed_review_and_historical_review_both_block(self):
+        self.commit()
+        valid_head = self.git('rev-parse', 'HEAD')
+        for text in ('{}', '[{}]', '[', '[null]', ''):
+            with self.subTest(text=text):
+                self.commit(safety.guard.REVIEW_FILE, text)
+                with self.assertRaises(safety.guard.Blocked):
+                    self.check(valid_head)
+        # A later valid head manifest must not replace malformed old policy.
+        self.commit(safety.guard.REVIEW_FILE, '[]')
+        with self.assertRaises(safety.guard.Blocked):
+            self.check(valid_head)
+
+    def test_historical_manifest_content_is_still_secret_scanned(self):
+        entry = {'path': 'fixture.txt', 'sha256': 'a' * 64,
+                 'rule': 'synthetic', 'line': 1,
+                 'reason': 'token = ' + 'ghp_' + 'AbCd1234' * 5}
+        self.commit(safety.guard.REVIEW_FILE, json.dumps([entry]))
+        self.commit(safety.guard.REVIEW_FILE, '[]')
+        self.assert_blocked('secret_pattern_findings')
+
+    def test_historical_ignore_policy_is_not_replaced_by_head_policy(self):
+        self.commit('.gitignore', 'blocked.txt\n')
+        self.commit('blocked.txt', 'ordinary fixture\n')
+        self.git('rm', '-q', 'blocked.txt')
+        self.commit('.gitignore', '')
+        self.assert_blocked('staged_ignore_rule_excludes_file')
+
+    def test_combined_review_manifest_limit_is_not_doubled(self):
+        def entries(prefix):
+            return [{'path': prefix + str(i), 'sha256': 'a' * 64,
+                     'rule': 'synthetic', 'line': 1, 'reason': 'Synthetic review'}
+                    for i in range(100)]
+        self.commit(safety.guard.REVIEW_FILE, json.dumps(entries('old')))
+        self.commit(safety.guard.REVIEW_FILE, json.dumps(entries('new')))
+        self.assert_blocked('invalid_reviewed_findings')
+
+    def test_head_manifest_symlink_and_oversize_are_refused(self):
+        self.commit()
+        (self.root / '.githooks').mkdir()
+        (self.root / safety.guard.REVIEW_FILE).symlink_to('../README.md')
+        self.git('add', safety.guard.REVIEW_FILE)
+        self.git('commit', '-qm', 'Synthetic linked policy')
+        self.assert_blocked('unsupported_policy_file_mode')
+        self.git('rm', '-q', safety.guard.REVIEW_FILE)
+        self.commit(safety.guard.REVIEW_FILE, ' ' * (safety.guard.MAX_FILE_BYTES + 1))
+        self.assert_blocked('file_size_limit')
+
+    def test_additional_review_bytes_count_towards_the_existing_total_limit(self):
+        for number in range(8):
+            (self.root / f'bounded-{number}.txt').write_bytes(b'x' * safety.guard.MAX_FILE_BYTES)
+        self.git('add', '.')
+        self.git('commit', '-qm', 'Synthetic maximum-sized snapshot')
+        historical = self.git('rev-parse', 'HEAD')
+        head = self.commit(safety.guard.REVIEW_FILE, '[]')
+        with self.assertRaises(safety.guard.Blocked) as blocked:
+            safety.scan_tree(self.root, historical, self.scanner, review_head=head)
+        self.assertEqual(blocked.exception.reason, 'total_size_limit')
 
     def test_invalid_revision_cannot_be_an_option(self):
         self.commit()
