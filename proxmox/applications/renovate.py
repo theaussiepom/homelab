@@ -51,3 +51,15 @@ def secrets(values):
     require(re.fullmatch(r'base64://[A-Za-z0-9+/]+={0,2}', result['MEND_RNV_GITHUB_APP_KEY']),
             'Supply the GitHub App PEM as a base64:// scalar')
     return result
+
+
+def preserve_storage(previous, current):
+    """Adding an explicit first database is supported; replacing one is not."""
+    if previous['adapter'] == 'renovate':
+        require(current['adapter'] == 'renovate'
+                and previous['settings']['database'] == current['settings']['database'],
+                'Preserve the owned Renovate database connection; no automatic relocation')
+    if previous['adapter'] == 'postgresql' and 'application_database' in previous.get('settings', {}):
+        require(current['adapter'] == 'postgresql'
+                and previous['settings']['application_database'] == current.get('settings', {}).get('application_database'),
+                'Preserve the owned application database, role and consumer')

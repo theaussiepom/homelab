@@ -88,6 +88,27 @@ class RenovateRuntime(unittest.TestCase):
                        {'user': 'postgres'}, {'user': 'x;drop'}, {'user': None}):
             with self.assertRaises(ValueError): component_native._clients([dict(row, **change)])
 
+    def test_existing_database_names_and_producer_bindings_cannot_be_replaced(self):
+        old = app(); renovate.preserve_storage(old, copy.deepcopy(old))
+        for field in ('name','user','host','port'):
+            changed = copy.deepcopy(old); changed['settings']['database'][field] = 'different'
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'Preserve the owned'):
+                renovate.preserve_storage(old, changed)
+        with self.assertRaises(ValueError): renovate.preserve_storage(old, dict(old, adapter='unbound'))
+        before = {'adapter':'postgresql', 'settings':{}}
+        owner = {'name':'updates','user':'updates','consumer':'renovate','source_vmid':818}
+        after = {'adapter':'postgresql','settings':{'application_database':owner}}
+        renovate.preserve_storage(before, after)
+        renovate.preserve_storage(after, copy.deepcopy(after))
+        for changed in (before, dict(after, adapter='unbound'),
+                {'adapter':'postgresql','settings':{'application_database':dict(owner, name='replacement')}},
+                {'adapter':'postgresql','settings':{'application_database':dict(owner, user='replacement')}},
+                {'adapter':'postgresql','settings':{'application_database':dict(owner, consumer='other')}},
+                {'adapter':'postgresql','settings':{'application_database':dict(owner, source_vmid=999)}}):
+            with self.assertRaisesRegex(ValueError, 'Preserve the owned'):
+                renovate.preserve_storage(after, changed)
+        renovate.preserve_storage({'adapter':'unbound'}, {'adapter':'unbound'})
+
     def test_create_once_storage_tasks_reject_foreign_state_and_never_rotate_or_drop(self):
         root = Path(component_prepare.__file__).parent
         raw = (root/'ansible/tasks/application-database.yml').read_text()
