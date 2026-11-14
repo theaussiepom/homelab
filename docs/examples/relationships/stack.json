@@ -151,7 +151,10 @@
         "web_endpoint": {
           "listener": "web_listener",
           "protocol": "http",
-          "via": "web_interface"
+          "via": "web_interface",
+          "http_check": {
+            "path": "/"
+          }
         }
       },
       "connections": {

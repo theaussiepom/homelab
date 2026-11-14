@@ -402,6 +402,8 @@ class Resolver:
                 require(('udp' if endpoint['protocol'] == 'udp' else 'tcp') == listener['protocol'])
                 self.endpoints[('app', name, endpoint_id)] = {'address': address, 'port': port,
                     'protocol': endpoint['protocol'], 'guest': app['guest'], 'app': name}
+                if 'http_check' in endpoint:
+                    self.endpoints[('app', name, endpoint_id)]['http_check'] = copy.deepcopy(endpoint['http_check'])
 
     def endpoint(self, reference):
         types.endpoint(reference)

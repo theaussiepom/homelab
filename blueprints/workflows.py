@@ -257,6 +257,11 @@ def models(stack, *, site_source, disabled=None):
                 'timeout-minutes': recipe['timeout-minutes'],
                 'with': dict(guest=guest, phase=phase['id'], disabled='${{ inputs.disabled }}',
                              **{name: '${{ secrets.' + name + ' }}' for name in COMMON_SECRETS}, **scoped)})
+        if metadata['https_checks']:
+            job['steps'].append({'name': 'HTTPS endpoints', 'timeout-minutes': 15,
+                'env': {'DISABLED': '${{ inputs.disabled }}'},
+                'run': '"$HOMELAB_CONFIG_PYTHON" framework-source/blueprints/check_https.py '
+                       '--stack stack-source --site-root . --guest ' + guest + ' --disabled "$DISABLED"'})
         workflow['jobs']['deploy'] = job
         result['guest-' + guest + '.yml'] = workflow
     result['phase.yml'] = {'name': 'Guest phase', 'on': workflow_call(phase=True),

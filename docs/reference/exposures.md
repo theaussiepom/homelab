@@ -47,7 +47,7 @@ ingress:
 tls: public
 ```
 
-This complete source file requires the `browser` web and `ingress` HTTPS endpoints, `domains.browser` and TLS policy `public: {type: acme, resolver: letsencrypt}`. It does not add readiness dependencies or general firewall rules. To use named `default-headers` and `ip-allow-list` middleware, declare both policies and add `middlewares: [headers, office_only]`. The main and alias hostnames belong to this exposure, allowing its app to select the corresponding origin.
+This complete source file requires the `browser` web and `ingress` HTTPS endpoints, `domains.browser` and TLS policy `public: {type: acme, resolver: letsencrypt}`. It does not add application-start dependencies or general firewall rules. Generated CD waits for its producers before checking HTTPS, as described below. To use named `default-headers` and `ip-allow-list` middleware, declare both policies and add `middlewares: [headers, office_only]`. The main and alias hostnames belong to this exposure, allowing its app to select the corresponding origin.
 
 **Invalid variation:** repeat `browser` in `aliases`, or select a missing TLS policy. The exposure binder rejects both; declaring a domain alone does not create a valid public route.
 
@@ -65,3 +65,15 @@ Unselected Compose services or private data are not deleted by removing an expos
 The [exposure binder](../../blueprints/component_exposures.py) checks name, ingress, transport and origin relationships. [Reference example tests](../../blueprints/test_component_reference_examples.py) check the exact route fragment within the complete configuration and reject the intended alias and TLS errors. They do not contact a public endpoint.
 
 [Reference index](README.md) · [Policies](policies.md)
+
+## HTTPS deployment checks
+
+CD automatically checks every `type: http` exposure, including aliases and external backends, from the deployment controller. DNS-only exposures do not get an HTTP request. Each guest still runs its native readiness checks; the shared HTTPS step additionally verifies controller DNS resolution, trusted TLS/hostname and an HTTP 200 page. An optional [profile endpoint expectation](supporting-types.md#http-response-expectations) selects a path and response marker. Forward-auth routes must reach their declared identity frontend. Other redirects stay within the route's declared origins, canonical alias destination or configured identity provider. These checks do not log in, exercise user permissions or prove an integration works.
+
+The generator derives prerequisites from the target, ingress, declared DNS resolver and authentication relationships. It places checks in the latest prerequisite guest job and adds only edges to earlier prerequisites in a stable topological ordering. For example, DNS can deploy before ingress; its web check runs in the ingress job after both exist. An SSO-protected ingress dashboard can be checked in the later identity job. There is no final aggregate job and no artificial dependency based on a Proxmox label. Explicit application readiness remains a separate contract. Disabled target guests are skipped; disabling a required producer for an enabled route refuses generation with `component.https-disabled-dependency`.
+
+The same procedure applies to first installation and updates. The controller must resolve and reach the configured frontend and trust its certificate; the checker does not bypass DNS, firewall policy or certificate verification. An external forward-auth service needs a declared identity-provider origin; otherwise generation refuses with `component.https-auth-origin`. Certificate-only retained SAML bindings can use the configured Authentik origins. Unsupported redirect destinations fail instead of widening trust automatically.
+
+Checks make only unauthenticated GET requests. They allow at most six requests per redirect chain, ten seconds per request and one MiB per response. Failed endpoints receive at most six attempts with five seconds between rounds; the generated step has a fifteen-minute timeout. Failure keeps the deployment unsuccessful and reports exposure identifiers without response bodies or redirect query strings. It does not restart applications, retry mutations or undo completed deployment phases. Fix the demonstrated cause through the normal source/deployment process.
+
+The old Music Assistant and CloudBeaver adapter-specific public route probes are replaced by this shared step. Their local service and gateway checks remain. See `blueprints/test_component_https.py` for graph, alias, redirect, TLS-client and failure tests; those local tests do not establish target-environment acceptance.
