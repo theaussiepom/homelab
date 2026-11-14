@@ -44,6 +44,24 @@ inputs:
   pegaprox_database_key:
     description: Existing scoped credential
     required: false
+  postgresql_application_database_password:
+    description: Existing scoped credential
+    required: false
+  renovate_accept_terms:
+    description: Existing scoped credential
+    required: false
+  renovate_database_password:
+    description: Existing scoped credential
+    required: false
+  renovate_github_app_id:
+    description: Existing scoped credential
+    required: false
+  renovate_github_app_key:
+    description: Existing scoped credential
+    required: false
+  renovate_license_key:
+    description: Existing scoped credential
+    required: false
   traefik_cloudflare_dns_token:
     description: Existing scoped credential
     required: false
@@ -77,8 +95,9 @@ runs:
       GUEST: ${{ inputs.guest }}
       PHASE: ${{ inputs.phase }}
       DISABLED: ${{ inputs.disabled }}
-    run: "umask 077\n\"$HOMELAB_CONFIG_PYTHON\" framework-source/blueprints/compile.py --stack stack-source --site-root .\
-      \ \\\n  --guest \"$GUEST\" --disabled \"$DISABLED\" --admit \\\n  --output \"$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json\"\
+    run: "umask 077\n\"$HOMELAB_CONFIG_PYTHON\" framework-source/blueprints/compile.py\
+      \ --stack stack-source --site-root . \\\n  --guest \"$GUEST\" --disabled \"\
+      $DISABLED\" --admit \\\n  --output \"$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json\"\
       \n"
     shell: bash
   - name: Load credentials
@@ -93,27 +112,53 @@ runs:
     env:
       GUEST: ${{ inputs.guest }}
       PHASE: ${{ inputs.phase }}
-      PBS_API_TOKEN: ${{ inputs.phase == 'pbs-agent' && inputs.PBS_API_TOKEN || '' }}
-      HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD: ${{ inputs.authentik_postgresql_password }}
+      PBS_API_TOKEN: ${{ inputs.phase == 'pbs-agent' && inputs.PBS_API_TOKEN || ''
+        }}
+      HOMELAB_APP_SECRET_POSTGRESQL_APPLICATION_DATABASE_PASSWORD: ${{ inputs.postgresql_application_database_password
+        }}
+      HOMELAB_APP_SECRET_RENOVATE_ACCEPT_TERMS: ${{ inputs.renovate_accept_terms }}
+      HOMELAB_APP_SECRET_RENOVATE_DATABASE_PASSWORD: ${{ inputs.renovate_database_password
+        }}
+      HOMELAB_APP_SECRET_RENOVATE_GITHUB_APP_ID: ${{ inputs.renovate_github_app_id
+        }}
+      HOMELAB_APP_SECRET_RENOVATE_GITHUB_APP_KEY: ${{ inputs.renovate_github_app_key
+        }}
+      HOMELAB_APP_SECRET_RENOVATE_LICENSE_KEY: ${{ inputs.renovate_license_key }}
+      HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD: ${{ inputs.authentik_postgresql_password
+        }}
       HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY: ${{ inputs.authentik_secret_key }}
-      HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD: ${{ inputs.authentik_smtp_password }}
-      HOMELAB_APP_SECRET_BITWARDEN_RUNTIME_ENVIRONMENT: ${{ inputs.bitwarden_runtime_environment }}
-      HOMELAB_APP_SECRET_CLOUDBEAVER_CLIENT_SECRET: ${{ inputs.cloudbeaver_client_secret }}
-      HOMELAB_APP_SECRET_MQTT_EXPLORER_BROKER_PASSWORD: ${{ inputs.mqtt_explorer_broker_password }}
+      HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD: ${{ inputs.authentik_smtp_password
+        }}
+      HOMELAB_APP_SECRET_BITWARDEN_RUNTIME_ENVIRONMENT: ${{ inputs.bitwarden_runtime_environment
+        }}
+      HOMELAB_APP_SECRET_CLOUDBEAVER_CLIENT_SECRET: ${{ inputs.cloudbeaver_client_secret
+        }}
+      HOMELAB_APP_SECRET_MQTT_EXPLORER_BROKER_PASSWORD: ${{ inputs.mqtt_explorer_broker_password
+        }}
       HOMELAB_APP_SECRET_MQTT_PROBE: ${{ inputs.mqtt_probe }}
       HOMELAB_APP_SECRET_NODE_RED_API_TOKEN: ${{ inputs.node_red_api_token }}
       HOMELAB_APP_SECRET_PEGAPROX_DATABASE_KEY: ${{ inputs.pegaprox_database_key }}
-      HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_DNS_TOKEN: ${{ inputs.traefik_cloudflare_dns_token }}
-      HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_ORIGIN_TOKEN: ${{ inputs.traefik_cloudflare_origin_token }}
+      HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_DNS_TOKEN: ${{ inputs.traefik_cloudflare_dns_token
+        }}
+      HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_ORIGIN_TOKEN: ${{ inputs.traefik_cloudflare_origin_token
+        }}
       HOMELAB_APP_SECRET_TRAEFIK_PROXMOX_TOKEN: ${{ inputs.traefik_proxmox_token }}
       HOMELAB_APP_SECRET_WINET_OPTIONS: ${{ inputs.winet_options }}
-      HOMELAB_APP_SECRET_ZABBIX_DATABASE_PASSWORD: ${{ inputs.zabbix_database_password }}
-    run: "if [ -z \"${PBS_API_TOKEN:-}\" ]; then unset PBS_API_TOKEN; fi\n# Elide only absent optional action defaults; preserve\
-      \ every supplied value.\nfor app_secret_slot in HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY\
-      \ HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD HOMELAB_APP_SECRET_BITWARDEN_RUNTIME_ENVIRONMENT HOMELAB_APP_SECRET_CLOUDBEAVER_CLIENT_SECRET\
-      \ HOMELAB_APP_SECRET_MQTT_EXPLORER_BROKER_PASSWORD HOMELAB_APP_SECRET_MQTT_PROBE HOMELAB_APP_SECRET_NODE_RED_API_TOKEN\
-      \ HOMELAB_APP_SECRET_PEGAPROX_DATABASE_KEY HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_DNS_TOKEN HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_ORIGIN_TOKEN\
-      \ HOMELAB_APP_SECRET_TRAEFIK_PROXMOX_TOKEN HOMELAB_APP_SECRET_WINET_OPTIONS HOMELAB_APP_SECRET_ZABBIX_DATABASE_PASSWORD;\
-      \ do\n  if [ -z \"${!app_secret_slot}\" ]; then unset \"$app_secret_slot\"; fi\ndone\nexec python3 framework-source/proxmox/applications/deploy.py\
-      \ --phase \"$PHASE\" --packet \"$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json\"\n"
+      HOMELAB_APP_SECRET_ZABBIX_DATABASE_PASSWORD: ${{ inputs.zabbix_database_password
+        }}
+    run: "if [ -z \"${PBS_API_TOKEN:-}\" ]; then unset PBS_API_TOKEN; fi\n# Elide\
+      \ only absent optional action defaults; preserve every supplied value.\nfor\
+      \ app_secret_slot in HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY\
+      \ HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD HOMELAB_APP_SECRET_BITWARDEN_RUNTIME_ENVIRONMENT\
+      \ HOMELAB_APP_SECRET_CLOUDBEAVER_CLIENT_SECRET HOMELAB_APP_SECRET_MQTT_EXPLORER_BROKER_PASSWORD\
+      \ HOMELAB_APP_SECRET_MQTT_PROBE HOMELAB_APP_SECRET_NODE_RED_API_TOKEN HOMELAB_APP_SECRET_PEGAPROX_DATABASE_KEY\
+      \ HOMELAB_APP_SECRET_POSTGRESQL_APPLICATION_DATABASE_PASSWORD HOMELAB_APP_SECRET_RENOVATE_ACCEPT_TERMS\
+      \ HOMELAB_APP_SECRET_RENOVATE_DATABASE_PASSWORD HOMELAB_APP_SECRET_RENOVATE_GITHUB_APP_ID\
+      \ HOMELAB_APP_SECRET_RENOVATE_GITHUB_APP_KEY HOMELAB_APP_SECRET_RENOVATE_LICENSE_KEY\
+      \ HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_DNS_TOKEN HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_ORIGIN_TOKEN\
+      \ HOMELAB_APP_SECRET_TRAEFIK_PROXMOX_TOKEN HOMELAB_APP_SECRET_WINET_OPTIONS\
+      \ HOMELAB_APP_SECRET_ZABBIX_DATABASE_PASSWORD; do\n  if [ -z \"${!app_secret_slot}\"\
+      \ ]; then unset \"$app_secret_slot\"; fi\ndone\nexec python3 framework-source/proxmox/applications/deploy.py\
+      \ --phase \"$PHASE\" --packet \"$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json\"\
+      \n"
     shell: bash

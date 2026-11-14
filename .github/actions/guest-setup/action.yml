@@ -74,7 +74,8 @@ runs:
 
       python3 -m venv "$job_tools"
 
-      "$job_tools/bin/python" -m pip --isolated install --disable-pip-version-check --require-hashes --no-deps -r framework-source/requirements.lock.txt
+      "$job_tools/bin/python" -m pip --isolated install --disable-pip-version-check
+      --require-hashes --no-deps -r framework-source/requirements.lock.txt
 
       "$job_tools/bin/ansible-playbook" --version
 

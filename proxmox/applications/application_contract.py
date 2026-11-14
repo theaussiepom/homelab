@@ -6,6 +6,7 @@ maps supply persistent runtime names; no site allocation belongs in this table.
 import re
 
 ADAPTERS = {
+    'renovate': {'services': ('renovate',), 'networks': ('default',), 'native': ()},
     'homeassistant': {'services': ('homeassistant',), 'networks': (), 'native': ()},
     'node_red': {'services': ('node_red',), 'networks': (), 'native': ()},
     'bitwarden': {'services': ('bitwarden',), 'networks': ('default',), 'native': ()},

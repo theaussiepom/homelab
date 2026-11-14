@@ -3,6 +3,7 @@ import json
 from pathlib import Path,PurePosixPath
 
 import component_generation
+import renovate
 from component_payload import AppPayload
 from private_io import read_json, require, sha
 from application_contract import adapter
@@ -79,4 +80,5 @@ def prior(attempt, app):
     old_app = read_json(payload.directory/'application.json', private=True)
     require(identity(old_cfg, old_app) == identity(attempt.cfg, app),
             'App storage or runtime ownership changed; no automatic relocation or adoption')
+    renovate.preserve_storage(old_app, app)
     return True

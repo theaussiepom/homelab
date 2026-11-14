@@ -24,6 +24,7 @@ This table describes the framework adapters. It does not establish that every li
 | authentik | Compose server/worker/Redis | Requires an existing database and private inputs. Supports the specific optional callback-update procedure; selecting the app does not commission an IdP. |
 | traefik | Compose | Requires declared ACME, provider and runtime settings, with the necessary trust files and tokens prepared. |
 | zabbix | Compose server/web | Ordinary preparation requires the credentials and files managed by root monitoring. Database and authentication prerequisites and explicit placement also apply. |
+| renovate | Compose bridge | Fresh CE server with an explicitly owned PostgreSQL database and protected App/licence/terms inputs. No public listener or Enterprise Web UI. Source tests do not prove scans or recovery; see [Renovate](renovate.md). |
 | postgresql | Native packages/systemd | Requires the specified version and verified ownership of data, listeners and accounts. Supports ordinary updates; generating native configuration does not prove first-time database commissioning. |
 | mariadb | Native packages/systemd | Checks the package account, existing data and credentials. Does not automatically import resources or rotate credentials. |
 | influxdb | Native packages/systemd | Requires the fixed native account and ownership of data and configuration. Does not automatically create organizations or buckets. |

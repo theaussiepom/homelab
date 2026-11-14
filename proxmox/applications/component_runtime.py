@@ -719,7 +719,24 @@ def _traefik(app, guest):
     return {'traefik': service}
 
 
-HANDLERS = {'unbound': _unbound, 'pihole': _pihole, 'music_assistant': _music_assistant, 'scrypted': _scrypted, 'homeassistant': _homeassistant, 'mqtt': _mqtt, 'authentik': _authentik, 'cloudbeaver': _cloudbeaver, 'mqtt_explorer': _mqtt_explorer, 'zabbix': _zabbix, 'node_red': _node_red, 'winet': _winet, 'zigbee2mqtt': _zigbee2mqtt,
+def _renovate(app, guest):
+    import renovate
+    require(app['lifecycle'] in ('fresh', 'retained') and not app['listeners'],
+            'Run Mend CE scheduled scans without a published listener')
+    settings = app['containers']['renovate']
+    require(settings.get('user') == '12021:12021' and settings.get('cap_drop') == ['ALL']
+            and settings.get('no_new_privileges') is True and settings.get('read_only') is True
+            and not settings.get('cap_add'),
+            'Preserve the unprivileged Mend CE runtime')
+    service = _service(app, 'renovate', guest)
+    require(service['image'].startswith('ghcr.io/mend/renovate-ce:'), 'Select the Mend CE server image')
+    require(set(app['storage_paths']) == {'scratch', 'cache'}, 'Bind both writable Mend CE cache paths')
+    service['volumes'] = _mounts(app, {'scratch': '/tmp', 'cache': '/opt/containerbase'})
+    service['environment'].update(renovate.environment(app))
+    return {'renovate': service}
+
+
+HANDLERS = {'renovate': _renovate, 'unbound': _unbound, 'pihole': _pihole, 'music_assistant': _music_assistant, 'scrypted': _scrypted, 'homeassistant': _homeassistant, 'mqtt': _mqtt, 'authentik': _authentik, 'cloudbeaver': _cloudbeaver, 'mqtt_explorer': _mqtt_explorer, 'zabbix': _zabbix, 'node_red': _node_red, 'winet': _winet, 'zigbee2mqtt': _zigbee2mqtt,
             'bitwarden': _bitwarden, 'pegaprox': _pegaprox, 'traefik': _traefik}
 
 

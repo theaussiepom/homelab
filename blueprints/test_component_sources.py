@@ -24,7 +24,7 @@ class SourcesTests(unittest.TestCase):
         return path
 
     def test_independent_adapters_have_no_fixed_guest_layout(self):
-        self.assertEqual(len(component_adapters.ADAPTERS), 19)
+        self.assertEqual(len(component_adapters.ADAPTERS), 20)
         self.assertEqual(component_adapters.adapter('pihole')['services'], ('pihole',))
         self.assertEqual(component_adapters.adapter('unbound')['services'], ('unbound',))
         self.assertEqual(component_adapters.adapter('mqtt')['services'], ('mqtt',))

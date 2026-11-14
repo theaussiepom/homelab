@@ -2,6 +2,10 @@
 
 Set library defaults in `app_profiles.<id>.properties` and override them in `apps.<id>.properties`. The compiler merges these objects by direct key, then checks the result against the selected adapter's fields below. An omitted optional property has no effect unless its reference states a default. Unknown properties are rejected.
 
+## Renovate and owned application databases
+
+The `renovate` adapter requires `database: {name, user}` and `repositories`. PostgreSQL optionally accepts `application_database: {app: renovate_instance}` to own that consumer's dedicated database and role. The [complete Renovate contract](renovate.md) defines every field, secret, dependency, first-installation refusal and later-update behavior. No database is implicitly created by a connection alone.
+
 ## Network and home adapters
 
 | Adapter | Fields and constraints |
@@ -141,6 +145,9 @@ zabbix:
   database:
     name: example_monitoring
     user: example_monitoring
+renovate:
+  database: {name: updates, user: updates}
+  repositories: [example-owner/example-repository]
 postgresql:
   client_access:
     - source:

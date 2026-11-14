@@ -28,6 +28,7 @@ import component_traffic
 import component_monitoring
 import component_admission
 import component_accounts
+import component_renovate
 import component_addresses
 import component_backup
 from component_adapters import adapter
@@ -640,6 +641,7 @@ class Resolver:
         component_foundations.bind(self)
         for app_id, settings in component_properties.bind(self).items():
             self.apps[app_id]['settings'] = settings
+        component_renovate.bind(self)
         canonical_accounts = component_accounts.bind(self, dependencies['accounts'])
         component_identity.bind(self)
         monitoring = component_monitoring.bind(self, exposure)

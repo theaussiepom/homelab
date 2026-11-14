@@ -339,7 +339,14 @@ def _zigbee2mqtt(app, compose_file):
                  component_app_hooks.zigbee_argv(app, 'health'), '"healthy": true')]
 
 
-HANDLERS.update({'authentik':_authentik,'traefik':_traefik,'cloudbeaver':_cloudbeaver,'bitwarden':_bitwarden,
+def _renovate(app, compose_file):
+    return [_row('Mend CE scheduler health', ['docker', 'compose', '-f', compose_file, 'exec', '-T',
+        app['identity']['services']['renovate'], 'curl', '--fail', '--silent', '--show-error',
+        '--retry', '30', '--retry-all-errors', '--retry-delay', '2', '--retry-max-time', '180',
+        '--max-time', '10', 'http://127.0.0.1:8080/health'], '')]
+
+
+HANDLERS.update({'renovate':_renovate,'authentik':_authentik,'traefik':_traefik,'cloudbeaver':_cloudbeaver,'bitwarden':_bitwarden,
           'pegaprox':_pegaprox,'zabbix':_zabbix,'mqtt':_mqtt,'mqtt_explorer':_mqtt_explorer,
           'music_assistant':_music_assistant,'scrypted':_scrypted,'winet':_winet,'zigbee2mqtt':_zigbee2mqtt})
 ADAPTERS.update(HANDLERS)
