@@ -58,7 +58,7 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
             attempt.begin_infrastructure()
             result=proxmox_guest.infrastructure(cfg,site,attempt.work,attempt.operation,expected,
                 **({'previous_configuration': attempt.previous_configuration}
-                   if 'job' in cfg['app'].get('backup', {}) else {}),
+                   if 'job' in cfg['app'].get('backup', {}) or 'recording_mount' in cfg['guest'] else {}),
                 **({'state_identity':attempt.custody_identity} if attempt.custody_identity is not None else {}))
             attempt.infrastructure_complete(result)
         else:

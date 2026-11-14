@@ -39,6 +39,20 @@ def guest():
 
 
 class DirectSmallTypesTests(unittest.TestCase):
+ def test_nas_recording_root_accepts_only_exact_closed_mount_metadata(self):
+  value={'path':'/srv/recordings','host_bind':{'source':'/mnt/example/recordings','slot':1,'filesystem_source':'nas.example.invalid:/recordings','filesystem':'nfs4','filesystem_root':'/'}}
+  types.root_path(value);types.storage_layout({'data':{'slot':0,'path':'/srv/state'}},{'nvr':value})
+  for field,items in {'source':['/etc/secret','/mnt/a,mp=/sys','/mnt/a b'],'slot':[True,-1,256],'filesystem':['ext4'],'filesystem_source':['not-nfs','nas:/a,ro','nas:/a\n'],'filesystem_root':['relative','/../root','/a b']}.items():
+   for item in items:
+    broken=copy.deepcopy(value);broken['host_bind'][field]=item
+    with self.subTest(field=field,value=item),self.assertRaises(ComponentError):types.root_path(broken)
+  broken=copy.deepcopy(value);broken['host_bind']['unknown']=True
+  with self.assertRaises(ComponentError):types.root_path(broken)
+  for field in value['host_bind']:
+   broken=copy.deepcopy(value);broken['host_bind'].pop(field)
+   with self.subTest(missing=field),self.assertRaises(ComponentError):types.root_path(broken)
+  with self.assertRaisesRegex(ComponentError,'storage-slot'):types.storage_layout({'data':{'slot':1,'path':'/srv/state'}},{'nvr':value})
+
  def bad(self,fn,values):
   for index,value in enumerate(values):
    with self.subTest(case=index),self.assertRaises(ComponentError)as caught:fn(copy.deepcopy(value))

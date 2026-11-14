@@ -24,7 +24,7 @@ from private_io import encoded, read_json, regular, require
 
 # Further adapters install their fixed owned file generator here. A rendered
 # preview is not permission to execute an incomplete private input path.
-SUPPORTED = {'renovate', 'unbound', 'pihole', 'homeassistant', 'node_red', 'music_assistant',
+SUPPORTED = {'renovate', 'unbound', 'pihole', 'homeassistant', 'node_red', 'music_assistant', 'scrypted',
              'postgresql', 'mariadb', 'influxdb', 'bitwarden', 'pegaprox', 'winet',
              'cloudbeaver', 'mqtt_explorer', 'authentik', 'mqtt', 'traefik', 'zabbix','zigbee2mqtt'}
 

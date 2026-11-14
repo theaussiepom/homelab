@@ -37,6 +37,20 @@ def app(adapter='node_red',*,guest='one',native=False,name='selected'):
 
 
 class LowerComponentTests(unittest.TestCase):
+    def test_recording_mount_is_a_separate_exact_append_after_managed_volumes(self):
+        plan=fixture(); guest=plan.resolved['guests']['one']
+        value={'source':'/mnt/example/recordings','slot':2,
+            'filesystem_source':'nas.example.invalid:/recordings',
+            'filesystem':'nfs4','filesystem_root':'/camera'}
+        guest['root_paths']['recordings']={'path':'/srv/recordings','host_bind':value}
+        result=lower.provider_config(plan,'one')['guest']
+        self.assertEqual(result['recording_mount'],dict(value,path='/srv/recordings'))
+        self.assertEqual(result['volume_order'],['data','later'])
+        result['recording_mount']['source']='/changed'
+        self.assertEqual(value['source'],'/mnt/example/recordings')
+        guest['root_paths']['other']={'path':'/srv/other','host_bind':copy.deepcopy(value)}
+        with self.assertRaisesRegex(ComponentError,'host-bind-owner'):lower.provider_config(plan,'one')
+
     def test_provider_fields_keep_slot_order_device_scope_and_explicit_ssh_override(self):
         plan=fixture();first=lower.provider_config(plan,'one')
         self.assertEqual(first['guest']['volume_order'],['data','later'])

@@ -213,12 +213,28 @@ def volume(value):
 
 
 def root_path(value):
-    closed(value, ('path',))
+    closed(value, ('path',), ('host_bind',))
     checked(data_path, value['path'], 'path')
+    if 'host_bind' in value:
+        row = closed(value['host_bind'], ('source', 'slot', 'filesystem_source', 'filesystem', 'filesystem_root'))
+        checked(data_path, row['source'], 'host_bind', 'source')
+        require(all(re.fullmatch(r'/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*', item)
+                    for item in (value['path'], row['source']))
+                and row['source'].startswith('/mnt/') and value['path'].startswith('/srv/'),
+                'component.host-bind-path')
+        checked(integer, row['slot'], 'host_bind', 'slot', minimum=0, maximum=255)
+        require(row['filesystem'] in ('nfs', 'nfs4'), 'component.host-bind-filesystem')
+        text(row['filesystem_source'])
+        require(re.fullmatch(r'[A-Za-z0-9_.-]+:/(?:[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)?',
+                             row['filesystem_source']), 'component.host-bind-source')
+        checked(path, row['filesystem_root'], 'host_bind', 'filesystem_root')
+        require(re.fullmatch(r'/(?:[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)?', row['filesystem_root']),
+                'component.host-bind-path')
 
 
 def storage_layout(volumes, roots):
-    slots = [row['slot'] for row in volumes.values()]
+    slots = [row['slot'] for row in volumes.values()] + [
+        row['host_bind']['slot'] for row in roots.values() if 'host_bind' in row]
     require(len(set(slots)) == len(slots), 'component.storage-slot')
     paths = [PurePosixPath(row['path']) for row in [*volumes.values(), *roots.values()]]
     for index, selected in enumerate(paths):
@@ -439,7 +455,7 @@ def profile(value):
         reference(value['monitoring'])
     if 'backup' in value:
         from component_backup import application
-        application(value['backup'], value.get('storage', {}))
+        application(value['backup'], value.get('storage', {}), adapter=value['adapter'])
     from component_foundations import OWNED, validate
     if value['adapter'] in OWNED:
         validate(value['adapter'], value.get('properties', {}), partial=True)

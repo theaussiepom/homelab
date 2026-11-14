@@ -53,7 +53,7 @@ def check_identity(root, rev):
             if '<' + OWN_EMAIL + '>' not in line:
                 raise guard.Blocked('maintainer_trailer_email_mismatch')
 
-def scan_tree(root, rev, scanner):
+def scan_tree(root, rev, scanner, review_head=None):
     objects = Path(os.fsdecode(git(root, 'rev-parse', '--git-path', 'objects').strip()))
     if not objects.is_absolute():
         objects = (Path(root) / objects).resolve()
@@ -69,10 +69,13 @@ def scan_tree(root, rev, scanner):
         (scratch / '.git/objects/info/alternates').write_text(str(objects) + '\n')
         env.update(GIT_NO_REPLACE_OBJECTS='1', GITLEAKS_BIN=str(scanner))
         git(scratch, 'read-tree', rev, env=env)
-        # Run the unchanged staged guard in the isolated process environment.
-        # An inherited scanner override cannot silently replace this pin.
+        # Preserve the historical index/policies; additional exact-finding
+        # reviews are read independently from the resolved scan-head commit.
+        command = [sys.executable, str(ROOT / '.githooks/staged_guard.py')]
+        if review_head is not None:
+            command += ['--review-head', review_head]
         completed = subprocess.run(
-            [sys.executable, str(ROOT / '.githooks/staged_guard.py')],
+            command,
             cwd=scratch, env=env, capture_output=True, timeout=8)
         result = json.loads(completed.stdout)
         if completed.returncode or result.get('status') != 'passed':
@@ -98,7 +101,7 @@ def run(root, head, base, scanner):
         check_identity(root, rev)
         tree = git(root, 'rev-parse', rev + '^{tree}').decode().strip()
         if tree not in trees:
-            trees[tree] = scan_tree(root, rev, scanner)
+            trees[tree] = scan_tree(root, rev, scanner, review_head=head)
         results.append({'commit': rev, 'tree': tree, **trees[tree]})
     return {'status': 'passed', 'commits_checked': len(revisions),
             'unique_trees_checked': len(trees), 'head_files': results[-1]['scanned_files'],

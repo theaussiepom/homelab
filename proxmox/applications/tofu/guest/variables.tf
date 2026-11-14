@@ -18,13 +18,24 @@ variable "guest" {
       bridge  = string, vlan = optional(number), mac = string, ipv4 = string,
       gateway = optional(string), ipv6 = optional(string), ip_filter = optional(bool, false)
     })),
-    volumes      = map(object({ path = string, size_gib = number, backup = optional(bool, true) })),
-    volume_order = optional(list(string)),
+    volumes         = map(object({ path = string, size_gib = number, backup = optional(bool, true) })),
+    volume_order    = optional(list(string)),
+    recording_mount = optional(object({ source = string, path = string, slot = number })),
     rules = list(object({
       direction = string, proto = string, port = optional(string),
       source    = optional(string), destination = optional(string), comment = string, interface = optional(string)
     }))
   })
+  validation {
+    condition = var.guest.recording_mount == null ? true : (
+      var.guest.recording_mount.slot == length(var.guest.volumes) &&
+      can(regex("^/mnt/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$", var.guest.recording_mount.source)) &&
+      can(regex("^/srv/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$", var.guest.recording_mount.path)) &&
+      alltrue([for item in split("/", var.guest.recording_mount.source) : !contains([".", ".."], item)]) &&
+      alltrue([for item in split("/", var.guest.recording_mount.path) : !contains([".", ".."], item)])
+    )
+    error_message = "Append only the declared literal NFS recording bind after all managed volumes."
+  }
   validation {
     condition     = var.guest.started
     error_message = "Deploy active guests."

@@ -1,0 +1,42 @@
+{
+  "schema": "homelab-scrypted-preparation-v1",
+  "enabled": false,
+  "selected_image": "example.invalid/scrypted:latest",
+  "decoder_decision": "unresolved",
+  "preserve": {
+    "server_volume_target": "/server/volume",
+    "nvr_target": "/nvr",
+    "numeric_user": "0:0",
+    "configuration": [
+      "plugins",
+      "cameras",
+      "nvr",
+      "credentials",
+      "recording-paths"
+    ]
+  },
+  "limits": {
+    "guest": {
+      "cpus": 6,
+      "memory_mib": 5120
+    },
+    "container": {
+      "cpus": 4,
+      "memory_mib": 4096,
+      "pids": 512
+    },
+    "logs": {
+      "max_size_mib": 10,
+      "max_files": 3
+    }
+  },
+  "inputs": {
+    "image_qualification_reference": null,
+    "frozen_capture_sha256": null,
+    "nvr_mount_contract": null,
+    "guest_profile": null,
+    "trust_reference": null,
+    "recovery_reference": null,
+    "exclusive_writer_evidence": null
+  }
+}

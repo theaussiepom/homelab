@@ -63,6 +63,9 @@ def _validate_mounts(service):
 
 def _image(selected, adapter):
     value = selected.get('image')
+    if value == 'ghcr.io/koush/scrypted:latest':
+        require(adapter == 'scrypted', 'Keep the declared latest image policy')
+        return value, 'always'
     if value == 'ghcr.io/music-assistant/server:latest':
         require(adapter == 'music_assistant', 'Keep the declared latest image policy')
         return value, 'always'
@@ -289,6 +292,48 @@ def _pihole(app, guest):
                 'Bind Pi-hole web only to its selected web role')
         service['environment']['FTLCONF_webserver_port'] = address + ':80'
     return {'pihole': service}
+
+
+def _scrypted(app, guest):
+    require(not app.get('devices') and not app.get('properties', {}).get('devices'),
+            'Scrypted software qualification has no graphics-device passthrough')
+    require(set(app.get('storage_paths', {})) == {'data', 'recordings'},
+            'Preserve both Scrypted state and recording bindings')
+    sources = [PurePosixPath(_mount_path(app['storage_paths'][role]['source']))
+               for role in ('data', 'recordings')]
+    require(all(str(path) != '/' for path in sources) and sources[0] != sources[1]
+            and sources[0] not in sources[1].parents and sources[1] not in sources[0].parents,
+            'Keep Scrypted configuration and recordings in separate nonroot directories')
+    for role, target in (('data', '/server/volume'), ('recordings', '/nvr')):
+        row = app['storage_paths'][role]
+        require(row['target'] == target and row['kind'] == 'directory'
+                and row['read_only'] is False, 'Preserve writable Scrypted container paths')
+    service = _service(app, 'scrypted', guest)
+    require(service['image'] == 'ghcr.io/koush/scrypted:latest',
+            'Preserve the selected unpinned Scrypted image')
+    require(set(app['containers']['scrypted']) == {'memory_mib', 'cpu_limit', 'pids_limit', 'user'}
+            and app['containers']['scrypted']['user'] == '0:0',
+            'Preserve the Scrypted process identity and bounded resources')
+    service.update(network_mode='host', user='0:0', restart='no',
+                   memswap_limit=service['mem_limit'],
+                   hostname=_name(app['identity']['runtime_id']),
+                   container_name=_name(app['identity']['runtime_id']))
+    service['environment'].update(SCRYPTED_NVR_VOLUME='/nvr', SCRYPTED_DOCKER_AVAHI='true',
+                                  SCRYPTED_INSECURE_PORT='80', SCRYPTED_SECURE_PORT='443')
+    # Retain /init and the upstream server command. Only the settings guard
+    # runs first; it loads Level, never an NVR/plugin or graphics module.
+    service['command'] = ['/bin/sh', '-ec',
+        'node /opt/homelab-app/scrypted-datastore.js verify; '
+        'ulimit -c 0; exec npm --prefix /server exec scrypted-serve']
+    service['volumes'] = [
+        {'type': 'bind', 'source': _mount_path(app['storage_paths'][role]['source']),
+         'target': target, 'read_only': False, 'bind': {'create_host_path': False}}
+        for role, target in (('data', '/server/volume'), ('recordings', '/nvr'))]
+    service['volumes'].append({'type': 'bind',
+        'source': '/opt/homelab-app/scrypted-datastore.js',
+        'target': '/opt/homelab-app/scrypted-datastore.js', 'read_only': True,
+        'bind': {'create_host_path': False}})
+    return {'scrypted': service}
 
 
 def _music_assistant(app, guest):
@@ -691,7 +736,7 @@ def _renovate(app, guest):
     return {'renovate': service}
 
 
-HANDLERS = {'renovate': _renovate, 'unbound': _unbound, 'pihole': _pihole, 'music_assistant': _music_assistant, 'homeassistant': _homeassistant, 'mqtt': _mqtt, 'authentik': _authentik, 'cloudbeaver': _cloudbeaver, 'mqtt_explorer': _mqtt_explorer, 'zabbix': _zabbix, 'node_red': _node_red, 'winet': _winet, 'zigbee2mqtt': _zigbee2mqtt,
+HANDLERS = {'renovate': _renovate, 'unbound': _unbound, 'pihole': _pihole, 'music_assistant': _music_assistant, 'scrypted': _scrypted, 'homeassistant': _homeassistant, 'mqtt': _mqtt, 'authentik': _authentik, 'cloudbeaver': _cloudbeaver, 'mqtt_explorer': _mqtt_explorer, 'zabbix': _zabbix, 'node_red': _node_red, 'winet': _winet, 'zigbee2mqtt': _zigbee2mqtt,
             'bitwarden': _bitwarden, 'pegaprox': _pegaprox, 'traefik': _traefik}
 
 

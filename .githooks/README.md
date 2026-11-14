@@ -68,6 +68,8 @@ The scanner uses a private mode-`0700` temporary snapshot. Normal completion or 
 
 Reviewed exceptions in `reviewed-findings.json` bind one **path, full-file SHA-256, rule and line**, with a reason. Changing the file invalidates its exception. The guard reads exceptions from the index, so unstaged edits cannot alter the proposed commit's checks. No blanket directory/rule suppression is an acceptable way to get a pass.
 
+CI also reads additional historical reviews from that file at the resolved scan-head commit. It keeps scanning every original historical tree, including its original manifest and ignore policies. Both manifests must be valid; an exact reviewed finding never approves another finding in the same file. Uncommitted review edits and environment-selected review files are not used.
+
 ## What has actually been verified?
 
 Run the regression checks from the repository root:

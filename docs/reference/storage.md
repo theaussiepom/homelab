@@ -23,7 +23,27 @@ Volume paths match `/srv/<lowercase-name>[/...]` or `/var/lib/mysql`, `/var/lib/
 
 ## Guest root paths
 
-`guests.<id>.root_paths.<id>` contains exactly one required field, `path`. The general absolute data-path and overlap checks above apply, but the declaration does not allocate another provider volume. App bindings resolve their paths relative to the selected root. Editing the declaration does not move data on the target.
+`guests.<id>.root_paths.<id>` requires `path` and optionally accepts the closed `host_bind` object below. The general absolute data-path and overlap checks above apply. A root without `host_bind` does not allocate another provider volume. App bindings resolve their paths relative to the selected root. Editing a declaration does not move data on the target.
+
+### NFS recording bind
+
+Only Scrypted's complete `recordings` root binding may select `host_bind`. Exactly one Scrypted app must own it, with `subpath: ''`; it cannot be an unused mount or another app's storage. No field has a default, and omitted, null, empty or unknown fields are rejected. The target `path` must be a literal directory below `/srv/`. Source and target path segments accept letters, digits, `_`, `-` and `.`, excluding `.` and `..` segments, whitespace and option separators.
+
+| Field under `host_bind` | Type / accepted value | Effect |
+| --- | --- | --- |
+| `source` | Absolute directory below `/mnt/` | Exact existing host NFS subdirectory exposed to the guest |
+| `slot` | Integer 0–255, equal to the number of managed guest volumes | Append the bind after every managed volume, with no gaps or collisions |
+| `filesystem_source` | Literal DNS/IPv4 host plus `:/export/path` | Exact expected NFS source from the guest's mount view; no whitespace or mount options |
+| `filesystem` | `nfs` or `nfs4` | Exact filesystem type required before starting the writer |
+| `filesystem_root` | Literal absolute path, including `/` | Exact directory within the exported filesystem; path segments follow the literal restrictions above |
+
+The compiler derives one `guest.recording_mount` for the provider and the app's storage guard from this declaration. OpenTofu keeps the bind writable, with `backup=false` and `replicate=false`; PBS captures the separately classified local Scrypted state. NAS recordings are persistent external data and are not part of that capture.
+
+First create the guest and its local volumes through normal CD without selecting the recording bind or Scrypted app. The pinned provider and API-token authentication cannot attach an absolute host path through ordinary CD. A separately authorised commissioning operation must attach the exact declared bind and prepare the local Scrypted state. This exception is limited to work that CD cannot perform; it does not authorise recurring host changes. Review the host, guest identity, complete earlier mount sequence, NAS source, absent destination slot and source data before that operation.
+
+Subsequent CD requires the genuine prior guest success and refuses an existing undeclared bind in its prior backend. It admits only the exact newly appended native mount after matching the whole active mount sequence and a read-only guest NFS check. Pending mount changes, different options, replacement, earlier-volume changes and unknown mount identities remain refusals. CD then records the append in its existing OpenTofu state, with no state editing or ignored mount drift. Ordinary repeat deployments preserve that exact identity and recheck the NAS before and after infrastructure reconciliation and before application start. A missing NAS mount never creates a local recording fallback.
+
+See the library's complete Scrypted example and recovery classification. These source and runtime checks do not prove usable cameras, decoding, recording continuity, NAS capacity or an independent recording backup.
 
 ## Profile storage roles
 

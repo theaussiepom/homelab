@@ -90,7 +90,7 @@ def refresh_values(value):
 
 
 def owned_resource_drift(rows, changes, node, vmid, serial_device, *, backup_selection=None,
-                         backup_staging=None, resources=None):
+                         backup_staging=None, recording_mount=None, resources=None):
     """Retain ownership evidence without vetoing mutable current-to-target updates."""
     if rows is None or rows == []:
         return True
@@ -131,7 +131,7 @@ def owned_resource_drift(rows, changes, node, vmid, serial_device, *, backup_sel
         old, new = refresh_values(before), refresh_values(after)
         if not all(
             declared_backup_drift(old.get(field), new.get(field),
-                                 backup_selection, backup_staging, vmid)
+                                 backup_selection, backup_staging, vmid, recording_mount=recording_mount)
             if field == 'mount_point' else old.get(field) == new.get(field)
             for field in IMMUTABLE_GUEST_FIELDS
         ):
@@ -177,10 +177,17 @@ def prepared_staging_mount(row, selected, vmid):
     return staging_mount(dict(row, volume=selected.get('volume')), selected)
 
 
-def declared_backup_drift(before, after, selection, staging, vmid):
+def declared_backup_drift(before, after, selection, staging, vmid, *, recording_mount=None):
     """Reconcile only declared metadata and one identity-verified staging append."""
     if before == after:
         return True
+    if recording_mount is not None:
+        from scrypted_mount import provider_row
+        if (isinstance(before, list) and isinstance(after, list)
+                and len(after) == len(before) + 1
+                and recording_mount['slot'] == len(before)
+                and provider_row(after[-1], recording_mount)):
+            return before == after[:-1]
     if (not isinstance(staging, dict) or not isinstance(selection, dict) or not isinstance(after, list)
             or selection.get(staging.get('path')) is not False
             or sum(prepared_staging_mount(row, staging, vmid) for row in after) != 1):
@@ -242,7 +249,7 @@ def fresh_mount_unknowns(after, unknown):
 
 
 def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=None,
-               backup_selection=None, backup_staging=None, ip_filter_slots=()):
+               backup_selection=None, backup_staging=None, recording_mount=None, ip_filter_slots=()):
     """Validate the exact saved plan under an explicit backend custody decision."""
     require(type(existing) is bool, "Select creation or reconciliation explicitly")
     protected = protected_guests
@@ -316,6 +323,14 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
                         'Only create a missing selected IP filter')
                 continue
         if row["address"] == "module.guest.proxmox_virtual_environment_container.guest":
+            if recording_mount is not None:
+                from scrypted_mount import declaration, provider_row
+                declaration(recording_mount)
+                mounts = after.get('mount_point')
+                require(existing and isinstance(mounts, list)
+                        and len(mounts) == recording_mount['slot'] + 1
+                        and provider_row(mounts[-1], recording_mount),
+                        'Commission the exact recording bind on an already owned guest first')
             require(
                 after.get("started", True) is True
                 and not has_unknown(unknown.get("started")),
@@ -364,5 +379,6 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
             )
     require(owned_resource_drift(value.get('resource_drift'), rows, node, vmid, serial_device,
                                 backup_selection=backup_selection, backup_staging=backup_staging,
+                                recording_mount=recording_mount,
                                 resources=resources),
             'Preserve owned resource identities, immutable data and complete refreshed evidence')

@@ -31,15 +31,17 @@ def configuration(cfg):
             path(selected)
         require(isinstance(app['storage'], dict) and isinstance(app['databases'], list),
                 'Preserve the closed PBS storage and database inventory')
-        for row in app['storage'].values():
+        for role, row in app['storage'].items():
             require(isinstance(row, dict) and row.get('kind') in ('file', 'directory')
                     and type(row.get('include')) is bool,
                     'Preserve the PBS dataset classification')
             path(row['path'])
             if 'reason' in row:
                 require(set(row) == {'path', 'kind', 'include', 'reason'} and row['include'] is False
-                        and row['reason'] in ('transient', 'rebuildable'),
-                        'Exclude only explicitly classified non-authoritative data')
+                        and (row['reason'] in ('transient', 'rebuildable')
+                             or row['reason'] == 'external-recordings'
+                             and app['adapter'] == 'scrypted' and role == 'recordings'),
+                        'Exclude only explicitly classified data or the Scrypted NAS recording store')
             else:
                 require(set(row) == {'path', 'kind', 'include', 'category', 'capture'}
                         and row['category'] in ('configuration', 'state', 'database')

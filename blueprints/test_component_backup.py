@@ -47,6 +47,37 @@ def fixture():
 
 
 class BackupUnits(unittest.TestCase):
+    def test_external_recordings_require_scrypted_nvr_and_an_exact_host_bind(self):
+        def scrypted_fixture():
+            r = fixture()
+            definition = r.library['app_profiles']['example']
+            definition['storage']['recordings'] = {'kind': 'directory', 'target': '/nvr'}
+            definition['backup']['exclude']['recordings'] = 'external-recordings'
+            app = r.apps['application']; app['adapter'] = 'scrypted'
+            app['storage']['recordings'] = {'root_path': 'recordings', 'subpath': ''}
+            r.guests['one']['root_paths']['recordings'] = {
+                'path': '/srv/recordings', 'host_bind': {
+                    'source': '/mnt/example/recordings', 'slot': 2,
+                    'filesystem_source': 'nas.example.invalid:/recordings',
+                    'filesystem': 'nfs4', 'filesystem_root': '/'}}
+            return r
+        r = scrypted_fixture()
+        backup.bind(r)
+        row = r.guests['one']['backup']['applications']['application']['storage']
+        self.assertEqual(row['recordings'], {'path': '/srv/recordings', 'kind': 'directory',
+            'include': False, 'reason': 'external-recordings'})
+        self.assertEqual(row['data']['capture'], 'application-export')
+        for mutate in (
+                lambda r: r.apps['application'].update(adapter='unbound'),
+                lambda r: r.library['app_profiles']['example']['storage']['recordings'].update(target='/other'),
+                lambda r: r.library['app_profiles']['example']['storage']['recordings'].update(kind='file'),
+                lambda r: r.apps['application']['storage']['recordings'].update(subpath='nested'),
+                lambda r: r.apps['application']['storage'].update(recordings={'volume': 'data', 'subpath': 'recordings'}),
+                lambda r: r.guests['one']['root_paths']['recordings'].pop('host_bind')):
+            r = scrypted_fixture(); mutate(r)
+            with self.subTest(mutate=mutate), self.assertRaisesRegex(ComponentError, 'external-recordings'):
+                backup.bind(r)
+
     def test_root_is_shared_and_mixed_guests_remain_independent(self):
         r = fixture(); r.guests['empty'].pop('backup')
         r.guests['empty']['software_selection']['packages'] = []

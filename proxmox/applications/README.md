@@ -1,5 +1,8 @@
 # Application deployment
 
+[Scrypted preparation](SCRYPTED.md) remains a disabled, local review helper.
+It emits no deployment packet; decoder and recording-source decisions remain open.
+
 The component compiler produces a guest packet: a file containing the generated deployment inputs. It includes ordered phases, provider inputs, app identities, project filenames and health checks, and accepts only the fields defined by its contract. Start with [component configuration](../../docs/components.md) and [testing](../../docs/testing.md). The earlier API for fixed guest bundles remains available at its original source revisions. This revision does not translate that source or migrate its state, receipts, credentials or data.
 
 | Boundary | Owner |

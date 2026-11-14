@@ -57,6 +57,12 @@ class SafetyEdges(unittest.TestCase):
             safety.resolve(Path("."), "untrusted/ref")
         command.assert_not_called()
 
+    def test_review_head_rejects_nonimmutable_input_before_any_git_read(self):
+        check = safety.guard.Check(review_head='HEAD')
+        with patch.object(check, 'git') as command, self.assertRaises(safety.guard.Blocked):
+            check.head_review()
+        command.assert_not_called()
+
     def test_commit_metadata_and_maintainer_trailer_identity_are_exact(self):
         for row in [
             "invalid metadata",

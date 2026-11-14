@@ -2,6 +2,7 @@
 """Offline, bounded checks of changed Git index blobs. Never print source values."""
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -52,10 +53,28 @@ def private_path(path):
     return bool(re.search(r'\.(?:pem|key|p12|pfx|db|sqlite\d*)(?:$|-)|\.tfstate(?:\.|$)|\.tfplan$', name))
 
 
+def reviewed_findings(value):
+    entries = json.loads(value)
+    if not isinstance(entries, list) or len(entries) > 100:
+        raise Blocked('invalid_reviewed_findings')
+    reviewed = set()
+    for item in entries:
+        if (not isinstance(item, dict) or set(item) != {'path', 'sha256', 'rule', 'line', 'reason'}
+                or not isinstance(item['path'], str) or not path_ok(item['path'])
+                or not isinstance(item['sha256'], str) or not re.fullmatch('[a-f0-9]{64}', item['sha256'])
+                or not isinstance(item['rule'], str) or not item['rule']
+                or type(item['line']) is not int or item['line'] < 1
+                or not isinstance(item['reason'], str) or not item['reason'].strip()):
+            raise Blocked('invalid_reviewed_findings')
+        reviewed.add((item['path'], item['sha256'], item['rule'], item['line']))
+    return reviewed
+
+
 class Check:
-    def __init__(self):
+    def __init__(self, review_head=None):
         self.started = time.monotonic()
         self.root = None
+        self.review_head = review_head
         self.env = dict(os.environ, GIT_OPTIONAL_LOCKS='0', GIT_NO_REPLACE_OBJECTS='1')
 
     def run(self, argv, data=None, cwd=None, env=None, allowed=(0,)):
@@ -115,9 +134,26 @@ class Check:
             raise Blocked('unexpected_blob_output')
         return {path: blobs[oid] for path, (_, oid) in entries.items()}
 
+    def head_review(self):
+        """Additional historical reviews come only from one immutable commit."""
+        if self.review_head is None:
+            return None
+        if not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', self.review_head):
+            raise Blocked('invalid_review_revision')
+        raw = self.git('ls-tree', '-z', self.review_head, '--', REVIEW_FILE).stdout
+        if not raw:
+            return None
+        header, name = raw.removesuffix(b'\0').split(b'\t', 1)
+        mode, kind, oid = header.decode('ascii').split()
+        if name != REVIEW_FILE.encode() or kind != 'blob' or mode not in ('100644', '100755'):
+            raise Blocked('unsupported_policy_file_mode', [{'path': REVIEW_FILE}])
+        return self.read_blobs({REVIEW_FILE: (mode, oid)})[REVIEW_FILE]
+
     def scan(self):
         self.root = Path(os.fsdecode(self.git('rev-parse', '--show-toplevel').stdout.strip()))
         before = self.index_bytes()
+        extra_review = self.head_review()
+        extra_reviewed = reviewed_findings(extra_review) if extra_review is not None else set()
         raw = self.git('ls-files', '--stage', '-z').stdout
         index = {}
         for row in raw.split(b'\0'):
@@ -157,6 +193,8 @@ class Check:
             if index[name][0] not in ('100644', '100755'):
                 raise Blocked('unsupported_policy_file_mode', [{'path': name}])
         blobs = self.read_blobs({name: index[name] for name in set(changed) | policy})
+        if sum(map(len, blobs.values())) + len(extra_review or b'') > MAX_TOTAL_BYTES:
+            raise Blocked('total_size_limit')
         for name, value in blobs.items():
             if b'\0' in value:
                 raise Blocked('binary_file_requires_separate_review', [{'path': name}])
@@ -165,20 +203,10 @@ class Check:
             except UnicodeError:
                 raise Blocked('non_utf8_file_requires_separate_review', [{'path': name}]) from None
 
-        reviewed = set()
-        if REVIEW_FILE in blobs:
-            entries = json.loads(blobs[REVIEW_FILE])
-            if not isinstance(entries, list) or len(entries) > 100:
-                raise Blocked('invalid_reviewed_findings')
-            for item in entries:
-                if (not isinstance(item, dict) or set(item) != {'path', 'sha256', 'rule', 'line', 'reason'}
-                        or not isinstance(item['path'], str) or not path_ok(item['path'])
-                        or not isinstance(item['sha256'], str) or not re.fullmatch('[a-f0-9]{64}', item['sha256'])
-                        or not isinstance(item['rule'], str) or not item['rule']
-                        or type(item['line']) is not int or item['line'] < 1
-                        or not isinstance(item['reason'], str) or not item['reason'].strip()):
-                    raise Blocked('invalid_reviewed_findings')
-                reviewed.add((item['path'], item['sha256'], item['rule'], item['line']))
+        reviewed = reviewed_findings(blobs[REVIEW_FILE]) if REVIEW_FILE in blobs else set()
+        reviewed.update(extra_reviewed)
+        if len(reviewed) > 100:
+            raise Blocked('invalid_reviewed_findings')
 
         configured = self.git('config', '--get', 'hooks.gitleaksPath', allowed=(0, 1)).stdout.strip()
         scanner = os.environ.get('GITLEAKS_BIN') or os.fsdecode(configured) or shutil.which('gitleaks')
@@ -249,8 +277,11 @@ class Check:
                 'scanned_bytes': sum(len(blobs[p]) for p in changed), 'reviewed_findings': approved}
 
 
-def main():
-    check = Check()
+def main(argv=()):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--review-head', help='Immutable scan-head commit supplying additional historical reviews')
+    args = parser.parse_args(argv)
+    check = Check(review_head=args.review_head)
     try:
         result = check.scan()
         code = 0
@@ -266,4 +297,4 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

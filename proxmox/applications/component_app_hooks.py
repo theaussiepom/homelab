@@ -1,7 +1,7 @@
-"""Closed lifecycle descriptors for three existing owned application helpers.
+"""Closed lifecycle descriptors for owned application helpers.
 
 This module never executes commands or reads configured files. The component
-Ansible caller installs the fixed helpers, runs Music/Zigbee validation before
+Ansible caller installs the fixed helpers, runs Music/Zigbee/Scrypted validation before
 the selected services start, and runs Pi-hole reconciliation after startup. Only
 Pi-hole's reported changed=true permits its one selected service to restart.
 Zigbee retains the provider's one-coordinator-per-guest capability and the two
@@ -61,6 +61,18 @@ def _music(app, compose_file):
     return {'helpers': [_helper('music_assistant.py')], 'music_state': {'argv': argv}}
 
 
+def _scrypted(app, compose_file):
+    storage = app['storage_paths']
+    require(set(storage) == {'data', 'recordings'}, 'Bind both Scrypted state roles')
+    mount = app['settings']['recording_mount']
+    argv = ['python3', ROOT + 'scrypted_runtime.py',
+            '--data', _mount_path(storage['data']['source']),
+            '--recordings', _mount_path(storage['recordings']['source']),
+            '--source', mount['source'], '--filesystem', mount['filesystem'], '--root', mount['root']]
+    return {'helpers': [_helper('scrypted_runtime.py'), _helper('scrypted-datastore.js')],
+            'scrypted_state': {'argv': argv}}
+
+
 def zigbee_argv(app, mode):
     """Use the existing helper's selected-data option with its fixed receipt."""
     require(mode in ('validate', 'health'), 'Select an existing Zigbee helper mode')
@@ -85,7 +97,7 @@ def _zigbee(app, compose_file):
         'single_coordinator_per_guest': True}}
 
 
-HANDLERS = {'pihole': _pihole, 'music_assistant': _music, 'zigbee2mqtt': _zigbee}
+HANDLERS = {'pihole': _pihole, 'music_assistant': _music, 'zigbee2mqtt': _zigbee, 'scrypted': _scrypted}
 
 
 def descriptors(app, *, compose_file):

@@ -48,8 +48,9 @@ def _native_version(app):
         require(False, 'component.health')
 
 
-def _listener(app, service, port, namespace):
-    selected = [row for row in app.get('listeners', {}).values() if row.get('service') == service]
+def _listener(app, service, port, namespace, *, name=None):
+    selected = [row for key, row in app.get('listeners', {}).items()
+                if row.get('service') == service and (name is None or key == name)]
     require(len(selected) == 1 and selected[0].get('protocol') == 'tcp'
             and selected[0].get('namespace') == namespace and selected[0].get('port') == port
             and 'publish' not in selected[0], 'component.health-listener')
@@ -312,6 +313,18 @@ def _music_assistant(app, compose_file):
          origin+'/info'],'server_version')]
 
 
+def _scrypted(app, compose_file):
+    require(set(app.get('listeners', {})) == {'web_listener', 'secure_listener'},
+            'component.health-listener')
+    _listener(app, 'scrypted', 80, 'host', name='web_listener')
+    _listener(app, 'scrypted', 443, 'host', name='secure_listener')
+    address = _ipv4(app['role_addresses']['web_interface'])
+    return [_row('Scrypted management HTTP responds',
+        _curl(maximum=10, retry=10, budget=60) + ['--output', '/dev/null',
+            '--write-out', 'SCRYPTED_HTTP_READY', 'http://' + address + ':80/'],
+        'SCRYPTED_HTTP_READY')]
+
+
 def _winet(app, compose_file):
     project,service=app['project_name'],app['identity']['services']['winet']
     require(all(isinstance(x,str) and re.fullmatch('[a-z0-9][a-z0-9_-]{0,127}',x) for x in (project,service)),
@@ -335,7 +348,7 @@ def _renovate(app, compose_file):
 
 HANDLERS.update({'renovate':_renovate,'authentik':_authentik,'traefik':_traefik,'cloudbeaver':_cloudbeaver,'bitwarden':_bitwarden,
           'pegaprox':_pegaprox,'zabbix':_zabbix,'mqtt':_mqtt,'mqtt_explorer':_mqtt_explorer,
-          'music_assistant':_music_assistant,'winet':_winet,'zigbee2mqtt':_zigbee2mqtt})
+          'music_assistant':_music_assistant,'scrypted':_scrypted,'winet':_winet,'zigbee2mqtt':_zigbee2mqtt})
 ADAPTERS.update(HANDLERS)
 
 

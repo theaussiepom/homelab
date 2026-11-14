@@ -116,7 +116,7 @@ This is an **app-profile fragment**. The example assumes the profile declares th
 | <a id="backup-application-include"></a>`include` | Named dataset map | Required; may be empty | Storage roles whose recovery material must be retained. |
 | <a id="backup-application-include-category"></a>`include.<role>.category` | String enum | Required | `configuration`, `state` or `database`. |
 | <a id="backup-application-include-capture"></a>`include.<role>.capture` | String enum | Required | `files`, `application-export` or `database-export`. |
-| <a id="backup-application-exclude"></a>`exclude` | Named string map | Required; may be empty | Each excluded role is explicitly `transient` or `rebuildable`. |
+| <a id="backup-application-exclude"></a>`exclude` | Named string map | Required; may be empty | Each excluded role is explicitly `transient` or `rebuildable`. `external-recordings` is reserved for Scrypted's `/nvr` directory on a declared external host bind; a local volume or another app/role is rejected. It excludes recordings from this configuration backup and does not assert an independent recording backup. |
 | <a id="backup-application-configuration"></a>`configuration` | Named path-object map | Optional; default empty | Native settings outside app storage. Each entry uses the path and kind fields below. |
 | <a id="backup-application-configuration-path"></a>`configuration.<id>.path` | Absolute canonical path | Required | Names a specific file or directory under the same [path rules as a backup profile](#backup-profile-configuration-path). |
 | <a id="backup-application-configuration-kind"></a>`configuration.<id>.kind` | String enum | Required | `file` or `directory`, as in a [backup profile](#backup-profile-configuration-kind). |
