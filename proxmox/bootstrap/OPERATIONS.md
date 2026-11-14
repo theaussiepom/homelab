@@ -24,6 +24,69 @@ A timed-out apply first interrupts OpenTofu and gives it up to five minutes to s
 
 ## State locking
 
+### Permission-only updates after bootstrap
+
+Use `bootstrap reconcile-access` when the only bootstrap change is extending an
+existing deployment token to newly declared application resources. It reuses
+`host_access.reconcile`; it does not run NAS setup, runner configuration,
+OpenTofu, guest creation or services. New application guests are still created
+and maintained through protected CD after this access preparation.
+
+Keep the desired request and its receipt workspace outside Git. The complete
+[synthetic access request](access-request.example.json) illustrates the shape;
+replace its invented values with the selected bootstrap identity, the complete
+retained application scope and its actual successful access receipt. Never
+substitute observed widened permissions for a saved baseline just to pass a
+drift check. `expected` contains only `status`, `token_id`, `expires_at` and
+`grants`; do not copy a token secret into the request. No expiry change is
+supported by this permission-only command.
+
+| Request field | Meaning |
+| --- | --- |
+| `node` | Existing Proxmox node name; checked against the pinned SSH host |
+| `vmid`, `guest_mac` | Existing unprivileged deployment guest identity |
+| `storage_id`, `template_storage` | Individual existing bootstrap storage names |
+| `bridge`, `vlan` | Existing bootstrap bridge and integer VLAN, or explicit `null` for an untagged bridge |
+| `applications` | Complete retained and desired application access declarations: each has `vmid`, `storage_id`, `template_storage` and one to eight `interfaces`, each containing only `bridge` and `vlan` |
+| `expected` | Actual successful non-secret token receipt; each `grants` row names `path`, `roles` and `propagate: false` |
+
+The same existing operator key and verified host keys used by bootstrap are
+required. Select a new, private permission workspace without copying old
+OpenTofu state or credentials into it:
+
+```sh
+export HOMELAB_SSH_KEY=/private/bootstrap/key
+export HOMELAB_KNOWN_HOSTS=/private/bootstrap/known_hosts
+./proxmox/bootstrap/bootstrap reconcile-access \
+  --work /private/bootstrap/access-scope \
+  --request /private/bootstrap/access-request.json --host 192.0.2.10
+```
+
+Review the printed `access.missing`, which is the exact nonpropagating ACL
+delta. Apply only the reviewed plan:
+
+```sh
+./proxmox/bootstrap/bootstrap reconcile-access \
+  --work /private/bootstrap/access-scope \
+  --request /private/bootstrap/access-request.json --host 192.0.2.10 \
+  --apply THE_PRINTED_PLAN_SHA256
+```
+
+The plan binds source, inputs and live permission observations. A successful
+apply atomically saves the updated non-secret receipt as `access.json` in this
+workspace. Retain that workspace for later runs: the command checks live ACLs
+against its last successful receipt. Planning and applying the unchanged
+request again reports `changed: false` and `acl_modifications: 0`, with no new
+token or ACL write. The original request's initial receipt remains preserved.
+Concurrent runs are excluded by a separate permission-workspace lock.
+
+A new application ID that is already occupied, changed token metadata, an
+unexpected ACL or requested grant removal is refused. An unsuccessful or
+uncertain apply retains `ACCESS-HOLD.json` and its attempt directory. Preserve
+and investigate them before another apply; a timeout does not authorise a
+retry. This command neither clears another bootstrap hold nor runs the full
+configuration operation.
+
 ### Reconfiguring a completed bootstrap
 
 `bootstrap configure BUNDLE DEPLOYMENT.json` uses the existing pinned operator SSH route to plan application access-control rules (ACLs) and the NFS connection. Apply requires the printed plan SHA256 and unchanged source, inputs and live plan. The separate configuration lock permits this operation after handover, but never unlocks workstation OpenTofu writes or copies stale workstation state back to the guest. The existing runner must be idle. A maintenance marker belonging to this attempt blocks application jobs until configuration and the NAS readback/backup finish.

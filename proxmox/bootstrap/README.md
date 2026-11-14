@@ -244,6 +244,11 @@ You can repeat this plan/apply pair with the same settings. It preserves the gue
 
 An expired token is not silently extended. See the [credential reference](OPERATIONS.md#credential-lifetime-and-rotation) before deliberately selecting a new absolute `expires_at` timestamp.
 
+For a later change that only extends the existing deployment token's resource
+scope, use the [permission-only bootstrap update](OPERATIONS.md#permission-only-updates-after-bootstrap).
+It retains its successful receipt for idempotent repeats and leaves NAS,
+runner and infrastructure configuration outside that operation.
+
 Continue with the [application deployment plan](../applications/README.md). Keep this runner dedicated to deployment: PegaProx is planned in its own LXC.
 
 ## 9. Let GitHub maintain the host prerequisites
