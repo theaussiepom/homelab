@@ -86,7 +86,7 @@ class BackupUnits(unittest.TestCase):
 
     def test_native_configuration_and_compose_overlay_come_from_their_owners(self):
         for adapter, root in [('postgresql', '/etc/postgresql'), ('mariadb', '/etc/mysql'), ('influxdb', '/etc/influxdb')]:
-            r = fixture(); app = r.apps['application']; app.update(adapter=adapter,
+            r = fixture(); app = r.apps['application']; app.update(adapter=adapter, settings={},
                 software_selection={'packages': ['postgresql-client-16=16.10-1']},
                 role_addresses={'service_interface':'192.0.2.10'})
             r.guests['one']['software_selection']['packages'].append('postgresql-client-16=16.10-1')
@@ -116,6 +116,24 @@ class BackupUnits(unittest.TestCase):
         with patch.object(backup.component_backup_job, 'bind', return_value={'schema':'group'}) as bind:
             result = backup.bind(r)
             self.assertEqual(result['mode'], 'scheduled-recovery'); bind.assert_called_once()
+
+    def test_renovate_database_receipt_and_private_environment_are_recovery_configuration(self):
+        r = fixture(); app = r.apps['application']
+        app.update(adapter='postgresql', settings={'application_database': {'name':'updates'}},
+            software_selection={'packages':[]})
+        r.library['app_profiles']['example']['backup']['configuration']['native']['path'] = '/etc/postgresql'
+        backup.bind(r)
+        selected = r.guests['one']['backup']['applications']['application']
+        self.assertEqual(selected['configuration']['application_database'],
+            {'path':'/var/lib/homelab-databases/updates.json','kind':'file'})
+        r = fixture(); app = r.apps['application']
+        app.update(adapter='renovate', identity={'project':'updates','services':{'renovate':'owned'}},
+            secret_bindings={'database_password':'source-reference'})
+        r.guests['one']['compose_projects'] = {'updates':{'name':'updates','file':'compose.yml'}}
+        backup.bind(r)
+        selected = r.guests['one']['backup']['applications']['application']
+        self.assertEqual(selected['producer']['overlay'], '/opt/homelab-app/component-application-environment.yml')
+        self.assertIn(selected['producer']['overlay'], selected['runtime_files'])
 
     def test_presence_and_selection_are_closed_and_ambiguous_defaults_refuse(self):
         for value in (None, {}): backup.presence(value)

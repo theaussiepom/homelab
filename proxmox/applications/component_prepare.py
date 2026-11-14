@@ -24,7 +24,7 @@ from private_io import encoded, read_json, regular, require
 
 # Further adapters install their fixed owned file generator here. A rendered
 # preview is not permission to execute an incomplete private input path.
-SUPPORTED = {'unbound', 'pihole', 'homeassistant', 'node_red', 'music_assistant',
+SUPPORTED = {'renovate', 'unbound', 'pihole', 'homeassistant', 'node_red', 'music_assistant',
              'postgresql', 'mariadb', 'influxdb', 'bitwarden', 'pegaprox', 'winet',
              'cloudbeaver', 'mqtt_explorer', 'authentik', 'mqtt', 'traefik', 'zabbix','zigbee2mqtt'}
 
@@ -91,11 +91,11 @@ def account_records(cfg, app, payload):
 
 
 def overlay(app, environment):
-    require(app['adapter'] in ('node_red', 'bitwarden') and isinstance(environment, dict)
+    require(app['adapter'] in ('node_red', 'bitwarden', 'renovate') and isinstance(environment, dict)
             and environment and all(isinstance(name, str) and re.fullmatch('[A-Za-z_][A-Za-z0-9_]*', name)
                 and isinstance(value, str) and not any(char in value for char in '\r\n\x00')
                 for name, value in environment.items()), 'Use the selected adapter private environment only')
-    role = 'node_red' if app['adapter'] == 'node_red' else 'bitwarden'
+    role = app['adapter']
     service = app['identity']['services'][role]
     return encoded({'services': {service: {'environment': {
         name: value.replace('$', '$$') for name, value in environment.items()}}}})
@@ -166,7 +166,15 @@ def prepare(cfg, app_id, environment=None, *, attempt):
         payload['monitoring-server.json']=encoded(server)
     else:
         payload.update(monitoring)
-    if app['adapter']=='zigbee2mqtt':
+    if app['adapter'] == 'renovate':
+        import renovate
+        payload['environment.yml'] = overlay(app, renovate.secrets(values))
+    elif app['adapter'] == 'postgresql' and 'application_database' in app['settings']:
+        require(set(values) == {'application_database_password'}, 'Supply the selected application database password')
+        import renovate
+        renovate.scalar(values['application_database_password'])
+        payload['application-database-password'] = values['application_database_password']
+    elif app['adapter']=='zigbee2mqtt':
         hook=component_app_hooks.descriptors(app,compose_file='/opt/homelab-app/'+app['project_file'])
         row=hook['zigbee_state']['settings_file']
         install.append(sidecar(app,'zigbee-settings.json',row['content'].encode(),payload))

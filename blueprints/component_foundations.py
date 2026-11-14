@@ -9,7 +9,7 @@ from component_errors import at
 from component_sources import closed, identifier, require
 import component_types as types
 
-OWNED = {'homeassistant', 'unbound', 'pihole', 'authentik', 'traefik', 'mqtt',
+OWNED = {'renovate', 'homeassistant', 'unbound', 'pihole', 'authentik', 'traefik', 'mqtt',
          'mqtt_explorer', 'zabbix', 'music_assistant', 'postgresql', 'mariadb',
          'influxdb', 'zigbee2mqtt'}
 
@@ -44,7 +44,10 @@ def _database(value):
 def validate(adapter, value, *, partial=False):
     """Component unit boundary; references and required runtime bindings follow."""
     require(adapter in OWNED, 'component.adapter')
-    if adapter == 'unbound':
+    if adapter == 'renovate':
+        import component_renovate
+        component_renovate.validate(value, partial=partial)
+    elif adapter == 'unbound':
         closed(value, (), ('publish_port',))
         if 'publish_port' in value:
             types.integer(value['publish_port'], 1, 65535)
@@ -85,7 +88,10 @@ def validate(adapter, value, *, partial=False):
         if 'database' in value:
             _database(value['database'])
     elif adapter == 'postgresql':
-        closed(value, (), ('client_access',))
+        closed(value, (), ('client_access', 'application_database'))
+        if 'application_database' in value:
+            closed(value['application_database'], ('app',))
+            require(identifier(value['application_database']['app']), 'component.reference')
         require(isinstance(value.get('client_access', []), list) and len(value.get('client_access', [])) <= 128,
                 'component.database-access')
         for row in value.get('client_access', []):

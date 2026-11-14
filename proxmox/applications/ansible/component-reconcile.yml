@@ -42,3 +42,7 @@
     - name: Preserve the dedicated monitoring database through its PostgreSQL owner
       ansible.builtin.include_tasks: tasks/monitoring-storage.yml
       when: component_application.adapter == 'postgresql' and app.monitoring.storage_password_file is defined
+
+    - name: Reconcile the explicitly selected application database through its PostgreSQL owner
+      ansible.builtin.include_tasks: tasks/application-database.yml
+      when: component_application_database is defined

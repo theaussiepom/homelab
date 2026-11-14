@@ -64,6 +64,15 @@ class OwnershipReceiptIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'prior app owns'):ownership.prior(self.attempt,renamed)
         self.assertEqual(before,{str(p.relative_to(self.fixture.state)):p.read_bytes()for p in self.fixture.state.rglob('*')if p.is_file()})
 
+    def test_database_identity_owner_refusal_propagates_before_an_ordinary_repeat(self):
+        before = self.receipt.read_bytes()
+        with patch.object(ownership.renovate, 'preserve_storage', side_effect=ValueError('database owner differs')) as guard:
+            with self.assertRaisesRegex(ValueError, 'database owner differs'):
+                ownership.prior(self.attempt, self.selected)
+        guard.assert_called_once()
+        self.assertEqual(guard.call_args.args, (self.selected, self.selected))
+        self.assertEqual(self.receipt.read_bytes(), before)
+
     def test_exact_owned_repeat_and_genuinely_disjoint_new_app_remain_distinct(self):
         self.assertTrue(ownership.prior(self.attempt,self.selected))
         new=copy.deepcopy(self.selected);new.update(id='new_identity',project_name='different-project')

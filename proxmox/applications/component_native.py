@@ -141,11 +141,15 @@ def _clients(clients):
     result = []
     for row in clients:
         require(isinstance(row, dict) and set(row) == {'source_address', 'database', 'user', 'method'}
-                and row['database'] == 'all' and row['user'] == 'all'
+                and all(isinstance(row[key], str) and re.fullmatch('[a-z][a-z0-9_]{0,62}', row[key])
+                        for key in ('database', 'user'))
+                and ((row['database'], row['user']) == ('all', 'all') or all(
+                    row[key] not in {'all', 'postgres', 'replication', 'template0', 'template1', 'public', 'none'}
+                    and not row[key].startswith('pg_') for key in ('database', 'user')))
                 and row['method'] == 'scram-sha-256',
                 'Use only the explicitly selected base PostgreSQL client allowance')
         source = _address(row['source_address'])
-        result.append(f'host all all {source}/32 scram-sha-256\n')
+        result.append(f"host {row['database']} {row['user']} {source}/32 scram-sha-256\n")
     return ''.join(result)
 
 
@@ -205,7 +209,7 @@ def render(app, *, clients=()):
         web_frontend(app)
     properties = app.get('properties', {})
     require(isinstance(properties, dict) and (not properties or
-            adapter == 'postgresql' and set(properties) == {'client_access'}),
+            adapter == 'postgresql' and set(properties) <= {'client_access', 'application_database'}),
             'Use only supported native database component properties')
     require(adapter == 'postgresql' or clients == () or clients == [],
             'PostgreSQL client allowances belong only to PostgreSQL')
