@@ -1,0 +1,30 @@
+{
+  "node": "pve-example",
+  "vmid": 900,
+  "guest_mac": "02:00:00:00:09:00",
+  "storage_id": "local-lvm",
+  "template_storage": "local",
+  "bridge": "vmbr0",
+  "vlan": 25,
+  "applications": [
+    {
+      "vmid": 6102,
+      "storage_id": "local-lvm",
+      "template_storage": "local",
+      "interfaces": [{"bridge": "vmbr0", "vlan": 25}]
+    }
+  ],
+  "expected": {
+    "status": "ready",
+    "token_id": "root@pam!homelab-deploy-900",
+    "expires_at": 0,
+    "grants": [
+      {"path": "/nodes/pve-example", "roles": "PVEAuditor", "propagate": false},
+      {"path": "/storage/local-lvm", "roles": "PVEDatastoreUser", "propagate": false},
+      {"path": "/storage/local", "roles": "PVEAuditor", "propagate": false},
+      {"path": "/sdn/zones/localnetwork/vmbr0", "roles": "PVESDNUser", "propagate": false},
+      {"path": "/sdn/zones/localnetwork/vmbr0/25", "roles": "PVESDNUser", "propagate": false},
+      {"path": "/vms/900", "roles": "PVEVMAdmin", "propagate": false}
+    ]
+  }
+}
