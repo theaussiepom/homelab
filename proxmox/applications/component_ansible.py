@@ -153,6 +153,9 @@ def variables(cfg, phase, *, payload=None, previously_owned=False):
             monitoring_server_configuration_file=str(payload.directory/'monitoring-server.json'),
             component_initial_compose_source=str(payload.directory/'initial-compose.yml'))
     if app_id in native:
+        if 'application_database' in selected['settings']:
+            result['component_application_database'] = dict(selected['settings']['application_database'],
+                password_file=str(payload.directory/'application-database-password'))
         app['database']=native[app_id]['identity']
         if selected['adapter']=='influxdb':
             import component_native

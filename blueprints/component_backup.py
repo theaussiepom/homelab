@@ -160,7 +160,11 @@ def bind(resolver):
                         'packages': guest['software_selection']['packages']}
                     if app['adapter'] == 'influxdb':
                         record['producer']['endpoint'] = 'http://' + app['role_addresses']['service_interface'] + ':8086'
-                if app['adapter'] in ('node_red', 'bitwarden') and app.get('secret_bindings'):
+                if app['adapter'] == 'postgresql' and 'application_database' in app['settings']:
+                    record['configuration']['application_database'] = {
+                        'path': '/var/lib/homelab-databases/' + app['settings']['application_database']['name'] + '.json',
+                        'kind': 'file'}
+                if app['adapter'] in ('node_red', 'bitwarden', 'renovate') and app.get('secret_bindings'):
                     overlay = '/opt/homelab-app/component-' + app_id + '-environment.yml'
                     record['runtime_files'].append(overlay)
                     record['producer']['overlay'] = overlay

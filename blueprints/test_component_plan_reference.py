@@ -339,7 +339,7 @@ class PlanCompilerWiringReview(unittest.TestCase):
             stack.enter_context(patch.object(plan.component_monitoring, 'bind', return_value={'guest': monitoring_guest}))
             stack.enter_context(patch.object(plan.component_backup, 'bind', return_value=None))
             admission = stack.enter_context(patch.object(plan.component_admission, 'admit'))
-            for owner in (plan.component_secrets, plan.component_foundations, plan.component_identity, plan.component_traffic):
+            for owner in (plan.component_renovate, plan.component_secrets, plan.component_foundations, plan.component_identity, plan.component_traffic):
                 stack.enter_context(patch.object(owner, 'bind'))
             result = r.resolve(disabled, admit=admit)
             return result, admission, authentication, settings

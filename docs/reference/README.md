@@ -11,7 +11,7 @@ This reference describes configuration written with `homelab-components-v1`. Dec
 | Set provider, trust and controller inputs | [Contexts](contexts.md) | [Guest placement](guests.md#guest-context) |
 | Allocate an IPv4 NIC and route | [Networks and NICs](networks.md) | [Address branches](networks.md#field-guest-nic-address), [control interface](guests.md#guest-control-interface) |
 | Allocate a guest and inherit defaults | [Guests](guests.md) | [Resource records](guests.md#resource-fields), [plan restrictions](lifecycle.md#infrastructure-plan-policy) |
-| Place an app and bind profile roles | [Apps](apps.md) | [Adapter properties](app-properties.md), [runtime identity](apps.md#runtime-identity) |
+| Place an app and bind profile roles | [Apps](apps.md) | [Adapter properties](app-properties.md), [Renovate CE](renovate.md), [runtime identity](apps.md#runtime-identity) |
 | Select data roots and mount roles | [Storage](storage.md) | [App storage branches](storage.md#app-storage-bindings) |
 | Connect a consumer to an endpoint | [Connections](connections.md) | [Managed accounts](connections.md#accounts), [explicit policy](policies.md#bindings) |
 | Publish a DNS or HTTPS name | [Exposures](exposures.md) | [Owned public origin](exposures.md#public-origin), [TLS/backend trust](policies.md#tls-and-backend-transport) |

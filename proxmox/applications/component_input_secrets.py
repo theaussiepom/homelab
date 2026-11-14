@@ -10,6 +10,8 @@ import re
 from private_io import regular, require
 
 ROLES = {
+    'renovate': {'accept_terms', 'license_key', 'github_app_id', 'github_app_key', 'database_password'},
+    'postgresql': {'application_database_password'},
     'authentik': {'secret_key', 'postgresql_password', 'smtp_password'},
     'traefik': {'cloudflare_dns_token', 'proxmox_token', 'cloudflare_origin_token'},
     'zabbix': {'database_password'}, 'node_red': {'api_token'},

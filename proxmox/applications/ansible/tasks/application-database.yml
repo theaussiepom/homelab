@@ -1,0 +1,127 @@
+---
+# Only the declared PostgreSQL owner runs this after its service checks.
+# The compiler resolves names and the consumer; no arbitrary SQL is accepted.
+- name: Inspect the application database ownership record
+  ansible.builtin.stat:
+    path: "/var/lib/homelab-databases/{{ component_application_database.name }}.json"
+    follow: false
+  register: application_database_receipt
+
+- name: Inspect the selected role and database before creating anything
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - postgres
+      - --
+      - psql
+      - -X
+      - -At
+      - -v
+      - ON_ERROR_STOP=1
+      - -d
+      - postgres
+      - -c
+      - "SELECT (SELECT count(*) FROM pg_roles WHERE rolname='{{ component_application_database.user }}') || ':' || (SELECT count(*) FROM pg_database WHERE datname='{{ component_application_database.name }}')"
+  register: application_database_before
+  changed_when: false
+  check_mode: false
+
+- name: Refuse foreign or partially created application storage
+  ansible.builtin.assert:
+    that:
+      - not application_database_receipt.stat.islnk | default(false)
+      - not application_database_receipt.stat.exists or (application_database_receipt.stat.isreg | default(false) and application_database_receipt.stat.uid == 0 and application_database_receipt.stat.mode == '0600' and application_database_receipt.stat.nlink == 1)
+      - application_database_before.stdout == ('1:1' if application_database_receipt.stat.exists else '0:0')
+
+- name: Read the retained application database owner
+  ansible.builtin.slurp:
+    src: "/var/lib/homelab-databases/{{ component_application_database.name }}.json"
+  register: application_database_owner
+  when: application_database_receipt.stat.exists
+
+- name: Verify the unchanged application database owner
+  ansible.builtin.assert:
+    that: >-
+      (application_database_owner.content | b64decode | from_json) ==
+      {'schema': 'homelab-application-database-v1', 'database': component_application_database.name,
+      'user': component_application_database.user, 'consumer': component_application_database.consumer,
+      'source_vmid': component_application_database.source_vmid}
+  when: application_database_receipt.stat.exists
+
+- name: Create the restricted application role once
+  ansible.builtin.command:
+    argv: [runuser, -u, postgres, --, psql, -X, -v, ON_ERROR_STOP=1, -d, postgres]
+    stdin: 'CREATE ROLE "{{ component_application_database.user }}" LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;'
+  when: not application_database_receipt.stat.exists
+  no_log: true
+
+- name: Set only the initial password using client-side SCRAM encryption
+  ansible.builtin.command:
+    argv: [runuser, -u, postgres, --, setsid, --wait, psql, -X, -v, ON_ERROR_STOP=1, -d, postgres, -c, "SET password_encryption='scram-sha-256'", -c, "\\password {{ component_application_database.user }}"]
+    stdin: "{{ lookup('ansible.builtin.file', component_application_database.password_file, rstrip=False) }}\n{{ lookup('ansible.builtin.file', component_application_database.password_file, rstrip=False) }}\n"
+  when: not application_database_receipt.stat.exists
+  no_log: true
+
+- name: Create the empty application database once
+  ansible.builtin.command:
+    argv: [runuser, -u, postgres, --, createdb, "--owner={{ component_application_database.user }}", "{{ component_application_database.name }}"]
+  when: not application_database_receipt.stat.exists
+
+- name: Restrict access to the new application database
+  ansible.builtin.command:
+    argv: [runuser, -u, postgres, --, psql, -X, -v, ON_ERROR_STOP=1, -d, postgres]
+    stdin: 'REVOKE ALL ON DATABASE "{{ component_application_database.name }}" FROM PUBLIC;'
+  when: not application_database_receipt.stat.exists
+
+- name: Verify database ownership and absence of cluster privileges or memberships
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - postgres
+      - --
+      - psql
+      - -X
+      - -At
+      - -v
+      - ON_ERROR_STOP=1
+      - -d
+      - postgres
+      - -c
+      - "SELECT count(*) FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba WHERE d.datname='{{ component_application_database.name }}' AND r.rolname='{{ component_application_database.user }}' AND r.rolcanlogin AND NOT r.rolinherit AND NOT r.rolsuper AND NOT r.rolcreatedb AND NOT r.rolcreaterole AND NOT r.rolreplication AND NOT r.rolbypassrls AND NOT EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member=r.oid) AND NOT EXISTS (SELECT 1 FROM aclexplode(COALESCE(d.datacl, acldefault('d',d.datdba))) a WHERE a.grantee=0)"
+  register: application_database_privileges
+  changed_when: false
+  failed_when: application_database_privileges.stdout != '1'
+  when: not ansible_check_mode
+
+- name: Verify authentication without resetting an existing credential
+  ansible.builtin.command:
+    argv: [psql, -X, -At, -v, ON_ERROR_STOP=1, -h, '127.0.0.1', -U, "{{ component_application_database.user }}", -d, "{{ component_application_database.name }}", -c, SELECT current_user]
+  environment:
+    PGPASSWORD: "{{ lookup('ansible.builtin.file', component_application_database.password_file, rstrip=False) }}"
+  register: application_database_authentication
+  changed_when: false
+  failed_when: application_database_authentication.stdout != component_application_database.user
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Create the private application database evidence directory
+  ansible.builtin.file:
+    path: /var/lib/homelab-databases
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Record completed application database ownership
+  ansible.builtin.copy:
+    content: >-
+      {{ {'schema': 'homelab-application-database-v1', 'database': component_application_database.name,
+      'user': component_application_database.user, 'consumer': component_application_database.consumer,
+      'source_vmid': component_application_database.source_vmid} | to_json }}
+    dest: "/var/lib/homelab-databases/{{ component_application_database.name }}.json"
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
