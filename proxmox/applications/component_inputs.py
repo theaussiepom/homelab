@@ -107,6 +107,8 @@ def binding(cfg, site):
                 external += discovery_scope.scope_source_files(scope,cfg['deployment']['protected_guests'])
     if cfg['guest'].get('serial_device'):
         external += [cfg['paths']['host_device_key'], cfg['paths']['host_known_hosts']]
+    if 'recording_mount' in cfg['guest']:
+        external += [cfg['paths']['host_nfs_key'], cfg['paths']['host_nfs_known_hosts']]
     hashes.update({path: sha(path) for path in external})
     from deployment_inputs import source_hash
     result = {'schema': component_payload.BINDING_SCHEMA, 'vmid': cfg['guest']['vmid'],

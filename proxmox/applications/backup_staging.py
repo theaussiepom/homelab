@@ -206,7 +206,7 @@ def storage(rows, selected):
 def native_row(raw, row):
     """Compare actual API options with the provider's retained mount attributes."""
     if isinstance(row.get('volume'), str) and row['volume'].startswith('/'):
-        from scrypted_mount import native_row as recording_row
+        from nfs_mounts import native_row as recording_row
         return recording_row(raw, row)
     require(isinstance(raw, str), 'Read the exact current native mount slot')
     require(len(raw) <= 4096, 'Bound native staging options')

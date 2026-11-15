@@ -108,9 +108,10 @@ def validate(cfg):
             'Bind the actual component runtime input file')
     phases(cfg)
     if 'recording_mount' in guest:
-        from scrypted_mount import declaration
+        from nfs_mounts import declaration
         selected = declaration(guest['recording_mount'])
-        require(selected['slot'] == len(guest.get('volumes', {})),
+        require({'host_nfs_key','host_nfs_known_hosts'} <= set(cfg['paths'])
+                and selected['slot'] == len(guest.get('volumes', {})),
                 'Append recording storage after every managed volume')
     if 'backup' in app:
         import backup_agent
@@ -156,7 +157,7 @@ def packet(value, inputs):
                     and row['services'] == ordered_services(app),
                     'Bind actual runtime services and file identity')
     scrypted = [app for app in runtime['applications'].values() if app['adapter'] == 'scrypted']
-    if scrypted or 'recording_mount' in cfg['guest']:
+    if scrypted:
         mount = cfg['guest'].get('recording_mount')
         require(len(scrypted) == 1 and isinstance(mount, dict)
                 and scrypted[0]['storage_paths']['recordings']['source'] == mount['path']

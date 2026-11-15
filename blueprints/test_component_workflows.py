@@ -71,6 +71,18 @@ class GraphTests(unittest.TestCase):
         self.assertEqual([call.args[1] for call in inputs.call_args_list],['unrelated','producer','consumer'])
         self.assertEqual(plan.calls,2);self.assertEqual(plan.resolved,plan.snapshot)
 
+    def test_nfs_secret_is_scoped_only_to_its_guest_infrastructure(self):
+        plan=fake();plan.resolved['guests']['room_a']['root_paths']={'data':{'host_bind':{'explicit':'contract fixture'}}}
+        plan.snapshot=copy.deepcopy(plan.resolved)
+        with mock.patch.object(m.component_secrets,'action_inputs',return_value={}):
+            graph=m.model(plan)
+        selected=graph['guests']['room_a']
+        self.assertEqual(selected['workflow_secrets'],['PROXMOX_NFS_SSH_KEY'])
+        self.assertEqual(selected['phases'][0]['inputs'],{'PROXMOX_NFS_SSH_KEY':{
+            'environment':'PROXMOX_NFS_SSH_KEY','workflow_secret':'PROXMOX_NFS_SSH_KEY'}})
+        self.assertTrue(all(not phase['inputs'] for phase in selected['phases'][1:]))
+        self.assertTrue(all(not guest['workflow_secrets'] for name,guest in graph['guests'].items() if name!='room_a'))
+
     def test_disabled_empty_leaf_all_and_required_dependencies(self):
         guests=['db-east','room_a','independent'];deps=fake().resolved['guest_dependencies']
         for disabled,expected in [([],guests),(['independent'],['db-east','room_a']),(guests,[])]:

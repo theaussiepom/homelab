@@ -1,4 +1,4 @@
-"""Admit one separately commissioned NFS recording bind into owned guest state.
+"""Admit one CD-attached NFS recording bind into owned guest state.
 
 No host mutation or state editing is performed here. Existing genuine component
 success, exact native configuration and a guest filesystem check are required.
@@ -15,7 +15,7 @@ from private_io import require, regular, decode_json
 def declaration(value):
     require(isinstance(value, dict) and set(value) == {
         'source', 'path', 'slot', 'filesystem_source', 'filesystem', 'filesystem_root'},
-        'Use the closed Scrypted recording mount declaration')
+        'Use the closed guest NFS mount declaration')
     for key in ('source', 'path'):
         require(isinstance(value[key], str) and re.fullmatch(
             r'/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*', value[key])
@@ -110,7 +110,7 @@ def verify(cfg, mounts, log, api_get, *, label):
             'Preserve pending native mount changes')
         return rows, current['rootfs']
     before = projection()
-    proof = log.parent / ('scrypted-recording-mount-' + label + '.json')
+    proof = log.parent / ('nfs-mount-' + label + '.json')
     require(not proof.exists() and not proof.is_symlink(), 'Preserve existing recording mount evidence')
     argv = ['ssh', '-F', '/dev/null', '-o', 'StrictHostKeyChecking=yes', '-o', 'BatchMode=yes',
         '-o', 'IdentitiesOnly=yes', '-o', 'ControlMaster=no', '-o', 'GlobalKnownHostsFile=/dev/null',

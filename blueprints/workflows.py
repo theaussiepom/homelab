@@ -28,7 +28,7 @@ PRIVATE_MAIN = "github.event.repository.private == true && github.event_name == 
 
 def secret_declarations(names=None):
     """The leaf admits finite slots; actual guest calls declare selected aliases."""
-    selected = (*SCALAR_SLOTS, 'PBS_API_TOKEN') if names is None else names
+    selected = (*SCALAR_SLOTS, 'PBS_API_TOKEN', 'PROXMOX_NFS_SSH_KEY') if names is None else names
     compiler.require(isinstance(selected, (tuple, list)) and
                      all(isinstance(name, str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name)
                          for name in selected) and len(selected) == len(set(selected)),
@@ -94,7 +94,7 @@ def phase_recipe(*, check_actions=True):
     ]
     step_env = {
         7: {"GUEST", "PHASE", "DISABLED"},
-        8: {"GUEST", "PHASE", *COMMON_SECRETS},
+        8: {"GUEST", "PHASE", "PROXMOX_NFS_SSH_KEY", *COMMON_SECRETS},
         9: {"GUEST", "PHASE", "PBS_API_TOKEN", *(PREFIX + slot.upper() for slot in SCALAR_SLOTS)},
     }
     for index, step in enumerate(job["steps"]):

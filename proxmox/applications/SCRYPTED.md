@@ -1,92 +1,35 @@
-# Prepare Scrypted without restarting it
+# Deploy prepared Scrypted state
 
-[Application guide](README.md)
+[Application guide](README.md) · [Restricted NFS setup](../bootstrap/NFS-ATTACHMENT.md)
 
-Scrypted needs a verified decoder path before deployment can be implemented.
-This preparation uses an unpinned image tag and preserves the numeric user inside the
-unprivileged guest, plugins, cameras, NVR settings and credentials, and the
-container paths `/server/volume` and `/nvr`.
+The component Scrypted profile retains local configuration/database at
+`/server/volume` and external NFS recordings at `/nvr`. It uses the requested
+floating latest image, numeric user0:0, finite memory/swap/CPU/PID/log limits and
+no automatic restart. It does not pass GPU devices or initialise retained data.
 
-## Review the proposed inputs
+Create the empty guest and its local volumes through ordinary protected CD.
+Bootstrap provisions the separate restricted NFS attachment capability and its
+protected `PROXMOX_NFS_SSH_KEY` secret. The site's context references that key and
+pinned host trust. Selecting the existing `host_bind` declaration causes the
+Infrastructure phase to attach and verify the exact NFS directory before the
+saved provider plan. Identical attachment is a no-op; conflicts, pending mount
+changes, a local fallback, earlier-volume changes and replacement are refused.
+See the [storage contract](../../docs/reference/storage.md) for the closed fields.
 
-Copy [the invented example](examples/scrypted.preparation.example.json) into your
-private site repository and select the image tag you want to follow. Using the pinned
-public source, run:
+Local configuration/database import uses separately reviewed protected input,
+with original plugins, cameras, NVR settings, credentials, numeric metadata and
+recovery material preserved. Ordinary CD does not restore or convert that state.
+The source and runtime guards require the exact writable recording source and
+an existing database. A pre-start settings guard refuses hardware/default
+decoder settings before the upstream server starts.
 
-```sh
-python3 proxmox/applications/scrypted.py --config /path/to/private/preparation.json
-```
+The separately retained `scrypted.py` review helper describes historical
+preparation inputs and emits no deployment. Use the component profile and normal
+protected CD for installation and subsequent maintenance.
 
-This reads one local JSON file and prints a review report. It contacts no host,
-reads no capture and emits no Compose file or runnable guest profile. Receipt
-values remain private. `deployable` always stays false, even when every receipt
-reference is filled. `enabled: true` and claimed decoder selections are refused.
-The component application contract has no Scrypted adapter and refuses that
-selection during source validation. No Actions deployment integration is added
-in this preparation.
-
-The proposed starting budget is 6 guest CPUs and 5 GiB guest RAM, with 4 CPUs,
-4 GiB RAM and 512 tasks for the container. Container logs would rotate at
-10 MiB across three files. These are finite review proposals, not measured
-capacity requirements or installed settings. A later implementation must also
-explicitly bound container swap, retain guest headroom, select guest swap/task
-containment and use no automatic restart during qualification.
-
-The private proposal uses `ghcr.io/koush/scrypted:latest` without a digest or
-local-image pin. Following this tag is not an instruction to update a live
-container now. Decoder qualification must cover the image actually selected
-when deployment is later reviewed.
-
-## Why the decoder decision stays open
-
-Retained incident evidence links repeated unresponsive decoder replacement to
-host memory exhaustion. Sampled Node tasks were blocked in host `nouveau`
-runtime-resume/DRM paths. Automatic probing could try VAAPI, then Vulkan, then
-software fallback; a stuck hardware probe cannot reach fallback. The incident
-occurred without `/dev/dri` passed into the container. Removing that mapping or
-adding memory/PID limits therefore does not establish a safe decoder path.
-
-Software-only and Intel-only operation are candidates for separately approved
-qualification. Neither is selected here. Establish how every relevant installed
-plugin avoids NVIDIA/Vulkan enumeration on the image resolved from the tag and restored
-plugin versions. Record the observed image identity as qualification evidence;
-it does not become a deployment pin. Do not invent a configuration switch or upgrade the image to
-obtain a green health check. Driver/kernel changes and passthrough need separate
-review and maintenance authority.
-
-## Continue through the component deployment path
-
-The earlier fixed-bundle installer has been retired. A later Scrypted adapter
-must use the current component contracts, OpenTofu guest module, Ansible phases,
-trusted TLS/SSH identity, ownership receipts and failure holds. Initial data
-transfer needs a separately reviewed procedure; ordinary deployment does not
-restore data. This local review helper is not a deployment engine. Keep an
-independent private Scrypted source lock without repinning commissioned services.
-
-1. Admit the exact new guest, networks, packages, capture and metadata,
-   and qualify the image resolved from the tag. Preserve numeric owners, modes, ACLs, xattrs and original helper
-   behavior. Keep plugin/camera/NVR settings and credentials in the frozen
-   private capture; commit only verified references and hashes.
-2. Bind `/nvr` to the exact selected recording source. A source guard must reject
-   absent, wrong and read-only sources before any writer starts. Never let
-   Docker create an empty local fallback. Preserve recording names, paths and
-   ownership, and explicitly decide protection/recovery of new recordings.
-3. Resolve DBus/Avahi and discovery inside the guest. Do not copy broken host
-   socket binds or expose Proxmox host control sockets. Admit only a reviewed
-   device path, if any; no privileged-container fallback.
-4. Implement the verified decoder path and approved finite resource/swap, task,
-   log and restart settings. Keep the old writer retired and recovery available
-   before the explicit start phase. A failed operation retains its hold.
-5. In a separately authorized target window, check real plugins, cameras,
-   discovery, HA/API consumers, actual listeners, TLS/authentication, old
-   playback and new recording continuity under representative load. Repeated
-   decoder start/stop and motion cycles must return workers to baseline,
-   stabilize memory and produce no new blocked-task reports. A port response
-   alone is insufficient.
-
-Earlier exact-image synthetic unprivileged-LXC evidence covered basic startup,
-synthetic persistence and multicast under its tested kernel/runtime. It did not
-exercise real cameras, restored plugins, recording writes or the incident
-probe path. It is version-specific compatibility evidence, not native deployment
-approval. Source tests here exercise refusal and review behavior only. They do
-not launch Scrypted or prove the driver deadlock is fixed.
+Passing source validation or a mount proof does not establish service acceptance.
+Verify restored login/cameras, authentication/routing, old playback, new recording
+continuity and intended software decoding with bounded resource observation.
+Preserve failed attempts, receipts, locks and holds. Do not probe GPU, PCI, DRM or
+sysfs paths as part of deployment. No scanner, source or runtime guard proves the
+historical driver deadlock is fixed.

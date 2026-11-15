@@ -124,6 +124,12 @@ def lower_guest(plan, guest_id, *, inputs=INPUTS):
         source = plan.site['secret_sources'][capability['ssh_private_key']]
         require(source['type'] == 'file', 'component.context-file-credential')
         cfg['paths'].update(host_device_key=source['path'], host_known_hosts=capability['known_hosts'])
+    if 'recording_mount' in provider['guest']:
+        selected = [row for row in context.get('capabilities', {}).values() if row['type'] == 'nfs-attachment']
+        require(len(selected) == 1, 'component.nfs-attachment-capability')
+        source = plan.site['secret_sources'][selected[0]['ssh_private_key']]
+        require(source['type'] == 'file', 'component.context-file-credential')
+        cfg['paths'].update(host_nfs_key=source['path'], host_nfs_known_hosts=selected[0]['known_hosts'])
     # Identity binds the abstract slot, including source/public desired artifacts.
     identity = hashlib.sha256(encoded({'config': cfg, 'runtime': runtime, 'files': files})).hexdigest()
     directory = Path(inputs) / guest_id / identity

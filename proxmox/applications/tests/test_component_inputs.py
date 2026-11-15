@@ -67,6 +67,17 @@ class StaticInputTests(unittest.TestCase):
         source = patch('deployment_inputs.source_hash', return_value='d'*64)
         source.start(); self.addCleanup(source.stop)
 
+    def test_nfs_capability_key_and_trust_are_bound_to_the_same_static_generation(self):
+        cfg,site=self.prepare()
+        cfg['guest']['recording_mount']={'explicit':'component-owned fixture'}
+        for field in ('host_nfs_key','host_nfs_known_hosts'):
+            path=self.root/field;write_new(path,field.encode());cfg['paths'][field]=str(path)
+        with patch.object(inputs,'inspect',return_value={}):
+            binding=inputs.binding(cfg,site)
+        for field in ('host_nfs_key','host_nfs_known_hosts'):
+            path=Path(cfg['paths'][field])
+            self.assertEqual(binding['input_hashes'][str(path)],sha(path))
+
     def prepare(self, create=True):
         return inputs.prepare(self.path, self.inputs, create=create)
 

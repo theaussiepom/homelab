@@ -52,6 +52,13 @@ class RenovateRuntime(unittest.TestCase):
             '/opt/homelab-app/compose-updates.yml', 'exec', '-T', 'updates'])
         self.assertEqual(checks[0]['argv'][-1], 'http://127.0.0.1:8080/health')
 
+    def test_only_optional_renovate_vulnerability_alert_processing_is_disabled(self):
+        config=json.loads(renovate.environment(app())['RENOVATE_CONFIG'])
+        self.assertEqual(config.pop('vulnerabilityAlerts'),{'enabled':False})
+        self.assertEqual(config,{'onboarding':False,'requireConfig':'required',
+            'allowedPostUpgradeCommands':[],'allowScripts':False,
+            'force':{'automerge':False,'platformAutomerge':False}})
+
     def test_unsupported_listener_image_privileges_and_missing_storage_refuse(self):
         changes = [lambda a: a.update(lifecycle='import'),
             lambda a: a['listeners'].update(public={}),

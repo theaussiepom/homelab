@@ -24,21 +24,21 @@ def github(repo, path, method='GET', payload=None):
     return json.loads(proc.stdout) if proc.stdout.strip() else None
 
 
-def environment(repo, create=True):
+def environment(repo, create=True, *, name=ENVIRONMENT):
     metadata = github(repo, '')
     require(metadata['private'] and metadata['permissions']['admin'], 'Use a private repository with administration access')
     envs = github(repo, '/environments?per_page=100')
     require(envs['total_count'] <= 100, 'Environment inventory exceeds this bounded setup')
-    existing = [e for e in envs['environments'] if e['name'] == ENVIRONMENT]
+    existing = [e for e in envs['environments'] if e['name'] == name]
     if not existing:
         require(create, 'The bootstrap environment is missing; setup is not ready')
-        github(repo, '/environments/' + ENVIRONMENT, 'PUT', {
+        github(repo, '/environments/' + name, 'PUT', {
             'deployment_branch_policy': {'protected_branches': False, 'custom_branch_policies': True}})
-        github(repo, '/environments/' + ENVIRONMENT + '/deployment-branch-policies', 'POST', {'name': 'main', 'type': 'branch'})
-    value = github(repo, '/environments/' + ENVIRONMENT)
+        github(repo, '/environments/' + name + '/deployment-branch-policies', 'POST', {'name': 'main', 'type': 'branch'})
+    value = github(repo, '/environments/' + name)
     require(value.get('deployment_branch_policy') == {'protected_branches': False, 'custom_branch_policies': True},
             'The existing bootstrap environment must already use custom branch restrictions')
-    policies = github(repo, '/environments/' + ENVIRONMENT + '/deployment-branch-policies')
+    policies = github(repo, '/environments/' + name + '/deployment-branch-policies')
     require(policies['total_count'] == 1 and policies['branch_policies'][0]['name'] == 'main'
             and policies['branch_policies'][0].get('type') == 'branch', 'The bootstrap secret must be restricted to main')
     return value
