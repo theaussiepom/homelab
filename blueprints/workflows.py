@@ -189,6 +189,8 @@ if not set(active) <= set(expected['guests']):
     raise SystemExit('Regenerate the selected component workflow before enabling another guest')
 expected['guest_order'] = active
 expected['guests'] = {key: expected['guests'][key] for key in active}
+if 'checks' in expected:
+    expected['checks'] = {key: row for key, row in expected['checks'].items() if row['guest'] in active}
 if actual != expected:
     raise SystemExit('Regenerate the exact selected component workflow graph and scalar bindings')
 PYCODE
@@ -232,10 +234,11 @@ def models(stack, *, site_source, disabled=None):
         result['backup.yml'] = {'name':backup_name,'on':workflow_call(['PBS_API_TOKEN']),
             'permissions':{'contents':'read'},'defaults':copy.deepcopy(defaults),'jobs':{'deploy':job}}
         result['backup.yml']['on']['workflow_call']['secrets'] = {'PBS_API_TOKEN': {'required': True}}
-    for guest, metadata in graph['guests'].items():
+    for guest, metadata in {**graph['guests'], **graph.get('checks', {})}.items():
+        owner = metadata.get('guest', guest)
         guest_name = label(metadata['name'])
         parent = {'name': guest_name, 'needs': metadata['needs'],
-                  'if': PRIVATE_MAIN + " && !contains(fromJSON(inputs.disabled || '[]'), '" + guest + "')",
+                  'if': PRIVATE_MAIN + " && !contains(fromJSON(inputs.disabled || '[]'), '" + owner + "')",
                   'uses': './.github/workflows/guest-' + guest + '.yml',
                   'with': arguments(), 'secrets': secret_forwarding(metadata['workflow_secrets'])}
         deploy['jobs'][guest] = parent
@@ -255,7 +258,7 @@ def models(stack, *, site_source, disabled=None):
             job['steps'].append({'name': label(phase['name']),
                 'uses': action_source + 'guest-phase' + action_revision,
                 'timeout-minutes': recipe['timeout-minutes'],
-                'with': dict(guest=guest, phase=phase['id'], disabled='${{ inputs.disabled }}',
+                'with': dict(guest=owner, phase=phase['id'], disabled='${{ inputs.disabled }}',
                              **{name: '${{ secrets.' + name + ' }}' for name in COMMON_SECRETS}, **scoped)})
         workflow['jobs']['deploy'] = job
         result['guest-' + guest + '.yml'] = workflow

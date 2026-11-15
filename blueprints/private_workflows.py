@@ -191,7 +191,7 @@ def model(stack, site):
     disabled = env.get('HOMELAB_DISABLED', '[]')
     disabled_rows = compiler.workflow_disabled((site / '.github/workflows/deploy.yml').read_text())
     source = workflows.models(stack, site_source=compiler.site_path(site), disabled=disabled_rows)
-    compiler.require(not pbs or all(key in ('selection', '_backup') or re.fullmatch('[a-z][a-z0-9_-]*', key)
+    compiler.require(not pbs or all(key in ('selection', '_backup') or re.fullmatch('(?:_check_)?[a-z][a-z0-9_-]*', key)
                                    for key in source['deploy.yml']['jobs']),
                      'Keep only public guest jobs and the early Configure backups job')
     repository = 'github.repository == ' + repr(env['HOMELAB_REPOSITORY'])
@@ -210,8 +210,11 @@ def model(stack, site):
         caller = source['deploy.yml']['jobs'][guest]
         filename = 'backup.yml' if guest == '_backup' else 'guest-' + guest + '.yml'
         job = bind(copy.deepcopy(source[filename]['jobs']['deploy']), disabled)
+        owners = {step['with']['guest'] for step in job['steps'] if 'guest' in step.get('with', {})}
+        compiler.require(guest == '_backup' or len(owners) == 1, 'Bind one actual guest Environment')
+        owner = next(iter(owners)) if owners else 'backup'
         job.update(name=caller['name'], needs=copy.deepcopy(caller['needs']),
-                   environment='backup' if guest == '_backup' else env['HOMELAB_ENVIRONMENT_PREFIX'] + '-' + guest,
+                   environment='backup' if guest == '_backup' else env['HOMELAB_ENVIRONMENT_PREFIX'] + '-' + owner,
                    **{'runs-on': labels, 'if': repository + ' && ' + caller['if'].replace("inputs.disabled || '[]'", repr(disabled or '[]'))})
         # Enrolled guests inherit config validation through their setup barrier.
         # Other guests still need it while the source checks run independently.

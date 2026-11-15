@@ -13,6 +13,7 @@ An exposure declares a DNS record or an HTTPS frontend route. Declare it inline 
 | <a id="exposure-tls"></a>`tls` | Not accepted | Required TLS policy ID |
 | <a id="exposure-middlewares"></a>`middlewares` | Not accepted | Optional ordered unique middleware-ID list, [] |
 | <a id="exposure-transport"></a>`transport` | Not accepted | Optional backend transport-policy ID, only for HTTPS backend |
+| <a id="exposure-check"></a>`check` | Not accepted | Optional closed [response expectation](routed-checks.md#http-exposure-expectation) for a target guest that selected routed checks |
 
 Every selected domain must exist. Main/alias domain IDs and their case-folded hostnames are globally unique among exposures. A DNS target needs an address and cannot be an internal service. Managed Pi-hole records require IPv4. HTTP app backends cannot use loopback. The selected ingress must be Traefik; dashboard exposure must use the same Traefik instance with dashboard enabled and a forward-auth middleware. TLS policies currently use the implemented ACME resolver contract; Traefik requires resolver `letsencrypt`.
 

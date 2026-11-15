@@ -117,7 +117,10 @@ class Exposures:
                 http = value['type'] == 'http'
                 closed(value, ('type', 'target', 'domain', 'ingress', 'tls') if http else
                        ('type', 'target', 'domain', 'resolver'),
-                       ('aliases', 'middlewares', 'resolver', 'transport') if http else ('aliases',))
+                       ('aliases', 'middlewares', 'resolver', 'transport', 'check') if http else ('aliases',))
+                if 'check' in value:
+                    from component_routed_checks import check_definition
+                    check_definition(value['check'])
                 types.endpoint(value['target'])
                 endpoint = self.resolver.endpoint(value['target'])
                 types.strings(value.get('aliases', []), ids=True)

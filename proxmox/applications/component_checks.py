@@ -352,9 +352,14 @@ HANDLERS.update({'renovate':_renovate,'authentik':_authentik,'traefik':_traefik,
 ADAPTERS.update(HANDLERS)
 
 
-def checks(app, guest, *, compose_file):
+def checks(app, guest, *, compose_file, routed=False):
     """Build only declared finite adapter checks; never execute their argv."""
     require(isinstance(app, dict) and isinstance(guest, dict)
             and isinstance(app.get('adapter'), str) and app['adapter'] in ADAPTERS, 'component.health-adapter')
     with at('apps', app.get('id', app['adapter']), 'health'):
-        return HANDLERS[app['adapter']](app, compose_file) if _declared(app) else []
+        selected = HANDLERS[app['adapter']](app, compose_file) if _declared(app) else []
+        # These two adapters predate generic configured DNS/TLS checks. Keep
+        # their local checks, replacing only the now-covered routed duplicate.
+        if routed and app['adapter'] in ('cloudbeaver', 'music_assistant'):
+            selected = selected[:1]
+        return selected
