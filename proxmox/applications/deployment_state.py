@@ -253,6 +253,8 @@ class DeploymentAttempt:
         )
         private_directory(self.operation, create=True)
         write_new(self.hold, encoded(self.marker))
+        from component_checkpoint import claim
+        claim(self)
 
     def infrastructure_complete(self, result):
         state_hash, identity = component_generation.backend(self.work,

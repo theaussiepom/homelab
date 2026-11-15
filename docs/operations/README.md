@@ -15,3 +15,5 @@ Use these guides to prepare, deploy and maintain a configuration through its sup
 Compilation, workflow generation, protected deployment and service acceptance have different effects and [evidence boundaries](../concepts/evidence.md). Choose the procedure that matches the observed stage; successful source checks cannot establish ownership on the target or supply an initial setup procedure that the adapter does not support.
 
 [Documentation index](../README.md) · [Supported adapters](../reference/support.md)
+
+For an infrastructure phase that completed before an application failure, see the explicit [infrastructure checkpoint admission](infrastructure-checkpoint.md).
