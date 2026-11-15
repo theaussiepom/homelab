@@ -25,6 +25,7 @@ def environment(app):
         'RENOVATE_BASE_DIR': '/tmp/renovate', 'RENOVATE_BINARY_SOURCE': 'install',
         'RENOVATE_CONFIG': json.dumps({'onboarding': False, 'requireConfig': 'required',
             'allowedPostUpgradeCommands': [], 'allowScripts': False,
+            'vulnerabilityAlerts': {'enabled': False},
             'force': {'automerge': False, 'platformAutomerge': False}}, separators=(',', ':')),
         'LOG_LEVEL': 'info', 'MEND_RNV_DEBUG_MODE': 'false'}
 
