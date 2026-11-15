@@ -168,6 +168,7 @@ def prepare(cfg, app_id, environment=None, *, attempt):
         payload.update(monitoring)
     if app['adapter'] == 'renovate':
         import renovate
+        install += install_rows(app, renovate.files(), payload)
         payload['environment.yml'] = overlay(app, renovate.secrets(values))
     elif app['adapter'] == 'postgresql' and 'application_database' in app['settings']:
         require(set(values) == {'application_database_password'}, 'Supply the selected application database password')

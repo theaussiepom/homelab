@@ -21,7 +21,8 @@ def values():
 
 def app():
     return {'adapter': 'renovate', 'lifecycle': 'fresh', 'listeners': {},
-        'identity': {'services': {'renovate': 'updates'}},
+        'identity': {'services': {'renovate': 'updates'},
+                     'runtime_directory': '/opt/homelab-app/runtime/updates'},
         'settings': {'database': {'name': 'updates', 'user': 'updates', 'host': '198.18.31.10', 'port': 5432},
                      'repositories': ['example/repo']},
         'health': {'ready': {'type': 'adapter', 'check': 'readiness'}},
@@ -44,16 +45,24 @@ class RenovateRuntime(unittest.TestCase):
         self.assertEqual(env['PGHOST'], '198.18.31.10')
         self.assertNotIn('PGPASSWORD', env)
         self.assertNotIn('MEND_RNV_ACCEPT_TOS', env)
-        self.assertEqual(json.loads(env['RENOVATE_CONFIG'])['force'],
-                         {'automerge': False, 'platformAutomerge': False})
+        self.assertNotIn('RENOVATE_CONFIG', env)
+        self.assertNotIn('RENOVATE_VULNERABILITY_ALERTS', env)
+        self.assertEqual(service['volumes'][-1], {'type':'bind',
+            'source':'/opt/homelab-app/runtime/updates/config.js',
+            'target':'/usr/src/app/config.js','read_only':True,'bind':{'create_host_path':False}})
         self.assertEqual(service['security_opt'], ['no-new-privileges:true'])
         checks = component_checks.checks(selected, {}, compose_file='/opt/homelab-app/compose-updates.yml')
         self.assertEqual(checks[0]['argv'][:7], ['docker', 'compose', '-f',
             '/opt/homelab-app/compose-updates.yml', 'exec', '-T', 'updates'])
         self.assertEqual(checks[0]['argv'][-1], 'http://127.0.0.1:8080/health')
 
-    def test_only_optional_renovate_vulnerability_alert_processing_is_disabled(self):
-        config=json.loads(renovate.environment(app())['RENOVATE_CONFIG'])
+    def test_core_file_contains_the_complete_fixed_nonsecret_policy(self):
+        row,=renovate.files()
+        self.assertEqual({key:row[key]for key in ('path','uid','gid','mode')},
+                         {'path':'config.js','uid':12021,'gid':12021,'mode':'0400'})
+        raw=row['content']
+        self.assertTrue(raw.startswith('module.exports = ')and raw.endswith(';\n'))
+        config=json.loads(raw[len('module.exports = '):-2])
         self.assertEqual(config.pop('vulnerabilityAlerts'),{'enabled':False})
         self.assertEqual(config,{'onboarding':False,'requireConfig':'required',
             'allowedPostUpgradeCommands':[],'allowScripts':False,
@@ -163,6 +172,13 @@ class RenovatePreparation(CallerCase):
         self.assertEqual(json.loads(before['environment.yml'])['services']['updates']['environment'], renovate.secrets(values()))
         actual = component_ansible.variables(cfg, 'selected', payload=payload)
         self.assertEqual(actual['component_environment_source'], str(payload.directory/'environment.yml'))
+        row,=renovate.files()
+        self.assertEqual(before['config.js'],row['content'].encode())
+        self.assertEqual(actual['component_runtime_files'],[{
+            'source':'config.js','destination':selected['identity']['runtime_directory']+'/config.js',
+            'uid':12021,'gid':12021,'mode':'0400'}])
+        self.assertEqual(actual['component_runtime_directory']['directory'],
+                         selected['identity']['runtime_directory'])
         self.assertNotIn('component_application_database', actual)
 
     def test_postgresql_receives_only_the_same_password_and_no_worker_credentials(self):

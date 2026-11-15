@@ -36,6 +36,7 @@ ADAPTERS = {
 # rendering; selected input preparation checks actual emitted files against the
 # same authority. Neither caller accepts authored filenames or directory mounts.
 RUNTIME_FILES = {
+    'renovate': {'config.js'},
     'authentik': {'authentik-secret-key', 'postgresql-password', 'smtp-password'},
     'traefik': {'traefik.yml', 'shared.yml', 'pve-ca.pem', 'cloudflare-dns-token'},
     'cloudbeaver': {'cloudbeaver.conf', 'cloudbeaver.auto.conf', 'cloudbeaver-connections.json',

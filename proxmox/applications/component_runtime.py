@@ -732,6 +732,7 @@ def _renovate(app, guest):
     require(service['image'].startswith('ghcr.io/mend/renovate-ce:'), 'Select the Mend CE server image')
     require(set(app['storage_paths']) == {'scratch', 'cache'}, 'Bind both writable Mend CE cache paths')
     service['volumes'] = _mounts(app, {'scratch': '/tmp', 'cache': '/opt/containerbase'})
+    service['volumes'].append(_runtime_mount(app, 'config.js', '/usr/src/app/config.js'))
     service['environment'].update(renovate.environment(app))
     return {'renovate': service}
 
