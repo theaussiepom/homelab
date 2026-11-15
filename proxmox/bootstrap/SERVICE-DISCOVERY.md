@@ -1,110 +1,75 @@
-# Let Traefik read the selected guests
+# Let Traefik read all guests
 
-Traefik can discover application routes from their Proxmox Notes. It needs its own read-only API token. It must never receive the administrator credential used by bootstrap CD or the application deployment token.
+Traefik discovers application routes from Proxmox Notes using its own read-only API token. Bootstrap owns that token and its permissions. Ordinary application jobs never receive the bootstrap administrator credential.
 
-This is an optional addition to the existing [host prerequisite workflow](README.md#9-let-github-maintain-the-host-prerequisites). Review it with the application profiles before merging. The merge lets bootstrap CD create the token and one host firewall allowance; no workstation command or root SSH key is needed on the runner.
-
-Add `service_discovery` to the private host settings. The following uses synthetic addresses from the RFC2544 benchmarking range and lab guest IDs; replace them together with the rest of the host configuration:
+Add the optional `service_discovery` object to the reviewed [host prerequisite configuration](README.md#9-let-github-maintain-the-host-prerequisites). These addresses and IDs are synthetic:
 
 ```json
 "service_discovery": {
   "vmid": 12012,
   "address": "198.19.125.43",
-  "guests": [12002, 12011, 12012]
+  "scope": "all-guests"
 }
 ```
 
-`vmid` selects the Traefik guest. `address` is its fixed management address. `guests` is the complete list of guests whose routes it may read, including Traefik itself. Every ID must already appear in `applications`. The selected host endpoint must use a literal private IPv4 address on HTTPS port 8006, with its existing pinned CA. The optional object accepts no extra fields or custom privileges.
+| Field | Presence and accepted value | Effect |
+| --- | --- | --- |
+| `vmid` | Required integer selecting a declared application guest | Owns the stable `homelab-traefik-<vmid>` token and `HomelabTraefikRead<vmid>` role. No default. |
+| `address` | Required individual private IPv4 address, distinct from the host API address | Selects the source `/32` of the existing TCP 8006 host allowance. No default. |
+| `scope` | Required string `all-guests` | Reads metadata for current and future guests through an inherited `/vms` grant. No guest inventory or owner digest belongs in source. |
 
-For the example, bootstrap creates:
+The object rejects unknown fields, nulls and empty values. The host endpoint must be credential-free HTTPS on port 8006 using its existing pinned CA and literal private IPv4 address. Omit the object when this provider is not selected.
+
+Bootstrap produces exactly this discovery policy:
 
 | Item | Result |
 | --- | --- |
-| API token | `root@pam!homelab-traefik-12012`, privilege separation enabled, no expiry |
-| Custom role | `HomelabTraefikRead12012`, containing only `Sys.Audit` and `VM.Audit` |
-| Grants | That role on the exact node and `/vms/12002`, `/vms/12011`, `/vms/12012`; propagation disabled |
-| Host firewall | One incoming TCP 8006 allowance from `198.19.125.43/32` to the selected host address `/32` |
+| Token | `root@pam!homelab-traefik-12012`, privilege separation enabled, no expiry |
+| Role | `HomelabTraefikRead12012`, only `Sys.Audit` and `VM.Audit` |
+| Guest grant | `/vms`, propagation enabled |
+| Node grant | `/nodes/<selected-node>`, propagation disabled |
+| Host firewall | One incoming TCP 8006 allowance from the selected guest `/32` to the selected host `/32` |
 
-The role permits reading metadata and Notes at those paths. It cannot create, configure, start, stop or delete guests. It receives no storage, guest-agent, console or secret-management permission. Other host firewall rules and options are preserved. This does not add a UDM rule or change guest networking.
+These privileges allow metadata and Notes reads. They grant no guest creation, configuration, power, console, guest-agent or credential-management operations. No root ACL is added. Existing firewall options and unrelated ACLs stay intact. An unchanged repeat verifies the policy and makes no permission changes.
 
-The token is returned once by Proxmox. Before granting it access, the workflow saves it under the existing bootstrap state directory:
+Visibility does not publish a route. The pinned [provider v0.7.0](https://github.com/NX211/traefik-proxmox-provider/tree/v0.7.0#required-labels) ignores guests without `traefik.enable=true` in their Notes. HomeLab emits that label only for declared routes. Explicit backend `server.url` labels select the intended interface. Adding a guest needs no discovery permission extension or privileged application job.
 
-```text
-/var/lib/homelab-bootstrap/service-discovery/token.json
-```
+## Retain the credential and history
 
-The same private file is saved in the NAS backup directory that passed admission checks as `service-discovery/token.json`. Both files have mode 0600 inside mode 0700 folders. The `token` field is the complete API credential. Application CD may read that file privately to install the provider configuration; it must never print the file, place it in Proxmox Notes, or upload it as an Actions artifact. The private folder also retains the once-returned response for recovery from a partial operation. Keep the NAS copy protected like your other credentials.
+Proxmox returns a new token secret once. Before granting access, bootstrap saves it as `service-discovery/token.json` under the admitted bootstrap state root and independently mounted NAS backup. The mode is 0600 inside 0700 directories. The `token` field holds the complete credential. Never print it, place it in Notes or upload it as an Actions artifact.
 
-**Expected result:** `service_discovery.status: ready`. This means the API credential, exact privileges, stored firewall rule and private backup passed readback. Application CD still needs to prove that the running Traefik guest can connect and discover its routes. It should use explicit backend `server.url` labels so a multi-interface guest uses the intended application network.
+The original `owner.json`, `token.json`, `READY.json` and once-returned mint response remain private. New installations use owner schema `homelab-service-discovery-v2`; token and READY records keep their original v1 schemas. A successful credential/permission readback is bootstrap readiness, not proof that running Traefik can reach or route an application.
 
-A repeat verifies the saved credential and makes no further changes. The workflow refuses to adopt an existing token, rotate a token, silently expand its guest list, rewrite changed privileges, or move an existing firewall rule. A partial failure leaves the normal bootstrap hold and maintenance marker. Preserve the private receipts and review the actual outcome before authorising a correction; do not delete files or repeatedly rerun the workflow.
+Existing finite-scope installations retain their original owner and every numbered `scope-extensions/NNNN.json` receipt unchanged. The reader validates the full contiguous mirrored historical chain. The reviewed conversion writes one new mirrored `read-scope.json`, schema `homelab-service-discovery-read-scope-v1`, containing the canonical hash of the genuine final historical owner and its unchanged identity, node, endpoint and address with `scope: all-guests`. This records verified read capability; it is not an application deployment or success receipt. Source no longer pins that hash.
 
-## Add another application later
+Missing, mismatched, partial or symlinked custody is refused. Bootstrap does not rotate credentials, invent previous ownership, change role privileges, move an allowance or rewrite unrelated ACLs. A failure after the saved plan and hold leaves the hold for review, with no automatic retry.
 
-Keep the existing token. Append the new guest to `applications` and to the end of `service_discovery.guests`, then include an explicit extension in the same reviewed host-settings change:
+## Reconcile only an already owned discovery identity
 
-```json
-"service_discovery_extension": {
-  "owner_sha256": "<SHA256 of the current non-secret discovery owner>",
-  "guests": [12015]
-}
-```
-
-Use `provider_access.owner_sha256()` on the current owner content to calculate this hash. Initially, that content is `service-discovery/owner.json`; after an extension it is the `owner` in the last `scope-extensions/NNNN.json` receipt. This hash describes the existing node, address, token identity, role and full guest list. It contains no credential.
-
-On the runner, run this from the private repository checkout containing `public-source/`. It prints only the non-secret owner hash:
-
-```sh
-python3 - <<'PY'
-import json
-import sys
-from pathlib import Path
-
-sys.path.insert(0, 'public-source/proxmox/bootstrap')
-from provider_access import owner_sha256
-
-base = Path('/var/lib/homelab-bootstrap/service-discovery')
-receipts = sorted((base / 'scope-extensions').glob('*.json'))
-owner = (json.loads(receipts[-1].read_text())['owner'] if receipts
-         else json.loads((base / 'owner.json').read_text()))
-print(owner_sha256(owner))
-PY
-```
-
-Do not hash the stored file with `sha256sum`: its whitespace differs from the canonical JSON content checked by bootstrap. Before changing access, normal bootstrap checks still validate the complete receipt chain and its NAS copies.
-
-Review and approve the exact added guest access before merging. Bootstrap adds only the declared read grants, without propagation. It verifies the retained credential, role and all previous grants first. A changed address, removed or reordered old guest, extra privilege or missing NAS copy stops the operation.
-
-The original owner and token files remain unchanged. Each successful extension adds one numbered receipt in `service-discovery/scope-extensions/` on the runner and NAS. Later runs use that complete chain to check the effective scope and make no further changes. A partial extension stays under the normal bootstrap hold; it cannot be adopted or automatically retried. After success the optional extension request may be removed, retaining the full desired guest list.
-
-Omit `service_discovery` when this provider is not part of your deployment. The original host prerequisite workflow keeps its existing behaviour.
-
-## Extend only an already owned scope
-
-When the complete historical host plan is not being changed, the same protected bootstrap workflow can invoke `bootstrap_cd.py --owned-discovery-extension --config <private-json> --ca <pinned-ca>`. Ordinary application CD does not receive the bootstrap credential. This mode accepts exactly these fields:
+Use the existing protected bootstrap workflow with `bootstrap_cd.py --owned-discovery --config <private-json> --ca <pinned-ca>` when the complete host plan is not changing. The closed input is:
 
 ```json
 {
-  "schema": "homelab-owned-discovery-extension-v1",
+  "schema": "homelab-owned-discovery-v1",
   "endpoint": "https://198.19.125.11:8006/",
   "node": "fixture-node",
   "backup_source": "198.19.120.2:/backups/fixture",
-  "application_vmids": [12002, 12011, 12012, 12015],
   "service_discovery": {
     "vmid": 12012,
     "address": "198.19.125.43",
-    "guests": [12002, 12011, 12012, 12015]
-  },
-  "service_discovery_extension": {
-    "owner_sha256": "<canonical current owner SHA256>",
-    "guests": [12015]
-  },
-  "added_guests": [
-    {"node": "fixture-node", "vmid": 12015, "hostname": "fixture-mqtt", "type": "lxc"}
-  ]
+    "scope": "all-guests"
+  }
 }
 ```
 
-These values are synthetic; the owner hash must come from the actual current ownership records. `added_guests` binds every appended ID, in order, to its exact node, guest type and hostname on Proxmox. CD reads only those added guest configurations before its saved plan and again before granting access. CD rejects the change if an identity is missing or different.
+`schema` is required and exact. `endpoint`, `node` and `backup_source` bind the retained API origin, node and actual mounted NAS source; none has a default. The mode has no application inventory, added-guest list or permission-extension packet. It cannot mint or adopt an unowned identity, modify application grants, networking, monitoring or firewall rules.
 
-The mode requires matching `owner.json`, `token.json` and `READY.json` in both `service-discovery` directories, the expected mounted NAS, and no bootstrap hold or maintenance marker. The mirrored `scope-extensions` chain is required only when previous extensions exist; it is absent for the first extension. The mode can add only the declared discovery access rules without propagation, plus matching receipts on the runner and NAS. It cannot mint credentials or change bridges, application grants, monitoring or firewall rules. Plans and results remain in the existing protected evidence directories. The single matching API allowance may appear after other input rules only when each preceding rule names one literal IPv4 source or CIDR that excludes the discovery guest. CD rejects unknown, inverted, compound or overlapping sources. It never moves or edits those rules. Preflight refusals create no hold. Failures after plan and hold creation retain that hold and do not retry; an unchanged successful repeat verifies the exact completed extension without another grant or receipt.
+The native scope must match either the genuine last historical owner exactly or the desired two-grant policy exactly. From the historical policy, bootstrap adds `/vms` with propagation, removes only the superseded per-guest grants of that same token and role, verifies the unchanged role, token metadata and firewall, then saves the read-scope record. If an explicitly authorised manual conversion already produced the exact policy, it verifies the same endstate and saves custody with zero API writes. Partial and foreign scope changes are refused.
+
+The effective-permissions API may enumerate inherited `/vms/<id>` paths beyond the two explicit ACLs. Each must contain only `Sys.Audit` and `VM.Audit`, with inheritance enabled. Unexpected paths, privileges or propagation flags fail verification. Ordinary ingress CD uses only GET requests to verify this capability and list guests, without a frozen VMID list.
+
+The mode requires no bootstrap hold or maintenance marker, matching private local/NAS custody, the admitted NAS mount, and the unchanged API allowance. Preceding firewall rules must have literal nonoverlapping IPv4 sources; unknown, compound, inverted or overlapping sources are refused. Plans, results and failures use the existing protected evidence directories. A completed repeat verifies without creating another receipt.
+
+## Source evidence and limits
+
+The maintained `test_provider_access.py`, `test_owned_discovery_scope.py`, `test_application_scope.py` and application discovery tests cover fresh issuance, exact conversion, already-converted adoption, six retained extensions, unchanged repeats, future guest admission, malformed custody, permission drift and held failures using synthetic APIs and directories. These checks do not execute a production conversion or prove service routing. Target permission readback, source integration, protected bootstrap execution and running application acceptance remain separate evidence.

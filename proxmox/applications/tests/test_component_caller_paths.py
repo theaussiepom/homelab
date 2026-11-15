@@ -382,7 +382,7 @@ class StaticSourceBindingTests(CallerCase):
         write_new(ca,b'synthetic route trust');write_new(scope,b'{"synthetic":"public identity proof"}')
         app['settings']['route_ca_files']={'owned':{'source':str(ca),'filename':'route-owned.pem'}}
         app['settings']['provider']['discovery']={'local_directory':str(self.root/'discovery'),
-            'mirror_directory':str(self.root/'mirror/discovery'),'owner_sha256':'b'*64,'guests':[610,611]};self.save()
+            'mirror_directory':str(self.root/'mirror/discovery'),'scope':'all-guests'};self.save()
         static={str(self.directory/'component-runtime.json'):sha(self.directory/'component-runtime.json')}
         with patch.object(inputs,'inspect',side_effect=lambda *args:static.copy()), \
              patch.object(inputs.discovery_scope,'scope_source_files',return_value=[str(scope)]) as discovery, \
@@ -391,7 +391,7 @@ class StaticSourceBindingTests(CallerCase):
              patch.object(managed_credentials,'credential',side_effect=AssertionError('No static credential read')):
             site=self.directory/'site.json';write_new(site,encoded(cfg))
             bound=inputs.binding(cfg,site)
-            discovery.assert_called_once_with(app['settings']['provider']['discovery'],[9900])
+            discovery.assert_called_once_with(app['settings']['provider']['discovery'])
             self.assertEqual(bound['input_hashes'][str(ca)],sha(ca));self.assertEqual(bound['input_hashes'][str(scope)],sha(scope))
             write_bytes(ca,b'changed public route trust')
             with patch.object(ansible.proxmox_guest,'dhcp_admission') as native, \

@@ -280,14 +280,12 @@ class FoundationBindingEdges(unittest.TestCase):
             with self.subTest(case=case),self.assertRaises(ComponentError):foundation.bind(resolver)
             app.clear();app.update(saved);resolver.endpoint.return_value=saved_endpoint
 
-    def test_traefik_required_capabilities_secrets_context_and_discovery_guests_are_explicit(self):
-        for case in ('provider','acme','secret','context','discovery-missing','discovery-context'):
+    def test_traefik_required_capabilities_secrets_context_are_explicit(self):
+        for case in ('provider','acme','secret','context'):
             resolver,app=fixture('traefik');app['secret_bindings']={'cloudflare_dns_token':{},'proxmox_token':{}}
             if case in ('provider','acme'):app['properties'].pop(case)
             elif case=='secret':app['secret_bindings'].pop('proxmox_token')
             elif case=='context':app['properties']['provider']['context']='other'
-            elif case=='discovery-missing':resolver.guests.pop('application')
-            else:resolver.guests['application']['context']='other'
             with self.subTest(case=case),self.assertRaises(ComponentError):foundation.bind(resolver)
 
     def test_traefik_dns_protocol_port_address_and_duplicate_aliases_refuse(self):
