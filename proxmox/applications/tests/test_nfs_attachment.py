@@ -122,6 +122,7 @@ class HostAttachmentTests(unittest.TestCase):
             with self.assertRaises(OSError):helper.directory(str(link))
         def execute(args):return json.dumps({'filesystems':[found]})
         with patch.object(helper,'directory',return_value=123),patch.object(helper.os,'close')as close, \
+             patch.object(helper,'mount_identity',return_value={k:found[k]for k in ('source','fstype','fsroot','target')}), \
              patch.object(helper.os,'fstatvfs',return_value=SimpleNamespace(f_flag=0)), \
              patch.object(helper.os,'fstat',return_value='identity'):
             self.assertEqual(helper.source(selected,execute),(123,'identity'))
@@ -133,7 +134,26 @@ class HostAttachmentTests(unittest.TestCase):
             with patch.object(helper.os,'fstatvfs',return_value=SimpleNamespace(f_flag=helper.os.ST_RDONLY)),self.assertRaises(ValueError):
                 helper.source(selected,execute)
         for value in ({'filesystems':[]},{'filesystems':[found,found]}):
-            with self.assertRaises(ValueError):helper.mount('/mnt/example',lambda args:json.dumps(value))
+            with patch.object(helper,'mount_identity',return_value={k:found[k]for k in ('source','fstype','fsroot','target')}),self.assertRaises(ValueError):helper.mount('/mnt/example',lambda args:json.dumps(value),123)
+
+    def test_opened_mount_id_selects_nfs_beneath_the_observed_autofs_overlay(self):
+        # Sanitised from the sealed post-CD two-row mount diagnostic/r3 proof.
+        rows=[{'source':'systemd-1','fstype':'autofs','fsroot':'/','options':'rw,relatime','target':'/mnt/example'},
+              {'source':'nas.example.invalid:/export','fstype':'nfs4','fsroot':'/','options':'rw,nosuid,nodev','target':'/mnt/example'}]
+        mountinfo=('160 32 0:76 / /mnt/example rw,relatime - autofs systemd-1 rw\n'
+                   '248 160 0:80 / /mnt/example rw,nosuid,nodev - nfs4 nas.example.invalid:/export rw\n')
+        def text(path):return 'pos:\t0\nmnt_id:\t248\n' if 'fdinfo'in str(path) else mountinfo
+        with patch.object(helper.Path,'read_text',autospec=True,side_effect=text), \
+             patch.object(helper.os,'fstat',return_value=SimpleNamespace(st_dev=helper.os.makedev(0,80))):
+            found=helper.mount('/mnt/example/recordings',lambda args:json.dumps({'filesystems':rows}),123)
+            self.assertEqual(found,rows[1])
+            with patch.object(helper.Path,'read_text',side_effect=['mnt_id: 160\n',mountinfo]), \
+                 patch.object(helper.os,'fstat',return_value=SimpleNamespace(st_dev=helper.os.makedev(0,76))),self.assertRaises(ValueError):
+                helper.mount('/mnt/example',lambda args:json.dumps({'filesystems':rows}),123)
+            for info,table in [('mnt_id: 999\n',mountinfo),('missing',mountinfo),('mnt_id: 248\n',mountinfo+mountinfo)]:
+                with patch.object(helper.Path,'read_text',side_effect=[info,table]),self.assertRaises(ValueError):helper.mount_identity(123)
+            with patch.object(helper.os,'fstat',return_value=SimpleNamespace(st_dev=helper.os.makedev(0,99))),self.assertRaises(ValueError):
+                helper.mount_identity(123)
 
     def test_command_is_bounded_and_shell_free(self):
         with patch.object(helper.subprocess,'check_output',return_value='value')as execute:

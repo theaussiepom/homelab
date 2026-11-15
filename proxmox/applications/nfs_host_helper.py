@@ -75,19 +75,37 @@ def directory(path):
         raise
 
 
-def mount(path, execute):
+def mount_identity(descriptor):
+    raw = Path('/proc/self/fdinfo/'+str(descriptor)).read_text()
+    require(len(raw) <= 16384)
+    ids = re.findall(r'^mnt_id:\s*([0-9]+)$',raw,re.M)
+    require(len(ids) == 1)
+    raw = Path('/proc/self/mountinfo').read_text()
+    require(len(raw) <= 1048576)
+    rows = [line.split() for line in raw.splitlines() if line.split()[0] == ids[0]]
+    require(len(rows) == 1)
+    fields = rows[0];separator = fields.index('-')
+    major,minor = map(int,fields[2].split(':'))
+    require(os.fstat(descriptor).st_dev == os.makedev(major,minor))
+    return {'source':fields[separator+2],'fstype':fields[separator+1],
+            'fsroot':fields[3],'target':fields[4]}
+
+
+def mount(path, execute, descriptor):
+    identity = mount_identity(descriptor)
+    require(identity['fstype'] in ('nfs','nfs4'))
     result = decode(execute(['/usr/bin/findmnt','--json','--nofsroot','--target',path,'--output','SOURCE,FSTYPE,FSROOT,OPTIONS,TARGET']))
     rows = result['filesystems']
-    require(type(rows) is list and len(rows) == 1)
-    row = rows[0]
-    require(row['fstype'] in ('nfs','nfs4') and 'rw' in row['options'].split(','))
-    return row
+    require(type(rows) is list and 1 <= len(rows) <= 256)
+    selected = [row for row in rows if type(row) is dict and all(row.get(key) == value for key,value in identity.items())]
+    require(len(selected) == 1 and 'rw' in selected[0]['options'].split(','))
+    return selected[0]
 
 
 def source(selected, execute):
     descriptor = directory(selected['source'])
     try:
-        row = mount(selected['source'], execute)
+        row = mount(selected['source'], execute, descriptor)
         relative = str(Path(selected['source']).relative_to(row['target']))
         relative = '' if relative == '.' else '/' + relative
         projected = row['source'].rstrip('/') + relative

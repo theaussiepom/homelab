@@ -55,7 +55,9 @@ Bootstrap pins the host key at `/var/lib/homelab-inputs/nfs-host-known_hosts`
 without replacing existing trust, then verifies the installed helper digest
 through the restricted key. The dedicated private key passes through a temporary
 mode0700 transport directory to `gh secret set PROXMOX_NFS_SSH_KEY` on stdin.
-It never appears in arguments, logs or source. The temporary transport is removed;
+The fetched controller file is explicitly restricted to mode0600 before it is
+read for delivery, independent of the Ansible process umask. It never appears
+in arguments, logs or source. The temporary transport is removed;
 the original key remains on the runner. The private attempt records safe status
 and preserves failure evidence. A failed step is not automatically retried.
 
@@ -70,7 +72,9 @@ Under the normal guest attempt/ownership locks, Infrastructure validates the
 genuine previous guest state, then invokes the forced helper before provider
 planning. The helper checks the closed request, live guest identity, complete
 previous mount sequence, current digest, pending changes and real writable NFS
-source without following symlinks or allowing a local directory fallback. An
+source without following symlinks or allowing a local directory fallback. The
+opened directory’s mount ID and device must match its NFS mountinfo row, even
+when autofs and NFS share a mountpoint. An
 identical bind is a no-op; a conflicting slot or earlier mount is refused.
 
 For an absent bind, the helper gracefully stops a running guest, verifies it is

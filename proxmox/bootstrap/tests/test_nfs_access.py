@@ -76,6 +76,30 @@ class NfsAccessTests(unittest.TestCase):
             runpy.run_path(nfs_access.__file__,run_name='__main__')
         self.assertEqual(end.exception.code,2)
 
+    def test_actual_fetch_transport_is_restricted_with_a_permissive_process_umask(self):
+        import copy,yaml
+        source=(Path(nfs_access.HERE)/'ansible/host-nfs.yml')
+        tasks=yaml.safe_load(source.read_text())[-1]['tasks'][-2:]
+        self.assertIn('ansible.builtin.fetch',tasks[0]);self.assertIn('ansible.builtin.file',tasks[1])
+        fixture=self.root/'synthetic-key';fixture.write_bytes(b'synthetic-transport-fixture');fixture.chmod(0o600)
+        for enforce in (False,True):
+            transport=self.root/('private-'+str(enforce));transport.mkdir(mode=0o700)
+            selected=copy.deepcopy(tasks if enforce else tasks[:1])
+            selected[0]['ansible.builtin.fetch']['src']=str(fixture)
+            play=self.root/('fetch-'+str(enforce)+'.yml')
+            play.write_text(yaml.safe_dump([{'hosts':'localhost','gather_facts':False,'vars':{
+                'ansible_connection':'local','ansible_python_interpreter':sys.executable,
+                'nfs_secret_transport':str(transport)},'tasks':selected}]))
+            executable=Path(sys.executable).with_name('ansible-playbook')
+            result=subprocess.run([str(executable),'-i','localhost,',str(play)],capture_output=True,text=True,timeout=30,
+                preexec_fn=lambda:os.umask(0o022),env=dict(os.environ,ANSIBLE_LOCAL_TEMP=str(self.root/'ansible-local'),
+                                                        ANSIBLE_REMOTE_TEMP=str(self.root/'ansible-remote')))
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertNotIn('synthetic-transport-fixture',result.stdout+result.stderr)
+            self.assertEqual((transport/'key').read_bytes(),fixture.read_bytes())
+            if enforce:self.assertEqual((transport/'key').stat().st_mode&0o777,0o600)
+            else:self.assertIn((transport/'key').stat().st_mode&0o777,(0o600,0o644))
+
     def test_play_uses_separate_reused_key_and_restricted_immutable_helper(self):
         import yaml
         plays=yaml.safe_load((Path(nfs_access.HERE)/'ansible/host-nfs.yml').read_text())

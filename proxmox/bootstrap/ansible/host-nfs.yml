@@ -175,3 +175,11 @@
         dest: '{{ nfs_secret_transport }}/key'
         flat: true
       no_log: true
+    - name: Restrict the fetched controller transport before secret delivery
+      ansible.builtin.file:
+        path: '{{ nfs_secret_transport }}/key'
+        state: file
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      no_log: true
