@@ -81,6 +81,8 @@ After successful CD, verify the intended layer: DNS answer, public TLS, backend 
 
 ## Failure and recovery
 
+When infrastructure completed before a later phase failed, the separately reviewed [infrastructure checkpoint admission](infrastructure-checkpoint.md) can bind that exact archived progress to one fresh successor. It preserves prior application ownership and does not release holds or rewrite state.
+
 Preserve the current pointer to the last successful operation, its immutable receipt, current HOLD and STARTED markers, checkpoints, and input evidence. Do not delete markers or edit state to rerun. Recovery, restore or an explicitly reviewed operator action requires separate authority; this guide introduces no generic override. [Lifecycle](../reference/lifecycle.md) and [Troubleshooting](troubleshooting.md) describe the boundaries.
 
 [Operations index](README.md)

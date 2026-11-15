@@ -204,6 +204,29 @@ def backup_continuity(previous, current):
             'Preserve backup destination and encryption ownership; rotation needs an explicit handover')
 
 
+def sealed_inputs(selected):
+    """Read genuine sealed static inputs without granting application ownership."""
+    component_binding(selected)
+    directory=Path(selected['app_inputs_directory']).parent
+    site=directory/'site.json';runtime=directory/'component-runtime.json'
+    require(sha(site)==selected['site_sha256'] and selected['input_hashes'].get(str(runtime))==sha(runtime),
+            'Preserve prior sealed component source and runtime')
+    cfg=read_json(site,private=True);apps=read_json(runtime,private=True)['applications']
+    from component_guest import phases
+    phases(cfg)
+    from component_inputs import static
+    hashes=static(cfg,site)
+    require(all(selected['input_hashes'].get(path)==value for path,value in hashes.items()),
+            'Preserve every prior sealed static input')
+    require(cfg.get('schema')=='homelab-component-guest-v1' and cfg['guest']['vmid']==selected['vmid']
+            and cfg['deployment']['input_directory']==str(directory)
+            and selected['app_inputs_directory']==str(directory/'applications')
+            and cfg['deployment']['input_identity']==selected['input_identity']
+            and cfg['deployment']['runtime_file']==str(runtime),
+            'Preserve the sealed component input identity')
+    return cfg,apps
+
+
 def previous(attempt):
     """Validate the actual prior canonical/immutable component and sealed inputs."""
     if not attempt.receipt.exists() and not attempt.receipt.is_symlink():return None
@@ -216,25 +239,11 @@ def previous(attempt):
     require(operation.parent==attempt.work and component_success(value,operation)
             and read_existing(operation/'complete.json')==raw,
             'Preserve the exact canonical and immutable component success')
-    selected=value['binding'];directory=Path(selected['app_inputs_directory']).parent
-    site=directory/'site.json';runtime=directory/'component-runtime.json'
-    require(sha(site)==selected['site_sha256'] and selected['input_hashes'].get(str(runtime))==sha(runtime),
-            'Preserve prior sealed component source and runtime')
-    cfg=read_json(site,private=True);apps=read_json(runtime,private=True)['applications']
-    from component_guest import phases
-    phases(cfg)
-    from component_inputs import static
-    hashes=static(cfg,site)
-    require(all(selected['input_hashes'].get(path)==value for path,value in hashes.items()),
-            'Preserve every prior sealed static input')
-    require(cfg.get('schema')=='homelab-component-guest-v1'
-            and cfg['site']['node']==attempt.cfg['site']['node']
+    selected=value['binding']
+    cfg,apps=sealed_inputs(selected)
+    require(cfg['site']['node']==attempt.cfg['site']['node']
             and cfg['site']['api_endpoint']==attempt.cfg['site']['api_endpoint']
             and all(cfg['guest'][key]==attempt.cfg['guest'][key]for key in('vmid','hostname'))
-            and cfg['deployment']['input_directory']==str(directory)
-            and selected['app_inputs_directory']==str(directory/'applications')
-            and cfg['deployment']['input_identity']==selected['input_identity']
-            and cfg['deployment']['runtime_file']==str(runtime)
             and set(value['phase_inputs'])==set(cfg['deployment']['phases'])
             and cfg['deployment']['payload_phases']=={phase:proof['app']for phase,proof in value['phase_inputs'].items()if proof is not None},
             'Preserve the prior component guest and phase owners')
@@ -299,8 +308,9 @@ def current(attempt):
                 and ready.get('state_identity')==identity,
                 'Preserve this run owned infrastructure checkpoint')
     else:
-        require(state_hash==value['state_sha256'] and ('state_identity'not in value or value['state_identity']==identity),
-                'Current backend changed outside its ordinary success')
+        if state_hash!=value['state_sha256'] or ('state_identity'in value and value['state_identity']!=identity):
+            from component_checkpoint import admission
+            attempt.previous_configuration=admission(attempt,value,state_hash,identity)
     require('state_identity'not in value or value['state_identity']==identity
             or (attempt.hold.exists() or attempt.hold.is_symlink())
             and identity_extension(value['state_identity'], identity,
