@@ -164,7 +164,7 @@ def prepare(catalog_path, settings_path, destination):
 def snapshot(destination):
     """Copy public inputs only; never expose .local/, Git metadata or caches."""
     destination.mkdir(parents=True, mode=0o700)
-    paths = ['proxmox/bootstrap', 'proxmox/common/ansible', 'proxmox/applications/host_device_helper.py']
+    paths = ['proxmox/bootstrap', 'proxmox/common/ansible', 'proxmox/applications/host_device_helper.py', 'proxmox/applications/nfs_host_helper.py']
     excluded = shutil.ignore_patterns('.local', '.work', 'evidence', '__pycache__',
                                      '.terraform', '*.tfstate*', '*.tfplan', '*.pyc')
     for name in paths:

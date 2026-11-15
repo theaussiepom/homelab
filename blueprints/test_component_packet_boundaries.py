@@ -129,4 +129,29 @@ class PacketComponentBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ComponentError,'component.credential-slot'):packet._account_paths(runtime,directory)
 
 
+
+class NfsPacketBoundaries(unittest.TestCase):
+    setUp=PacketComponentBoundaryTests.setUp
+    lower=PacketComponentBoundaryTests.lower
+    config=PacketComponentBoundaryTests.config
+    def test_declared_nfs_requires_one_explicit_file_capability(self):
+        import component_lower
+        provider=component_lower.provider_config(self.plan,'resolver')
+        provider['guest']['recording_mount']={'explicit':'upstream boundary fixture'}
+        context=self.plan.resolved['contexts'][self.plan.resolved['guests']['resolver']['context']]
+        context['capabilities']={'nfs':{'type':'nfs-attachment','ssh_private_key':'nfs-key','known_hosts':'/controller/nfs-hosts'}}
+        self.plan.site['secret_sources']['nfs-key']={'type':'file','path':'/controller/nfs-key'}
+        with patch.object(packet,'provider_config',return_value=provider):
+            cfg=self.config()
+            self.assertEqual(cfg['paths']['host_nfs_key'],'/controller/nfs-key')
+            self.assertEqual(cfg['paths']['host_nfs_known_hosts'],'/controller/nfs-hosts')
+            original=copy.deepcopy(context['capabilities'])
+            for values in ({},{**original,'duplicate':copy.deepcopy(original['nfs'])}):
+                context['capabilities']=values
+                with self.assertRaisesRegex(ComponentError,'nfs-attachment-capability'):self.lower()
+            context['capabilities']=original
+            self.plan.site['secret_sources']['nfs-key']={'type':'github-actions','name':'NFS_KEY'}
+            with self.assertRaisesRegex(ComponentError,'context-file-credential'):self.lower()
+
+
 if __name__=='__main__':unittest.main()

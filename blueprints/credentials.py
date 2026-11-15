@@ -17,6 +17,20 @@ import private_io as files
 import component_guest
 
 
+def public_key(key, parent):
+    files.require(key.startswith("-----BEGIN OPENSSH PRIVATE KEY-----\n")
+        and key.endswith("\n-----END OPENSSH PRIVATE KEY-----") and "\r" not in key and len(key) <= 8192,
+        'Supply a bounded unencrypted OpenSSH key')
+    with tempfile.TemporaryDirectory(prefix='homelab-key-check-', dir=parent) as directory:
+        path = Path(directory)/'key'
+        files.write_new(path,(key+'\n').encode())
+        result = subprocess.run(['ssh-keygen','-y','-P','','-f',str(path)],capture_output=True,text=True,timeout=10)
+        public = ' '.join(result.stdout.split()[:2])
+        files.require(result.returncode == 0 and re.fullmatch(r'ssh-ed25519 [A-Za-z0-9+/=]+',public),
+                      'Require the retained Ed25519 key identity')
+        return public
+
+
 def bind(packet, environment=os.environ):
     files.require(
         environment.get("GITHUB_REF") == "refs/heads/main"
@@ -31,13 +45,6 @@ def bind(packet, environment=os.environ):
         re.fullmatch(r"[A-Za-z0-9@!._-]+=[A-Za-z0-9-]+", token) and len(token) <= 512,
         "Supply the existing PVE application token",
     )
-    files.require(
-        key.startswith("-----BEGIN OPENSSH PRIVATE KEY-----\n")
-        and key.endswith("\n-----END OPENSSH PRIVATE KEY-----")
-        and "\r" not in key
-        and len(key) <= 8192,
-        "Supply the existing application SSH key",
-    )
     public_keys = cfg["ssh_public_keys"]
     files.require(
         isinstance(public_keys, list)
@@ -49,27 +56,14 @@ def bind(packet, environment=os.environ):
         ),
         "Supply the approved deployment public keys",
     )
-    with tempfile.TemporaryDirectory(
-        prefix="homelab-key-check-", dir=packet.parent
-    ) as directory:
-        temporary = Path(directory) / "key"
-        files.write_new(temporary, (key + "\n").encode())
-        result = subprocess.run(
-            ["ssh-keygen", "-y", "-P", "", "-f", str(temporary)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        files.require(
-            result.returncode == 0
-            and " ".join(result.stdout.split()[:2]) in public_keys,
-            "The retained private key must match an approved guest public key",
-        )
-    selected = [
-        (Path(cfg["paths"]["api_token"]), token),
-        (Path(cfg["paths"]["private_key"]), key),
-    ]
+    files.require(public_key(key, packet.parent) in public_keys,
+                  "The retained private key must match an approved guest public key")
+    selected = [(Path(cfg["paths"]["api_token"]), token), (Path(cfg["paths"]["private_key"]), key)]
+    if 'recording_mount' in cfg['guest'] and environment.get('PHASE') == 'infrastructure':
+        nfs_key = environment.get('PROXMOX_NFS_SSH_KEY', '').rstrip('\n')
+        files.require(public_key(nfs_key, packet.parent) not in public_keys,
+                      'Use the separate restricted NFS key, never the application key')
+        selected.append((Path(cfg['paths']['host_nfs_key']), nfs_key))
     files.require(
         len({path for path, _ in selected}) == len(selected),
         "Use distinct credential paths",

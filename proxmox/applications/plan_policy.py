@@ -182,7 +182,7 @@ def declared_backup_drift(before, after, selection, staging, vmid, *, recording_
     if before == after:
         return True
     if recording_mount is not None:
-        from scrypted_mount import provider_row
+        from nfs_mounts import provider_row
         if (isinstance(before, list) and isinstance(after, list)
                 and len(after) == len(before) + 1
                 and recording_mount['slot'] == len(before)
@@ -324,7 +324,7 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
                 continue
         if row["address"] == "module.guest.proxmox_virtual_environment_container.guest":
             if recording_mount is not None:
-                from scrypted_mount import declaration, provider_row
+                from nfs_mounts import declaration, provider_row
                 declaration(recording_mount)
                 mounts = after.get('mount_point')
                 require(existing and isinstance(mounts, list)

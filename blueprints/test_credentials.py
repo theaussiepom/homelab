@@ -203,3 +203,30 @@ class CredentialTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             credentials.bind(self.packet, self.environment)
         self.assertEqual(list(self.directory.iterdir()), [])
+
+class NfsCredentialTests(unittest.TestCase):
+    setUp=CredentialTests.setUp
+    save=CredentialTests.save
+    def test_separate_nfs_key_is_bound_only_for_infrastructure_without_rotation(self):
+        from unittest.mock import patch
+        self.save();cfg=json.loads(self.value['files']['site.json'])
+        cfg['guest']['recording_mount']={'declared':'boundary fixture'}
+        nfs=self.directory/'nfs';cfg['paths']['host_nfs_key']=str(nfs)
+        env=dict(self.environment,PHASE='infrastructure',PROXMOX_NFS_SSH_KEY=(self.root/'other').read_text())
+        with patch.object(credentials.component_guest,'packet',return_value=(cfg,None)):
+            self.assertEqual(credentials.bind(self.packet,env)['files_created'],3)
+            self.assertEqual(credentials.bind(self.packet,env)['files_created'],0)
+            self.assertEqual(credentials.bind(self.packet,dict(env,PHASE='scrypted',PROXMOX_NFS_SSH_KEY=''))['files_created'],0)
+            self.assertEqual(nfs.read_text(),(self.root/'other').read_text())
+        self.assertEqual(nfs.stat().st_mode&0o777,0o600)
+
+    def test_absent_or_application_nfs_identity_refuses_before_any_persistent_write(self):
+        from unittest.mock import patch
+        self.save();cfg=json.loads(self.value['files']['site.json'])
+        cfg['guest']['recording_mount']={'declared':'boundary fixture'}
+        cfg['paths']['host_nfs_key']=str(self.directory/'nfs')
+        for value in ('',self.environment['APPLICATION_SSH_KEY']):
+            env=dict(self.environment,PHASE='infrastructure',PROXMOX_NFS_SSH_KEY=value)
+            with patch.object(credentials.component_guest,'packet',return_value=(cfg,None)),self.assertRaises(ValueError):
+                credentials.bind(self.packet,env)
+            self.assertEqual(list(self.directory.iterdir()),[])

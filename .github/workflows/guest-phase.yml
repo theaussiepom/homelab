@@ -23,6 +23,8 @@ on:
         required: true
       PROXMOX_APP_TOKEN:
         required: true
+      PROXMOX_NFS_SSH_KEY:
+        required: false
       authentik_postgresql_password:
         required: false
       authentik_secret_key:
@@ -145,6 +147,7 @@ jobs:
           PHASE: ${{ inputs.phase }}
           PROXMOX_APP_TOKEN: ${{ secrets.PROXMOX_APP_TOKEN }}
           APPLICATION_SSH_KEY: ${{ secrets.APPLICATION_SSH_KEY }}
+          PROXMOX_NFS_SSH_KEY: ${{ secrets.PROXMOX_NFS_SSH_KEY }}
         run: python3 framework-source/blueprints/credentials.py --packet "$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json"
       - name: Reconcile this phase
         env:

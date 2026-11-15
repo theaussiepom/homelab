@@ -122,12 +122,19 @@ class FoundationBindingTests(unittest.TestCase):
                 (lambda r: r.apps['application']['storage'].pop('data'), 'scrypted-storage'),
                 (lambda r: r.apps['application']['storage'].update(data={'root_path':'other', 'subpath':''}), 'scrypted-storage'),
                 (lambda r: r.apps['application']['storage']['recordings'].update(subpath='camera'), 'scrypted-storage'),
-                (lambda r: r.guests['host']['root_paths']['recordings'].pop('host_bind'), 'scrypted-storage'),
-                (lambda r: r.guests['host']['root_paths'].update(unused={
-                    'path':'/srv/example/unused', 'host_bind':{}}), 'host-bind-owner')):
+                (lambda r: r.guests['host']['root_paths']['recordings'].pop('host_bind'), 'scrypted-storage')):
             r = fixture(); mutate(r)
             with self.subTest(error=error), self.assertRaisesRegex(ComponentError, error):
                 settings.bind(r)
+
+    def test_empty_guest_nfs_provisioning_has_no_application_selection_gate(self):
+        resolver=self.fixture('scrypted');resolver.apps={}
+        resolver.guests['host']['root_paths']={'data':{'path':'/srv/example/nfs','host_bind':{
+            'source':'/mnt/example/nfs','slot':0,'filesystem_source':'nas.example.invalid:/nfs',
+            'filesystem':'nfs4','filesystem_root':'/'}}}
+        before=copy.deepcopy(resolver.guests)
+        settings.bind(resolver)
+        self.assertEqual(resolver.guests,before)
 
     def fixture(self, adapter):
         app = {'id': 'application', 'guest': 'host', 'adapter': adapter, 'properties': props()[adapter],

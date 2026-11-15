@@ -21,8 +21,8 @@ A context selects a Proxmox LXC provider and the trust, credentials and paths it
 | <a id="context-protected-guests"></a>`protected_guests` | Required integer list | Unique positive VMIDs reserved from use by selected guests |
 | <a id="context-ssh-public-keys"></a>`ssh_public_keys` | Required string list | Unique nonempty strings; deployment admission also requires actual Ed25519 public keys |
 | <a id="context-dns-servers"></a>`dns_servers` | Required nonempty endpoint-reference list | Resolved DNS TCP/UDP port 53 with IPv4 addresses |
-| <a id="context-capabilities"></a>`capabilities ` | Optional named map, {} | Named serial capabilities, exact fields below |
-| <a id="context-capability-type"></a>`capabilities.<id>.type ` | Required `serial-device` | No discovery or alternate capability discriminator |
+| <a id="context-capabilities"></a>`capabilities ` | Optional named map, {} | Named restricted host capabilities, exact fields below |
+| <a id="context-capability-type"></a>`capabilities.<id>.type ` | Required `serial-device` or `nfs-attachment` | Explicit restricted capability; no discovery |
 | <a id="context-capability-ssh-private-key"></a>`capabilities.<id>.ssh_private_key ` | Required source ID | Protected key used by the selected capability |
 | <a id="context-capability-known-hosts"></a>`capabilities.<id>.known_hosts ` | Required absolute path | Selects the SSH trust file used for this capability |
 | <a id="context-timezone"></a>`timezone` | Optional string | Default `Etc/UTC`; 1–128 characters, slash-separated `[A-Za-z0-9_+-]+` parts |
@@ -30,6 +30,8 @@ A context selects a Proxmox LXC provider and the trust, credentials and paths it
 [Path constraints](supporting-types.md#scalar-and-path-types) apply to every absolute path. Compilation checks the references without reading trust files or keys, or mounting the backup. Deployment later checks the actual protected inputs and state.
 
 A [guest can override its DNS servers, SSH public keys and timezone](guests.md#guest-dns-servers), but those overrides do not change its provider ownership. Continuing a retained installation requires the previous API endpoint, node, VMID and hostname. Pointing an existing ID at another context does not import or replace it. Runtime checks continue to enforce protected IDs, permanent locks and HOLDs.
+
+A selected NFS `host_bind` requires exactly one context capability of type `nfs-attachment`, with a file-backed `ssh_private_key` and its own pinned `known_hosts`. Bootstrap provisions the separate key and restricted helper as described in [NFS attachment setup](../../proxmox/bootstrap/NFS-ATTACHMENT.md). `component.nfs-attachment-capability` refuses missing or ambiguous selection. This capability has no VMID allowlist; normal guest ownership and protected-ID checks still apply.
 
 ## First installation
 

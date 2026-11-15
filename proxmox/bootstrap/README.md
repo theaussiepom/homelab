@@ -339,3 +339,7 @@ On 26 October 2026 the physical deployment guest also passed NAS mount/copy read
 ## Maintain host firewall policy through CD
 
 For a host policy already managed by HomeLab, use the separate [host firewall CD guide](HOST-FIREWALL.md). It owns node TCP allowances and explicit cluster options with its own imported OpenTofu state; ordinary application credentials and guest policies are unchanged. Importing the existing configuration is a separate initial operation, outside normal deployments.
+
+## Restricted NFS attachment
+
+[Set up the dedicated NFS capability](NFS-ATTACHMENT.md) through `bootstrap nfs-access`. Bootstrap owns its separate Ed25519 key, forced host helper, pinned trust and protected Environment secret. Ordinary guest Infrastructure attaches configured NFS binds before the saved provider plan; bootstrap does not attach application storage.

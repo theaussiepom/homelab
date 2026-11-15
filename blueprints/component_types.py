@@ -118,7 +118,7 @@ def context(value):
         endpoint(item)
     for row in named(value.get('capabilities', {})).values():
         closed(row, ('type', 'ssh_private_key', 'known_hosts'))
-        require(row['type'] == 'serial-device' and identifier(row['ssh_private_key']))
+        require(row['type'] in ('serial-device', 'nfs-attachment') and identifier(row['ssh_private_key']))
         path(row['known_hosts'])
     if 'timezone' in value:
         timezone(value['timezone'])

@@ -73,7 +73,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
         import hashlib
         self.assertEqual(hashlib.sha256(json.dumps(job['steps'][:7],sort_keys=True).encode()).hexdigest(),w.SHARED_SETUP_SHA256)
         self.assertEqual(set(job['steps'][7]['env']),{'GUEST','PHASE','DISABLED'})
-        self.assertEqual(set(job['steps'][8]['env']),{'GUEST','PHASE',*w.COMMON_SECRETS})
+        self.assertEqual(set(job['steps'][8]['env']),{'GUEST','PHASE','PROXMOX_NFS_SSH_KEY',*w.COMMON_SECRETS})
         self.assertEqual(defaults, {'run': {'shell': 'bash'}})
         actions = w.composite_actions(job)
         actual_setup = yaml.safe_load((w.PHASE_RECIPE.parents[1] / 'actions/guest-setup/action.yml').read_text())
@@ -107,7 +107,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertEqual(final['with']['cloudbeaver_client_secret'], '${{ secrets.EXAMPLE_OIDC_SECRET }}')
         self.assertNotIn('${{ secrets.EXAMPLE_CLIENT_SECRET }}', json.dumps(result))
         self.assertEqual(set(result['guest-store.yml']['on']['workflow_call']['secrets']), set(w.COMMON_SECRETS))
-        self.assertEqual(set(result['phase.yml']['on']['workflow_call']['secrets']), {*w.COMMON_SECRETS,*w.SCALAR_SLOTS,'PBS_API_TOKEN'})
+        self.assertEqual(set(result['phase.yml']['on']['workflow_call']['secrets']), {*w.COMMON_SECRETS,*w.SCALAR_SLOTS,'PBS_API_TOKEN','PROXMOX_NFS_SSH_KEY'})
 
     def test_no_implicit_source_and_expression_labels_or_excess_budget_refuse(self):
         with self.assertRaises(TypeError): w.models(self.stack)

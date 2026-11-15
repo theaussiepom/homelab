@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import scrypted_mount as mount
+import nfs_mounts as mount
 import backup_staging
 import plan_policy
 from test_plan import existing_fixture
@@ -160,6 +160,7 @@ class RecordingInfrastructureBoundary(unittest.TestCase):
     def test_normal_repeat_proves_mount_before_planning_and_after_apply_boundary(self):
         import deployment_inputs
         import proxmox_guest as pve
+        import nfs_attachments
         from fixtures import guest
         from test_plan import fixture as plan_fixture
         with tempfile.TemporaryDirectory() as tmp:
@@ -183,6 +184,7 @@ class RecordingInfrastructureBoundary(unittest.TestCase):
                 operation=root/('mismatch'if mismatch else 'repeat');operation.mkdir()
                 with patch.object(deployment_inputs,'binding',return_value={'approved':True}), \
                      patch.object(pve,'backup'),patch.object(pve,'quiet',side_effect=quiet), \
+                     patch.object(nfs_attachments,'attach',return_value=False)as attach, \
                      patch.object(pve,'guest_trust')as trust, \
                      patch.object(pve.subprocess,'check_output',return_value=json.dumps(value).encode()), \
                      patch.object(mount,'original',return_value=mounts())as original, \
@@ -194,6 +196,7 @@ class RecordingInfrastructureBoundary(unittest.TestCase):
                         result=pve.infrastructure(selected,root/'site',work,operation,{'approved':True},previous_configuration=previous)
                         self.assertFalse(result['changed']);self.assertFalse(result['created'])
                     original.assert_called_once_with(selected,previous,work)
+                    attach.assert_called_once()
                     self.assertEqual([x.kwargs['label']for x in verify.call_args_list],['before','after'])
                     trust.assert_called_once_with(selected,work,persist=False)
             self.assertFalse(any('apply'in row for row in commands))
@@ -212,6 +215,7 @@ class RecordingPacketBoundary(unittest.TestCase):
         packet=copy.deepcopy(fixture.packet);cfg=json.loads(packet['files']['site.json'])
         cfg['guest']['volumes']={'state':{'path':'/srv/state','size_gib':16}}
         cfg['guest']['recording_mount']={**declaration(),'slot':1}
+        cfg['paths'].update(host_nfs_key='/private/nfs-key',host_nfs_known_hosts='/private/nfs-hosts')
         row=cfg['deployment']['applications']['resolver'];row['adapter']='scrypted'
         row['services']=['resolver_a_scrypted']
         runtime=json.loads(packet['files']['component-runtime.json'])

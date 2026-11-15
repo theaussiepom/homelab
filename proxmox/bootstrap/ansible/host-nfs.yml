@@ -1,0 +1,177 @@
+---
+- name: Prepare the separate NFS attachment identity
+  hosts: deploy
+  become: true
+  gather_facts: false
+  vars:
+    nfs_key: /home/homelab-runner/.ssh/proxmox-host-nfs
+  tasks:
+    - name: Require the existing single runner and host
+      ansible.builtin.assert:
+        that: ["groups.deploy | length == 1", "groups.pve | length == 1"]
+    - name: Verify the private runner key directory
+      ansible.builtin.stat:
+        path: /home/homelab-runner/.ssh
+        follow: false
+      register: nfs_directory
+    - name: Preserve the existing runner custody
+      ansible.builtin.assert:
+        that:
+          - nfs_directory.stat.isdir | default(false)
+          - nfs_directory.stat.pw_name == 'homelab-runner'
+          - nfs_directory.stat.mode == '0700'
+    - name: Inspect both dedicated key files
+      ansible.builtin.stat:
+        path: '{{ nfs_key }}{{ item }}'
+        follow: false
+      loop: ['', '.pub']
+      register: nfs_keys
+    - name: Preserve partial or linked keys
+      ansible.builtin.assert:
+        that:
+          - nfs_keys.results[0].stat.exists == nfs_keys.results[1].stat.exists
+          - not nfs_keys.results[0].stat.exists or (nfs_keys.results[0].stat.isreg | default(false) and nfs_keys.results[0].stat.nlink == 1 and nfs_keys.results[0].stat.pw_name == 'homelab-runner' and nfs_keys.results[0].stat.mode == '0600')
+          - not nfs_keys.results[1].stat.exists or (nfs_keys.results[1].stat.isreg | default(false) and nfs_keys.results[1].stat.nlink == 1 and nfs_keys.results[1].stat.pw_name == 'homelab-runner')
+    - name: Generate only an absent Ed25519 pair
+      ansible.builtin.command:
+        argv: [ssh-keygen, -q, -t, ed25519, -N, '', -C, homelab-nfs-attachment, -f, '{{ nfs_key }}']
+      become_user: homelab-runner
+      when: not nfs_keys.results[0].stat.exists
+      no_log: true
+    - name: Read the public identity
+      ansible.builtin.slurp:
+        src: '{{ nfs_key }}.pub'
+      register: nfs_public
+    - name: Derive the retained public identity
+      ansible.builtin.command:
+        argv: [ssh-keygen, -y, -P, '', -f, '{{ nfs_key }}']
+      become_user: homelab-runner
+      register: nfs_derived
+      changed_when: false
+      no_log: true
+    - name: Require a matching Ed25519 pair
+      ansible.builtin.assert:
+        that:
+          - nfs_derived.stdout.split()[:2] == (nfs_public.content | b64decode).split()[:2]
+          - nfs_derived.stdout is match('^ssh-ed25519 [A-Za-z0-9+/=]+')
+      no_log: true
+    - name: Read the existing application public identity
+      ansible.builtin.slurp:
+        src: /home/homelab-runner/.ssh/applications.pub
+      register: nfs_application_public
+    - name: Keep both capabilities separate
+      ansible.builtin.assert:
+        that:
+          - nfs_derived.stdout.split()[:2] != (nfs_application_public.content | b64decode).split()[:2]
+      no_log: true
+    - name: Select the public capability key
+      ansible.builtin.set_fact:
+        nfs_public_key: '{{ nfs_derived.stdout.split()[:2] | join(" ") }}'
+
+- name: Install the restricted host capability
+  hosts: pve
+  become: true
+  gather_facts: false
+  vars:
+    nfs_helper: /usr/local/libexec/homelab-host-nfs.py
+    nfs_line: 'restrict,from="{{ hostvars[groups.deploy[0]].ansible_host }}",command="/usr/bin/python3 -I /usr/local/libexec/homelab-host-nfs.py" {{ hostvars[groups.deploy[0]].nfs_public_key }}'
+  tasks:
+    - name: Require literal host and runner addresses
+      ansible.builtin.assert:
+        that:
+          - ansible_host is match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
+          - hostvars[groups.deploy[0]].ansible_host is match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
+    - name: Inspect any existing helper
+      ansible.builtin.stat:
+        path: '{{ nfs_helper }}'
+        follow: false
+        checksum_algorithm: sha256
+      register: nfs_installed
+    - name: Preserve a changed or untrusted helper
+      ansible.builtin.assert:
+        that:
+          - not nfs_installed.stat.exists or (nfs_installed.stat.isreg | default(false) and nfs_installed.stat.uid == 0 and nfs_installed.stat.mode == '0755' and nfs_installed.stat.nlink == 1 and nfs_installed.stat.checksum == lookup('ansible.builtin.file', nfs_helper_source, rstrip=False) | hash('sha256'))
+    - name: Install the absent root-owned implementation
+      ansible.builtin.copy:
+        src: '{{ nfs_helper_source }}'
+        dest: '{{ nfs_helper }}'
+        owner: root
+        group: root
+        mode: '0755'
+        force: false
+    - name: Read current host authorizations
+      ansible.builtin.slurp:
+        src: /etc/pve/priv/authorized_keys
+      register: nfs_authorizations
+      no_log: true
+    - name: Refuse a reused key or conflicting forced command
+      ansible.builtin.assert:
+        that:
+          - ((nfs_authorizations.content | b64decode).splitlines() | select('search', hostvars[groups.deploy[0]].nfs_public_key | regex_escape) | list) in [[], [nfs_line]]
+          - ((nfs_authorizations.content | b64decode).splitlines() | select('search', '/usr/local/libexec/homelab-host-nfs.py' | regex_escape) | list) in [[], [nfs_line]]
+      no_log: true
+    - name: Preserve authorizations in the private attempt
+      ansible.builtin.fetch:
+        src: /etc/pve/priv/authorized_keys
+        dest: '{{ nfs_evidence }}/authorized_keys.before'
+        flat: true
+      no_log: true
+    - name: Register only this forced command
+      ansible.builtin.lineinfile:
+        path: /etc/pve/priv/authorized_keys
+        line: '{{ nfs_line }}'
+        state: present
+        unsafe_writes: true
+      no_log: true
+    - name: Read the trusted host public key
+      ansible.builtin.slurp:
+        src: /etc/ssh/ssh_host_ed25519_key.pub
+      register: nfs_host_key
+
+- name: Pin trust and verify the forced capability
+  hosts: deploy
+  become: true
+  gather_facts: false
+  vars:
+    nfs_trust: '{{ hostvars[groups.pve[0]].ansible_host }} {{ (hostvars[groups.pve[0]].nfs_host_key.content | b64decode).split()[:2] | join(" ") }}'
+  tasks:
+    - name: Inspect existing dedicated host trust
+      ansible.builtin.stat:
+        path: /var/lib/homelab-inputs/nfs-host-known_hosts
+        follow: false
+      register: nfs_known
+    - name: Read retained trust
+      ansible.builtin.slurp:
+        src: /var/lib/homelab-inputs/nfs-host-known_hosts
+      when: nfs_known.stat.exists
+      register: nfs_prior
+      no_log: true
+    - name: Refuse changed trust
+      ansible.builtin.assert:
+        that:
+          - not nfs_known.stat.exists or (nfs_known.stat.isreg | default(false) and nfs_known.stat.pw_name == 'homelab-runner' and nfs_known.stat.mode == '0600' and (nfs_prior.content | default('') | b64decode).rstrip('\n') == nfs_trust)
+    - name: Save only absent trust
+      ansible.builtin.copy:
+        content: |
+          {{ nfs_trust }}
+        dest: /var/lib/homelab-inputs/nfs-host-known_hosts
+        owner: homelab-runner
+        group: homelab-runner
+        mode: '0600'
+        force: false
+    - name: Verify the exact installed capability
+      ansible.builtin.command:
+        argv: [ssh, -F, /dev/null, -T, -i, /home/homelab-runner/.ssh/proxmox-host-nfs, -o, BatchMode=yes, -o, StrictHostKeyChecking=yes, -o, IdentitiesOnly=yes, -o, ControlMaster=no, -o, ClearAllForwardings=yes, -o, GlobalKnownHostsFile=/dev/null, -o, VerifyHostKeyDNS=no, -o, UpdateHostKeys=no, -o, UserKnownHostsFile=/var/lib/homelab-inputs/nfs-host-known_hosts, -o, ConnectTimeout=10, 'root@{{ hostvars[groups.pve[0]].ansible_host }}', version]
+      become_user: homelab-runner
+      register: nfs_version
+      changed_when: false
+    - name: Require the reviewed helper identity
+      ansible.builtin.assert:
+        that:
+          - (nfs_version.stdout | from_json) == {'schema':'homelab-nfs-attachment-v1','helper_sha256':lookup('ansible.builtin.file', nfs_helper_source, rstrip=False) | hash('sha256'),'changed':false}
+    - name: Transfer the separate key only to protected secret transport
+      ansible.builtin.fetch:
+        src: /home/homelab-runner/.ssh/proxmox-host-nfs
+        dest: '{{ nfs_secret_transport }}/key'
+        flat: true
+      no_log: true

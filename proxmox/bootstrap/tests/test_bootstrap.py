@@ -235,7 +235,7 @@ class BootstrapTests(unittest.TestCase):
             for name in names: (root / name).mkdir(parents=True, exist_ok=True)
             for name in ['proxmox/bootstrap/fixtures/site.json', 'proxmox/bootstrap/docker/versions.tf',
                          'proxmox/bootstrap/docker/.terraform.lock.hcl', 'proxmox/common/ansible/network-ready.yml',
-                         'proxmox/applications/host_device_helper.py']:
+                         'proxmox/applications/host_device_helper.py', 'proxmox/applications/nfs_host_helper.py']:
                 (root / name).write_text('public')
             private = root / 'proxmox/bootstrap/.local'; private.mkdir()
             (private / 'private-marker').write_text('synthetic private input')
@@ -245,6 +245,7 @@ class BootstrapTests(unittest.TestCase):
                 self.assertFalse((output / 'proxmox/bootstrap/.local').exists())
                 self.assertEqual((output / 'proxmox/common/ansible/network-ready.yml').read_text(), 'public')
                 self.assertEqual((output / 'proxmox/applications/host_device_helper.py').read_text(), 'public')
+                self.assertEqual((output / 'proxmox/applications/nfs_host_helper.py').read_text(), 'public')
                 (root / 'proxmox/bootstrap/unsafe-link').symlink_to(private / 'private-marker')
                 with self.assertRaises(ValueError): bootstrap.snapshot(Path(tmp) / 'linked-snapshot')
 

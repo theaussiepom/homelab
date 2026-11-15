@@ -247,10 +247,11 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
     host_devices.check(cfg, operation)
     existing = (work / "terraform.tfstate").is_file()
     recording_mount = None
+    nfs_changed = False
     if 'recording_mount' in cfg['guest']:
-        import scrypted_mount
-        require(existing, 'Create and commission the empty owned guest before selecting Scrypted recordings')
-        recording_mount = scrypted_mount.original(cfg, previous_configuration, work)
+        import nfs_mounts
+        require(existing, 'Create the empty owned guest before selecting its NFS bind')
+        recording_mount = nfs_mounts.original(cfg, previous_configuration, work)
     staging = None
     if 'job' in cfg['app'].get('backup', {}):
         import backup_staging
@@ -288,8 +289,10 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
     tofu = ["tofu", "-chdir=" + str(operation / "tofu")]
     log = operation / "infrastructure.log"
     if recording_mount is not None:
+        import nfs_attachments
+        nfs_changed = nfs_attachments.attach(cfg, recording_mount, operation, lambda path: api_get(cfg, path))
         guest_trust(cfg, work, persist=False)
-        recording_proof = scrypted_mount.verify(cfg, recording_mount, log,
+        recording_proof = nfs_mounts.verify(cfg, recording_mount, log,
             lambda path: api_get(cfg, path), label='before')
     quiet(
         tofu
@@ -405,12 +408,12 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
                 'The declared staging filesystem changed across apply')
     changed = host_devices.attach(cfg, operation) or changed
     if recording_mount is not None:
-        require(scrypted_mount.verify(cfg, recording_mount, log, lambda path: api_get(cfg, path),
+        require(nfs_mounts.verify(cfg, recording_mount, log, lambda path: api_get(cfg, path),
                                       label='after') == recording_proof,
                 'The recording mount changed across infrastructure reconciliation')
     backup(cfg, work / "terraform.tfstate", "after-ordinary")
     return {
-        "changed": changed,
+        "changed": changed or nfs_changed,
         "created": not existing,
         "state_sha256": sha(work / "terraform.tfstate"),
     }

@@ -170,6 +170,9 @@ def model(plan):
         phases = [{'id': 'infrastructure', 'name': 'Infrastructure', 'application': None, 'inputs': {}},
                   {'id': 'preparation', 'name': 'Prepare', 'application': None, 'inputs': {}}]
         ids, secrets = {'infrastructure', 'preparation', AGENT_PHASE, BACKUP_PHASE}, []
+        if any('host_bind' in row for row in guests[guest].get('root_paths', {}).values()):
+            phases[0]['inputs']['PROXMOX_NFS_SSH_KEY'] = {'environment':'PROXMOX_NFS_SSH_KEY','workflow_secret':'PROXMOX_NFS_SSH_KEY'}
+            secrets.append('PROXMOX_NFS_SSH_KEY')
         for app_id in _ordered_apps(apps, app_dependencies, guest):
             app = apps[app_id]; phase, title = app['identity']['phase'], app['display_name']
             require(identifier(phase) and phase not in RESERVED and phase not in ids, 'component.workflow-phase-id')

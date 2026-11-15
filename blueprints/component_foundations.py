@@ -330,12 +330,5 @@ def bind(resolver):
                             'certificate': transports[key]['certificate'],
                             'filename': 'route-' + key + '.pem'}
             app['settings'] = values
-    # Host filesystem access is admitted only for the selected NVR recording
-    # role, never as an unused provider mount or another app's storage escape.
-    for guest_id, guest in resolver.guests.items():
-        for name, root in guest.get('root_paths', {}).items():
-            if 'host_bind' in root:
-                users = [app for app in resolver.apps.values()
-                         if app['guest'] == guest_id and app['adapter'] == 'scrypted'
-                         and app.get('storage', {}).get('recordings') == {'root_path': name, 'subpath': ''}]
-                require(len(users) == 1, 'component.host-bind-owner')
+    # Declared NFS host binds belong to guest provisioning. Application storage
+    # checks above still bind Scrypted's recordings to its exact selected root.

@@ -80,6 +80,9 @@ inputs:
   PBS_API_TOKEN:
     description: Existing scoped credential
     required: false
+  PROXMOX_NFS_SSH_KEY:
+    description: Existing scoped credential
+    required: false
 runs:
   using: composite
   steps:
@@ -106,6 +109,7 @@ runs:
       PHASE: ${{ inputs.phase }}
       PROXMOX_APP_TOKEN: ${{ inputs.PROXMOX_APP_TOKEN }}
       APPLICATION_SSH_KEY: ${{ inputs.APPLICATION_SSH_KEY }}
+      PROXMOX_NFS_SSH_KEY: ${{ inputs.PROXMOX_NFS_SSH_KEY }}
     run: python3 framework-source/blueprints/credentials.py --packet "$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json"
     shell: bash
   - name: Deploy
