@@ -122,14 +122,12 @@ def validate(adapter, value, *, partial=False):
             require(isinstance(row['token_id'], str) and
                     re.fullmatch(r'[^\s!]+@[^\s!]+![A-Za-z0-9_.-]+', row['token_id']), 'component.property')
             if 'discovery' in row:
-                discovery = closed(row['discovery'], ('local_directory', 'mirror_directory', 'owner_sha256', 'guests'))
+                discovery = closed(row['discovery'], ('local_directory', 'mirror_directory', 'scope'))
                 for key in ('local_directory', 'mirror_directory'):
                     types.path(discovery[key])
                     require(discovery[key].endswith('/service-discovery'), 'component.property')
                 require(discovery['local_directory'] != discovery['mirror_directory'], 'component.property')
-                _digest(discovery['owner_sha256'])
-                types.strings(discovery['guests'], ids=True)
-                require(1 <= len(discovery['guests']) <= 32, 'component.property')
+                require(discovery['scope'] == 'all-guests', 'component.property')
         if 'acme' in value:
             row = closed(value['acme'], ('email', 'resolvers'), ('propagation_timeout_seconds',))
             require(isinstance(row['email'], str) and re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', row['email']),
@@ -294,9 +292,6 @@ def bind(resolver):
                     'token_id': provider['token_id'], 'ca_file': context['trust']['ca_file']}
                 if 'discovery' in provider:
                     scope = copy.deepcopy(provider['discovery'])
-                    require(all(key in resolver.guests and resolver.guests[key]['context'] == provider['context']
-                                for key in scope['guests']), 'component.reference')
-                    scope['guests'] = [resolver.guests[key]['identity']['vmid'] for key in scope['guests']]
                     values['provider']['discovery'] = scope
                 values['acme'] = copy.deepcopy(props['acme'])
                 addresses = []

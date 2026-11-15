@@ -22,7 +22,7 @@ class DiscoveryCallerTests(unittest.TestCase):
         self.scope=old_discovery;self.runtime=runtime_secrets;self.caller=component_discovery
         self.cfg={'deployment':{'protected_guests':[9900]},'site':{'api_endpoint':'https://198.18.25.10:8006/','node':'fixture-pve'},
                   'paths':{'ca_file':'/public/context.pem'},'guest':{'vmid':818,'interfaces':[{'ipv4':'198.18.25.33/24'}]}}
-        self.value={'local_directory':'/var/lib/example/service-discovery','mirror_directory':'/backup/example/service-discovery','owner_sha256':'a'*64,'guests':[818,808]}
+        self.value={'local_directory':'/var/lib/example/service-discovery','mirror_directory':'/backup/example/service-discovery','scope':'all-guests'}
         self.app={'adapter':'traefik','settings':{'provider':{'url':'https://198.18.25.10:8006','ca_file':'/public/context.pem','token_id':'root@pam!homelab-traefik-818','discovery':self.value}}}
         self.raw=json.dumps({'schema':'homelab-service-discovery-v1','identity':'root@pam!homelab-traefik-818','token':'root@pam!homelab-traefik-818=synthetic-token'}).encode()
     def test_component_unit_delegates_same_context_and_full_owned_token_once(self):
@@ -44,12 +44,12 @@ class DiscoveryCallerTests(unittest.TestCase):
     def test_unknown_adapter_scope_duplicate_and_foreign_token_refuse(self):
         cases=[]
         app=copy.deepcopy(self.app);app['adapter']='mqtt';cases.append((app,self.raw))
-        app=copy.deepcopy(self.app);app['settings']['provider']['discovery']['guests']=[818,818];cases.append((app,self.raw))
+        app=copy.deepcopy(self.app);app['settings']['provider']['discovery']['scope']='selected-guests';cases.append((app,self.raw))
         value=json.loads(self.raw);value['identity']='foreign@pam!token';cases.append((self.app,json.dumps(value).encode()))
         cases.extend((self.app,raw)for raw in (b'',b'x'*65537,b'raw-token'))
         for app,raw in cases:
             with self.subTest(length=len(raw)),patch.object(deployment_state,'bootstrap_closed'),patch.object(self.scope,'verify_selection',side_effect=lambda *a,**kw:kw['read_configured']())as reader,self.assertRaises(ValueError):self.caller.verify(self.cfg,app,raw)
-            if app['adapter']!='traefik' or app['settings']['provider']['discovery']['guests']==[818,818] or not raw or len(raw)>65536:reader.assert_not_called()
+            if app['adapter']!='traefik' or app['settings']['provider']['discovery']['scope']=='selected-guests' or not raw or len(raw)>65536:reader.assert_not_called()
     def test_omitted_scope_preserves_not_selected_without_claiming_privilege(self):
         app=copy.deepcopy(self.app);app['settings']['provider'].pop('discovery')
         with patch.object(deployment_state,'bootstrap_closed')as markers,patch.object(self.scope,'verify_selection')as reader:
@@ -64,13 +64,15 @@ class DiscoveryCallerTests(unittest.TestCase):
                'applications':[{'vmid':818},{'vmid':808},{'vmid':809}],
                'service_discovery':{'vmid':818,'address':'198.18.25.33','guests':[818,808]}}
             previous=access.owner(c);following=copy.deepcopy(previous);following['configuration']['guests'].append(809)
+            current=copy.deepcopy(following);current['schema']=access.OWNER_SCHEMA;current['configuration']={'vmid':818,'address':'198.18.25.33','scope':'all-guests'}
             record=json.loads(self.raw)
             def save(path,value):path.write_text(json.dumps(value,sort_keys=True)+'\n');path.chmod(0o600)
             for folder in (local,remote):
                 save(folder/'owner.json',previous);save(folder/'token.json',record);save(folder/'READY.json',{'schema':access.SCHEMA,'status':'ready'})
                 (folder/'scope-extensions').mkdir(mode=0o700)
                 save(folder/'scope-extensions/0001.json',{'schema':access.EXTENSION_SCHEMA,'previous_owner_sha256':access.owner_sha256(previous),'owner':following})
-            app=copy.deepcopy(self.app);app['settings']['provider']['discovery']={'local_directory':str(local),'mirror_directory':str(remote),'owner_sha256':access.owner_sha256(following),'guests':[818,808,809]}
+                save(folder/'read-scope.json',{'schema':access.READ_SCOPE_SCHEMA,'previous_owner_sha256':access.owner_sha256(following),'owner':current})
+            app=copy.deepcopy(self.app);app['settings']['provider']['discovery']={'local_directory':str(local),'mirror_directory':str(remote),'scope':'all-guests'}
             class API:
                 def __init__(self):self.paths=[]
                 def discovery(self,token):
@@ -78,13 +80,13 @@ class DiscoveryCallerTests(unittest.TestCase):
                     return self
                 def call(self,path):
                     self.paths.append(path)
-                    if path=='/access/permissions':return{'data':{p:{'VM.Audit':0,'Sys.Audit':0}for p in ('/nodes/fixture-pve','/vms/818','/vms/808','/vms/809')}}
-                    if path in ('/nodes/fixture-pve/lxc/818/config','/nodes/fixture-pve/lxc/808/config','/nodes/fixture-pve/lxc/809/config'):return{'data':{'hostname':'fixture'}}
+                    if path=='/access/permissions':return{'data':{p:{'VM.Audit':flag,'Sys.Audit':flag}for p,flag in (('/nodes/fixture-pve',0),('/vms',1),('/vms/818',1),('/vms/808',1),('/vms/809',1))}}
+                    if path=='/cluster/resources?type=vm':return{'data':[{'vmid':v,'node':'fixture-pve'} for v in (818,808,809)]}
                     raise AssertionError('foreign API route')
             before={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()for p in root.rglob('*')if p.is_file()};api=API()
             result=self.caller.verify(self.cfg,app,self.raw,api)
-            self.assertEqual(result,{'status':'verified','owned_scope':True,'effective_permissions':True,'visible_guests':3,'writes':False})
-            self.assertEqual(api.paths,['/access/permissions','/nodes/fixture-pve/lxc/818/config','/nodes/fixture-pve/lxc/808/config','/nodes/fixture-pve/lxc/809/config'])
+            self.assertEqual(result,{'status':'verified','owned_scope':True,'effective_permissions':True,'visible_guests':3,'scope':'all-guests','writes':False})
+            self.assertEqual(api.paths,['/access/permissions','/cluster/resources?type=vm'])
             after={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()for p in root.rglob('*')if p.is_file()};self.assertEqual(before,after)
             save(remote/'READY.json',{'schema':access.SCHEMA,'status':'incomplete'})
             api=API()
