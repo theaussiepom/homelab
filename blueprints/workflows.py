@@ -85,17 +85,19 @@ def phase_recipe(*, check_actions=True):
     }
     compiler.require(isinstance(job, dict) and set(job) == {*policy, "name", "steps"}
                      and all(job[key] == value for key, value in policy.items())
-                     and isinstance(job["steps"], list) and len(job["steps"]) == 10,
-                     "Preserve the existing phase job policies and ten steps")
+                     and isinstance(job["steps"], list) and len(job["steps"]) == 11,
+                     "Preserve the phase job policies and final cleanup step")
     step_keys = [
         {"name", "run"}, {"uses", "with"}, {"name", "id", "run"},
         {"uses", "with"}, {"name", "id", "run"}, {"uses", "with"},
         {"name", "run"}, {"name", "env", "run"}, {"name", "env", "run"}, {"name", "env", "run"},
+        {"name", "if", "continue-on-error", "env", "run"},
     ]
     step_env = {
         7: {"GUEST", "PHASE", "DISABLED"},
         8: {"GUEST", "PHASE", "PROXMOX_NFS_SSH_KEY", *COMMON_SECRETS},
         9: {"GUEST", "PHASE", "PBS_API_TOKEN", *(PREFIX + slot.upper() for slot in SCALAR_SLOTS)},
+        10: {"GUEST", "PHASE", "OUTCOME"},
     }
     for index, step in enumerate(job["steps"]):
         compiler.require(isinstance(step, dict) and set(step) == step_keys[index]
@@ -116,7 +118,10 @@ def phase_recipe(*, check_actions=True):
                      "Review job-identity dependencies before changing workflow nesting")
     allowed = {"inputs." + key for key in (*INPUTS, "guest", "phase")}
     allowed |= {"secrets." + key for key in secret_declarations()}
-    allowed |= {"github.event.repository.private", "github.event_name", "github.ref", "github.workflow_ref"}
+    compiler.require(job['steps'][-1]['if'] == 'always()'
+                     and job['steps'][-1]['continue-on-error'] is True,
+                     'Cleanup must run after failure without replacing the deployment outcome')
+    allowed |= {"github.event.repository.private", "github.event_name", "github.ref", "github.workflow_ref", "job.status"}
     allowed |= {"steps." + step + ".outputs." + field for step in ("stack", "framework") for field in ("repository", "revision")}
     texts, pending = [], [job]
     while pending:
@@ -150,7 +155,7 @@ def composite_actions(recipe):
         step['name'] = name
         if 'run' in step:
             step['shell'] = 'bash'
-    steps = [copy.deepcopy(recipe['steps'][0]), *copy.deepcopy(recipe['steps'][7:])]
+    steps = [copy.deepcopy(recipe['steps'][0]), *copy.deepcopy(recipe['steps'][7:10])]
     for step, name in zip(steps, ('Check readiness', 'Check inputs', 'Load credentials', 'Deploy')):
         step.update(name=name, shell='bash')
         if 'env' in step:
@@ -161,11 +166,16 @@ def composite_actions(recipe):
               for name in ('guest', 'phase', 'disabled')}
     inputs.update({name: {'description': 'Existing scoped credential', 'required': row['required']}
                    for name, row in secret_declarations().items()})
+    cleanup = copy.deepcopy(recipe['steps'][-1])
+    cleanup['shell'] = 'bash'
     return {
         'guest-setup': {'name': 'Setup', 'description': 'Select immutable settings, services and tools',
                         'runs': {'using': 'composite', 'steps': setup}},
         'guest-phase': {'name': 'Guest phase', 'description': 'Run one guarded admitted deployment phase',
                         'inputs': inputs, 'runs': {'using': 'composite', 'steps': steps}},
+        'guest-cleanup': {'name': 'Guest cleanup', 'description': 'Reclaim eligible guest deployment scratch under custody locks',
+                         'inputs': {name: inputs[name] for name in ('guest', 'phase')},
+                         'runs': {'using': 'composite', 'steps': [cleanup]}},
     }
 
 
@@ -258,6 +268,9 @@ def models(stack, *, site_source, disabled=None):
                 'with': dict(guest=guest, phase=phase['id'], disabled='${{ inputs.disabled }}',
                              **{name: '${{ secrets.' + name + ' }}' for name in COMMON_SECRETS}, **scoped)})
         workflow['jobs']['deploy'] = job
+        job['steps'].append({'name': 'Cleanup', 'if': 'always()', 'continue-on-error': True,
+            'timeout-minutes': 5, 'uses': action_source + 'guest-cleanup' + action_revision,
+            'with': {'guest': guest, 'phase': 'infrastructure'}})
         result['guest-' + guest + '.yml'] = workflow
     result['phase.yml'] = {'name': 'Guest phase', 'on': workflow_call(phase=True),
         'permissions': {'contents': 'read'}, 'jobs': {'run': {

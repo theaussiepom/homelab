@@ -36,7 +36,7 @@ if stage == 'compile':
     assert args[args.index('--guest') + 1] == guest and '--admit' in args
     assert args[args.index('--disabled') + 1] == '[]'
     with packet.open('x') as out: json.dump({'phase': phase, 'guest': guest}, out)
-else:
+elif stage != 'guest_cleanup':
     assert json.loads(packet.read_text()) == {'phase': phase, 'guest': guest}
     if stage == 'deploy': assert args[args.index('--phase') + 1] == phase
 '''
@@ -91,10 +91,11 @@ class ComponentJobExecutionTests(unittest.TestCase):
                 result[name] = selected[match[1]]
         return result
 
-    def exercise(self, guests, fail=None, guard='CONFIGURING'):
+    def exercise(self, guests, fail=None, guard='CONFIGURING', finalize=False):
         temporary = tempfile.TemporaryDirectory(dir=self.root); self.addCleanup(temporary.cleanup)
         work = Path(temporary.name).resolve()
-        for relative in ('blueprints/compile.py', 'blueprints/credentials.py', 'proxmox/applications/deploy.py'):
+        for relative in ('blueprints/compile.py', 'blueprints/credentials.py', 'proxmox/applications/deploy.py',
+                         'proxmox/applications/guest_cleanup.py'):
             target = work / 'framework-source' / relative
             target.parent.mkdir(parents=True, exist_ok=True); target.write_text(STUB)
         runner = work / 'temp'; runner.mkdir(mode=0o700)
@@ -105,7 +106,7 @@ class ComponentJobExecutionTests(unittest.TestCase):
         returncode = 0
         for guest in guests:
             job = self.models['guest-' + guest + '.yml']['jobs']['deploy']
-            for call in job['steps'][1:]:
+            for call in job['steps'][1:-1]:
                 self.assertNotIn('if', call); self.assertNotIn('continue-on-error', call)
                 selected = self.inputs(call, values)
                 for step in self.action['runs']['steps']:
@@ -124,6 +125,21 @@ class ComponentJobExecutionTests(unittest.TestCase):
                         returncode = result.returncode
                         break
                 if returncode: break  # Model GitHub's unchanged default success() gating.
+            if finalize:
+                call = job['steps'][-1]
+                self.assertEqual(call['if'], 'always()'); self.assertTrue(call['continue-on-error'])
+                self.assertEqual(set(call['with']), {'guest', 'phase'})
+                action = workflows.composite_actions(workflows.phase_recipe()[0])['guest-cleanup']
+                step = action['runs']['steps'][0]
+                self.assertEqual(step['if'], 'always()'); self.assertTrue(step['continue-on-error'])
+                self.assertEqual(step['env']['OUTCOME'], '${{ job.status }}')
+                environment = self.environment({k:v for k,v in step['env'].items() if k != 'OUTCOME'}, call['with'])
+                environment.update(HOMELAB_CONFIG_PYTHON=sys.executable, RUNNER_TEMP=str(runner),
+                    GITHUB_RUN_ID='900', GITHUB_RUN_ATTEMPT='1', STUB_TRACE=str(trace),
+                    STUB_SECRET_NAMES=json.dumps(sorted(self.known)), OUTCOME='failure' if returncode else 'success')
+                result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', step['run']], cwd=work,
+                    env=environment, capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stderr)
             if returncode: break
         records = [json.loads(line) for line in trace.read_text().splitlines()] if trace.exists() else []
         return returncode, records, runner, values
@@ -189,6 +205,17 @@ class ComponentJobExecutionTests(unittest.TestCase):
                 self.assertNotEqual(status, 0)
                 self.assertEqual(records, [])
                 self.assertEqual(list(folder.iterdir()), [])
+
+    def test_guest_finalizer_runs_once_after_success_or_each_failure_without_secrets(self):
+        for failure in (None, 'guard', 'infrastructure:compile', 'infrastructure:credentials',
+                        'infrastructure:deploy', 'preparation:deploy', 'browser:deploy'):
+            with self.subTest(failure=failure):
+                status, records, _, _ = self.exercise(['viewer'], failure, finalize=True)
+                self.assertEqual(status == 0, failure is None)
+                self.assertEqual(records[-1]['stage'], 'guest_cleanup')
+                self.assertEqual(records[-1]['secrets'], {})
+                self.assertEqual(records[-1]['present_slots'], [])
+                self.assertEqual(sum(row['stage'] == 'guest_cleanup' for row in records), 1)
 
 
 if __name__ == '__main__':

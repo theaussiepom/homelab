@@ -98,12 +98,12 @@ class WorkflowIntegrationTests(unittest.TestCase):
         for guest, name in [('store', 'Database'), ('viewer', 'Tools')]:
             job = result['guest-'+guest+'.yml']['jobs']['deploy']
             self.assertEqual(job['name'], name); self.assertEqual(job['timeout-minutes'], 135)
-            self.assertEqual([s['with']['phase'] for s in job['steps'][1:]],
+            self.assertEqual([s['with']['phase'] for s in job['steps'][1:-1]],
                              ['infrastructure','preparation','database' if guest=='store' else 'browser'])
-            self.assertTrue(all(s['timeout-minutes']==45 for s in job['steps']))
-            self.assertTrue(all('continue-on-error' not in s and 'if' not in s for s in job['steps']))
+            self.assertTrue(all(s['timeout-minutes']==45 for s in job['steps'][:-1]))
+            self.assertTrue(all('continue-on-error' not in s and 'if' not in s for s in job['steps'][:-1]))
             for step in job['steps'][1:3]: self.assertEqual(set(step['with']), {'guest','phase','disabled',*w.COMMON_SECRETS})
-        final = result['guest-viewer.yml']['jobs']['deploy']['steps'][-1]
+        final = result['guest-viewer.yml']['jobs']['deploy']['steps'][-2]
         self.assertEqual(final['with']['cloudbeaver_client_secret'], '${{ secrets.EXAMPLE_OIDC_SECRET }}')
         self.assertNotIn('${{ secrets.EXAMPLE_CLIENT_SECRET }}', json.dumps(result))
         self.assertEqual(set(result['guest-store.yml']['on']['workflow_call']['secrets']), set(w.COMMON_SECRETS))
@@ -189,7 +189,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
         result=w.models(stack,site_source=self.root/'site.yaml')
         self.assertEqual(set(result),{'deploy.yml','phase.yml','guest-resolver.yml'})
         self.assertEqual(result['deploy.yml']['jobs']['resolver']['needs'],['selection'])
-        self.assertEqual([s['with']['phase'] for s in result['guest-resolver.yml']['jobs']['deploy']['steps'][1:]],
+        self.assertEqual([s['with']['phase'] for s in result['guest-resolver.yml']['jobs']['deploy']['steps'][1:-1]],
                          ['infrastructure','preparation','recursive_a'])
 
     def test_real_duplicate_and_guest_stage_plans_reach_generator(self):
@@ -198,9 +198,9 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertEqual(set(result),{'deploy.yml','phase.yml','guest-resolver.yml','guest-remote.yml'})
         self.assertEqual(result['deploy.yml']['jobs']['resolver']['needs'],['selection','remote'])
         self.assertEqual(result['guest-resolver.yml']['jobs']['deploy']['name'],source['guests']['resolver']['identity']['hostname'])
-        self.assertEqual([s['with']['phase'] for s in result['guest-resolver.yml']['jobs']['deploy']['steps'][1:]],
+        self.assertEqual([s['with']['phase'] for s in result['guest-resolver.yml']['jobs']['deploy']['steps'][1:-1]],
                          ['infrastructure','preparation','recursive_a','backup'])
-        self.assertEqual(len(result['guest-remote.yml']['jobs']['deploy']['steps']),4)
+        self.assertEqual(len(result['guest-remote.yml']['jobs']['deploy']['steps']),5)
 
     def test_actual_generated_selector_checks_sources_closure_and_exact_metadata(self):
         stack,source=self._source_fixture(remote=True);result=w.models(stack,site_source=self.root/'site.yaml')
@@ -258,7 +258,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
         viewer=result['jobs']['viewer'];self.assertEqual(viewer['environment'],'fixture-viewer')
         self.assertEqual(viewer['needs'],['validate','selection','store']);self.assertEqual(viewer['runs-on'],['self-hosted'])
         self.assertNotIn('inputs.',json.dumps(viewer));self.assertNotIn('secrets: inherit',json.dumps(result))
-        self.assertEqual(viewer['steps'][-1]['with']['cloudbeaver_client_secret'],'${{ secrets.EXAMPLE_OIDC_SECRET }}')
+        self.assertEqual(viewer['steps'][-2]['with']['cloudbeaver_client_secret'],'${{ secrets.EXAMPLE_OIDC_SECRET }}')
 
 
 if __name__=='__main__':unittest.main()

@@ -83,4 +83,6 @@ After successful CD, verify the intended layer: DNS answer, public TLS, backend 
 
 Preserve the current pointer to the last successful operation, its immutable receipt, current HOLD and STARTED markers, checkpoints, and input evidence. Do not delete markers or edit state to rerun. Recovery, restore or an explicitly reviewed operator action requires separate authority; this guide introduces no generic override. [Lifecycle](../reference/lifecycle.md) and [Troubleshooting](troubleshooting.md) describe the boundaries.
 
+The guest job's final **Cleanup** step runs after success or failure. It reclaims generated controller scratch and verified superseded generations while preserving active ownership and recovery custody. The latest 20 private outcome records include bounded log tails; full historical provider downloads and logs are not retained as evidence. A deferred cleanup is retried by later jobs for eligible leftovers. See the [cleanup contract](../reference/lifecycle.md#controller-cleanup) for the exact retained records and compatibility limits. A cleanup result does not establish deployment or service health.
+
 [Operations index](README.md)

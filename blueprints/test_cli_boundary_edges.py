@@ -100,7 +100,8 @@ class WorkflowCLIAndRecipeEdges(TemporarySourceTests):
                 job,defaults=workflows.phase_recipe(check_actions=False)
             self.assertEqual(defaults,{'run':{'shell':'bash'}})
             self.assertEqual(job['if'],workflows.PRIVATE_MAIN+" && !contains(fromJSON(inputs.disabled || '[]'), inputs.guest)")
-            self.assertEqual(len(job['steps']),10)
+            self.assertEqual(len(job['steps']),11)
+            self.assertEqual(job['steps'][-1]['if'], 'always()')
 
     def test_false_check_actions_skips_only_missing_composite_files_not_recipe_policy(self):
         target=self.root/'recipe.yml';target.write_bytes(workflows.PHASE_RECIPE.read_bytes())

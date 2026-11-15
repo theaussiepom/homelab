@@ -96,7 +96,7 @@ def main():
         except Exception:
             diagnostic = {'error_type': 'Exception', 'source': []}
         raise SystemExit(
-            "Deployment held; preserve private inputs, state and all attempt evidence. No automatic replay or restore."
+            "Deployment held; preserve private inputs, state and custody records. No automatic replay or restore."
             + '\n' + json.dumps(diagnostic, sort_keys=True)
         ) from None
 

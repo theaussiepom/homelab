@@ -83,4 +83,18 @@ Locks prevent cooperating deployments from running conflicting work at the same 
 
 Compilation, controller tests, isolated Docker protocol tests, protected CD runs and observations of real services establish different things. Read [Deployment](../operations/deployment.md) and [Troubleshooting](../operations/troubleshooting.md) before acting.
 
+## Controller cleanup
+
+Each generated guest job ends with **Cleanup**, including after a failed phase. The standalone reusable phase workflow also ends with cleanup. It takes the same database-network, workflow and deployment locks in the same order. A busy lock defers cleanup; it never interrupts another deployment or backup. Cleanup receives the compiled packet and job outcome, with no application secrets. Its failure leaves the deployment outcome unchanged and appears as a deferred cleanup in the job log.
+
+The current backend, canonical success pointer, immutable phase receipts and sealed static/application inputs remain authoritative. Cleanup does not relocate or rewrite these records. It removes the finished attempt's reproducible OpenTofu working directory, downloaded providers, saved plan, phase variables/inventory/rendered scratch and full logs. Before deleting logs it records up to eight private 1 KiB tails, the run/source identity and outcome. `job-history.json` retains the latest 20 operation summaries. These summaries are diagnostics, never proof of deployment success.
+
+After validating the genuine current success, cleanup retires older completed operation trees and their superseded generated inputs. Inputs still referenced by current or unresolved custody remain. Failed attempts finalized by this implementation can have their bulk reclaimed on subsequent jobs; the exact HOLD, checkpoints and required input generation remain until separately authorized recovery resolves them. Older unclassified failures without a finished-job record are preserved for explicit compatibility review. A completion filename alone is insufficient authority to delete a generation.
+
+Deletion uses an explicit inventory of owned regular files and directories, checks identities, refuses symlinks, hard links, special files and filesystem crossings, and leaves unknown operation files alone. Runtime-owned application paths, imported data, external credentials, backend state, backup records and recovery stores are outside the deletion scope. An unexpected state file or recovery marker inside scratch stops its removal.
+
+Interrupted retirement leaves `cleanup-retiring.json` with the exact approved file identities. The next finalizer can finish that deletion without replaying deployment or manufacturing success. Cleanup never clears holds, resumes a failed phase, restores state, or contacts a guest. If a runner stops before the finalizer executes, a later job can reclaim eligible completed leftovers; unresolved legacy or unclassified attempts still require review.
+
+First installation and later deployments use the same cleanup behavior. Adoption requires selecting the reviewed framework and regenerating the consuming workflows; existing pinned jobs do not change automatically. No automatic one-off conversion of historical recovery custody is provided.
+
 [Reference index](README.md)
