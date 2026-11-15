@@ -36,6 +36,8 @@
       ansible.builtin.command:
         argv: [ssh-keygen, -q, -t, ed25519, -N, '', -C, homelab-nfs-attachment, -f, '{{ nfs_key }}']
       become_user: homelab-runner
+      vars:
+        ansible_remote_tmp: /home/homelab-runner/.ansible/tmp
       when: not nfs_keys.results[0].stat.exists
       no_log: true
     - name: Read the public identity
@@ -46,6 +48,8 @@
       ansible.builtin.command:
         argv: [ssh-keygen, -y, -P, '', -f, '{{ nfs_key }}']
       become_user: homelab-runner
+      vars:
+        ansible_remote_tmp: /home/homelab-runner/.ansible/tmp
       register: nfs_derived
       changed_when: false
       no_log: true
@@ -163,6 +167,8 @@
       ansible.builtin.command:
         argv: [ssh, -F, /dev/null, -T, -i, /home/homelab-runner/.ssh/proxmox-host-nfs, -o, BatchMode=yes, -o, StrictHostKeyChecking=yes, -o, IdentitiesOnly=yes, -o, ControlMaster=no, -o, ClearAllForwardings=yes, -o, GlobalKnownHostsFile=/dev/null, -o, VerifyHostKeyDNS=no, -o, UpdateHostKeys=no, -o, UserKnownHostsFile=/var/lib/homelab-inputs/nfs-host-known_hosts, -o, ConnectTimeout=10, 'root@{{ hostvars[groups.pve[0]].ansible_host }}', version]
       become_user: homelab-runner
+      vars:
+        ansible_remote_tmp: /home/homelab-runner/.ansible/tmp
       register: nfs_version
       changed_when: false
     - name: Require the reviewed helper identity
