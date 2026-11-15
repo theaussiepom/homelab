@@ -23,11 +23,17 @@ def environment(app):
         'MEND_RNV_CRON_JOB_SCHEDULER_ALL': '0 * * * *',
         'MEND_RNV_LOG_HISTORY_DIR': '/tmp/renovate-logs',
         'RENOVATE_BASE_DIR': '/tmp/renovate', 'RENOVATE_BINARY_SOURCE': 'install',
-        'RENOVATE_CONFIG': json.dumps({'onboarding': False, 'requireConfig': 'required',
-            'allowedPostUpgradeCommands': [], 'allowScripts': False,
-            'vulnerabilityAlerts': {'enabled': False},
-            'force': {'automerge': False, 'platformAutomerge': False}}, separators=(',', ':')),
         'LOG_LEVEL': 'info', 'MEND_RNV_DEBUG_MODE': 'false'}
+
+
+def files():
+    """Mend preserves Core's supported file while replacing RENOVATE_CONFIG."""
+    config = {'onboarding': False, 'requireConfig': 'required',
+        'allowedPostUpgradeCommands': [], 'allowScripts': False,
+        'vulnerabilityAlerts': {'enabled': False},
+        'force': {'automerge': False, 'platformAutomerge': False}}
+    return [{'path': 'config.js', 'content': 'module.exports = ' + json.dumps(config, indent=2) + ';\n',
+             'uid': 12021, 'gid': 12021, 'mode': '0400'}]
 
 
 def scalar(raw):
