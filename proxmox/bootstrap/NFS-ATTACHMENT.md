@@ -51,6 +51,23 @@ key line with `restrict`, the runner's exact source address and a forced
 `/usr/bin/python3 -I` invocation. Conflicting key authority or helper bytes are
 preserved and refused. The existing host authorizations are saved privately.
 
+Key generation, retained-key derivation and the capability probe run as the
+runner user with private scratch space at `/home/homelab-runner/.ansible/tmp`.
+These tasks do not reuse the root tasks' temporary directory or relax its
+permissions. Ansible creates the runner's scratch directory privately as needed.
+
+The focused regression runs in the existing bootstrap test image:
+
+```sh
+docker run --rm --platform linux/amd64 --network none -v "$PWD:/src:ro" -w /src \
+  homelab-bootstrap-test:1 python3 -m unittest discover \
+  -s proxmox/bootstrap/tests -p test_nfs_access.py
+```
+
+It exercises the real root-to-unprivileged-user boundary, including key creation
+and reuse. The capability probe uses an inert local command; the test contacts
+no host and does not establish native bootstrap or guest mount acceptance.
+
 Bootstrap pins the host key at `/var/lib/homelab-inputs/nfs-host-known_hosts`
 without replacing existing trust, then verifies the installed helper digest
 through the restricted key. The dedicated private key passes through a temporary

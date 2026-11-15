@@ -113,5 +113,50 @@ class NfsAccessTests(unittest.TestCase):
         self.assertTrue(all(c['force'] is False for c in copies))
         self.assertTrue(all(t.get('no_log')for t in tasks if 'ansible.builtin.fetch'in t))
 
+    @unittest.skipUnless(sys.platform.startswith('linux') and os.geteuid()==0,
+                         'Real become-user boundary runs in the existing bootstrap test container')
+    def test_runner_commands_keep_private_scratch_and_reuse_the_key_after_root_tasks(self):
+        import copy,hashlib,pwd,yaml
+        account=pwd.getpwnam('nobody')
+        os.chown(self.root,account.pw_uid,account.pw_gid)
+        private=self.root/'runner-tmp'
+        shared=self.root/'root-tmp';shared.mkdir(mode=0o700)
+        key=self.root/'separate-key'
+        plays=yaml.safe_load((Path(nfs_access.HERE)/'ansible/host-nfs.yml').read_text())
+        runner=[t for p in plays for t in p['tasks']if t.get('become_user')=='homelab-runner']
+        self.assertEqual(len(runner),3)
+        for fixed,exists in ((False,False),(True,False),(True,True)):
+            selected=copy.deepcopy(runner)
+            for task in selected:
+                task.update(become=True,become_user=account.pw_name,become_method='su',become_flags='-s /bin/sh')
+                if fixed:
+                    self.assertEqual(task['vars']['ansible_remote_tmp'],'/home/homelab-runner/.ansible/tmp')
+                    task['vars']['ansible_remote_tmp']=str(private)
+                else:task.pop('vars',None)
+            # The capability probe's transport is outside this scratch-directory
+            # regression. Execute its actual task as an inert local command.
+            selected[-1]['ansible.builtin.command']['argv']=['/bin/true']
+            selected.insert(0,{'name':'Root metadata before runner commands','ansible.builtin.stat':{'path':str(shared)}})
+            play=shared/f'key-{fixed}-{exists}.yml'
+            play.write_text(yaml.safe_dump([{'hosts':'localhost','gather_facts':False,'vars':{
+                'ansible_connection':'local','ansible_python_interpreter':sys.executable,
+                'nfs_key':str(key),'nfs_keys':{'results':[{'stat':{'exists':exists}}]}},'tasks':selected}]))
+            result=subprocess.run([str(Path(sys.executable).with_name('ansible-playbook')),'-i','localhost,',str(play)],
+                capture_output=True,text=True,timeout=30,cwd=shared,env=dict(os.environ,
+                    ANSIBLE_LOCAL_TEMP=str(self.root/'controller-tmp'),ANSIBLE_REMOTE_TEMP=str(shared)))
+            if not fixed:
+                self.assertNotEqual(result.returncode,0,result.stdout+result.stderr);self.assertFalse(key.exists());continue
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertIn('changed=0'if exists else 'changed=1',result.stdout)
+            current=hashlib.sha256(key.read_bytes()).hexdigest()
+            if exists:self.assertEqual(current,previous)
+            previous=current
+            self.assertEqual(key.stat().st_uid,account.pw_uid)
+            self.assertEqual(key.stat().st_mode&0o777,0o600)
+            self.assertEqual(private.stat().st_uid,account.pw_uid)
+            self.assertEqual(private.stat().st_mode&0o777,0o700)
+            self.assertEqual(shared.stat().st_uid,0)
+            self.assertEqual(shared.stat().st_mode&0o777,0o700)
+
 
 if __name__=='__main__':unittest.main()
