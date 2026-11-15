@@ -6,7 +6,7 @@ import component_generation
 import renovate
 from component_payload import AppPayload
 from private_io import read_json, require, sha
-from application_contract import adapter
+from application_contract import adapter, runtime_files
 
 
 def identity(cfg, app):
@@ -47,6 +47,11 @@ def conflicts(first,second):
 
 
 def prior(attempt, app):
+    """Return application ownership independently of its generated namespace."""
+    return namespaces(attempt, app)[0]
+
+
+def namespaces(attempt, app):
     """A fresh declaration cannot adopt an existing foreign namespace.
 
     A successful owned fresh app keeps the same lifecycle on ordinary repeats.
@@ -55,11 +60,11 @@ def prior(attempt, app):
     """
     if not attempt.receipt.exists() and not attempt.receipt.is_symlink():
         require(app['lifecycle'] == 'fresh', 'Retained apps require a genuine prior component owner')
-        return False
+        return False, False
     receipt = read_json(attempt.receipt, private=True)
     operation = Path(receipt['operation']) if isinstance(receipt.get('operation'), str) else None
     if operation is None or not component_generation.component_success(receipt, operation):
-        return False
+        return False, False
     proofs=[proof for proof in receipt['phase_inputs'].values()
             if proof is not None and proof['app'] not in ('agent', 'backup-agent')]
     selected = [proof for proof in proofs if proof['app'] == app['id']]
@@ -75,10 +80,18 @@ def prior(attempt, app):
         require(not conflicts(old,app),'A prior app owns the selected persistent namespace')
     if not selected:
         require(app['lifecycle'] == 'fresh', 'Retained apps require their prior sealed application')
-        return False
+        return False, False
     payload = AppPayload.load(previous/app['id'], selected[0])
     old_app = read_json(payload.directory/'application.json', private=True)
-    require(identity(old_cfg, old_app) == identity(attempt.cfg, app),
+    before, current = identity(old_cfg, old_app), identity(attempt.cfg, app)
+    if before['runtime_directory'] is None and current['runtime_directory'] is not None:
+        files = runtime_files(app)
+        require(old_app['adapter'] == app['adapter'] and not old_app.get('runtime_files') and files
+                and app.get('runtime_files') == {'app': app['id'], 'guest': app['guest'],
+                    'directory': current['runtime_directory'], 'files': sorted(files), 'directory_mounts': []},
+                'A first runtime namespace must contain only this adapter owned leaves')
+        current['runtime_directory'] = None
+    require(before == current,
             'App storage or runtime ownership changed; no automatic relocation or adoption')
     renovate.preserve_storage(old_app, app)
-    return True
+    return True, before['runtime_directory'] is not None

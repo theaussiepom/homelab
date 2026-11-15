@@ -27,10 +27,12 @@ HELPERS = {'pihole': [('dns_records.py','dns_records.py')],
     'music_assistant': [('music_assistant.py','music_assistant.py')]}
 
 
-def variables(cfg, phase, *, payload=None, previously_owned=False):
+def variables(cfg, phase, *, payload=None, previously_owned=False, initialize_runtime=False):
     """Derive one admitted phase from its bound payload and runtime descriptor."""
     phases = component_guest.phases(cfg)
-    require(phase in phases and type(previously_owned) is bool, 'Select one actual component phase')
+    require(phase in phases and type(previously_owned) is bool and type(initialize_runtime) is bool
+            and (not initialize_runtime or previously_owned and phase in cfg['deployment']['payload_phases']),
+            'Select one actual component phase')
     app = copy.deepcopy(cfg['app'])
     app.update(kind='component', start_services=phase != 'preparation')
     result = {'app':app, 'preparation_capabilities':cfg['deployment']['capabilities'],
@@ -99,6 +101,8 @@ def variables(cfg, phase, *, payload=None, previously_owned=False):
     require(payload is not None and payload.check()['app']==app_id, 'Bind the selected app payload before Ansible')
     selected = read_json(payload.directory/'application.json',private=True)
     require(selected == runtime['applications'][app_id], 'Preserve the exact selected runtime descriptor')
+    require(not initialize_runtime or 'runtime_directory' in selected['identity'],
+            'Initialize only a verified new owned runtime namespace')
     app.update(kind=selected['adapter'], required_paths=[{'path':row['source'],'type':row['kind']}
         for row in selected['storage_paths'].values()], health_checks=cfg['app']['service_health_checks'][phase])
     result['component_application']=selected
@@ -110,7 +114,8 @@ def variables(cfg, phase, *, payload=None, previously_owned=False):
     result['component_runtime_files']=read_json(payload.directory/'runtime-files.json',private=True)
     if 'runtime_directory' in selected['identity']:
         result['component_runtime_directory']={'directory':selected['identity']['runtime_directory'],
-            'lifecycle':selected['lifecycle'],'previously_owned':previously_owned}
+            'lifecycle':'fresh' if initialize_runtime else selected['lifecycle'],
+            'previously_owned':False if initialize_runtime else previously_owned}
     result['component_helpers']=[{'source':row[0],
         'destination':row[1] if row[1].startswith('/') else '/opt/homelab-app/'+row[1],
         'mode':row[2] if len(row)==3 else '0700'} for row in HELPERS.get(selected['adapter'],[])]
@@ -185,7 +190,7 @@ def variables(cfg, phase, *, payload=None, previously_owned=False):
     return result
 
 
-def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, previously_owned=False):
+def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, previously_owned=False, initialize_runtime=False):
     require(component_inputs.binding(cfg,site)==expected, 'Static component inputs changed before Ansible')
     if payload is not None:payload.check()
     if payload is not None and phase not in ('preparation',component_guest.AGENT_PHASE,component_guest.BACKUP_PHASE):
@@ -196,7 +201,7 @@ def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, prev
     proxmox_guest.guest_trust(cfg,work)
     phase_work=operation/phase
     private_directory(phase_work,create=True)
-    selected=variables(cfg,phase,payload=payload,previously_owned=previously_owned)
+    selected=variables(cfg,phase,payload=payload,previously_owned=previously_owned,initialize_runtime=initialize_runtime)
     phase_app=selected['component_preparation_app'] if phase=='preparation' else selected['app']
     phase_app['render_dir']=str(phase_work/'rendered')
     write(phase_work/'variables.json',selected)

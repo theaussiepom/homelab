@@ -45,6 +45,15 @@ A fresh guest must have neither a prior ordinary HomeLab owner nor an existing b
 
 The controller checks the current pointer to the last successful ordinary operation (the canonical record) and the immutable receipt for that operation. It also verifies the sealed static configuration, completion evidence for each phase, and each AppPayload—the recorded inputs for an app—against the current backend and guest and app identities. These checks preserve the previous API provider, node, VMID, hostname, and ownership of storage and runtime services. They also check that workflow history continues from the previous run. A newly selected retained app cannot take over names or paths that HomeLab does not already own.
 
+An already owned app may acquire its first generated runtime-file directory when
+an adapter adds managed files. Its prior sealed app must have no runtime
+directory or owned runtime leaves, and every other persistent identity and
+storage field must remain equal. The compiler reserves only the adapter's fixed
+leaves and checks peer conflicts. The directory uses the existing fresh-namespace
+creation guard: an existing or conflicting leaf is refused, never adopted or
+repaired. App and data ownership remain retained. Later deployments verify the
+same directory; moving or removing an owned directory is refused.
+
 Each later ordinary run records new receipts and a new backend generation. Earlier inactive records remain unchanged historical evidence; they do not permit importing resources. Execution stops when checks find active or pending markers, unresolved records from a newer or different component operation, changed state, or a pointer moved back to an older successful operation. A checkpoint records progress within an operation and can be reused only through the existing procedure that verifies it belongs to that exact operation. The workflow does not automatically retry operations or release holds.
 
 Historical sealed v1 component configurations may contain retired fields. HomeLab reads them as immutable evidence rather than parsing them as new configuration. Their contents do not add migration exceptions, bootstrap adapters or release hooks to the current configuration format.

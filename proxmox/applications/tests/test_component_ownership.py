@@ -79,6 +79,60 @@ class OwnershipReceiptIntegrationTests(unittest.TestCase):
         new['identity']['services']={'unbound':'new_unbound'}
         self.assertFalse(ownership.prior(self.attempt,new))
 
+    def test_first_fixed_runtime_leaves_keep_the_app_owner_and_reject_other_identity_changes(self):
+        import application_contract
+        new=copy.deepcopy(self.selected)
+        root='/opt/homelab-app/runtime/recursive_a'
+        new['identity']['runtime_directory']=root
+        new['runtime_files']={'app':new['id'],'guest':new['guest'],'directory':root,
+                              'files':['owned.json'],'directory_mounts':[]}
+        before=self.receipt.read_bytes()
+        with patch.dict(application_contract.RUNTIME_FILES,{'unbound':{'owned.json'}}):
+            self.assertEqual(ownership.namespaces(self.attempt,new),(True,False))
+            for change in ('storage','service','directory_claim','adapter'):
+                other=copy.deepcopy(new)
+                if change=='storage':other['storage_paths']={'new':{'source':'/srv/foreign'}}
+                elif change=='service':other['identity']['services']['unbound']='foreign'
+                elif change=='directory_claim':other['runtime_files']['files']=['foreign.json']
+                else:other['adapter']='renovate'
+                with self.subTest(change=change),self.assertRaises(ValueError):
+                    ownership.namespaces(self.attempt,other)
+        self.assertEqual(self.receipt.read_bytes(),before)
+
+    def test_controller_first_runtime_namespace_then_owned_repeat_and_relocation_refusal(self):
+        import os,json,application_contract,component_prepare,component_plan,component_packet
+        from private_io import encoded,write_bytes
+        new_files={'files':[{'path':'owned.json','content':'{}','uid':0,'gid':0,'mode':'0400'}],
+                   'environment':{}}
+        fixture=self.fixture
+        seen=[]
+        def ansible(argv,environment,log):
+            fixture.ansible(argv,environment,log)
+            selected=read_json(Path(argv[-1][1:]),private=True)
+            if 'component_runtime_directory'in selected:
+                seen.append((selected['component_preflight']['previously_owned'],selected['component_runtime_directory']))
+        with patch.dict(application_contract.RUNTIME_FILES,{'unbound':{'owned.json'}}), \
+             patch.dict(component_prepare.component_private_inputs.ROLES,{'unbound':set()}), \
+             patch.object(component_prepare.component_private_inputs,'bind',return_value=new_files), \
+             patch.object(component_ansible,'quiet',side_effect=ansible):
+            plan=component_plan.resolve(fixture.root/'library',fixture.root/'consumer/site.json')
+            packet=component_packet.lower_plan(plan,inputs=fixture.inputs)['resolver']
+            write_bytes(fixture.packet,encoded(packet));fixture.cfg=json.loads(packet['files']['site.json'])
+            with patch.dict(os.environ,{'GITHUB_RUN_ID':'102','GITHUB_RUN_NUMBER':'11'}):fixture.all_phases()
+            root=plan.resolved['apps']['recursive_a']['identity']['runtime_directory']
+            self.assertEqual(seen,[(True,{'directory':root,'lifecycle':'fresh','previously_owned':False})])
+            with patch.dict(os.environ,{'GITHUB_RUN_ID':'103','GITHUB_RUN_NUMBER':'12'}):fixture.all_phases()
+            self.assertEqual(seen[-1],(True,{'directory':root,'lifecycle':'fresh','previously_owned':True}))
+            attempt=SimpleNamespace(receipt=self.receipt,cfg=fixture.cfg)
+            app=read_json(Path(fixture.cfg['deployment']['runtime_file']),private=True)['applications']['recursive_a']
+            self.assertEqual(ownership.namespaces(attempt,app),(True,True))
+            for directory in (None,root+'-moved'):
+                changed=copy.deepcopy(app)
+                if directory is None:changed['identity'].pop('runtime_directory')
+                else:changed['identity']['runtime_directory']=directory
+                with self.subTest(directory=directory),self.assertRaisesRegex(ValueError,'no automatic relocation'):
+                    ownership.prior(attempt,changed)
+
     def test_reserved_agent_payload_does_not_hide_or_impersonate_peer_app_ownership(self):
         fixture=agent_caller.AgentCallerTests('test_selected_agent_payload_is_phase_bound_and_repeats_without_rotation')
         fixture.setUp();self.addCleanup(fixture.doCleanups)
