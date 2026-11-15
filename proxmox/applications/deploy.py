@@ -65,6 +65,7 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
             attempt.phase_ready(phase)
             payload=None
             previously_owned=False
+            initialize_runtime=False
             if phase != 'preparation':
                 if phase == component_guest.BACKUP_PHASE:
                     payload = component_prepare.prepare_backup(cfg, environment)
@@ -73,11 +74,14 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
                 else:
                     app_id=cfg['deployment']['payload_phases'][phase]
                     runtime=read_json(Path(cfg['deployment']['runtime_file']),private=True)
-                    previously_owned=component_ownership.prior(attempt,runtime['applications'][app_id])
+                    app=runtime['applications'][app_id]
+                    previously_owned,runtime_owned=component_ownership.namespaces(attempt,app)
+                    initialize_runtime=previously_owned and not runtime_owned and 'runtime_directory' in app['identity']
                     payload=component_prepare.prepare(cfg,app_id,environment,attempt=attempt)
             ready=attempt.begin_phase(phase,payload=payload)
             result=component_ansible.run_phase(cfg,site,attempt.work,attempt.operation,expected,phase,
-                payload=payload,previously_owned=previously_owned)
+                payload=payload,previously_owned=previously_owned,
+                **({'initialize_runtime':True} if initialize_runtime else {}))
             result=dict(result,changed=attempt.phase_complete(phase,result,ready,payload=payload))
         return {'status':'passed','vmid':cfg['guest']['vmid'],**result}
 
