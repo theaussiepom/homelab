@@ -23,6 +23,63 @@ def row():
 
 
 class RoutedRuntimeTests(unittest.TestCase):
+    def assert_page_response(self, payload, contains, cause=None, status=200):
+        value=row();value['contains']=contains
+        stream=io.BytesIO(payload)
+        response=MagicMock(status=status);response.read.side_effect=stream.read
+        response.getheader.return_value=None
+        context=MagicMock(check_hostname=True,verify_mode=ssl.CERT_REQUIRED)
+        with patch.object(m.dns_records,'probe'),patch.object(m.socket,'create_connection')as connect,\
+             patch.object(m.ssl,'create_default_context',return_value=context),\
+             patch.object(m.http.client,'HTTPSConnection')as client,patch.object(m.time,'monotonic',return_value=1):
+            client.return_value.getresponse.return_value=response
+            if cause is None:
+                m.check(value,100)
+            else:
+                with self.assertRaises(m.RouteFailure)as caught:m.check(value,100)
+                self.assertEqual(caught.exception.details,{'stage':'expectation','cause':cause,'http_status':status})
+        response.read.assert_called_once_with(m.BODY_INSPECTION_LIMIT+1)
+        self.assertEqual(stream.tell(),min(len(payload),m.BODY_INSPECTION_LIMIT+1))
+        client.return_value.close.assert_called_once();connect.return_value.close.assert_called_once()
+
+    def test_marker_must_exist_within_bounded_prefix_even_for_large_200_responses(self):
+        marker=b'Expected service';budget=m.BODY_INSPECTION_LIMIT
+        cases=[(marker,None),
+               (b'x'*(budget-len(marker))+marker,None),
+               (marker+b'x'*(budget*2),None),
+               (b'x'*(budget*2),'marker_missing'),
+               (b'x'*budget+marker,'marker_missing'),
+               (b'x'*(budget-4)+marker,'marker_missing')]
+        for payload,cause in cases:
+            with self.subTest(length=len(payload),cause=cause):
+                self.assert_page_response(payload,'EXPECTED SERVICE',cause)
+        self.assert_page_response(marker+b'x'*(budget*2),'Expected service','unexpected_status',status=403)
+
+    def test_prefix_utf8_boundary_does_not_invent_a_marker_and_keeps_casefold_and_malformed_bytes(self):
+        with patch.object(m,'BODY_INSPECTION_LIMIT',8):
+            cases=[('Straße trailing'.encode(),'STRASSE',None),
+                   (b'x'*6+'é'.encode(),'é',None),
+                   (b'x'*7+'é tail'.encode(),'é','marker_missing'),
+                   (b'x'*7+'é tail'.encode(),'\ufffd','marker_missing'),
+                   (b'a\xffb tail','a\ufffdb',None),
+                   (b'a\xffb tail','ab','marker_missing'),
+                   (b'end\xc3','end\ufffd',None),
+                   (b'x'*7+b'\xc3','\ufffd',None)]
+            for payload,contains,cause in cases:
+                with self.subTest(payload=payload,contains=contains):
+                    self.assert_page_response(payload,contains,cause)
+
+    def test_command_input_cap_stays_one_mib_independently_of_body_inspection_budget(self):
+        self.assertEqual(m.INPUT_LIMIT,1024*1024)
+        selected=json.dumps([row()]);selected+=' '*(m.INPUT_LIMIT-len(selected))
+        with patch.object(m,'BODY_INSPECTION_LIMIT',8),patch.object(sys,'argv',['route',selected]),\
+             patch.object(m,'verify',return_value={'status':'passed'})as verify,\
+             patch('sys.stdout',new_callable=io.StringIO):m.main()
+        verify.assert_called_once_with([row()])
+        with patch.object(sys,'argv',['route',selected+' ']),patch.object(m.json,'loads')as parse,\
+             patch.object(m,'verify')as verify,self.assertRaises(SystemExit):m.main()
+        parse.assert_not_called();verify.assert_not_called()
+
     def test_terminal_diagnostic_keeps_last_stage_and_attempt_without_sensitive_text(self):
         secret = 'PRIVATE-body-cookie-header-url?state=credential'
         first, second = row(), row()
@@ -110,14 +167,17 @@ class RoutedRuntimeTests(unittest.TestCase):
              patch.object(m.socket,'create_connection')as connect,self.assertRaises(ValueError):m.fetch(value,'https://web.example.invalid',100)
         connect.assert_not_called()
 
-    def test_nonstandard_port_body_bound_deadline_and_tls_requirements(self):
+    def test_nonstandard_port_prefix_budget_deadline_and_tls_requirements(self):
         value=row();value.update(port=8443,route_origins=['https://web.example.invalid:8443'])
         context=MagicMock(check_hostname=True,verify_mode=ssl.CERT_REQUIRED)
-        response=MagicMock(status=200);response.read.return_value=b'x'*(m.LIMIT+1)
+        response=MagicMock(status=200);response.read.return_value=b'x'*(m.BODY_INSPECTION_LIMIT+1)
+        response.getheader.return_value=None
         with patch.object(m.dns_records,'probe'),patch.object(m.socket,'create_connection'),\
              patch.object(m.ssl,'create_default_context',return_value=context),patch.object(m.http.client,'HTTPSConnection')as client,\
-             patch.object(m.time,'monotonic',return_value=1),self.assertRaises(ValueError):
-            client.return_value.getresponse.return_value=response;m.fetch(value,'https://web.example.invalid:8443',100)
+             patch.object(m.time,'monotonic',return_value=1):
+            client.return_value.getresponse.return_value=response
+            self.assertEqual(m.fetch(value,'https://web.example.invalid:8443',100),(200,None,'x'*m.BODY_INSPECTION_LIMIT))
+        response.read.assert_called_once_with(m.BODY_INSPECTION_LIMIT+1)
         for selected,deadline in [(MagicMock(check_hostname=False),100),(MagicMock(check_hostname=True,verify_mode=ssl.CERT_NONE),100),(context,0)]:
             with patch.object(m.dns_records,'probe'),patch.object(m.ssl,'create_default_context',return_value=selected),\
                  patch.object(m.time,'monotonic',return_value=1),self.assertRaises(ValueError):m.fetch(value,'https://web.example.invalid:8443',deadline)
@@ -143,7 +203,7 @@ class RoutedRuntimeTests(unittest.TestCase):
             with patch.object(m,'check',side_effect=error),patch.object(m.time,'monotonic',side_effect=[0,601]),self.assertRaises(ValueError):m.verify([row()])
         with patch.object(sys,'argv',['route',json.dumps([row()])]),patch.object(m,'verify',return_value={'status':'passed'}),patch('sys.stdout',new_callable=io.StringIO)as out:m.main()
         self.assertIn('passed',out.getvalue())
-        for args in (['route'],['route','x'*(m.LIMIT+1)],['route','not-json']):
+        for args in (['route'],['route','x'*(m.INPUT_LIMIT+1)],['route','not-json']):
             with patch.object(sys,'argv',args),self.assertRaisesRegex(SystemExit,'preserve its private evidence'):m.main()
         with patch.object(sys,'argv',['route','not-json']),self.assertRaises(SystemExit):runpy.run_path(m.__file__,run_name='__main__')
 

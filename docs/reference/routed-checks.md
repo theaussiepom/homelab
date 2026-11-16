@@ -28,10 +28,12 @@ Paths below are relative to `exposures.<id>.check`. This closed object is option
 | --- | --- | --- |
 | `type` | Required `page` or `auth-redirect` | Selects the response contract. |
 | `path` | Optional absolute path, `/` | At most 1,024 characters; no query, fragment, escapes, control characters, dot segments or scheme-relative path. |
-| `contains` | Required nonempty text for page mode | At most 256 characters without control characters; requires HTTP 200 containing this text, case-insensitively. Refused for auth-redirect. |
+| `contains` | Required nonempty text for page mode | At most 256 characters without control characters; requires HTTP 200 and this text within the inspected response prefix, case-insensitively. Refused for auth-redirect. |
 | `provider` | Required for auth-redirect, optional for page | Existing [origin reference](identity-and-secrets.md#identity-providers): `{exposure: id, domain?: id}` or `{domain: id}`. A managed exposure supplies its actual guest prerequisite. A domain-only external origin adds no guest job. A page can declare its provider dependency while checking its local sign-in page. |
 
-All hostnames and aliases of the selected route are checked. Redirects may remain within that route's declared origins, or terminate at the declared provider for auth-redirect mode. A foreign origin, downgrade to HTTP, credentials in a URL, loop, missing marker, unexpected status, wrong DNS answer or invalid TLS certificate fails. There are at most eight redirect hops, a one-MiB response limit and one shared ten-minute retry budget per guest's checks.
+All hostnames and aliases of the selected route are checked. Redirects may remain within that route's declared origins, or terminate at the declared provider for auth-redirect mode. A foreign origin, downgrade to HTTP, credentials in a URL, loop, missing marker, unexpected status, wrong DNS answer or invalid TLS certificate fails. There are at most eight redirect hops and one shared ten-minute retry budget per guest's checks.
+
+Each response is inspected through a prefix of at most one MiB. The reader requests at most one additional sentinel byte to distinguish a complete body from a truncated prefix, then closes the connection. A larger response can pass a page check only when HTTP 200 and the actual required marker are present within that prefix. A marker absent from the prefix, including one located only beyond the budget, fails as `marker_missing`; the total response size is not measured. UTF-8 decoding retains replacement of malformed bytes while withholding an incomplete character cut by the inspection boundary. The separate one-MiB limit on command JSON inputs is unchanged. These limits apply to first and later deployments alike.
 
 ## First installation and later deployments
 

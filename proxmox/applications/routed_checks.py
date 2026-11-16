@@ -1,4 +1,5 @@
 """Read-only FQDN checks through declared DNS, hostname-verified TLS and HTTP."""
+import codecs
 import http.client
 import ipaddress
 import json
@@ -11,7 +12,8 @@ from urllib.parse import urljoin, urlsplit
 
 import dns_records
 
-LIMIT = 1024 * 1024
+INPUT_LIMIT = 1024 * 1024
+BODY_INSPECTION_LIMIT = 1024 * 1024
 
 
 class RouteFailure(ValueError):
@@ -131,9 +133,12 @@ def fetch(row, url, deadline):
             stage = 'http'
             connection.request('GET', path, headers={'User-Agent':'HomeLab-route-check/1','Accept':'text/html,application/json'})
             response = connection.getresponse()
-            body = response.read(LIMIT+1)
-            expect(len(body) <= LIMIT, 'http', 'response_too_large', response.status)
-            return response.status, response.getheader('Location'), body.decode('utf-8', errors='replace')
+            body = response.read(BODY_INSPECTION_LIMIT+1)
+            # One sentinel byte distinguishes EOF from a truncated prefix. Do
+            # not turn a valid UTF-8 character cut at the budget into U+FFFD.
+            decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
+            text = decoder.decode(body[:BODY_INSPECTION_LIMIT], final=len(body) <= BODY_INSPECTION_LIMIT)
+            return response.status, response.getheader('Location'), text
         finally:
             connection.close()
             raw.close()
@@ -194,7 +199,7 @@ def verify(rows):
 
 def main():
     try:
-        require(len(sys.argv) == 2 and len(sys.argv[1]) <= LIMIT)
+        require(len(sys.argv) == 2 and len(sys.argv[1]) <= INPUT_LIMIT)
         print(json.dumps(verify(json.loads(sys.argv[1]))))
     except VerificationFailure as error:
         print(json.dumps(error.diagnostic), file=sys.stderr)
