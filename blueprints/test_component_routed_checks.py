@@ -79,6 +79,23 @@ class RoutedCompilationTests(unittest.TestCase):
         self.assertEqual(result['deferred_routed_checks']['room'],{'name':'Check room web','needs':['edge','login','names','room']})
         self.assertEqual(result['routed_checks']['room']['rows'][0]['source_address'],'198.18.21.99')
 
+    def test_deferred_web_edges_never_delay_guest_and_real_edges_remain(self):
+        r,e,d=fixture()
+        r.guests['room']['route_checks']={'mode':'deferred','name':'Check room web','source':{'address_group':'runner'}}
+        e.resolved['web']['check']={'type':'auth-redirect','provider':{'exposure':'idp'}}
+        d['guest_dependencies']['login']=['room']
+        before=copy.deepcopy(d)
+        for _ in range(2):
+            result=m.bind(r,e,d)
+            self.assertEqual(d,before)
+            self.assertEqual(result['deferred_routed_checks']['room']['needs'],['edge','login','names','room'])
+        # The same producer can be a genuine declared startup prerequisite.
+        d['guest_dependencies']['room']=['edge']
+        m.bind(r,e,d)
+        self.assertEqual(d['guest_dependencies']['room'],['edge'])
+        d['guest_dependencies']['edge']=['room']
+        with self.assertRaisesRegex(ComponentError,'cycle'):m.bind(r,e,d)
+
     def test_missing_expectations_resolver_provider_source_or_existing_grants_refuse(self):
         def mutate(r,e,d,case):
             web=e.resolved['web']

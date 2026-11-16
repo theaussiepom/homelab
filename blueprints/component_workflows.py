@@ -12,11 +12,12 @@ import yaml
 
 import component_secrets
 import component_connections
+import routed_checks
 from component_plan import RESERVED
 from component_sources import identifier, require
 
 FLAT_INPUTS = {'HOMELAB_STACK_SOURCE', 'HOMELAB_ENVIRONMENT_PREFIX', 'HOMELAB_RUNNER_LABELS',
-               'HOMELAB_REPOSITORY', 'HOMELAB_DISABLED'}
+               'HOMELAB_REPOSITORY', 'HOMELAB_DISABLED', 'HOMELAB_CHECK_ENVIRONMENT'}
 REUSABLE_INPUTS = {'disabled', 'runner_labels', 'environment_name'}
 AGENT_PHASE = 'zabbix-agent'
 BACKUP_PHASE = 'pbs-agent'
@@ -138,6 +139,25 @@ def application_order(plan, guest):
     return _ordered_apps(plan.resolved['apps'], plan.resolved['app_dependencies'], guest)
 
 
+
+def deferred_job(owners, active, backup):
+    """One finite final job, with per-owner prerequisites retained for admission."""
+    if not owners:
+        return None
+    require(set(owners) <= set(active), 'component.workflow-disabled-dependency')
+    for owner,row in owners.items():
+        label(row['name'])
+        require(set(row['needs']) <= set(active) and owner in row['needs'],
+                'component.workflow-disabled-dependency')
+        require(type(row['endpoint_count']) is int and row['endpoint_count'] > 0,
+                'component.route-check')
+    count = sum(row['endpoint_count'] for row in owners.values())
+    require(count <= routed_checks.MAX_ENDPOINTS, 'component.route-check')
+    return {'name': 'Check web endpoints', 'needs': ['selection', *(['_backup'] if backup else []), *active],
+            'owners': owners, 'endpoint_count': count,
+            'timeout_minutes': 10 + 10*((count+routed_checks.CONCURRENCY-1)//routed_checks.CONCURRENCY)}
+
+
 def model(plan):
     """Return graph/phase metadata for the selected source Plan, never secrets.
 
@@ -198,16 +218,12 @@ def model(plan):
         result['guests'][guest] = {'name': guest_title,
                                   'needs': ['selection', *(['_backup'] if operational_backup and 'backup' in guests[guest] else []), *dependencies[guest]],
                                   'phases': phases, 'workflow_secrets': secrets}
-    deferred = resolved.get('deferred_routed_checks', {})
-    if deferred:
-        result['checks'] = {}
-        for owner, row in deferred.items():
-            if owner not in active:
-                continue
-            require(set(row['needs']) <= set(active), 'component.workflow-disabled-dependency')
-            result['checks']['_check_' + owner] = {'guest':owner, 'name':label(row['name']),
-                'needs':['selection', *row['needs']], 'workflow_secrets':[],
-                'phases':[{'id':'http-checks','name':'Check web','application':None,'inputs':{}}]}
+    owners = {owner: {'name': label(row['name']), 'needs': row['needs'],
+                      'endpoint_count': len(resolved['routed_checks'][owner]['rows'])}
+              for owner,row in resolved.get('deferred_routed_checks', {}).items() if owner in active}
+    checks = deferred_job(owners, active, operational_backup)
+    if checks is not None:
+        result['checks'] = checks
     if operational_backup:
         result['backup'] = {'name':'Configure backups', 'needs':['selection'],
                             'environment':'backup', 'workflow_secrets':['PBS_API_TOKEN']}

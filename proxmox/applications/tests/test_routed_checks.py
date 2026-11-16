@@ -1,4 +1,6 @@
 """Real request policy with DNS/TLS/socket collaborators; no target traffic."""
+from concurrent.futures import ThreadPoolExecutor
+import threading
 import copy
 import http.client
 import io
@@ -23,6 +25,28 @@ def row():
 
 
 class RoutedRuntimeTests(unittest.TestCase):
+    def test_parallel_real_pool_overlap_finite_per_worker_budget_and_failed_probe_isolation(self):
+        rows=[row() for _ in range(3)]
+        rows[1].update(host='alias.example.invalid',route_origins=['https://alias.example.invalid'])
+        rows[2].update(host='last.example.invalid',route_origins=['https://last.example.invalid'])
+        barrier=threading.Barrier(3);deadlines=[]
+        def probe(value,deadline):
+            deadlines.append(deadline)
+            barrier.wait(timeout=3)
+            if value['host'].startswith('alias'):raise RuntimeError('PRIVATE')
+            return {'status':'passed','attempts':1}
+        with ThreadPoolExecutor(max_workers=3) as pool,patch.object(m,'probe',side_effect=probe),\
+             patch.object(m.time,'monotonic',return_value=20):
+            value=m.parallel(rows,pool)
+        self.assertEqual(deadlines,[620]*3)
+        self.assertEqual(value['status'],'failed')
+        self.assertEqual([r['status'] for r in value['endpoints']],['passed','failed','passed'])
+        self.assertEqual([r['endpoint'] for r in value['endpoints']],[0,1,2])
+        self.assertNotIn('PRIVATE',json.dumps(value))
+        for answer,expected in [({'status':'passed','attempts':1},'passed'),(None,'failed')]:
+            with ThreadPoolExecutor(max_workers=1) as pool,patch.object(m,'probe',return_value=answer):
+                self.assertEqual(m.parallel([row()],pool)['status'],expected)
+
     def assert_page_response(self, payload, contains, cause=None, status=200):
         value=row();value['contains']=contains
         stream=io.BytesIO(payload)

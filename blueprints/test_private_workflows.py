@@ -136,27 +136,39 @@ class PrivateWorkflowTests(unittest.TestCase):
                           'environment': 'backup', 'workflow_secrets': ['PBS_API_TOKEN']}
         return graph
 
-    def test_explicit_web_job_reuses_owner_environment_and_only_common_transport_secrets(self):
+    def test_one_final_web_job_uses_common_environment_and_no_credentials(self):
         original = workflows.component_workflows.model
         def deferred(plan):
             graph = original(plan)
-            graph['checks'] = {'_check_web':{'guest':'web','name':'Check web frontend',
-                'needs':['selection','database','web'],'workflow_secrets':[],
-                'phases':[{'id':'http-checks','name':'Check web','inputs':{}}]}}
+            graph['checks'] = workflows.component_workflows.deferred_job(
+                {'web':{'name':'Check web frontend','needs':['database','web'],'endpoint_count':2}},
+                graph['guest_order'], False)
             return graph
+        self.env['HOMELAB_CHECK_ENVIRONMENT'] = 'private-controller'
+        self.write()
         with patch.object(workflows.component_workflows,'model',side_effect=deferred):
             public = workflows.models(self.stack,site_source=self.site/'site.json')
             value = p.model(self.stack,self.site)
-        job = value['jobs']['_check_web']
-        self.assertEqual(job['environment'],'private-apps-web')
+            for invalid in ('', '${{ secrets.NAME }}', 'unsafe environment'):
+                self.env['HOMELAB_CHECK_ENVIRONMENT'] = invalid
+                self.write()
+                with self.assertRaises(ValueError): p.model(self.stack,self.site)
+        job = value['jobs']['_checks']
+        self.assertEqual(job['name'],'Check web endpoints')
+        self.assertEqual(job['environment'],'private-controller')
         self.assertEqual(job['needs'],['validate','selection','database','web'])
-        phase = job['steps'][-1]
-        self.assertEqual(phase['with']['guest'],'web')
-        self.assertEqual(phase['with']['phase'],'http-checks')
-        self.assertEqual(set(phase['with']),{'guest','phase','disabled','APPLICATION_SSH_KEY','PROXMOX_APP_TOKEN'})
-        self.assertEqual(set(public['guest-_check_web.yml']['on']['workflow_call']['secrets']),{'APPLICATION_SSH_KEY','PROXMOX_APP_TOKEN'})
-        self.assertIn("'web'",job['if'])
-        self.assertNotIn("'_check_web'",job['if'])
+        self.assertIn('always() && !cancelled()',job['if'])
+        self.assertNotIn('!failure()',job['if'])
+        self.assertNotIn('needs.validate.result',job['if'])
+        self.assertNotIn('secrets.',json.dumps(job))
+        self.assertEqual(set(public['web-checks.yml']['on']['workflow_call']['secrets']),set())
+        caller=public['deploy.yml']['jobs']['_checks']
+        self.assertEqual(caller['secrets'],{})
+        self.assertEqual(caller['with']['prerequisite_results'],workflows.job_results(caller['needs']))
+        self.assertEqual(job['steps'][-1]['env']['HOMELAB_CHECK_RESULTS'],workflows.job_results(job['needs']))
+        self.assertEqual(public['web-checks.yml']['jobs']['deploy']['steps'][-1]['env']['HOMELAB_CHECK_RESULTS'],
+                         '${{ inputs.prerequisite_results }}')
+        self.assertFalse(any(name.startswith('guest-_check') for name in public))
 
     def test_parallel_source_checks_gate_setup_and_every_guest_path(self):
         public = workflows.models(self.stack, site_source=self.site/'site.json')

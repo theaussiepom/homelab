@@ -88,11 +88,10 @@ def bind(resolver, exposures, dependencies):
             routes = {key: row for key, row in exposures.resolved.items() if row['type'] == 'http'
                       and row['target'].get('guest') == owner}
             require(bool(routes), 'component.route-check-owner')
-            rows, prerequisites, ingress_guests = [], {owner}, set()
+            rows, prerequisites = [], {owner}
             for name, route in routes.items():
                 with at('exposures', name):
                     ingress = route['ingress_target']
-                    ingress_guests.add(ingress['guest'])
                     require('resolver' in route, 'component.route-check-resolver')
                     resolver_id = route['resolver']
                     endpoints = [row for row in resolver.endpoints.values()
@@ -147,8 +146,8 @@ def bind(resolver, exposures, dependencies):
                             'auth_origins': origins})
             routed_checks.validate(rows)
             result[owner] = {'mode': settings['mode'], 'rows': rows}
-            additional = ingress_guests if settings['mode'] == 'deferred' else prerequisites
-            graph[owner] = list(dict.fromkeys([*graph[owner], *sorted(additional - {owner})]))
+            if settings['mode'] == 'inline':
+                graph[owner] = list(dict.fromkeys([*graph[owner], *sorted(prerequisites - {owner})]))
             if settings['mode'] == 'deferred':
                 deferred[owner] = {'name': settings['name'], 'needs': sorted(prerequisites)}
     require(all(row['target'].get('guest') in selected for row in exposures.resolved.values()

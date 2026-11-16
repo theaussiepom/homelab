@@ -1,5 +1,6 @@
 """Read-only FQDN checks through declared DNS, hostname-verified TLS and HTTP."""
 import codecs
+from concurrent.futures import as_completed
 import http.client
 import ipaddress
 import json
@@ -14,6 +15,9 @@ import dns_records
 
 INPUT_LIMIT = 1024 * 1024
 BODY_INSPECTION_LIMIT = 1024 * 1024
+MAX_ENDPOINTS = 256
+CONCURRENCY = 8
+VERIFY_SECONDS = 600
 
 
 class RouteFailure(ValueError):
@@ -72,7 +76,7 @@ def origin(value):
 
 
 def validate(rows):
-    require(isinstance(rows, list) and 1 <= len(rows) <= 256)
+    require(isinstance(rows, list) and 1 <= len(rows) <= MAX_ENDPOINTS)
     seen = set()
     for row in rows:
         require(isinstance(row, dict) and set(row) == {'exposure', 'host', 'port', 'path', 'source_address',
@@ -179,23 +183,49 @@ def check(row, deadline):
     raise RouteFailure('redirect', 'limit')
 
 
+def probe(row, deadline):
+    """Retry one unchanged endpoint contract without exporting exception values."""
+    attempts = 0
+    while True:
+        attempts += 1
+        try:
+            check(row, deadline)
+            return {'status': 'passed', 'attempts': attempts}
+        except (ValueError, OSError, http.client.HTTPException) as error:
+            if time.monotonic()+2 >= deadline:
+                details = error if isinstance(error, RouteFailure) else failure('verification', error)
+                return {'status': 'failed', 'attempts': attempts, **details.details}
+            time.sleep(2)
+
+
 def verify(rows):
     validate(rows)
-    deadline = time.monotonic() + 600
+    deadline = time.monotonic() + VERIFY_SECONDS
     for index, row in enumerate(rows):
-        attempts = 0
-        while True:
-            attempts += 1
-            try:
-                check(row, deadline)
-                break
-            except (ValueError, OSError, http.client.HTTPException) as error:
-                if time.monotonic()+2 >= deadline:
-                    details = error if isinstance(error, RouteFailure) else failure('verification', error)
-                    raise VerificationFailure({'status': 'failed', 'endpoint': index,
-                        'exposure': row['exposure'], 'attempts': attempts, **details.details}) from None
-                time.sleep(2)
+        result = probe(row, deadline)
+        if result['status'] != 'passed':
+            raise VerificationFailure({'endpoint': index, 'exposure': row['exposure'], **result})
     return {'status':'passed','routed_endpoints':len(rows),'credentialed_login':False}
+
+
+def parallel(rows, executor):
+    """Collect every alias result; one failed probe never cancels another."""
+    validate(rows)
+    def selected(row):
+        return probe(row, time.monotonic() + VERIFY_SECONDS)
+    pending = {executor.submit(selected, row): index for index, row in enumerate(rows)}
+    results = [None] * len(rows)
+    for future in as_completed(pending):
+        index = pending[future]
+        try:
+            result = future.result()
+            require(isinstance(result, dict) and result.get('status') in ('passed', 'failed'))
+        except Exception:
+            result = {'status': 'failed', 'attempts': 0, 'stage': 'verification', 'cause': 'internal_error'}
+        results[index] = {'endpoint': index, 'exposure': rows[index]['exposure'], **result}
+    require(all(result is not None for result in results))
+    return {'status': 'passed' if all(row['status'] == 'passed' for row in results) else 'failed',
+            'routed_endpoints': len(rows), 'credentialed_login': False, 'endpoints': results}
 
 
 def main():

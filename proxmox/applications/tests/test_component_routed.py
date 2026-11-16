@@ -1,4 +1,5 @@
 """Read-only caller evidence plus real ordinary phase/receipt integration."""
+from concurrent.futures import ThreadPoolExecutor
 import copy
 import json
 import os
@@ -59,6 +60,23 @@ class RouteCallerTests(unittest.TestCase):
         self.assertEqual(command[1],str(m.SOURCE/'routed_checks.py'))
         self.assertTrue((self.work/'http-checks-101-1/complete.json').is_file())
         m.proxmox_guest.guest_trust.assert_not_called()
+    def test_shared_pool_retains_private_evidence_binding_and_failure(self):
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with self.assertRaisesRegex(ValueError,'only on the controller'):
+                m.run(self.cfg,self.root/'site.json',self.work,self.operation,{'fixed':True},executor=pool)
+            self.cfg['app']['route_checks']['mode']='deferred'
+            with patch.object(m.routed_checks,'probe',return_value={'status':'passed','attempts':1}),patch.object(m,'quiet') as quiet:
+                value=m.run(self.cfg,self.root/'site.json',self.work,self.operation,{'fixed':True},executor=pool)
+            self.assertEqual(value['endpoints'][0]['status'],'passed');quiet.assert_not_called()
+            self.assertTrue((self.work/'http-checks-101-1/complete.json').is_file())
+            for suffix,result in [('failed',{'status':'failed','attempts':1,'cause':'timeout'}),
+                                  ('changed',{'status':'passed','attempts':1})]:
+                operation=self.work/('ordinary-'+suffix);operation.mkdir(mode=0o700)
+                self.binding.side_effect=[{'fixed':True},{'changed':True}] if suffix=='changed' else None
+                with patch.object(m.routed_checks,'probe',return_value=result),self.assertRaises(ValueError):
+                    m.run(self.cfg,self.root/'site.json',self.work,operation,{'fixed':True},executor=pool)
+                self.assertFalse((self.work/('http-checks-'+suffix)/'complete.json').exists())
+
     def test_changed_inputs_invalid_mode_source_or_reported_mutation_refuse(self):
         for mutate in (lambda c:c['app']['route_checks'].update(extra=True),lambda c:c['app']['route_checks'].update(mode='guess'),
                        lambda c:c['app']['route_checks']['rows'][0].update(source_address='198.18.20.99'),
@@ -111,6 +129,19 @@ class RouteOrdinaryIntegrationTests(unittest.TestCase):
         with patch.dict(os.environ,{'GITHUB_RUN_ID':'102','GITHUB_RUN_NUMBER':'11'}),patch.object(m,'run')as run,\
              self.assertRaisesRegex(ValueError,'exact run and binding'):deploy.run('http-checks',case.packet,inputs=case.inputs,environment={})
         run.assert_not_called()
+    def test_parallel_executor_requires_ordinary_completion_and_cannot_enter_other_phases(self):
+        case=self.fixture('deferred')
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with patch.object(m,'run') as check,self.assertRaises(ValueError):
+                deploy.run('http-checks',case.packet,inputs=case.inputs,environment={},route_executor=pool)
+            check.assert_not_called()
+            with self.assertRaisesRegex(ValueError,'cannot change deployment phases'):
+                deploy.run('infrastructure',case.packet,inputs=case.inputs,environment={},route_executor=pool)
+            case.all_phases()
+            with patch.object(m,'run',return_value={'status':'passed'}) as check:
+                self.assertEqual(deploy.run('http-checks',case.packet,inputs=case.inputs,environment={},route_executor=pool)['status'],'passed')
+            self.assertIs(check.call_args.kwargs['executor'],pool)
+
     def test_inline_success_and_unselected_deferred_phase(self):
         case=self.fixture('inline')
         with patch.object(m,'run',wraps=m.run)as check,\
