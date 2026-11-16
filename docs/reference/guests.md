@@ -35,6 +35,7 @@ Use only the listed fields. Required fields have no default, and null does not r
 | <a id="guest-readiness"></a>`readiness` | Optional ordered list; omitted `[]` | Each exactly `{stage: preparation, target: {app: id, endpoint: name}}`; target must be on another guest |
 | <a id="guest-source-policy-route"></a>`source_policy_route` | Optional closed object | Exactly `{interface: nic_id}`; selected non-default static NIC requires a gateway different from its address; manages the [source reply policy](#source-reply-routing) |
 | <a id="guest-monitoring"></a>`monitoring` | Optional closed object | Exactly `{profile: id}`; replaces template selection; see [monitoring](zabbix.md) |
+| <a id="guest-route-checks"></a>`route_checks` | Optional closed object | Select [configured DNS/TLS/HTTP checks](routed-checks.md), inline or explicitly deferred, and their source/prerequisites. No default selection. |
 
 ## Defaults and resolution
 

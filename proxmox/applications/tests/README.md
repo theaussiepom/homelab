@@ -13,3 +13,12 @@ python3 tools/measure_coverage.py --suite applications --output /tmp/application
 ```
 
 The existing `applications` CI job runs that suite in the pinned test container with a read-only source mount and disposable Linux `/tmp` filesystem.
+
+The separate CloudBeaver Community/OIDC fixture retains failed queries and
+private server logs before removing its owned containers. Its public failure
+summary includes only closed exception names and frames, plus a bounded PID
+count and configured PID limit from that same owned Community container.
+Unavailable or timed-out process statistics remain unknown; they cannot change
+the original query failure or prevent cleanup. These observations help
+distinguish resource limits from application errors without exporting server
+messages, sessions or query results. They do not establish a cause by themselves.

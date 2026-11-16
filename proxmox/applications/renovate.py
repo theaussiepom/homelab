@@ -29,7 +29,7 @@ def environment(app):
 def files():
     """Mend preserves Core's supported file while replacing RENOVATE_CONFIG."""
     config = {'onboarding': False, 'requireConfig': 'required',
-        'allowedPostUpgradeCommands': [], 'allowScripts': False,
+        'allowedCommands': [], 'allowScripts': False,
         'vulnerabilityAlerts': {'enabled': False},
         'force': {'automerge': False, 'platformAutomerge': False}}
     return [{'path': 'config.js', 'content': 'module.exports = ' + json.dumps(config, indent=2) + ';\n',

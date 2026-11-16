@@ -198,6 +198,16 @@ def model(plan):
         result['guests'][guest] = {'name': guest_title,
                                   'needs': ['selection', *(['_backup'] if operational_backup and 'backup' in guests[guest] else []), *dependencies[guest]],
                                   'phases': phases, 'workflow_secrets': secrets}
+    deferred = resolved.get('deferred_routed_checks', {})
+    if deferred:
+        result['checks'] = {}
+        for owner, row in deferred.items():
+            if owner not in active:
+                continue
+            require(set(row['needs']) <= set(active), 'component.workflow-disabled-dependency')
+            result['checks']['_check_' + owner] = {'guest':owner, 'name':label(row['name']),
+                'needs':['selection', *row['needs']], 'workflow_secrets':[],
+                'phases':[{'id':'http-checks','name':'Check web','application':None,'inputs':{}}]}
     if operational_backup:
         result['backup'] = {'name':'Configure backups', 'needs':['selection'],
                             'environment':'backup', 'workflow_secrets':['PBS_API_TOKEN']}

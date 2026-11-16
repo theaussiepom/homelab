@@ -136,6 +136,28 @@ class PrivateWorkflowTests(unittest.TestCase):
                           'environment': 'backup', 'workflow_secrets': ['PBS_API_TOKEN']}
         return graph
 
+    def test_explicit_web_job_reuses_owner_environment_and_only_common_transport_secrets(self):
+        original = workflows.component_workflows.model
+        def deferred(plan):
+            graph = original(plan)
+            graph['checks'] = {'_check_web':{'guest':'web','name':'Check web frontend',
+                'needs':['selection','database','web'],'workflow_secrets':[],
+                'phases':[{'id':'http-checks','name':'Check web','inputs':{}}]}}
+            return graph
+        with patch.object(workflows.component_workflows,'model',side_effect=deferred):
+            public = workflows.models(self.stack,site_source=self.site/'site.json')
+            value = p.model(self.stack,self.site)
+        job = value['jobs']['_check_web']
+        self.assertEqual(job['environment'],'private-apps-web')
+        self.assertEqual(job['needs'],['validate','selection','database','web'])
+        phase = job['steps'][-1]
+        self.assertEqual(phase['with']['guest'],'web')
+        self.assertEqual(phase['with']['phase'],'http-checks')
+        self.assertEqual(set(phase['with']),{'guest','phase','disabled','APPLICATION_SSH_KEY','PROXMOX_APP_TOKEN'})
+        self.assertEqual(set(public['guest-_check_web.yml']['on']['workflow_call']['secrets']),{'APPLICATION_SSH_KEY','PROXMOX_APP_TOKEN'})
+        self.assertIn("'web'",job['if'])
+        self.assertNotIn("'_check_web'",job['if'])
+
     def test_parallel_source_checks_gate_setup_and_every_guest_path(self):
         public = workflows.models(self.stack, site_source=self.site/'site.json')
         baseline = p.model(self.stack,self.site)

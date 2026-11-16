@@ -21,7 +21,7 @@ def helpers():
     tree=ast.parse(SOURCE.read_text())
     selected=[node for node in tree.body if isinstance(node,ast.FunctionDef) and node.name in {'clean_header','proxy_target','query_error_projection','community_exception_projection','combined_checks','record','write','execute'}]
     namespace={'urlsplit':urlsplit,'urlencode':urlencode,'parse_qs':parse_qs,'json':json,
-               'os':os,'hashlib':hashlib,'traceback':traceback}
+               'os':os,'hashlib':hashlib,'traceback':traceback,'subprocess':subprocess}
     exec(compile(ast.Module(selected,type_ignores=[]),str(SOURCE),'exec'),namespace)
     return namespace
 
@@ -176,7 +176,7 @@ class FixtureHardeningTests(unittest.TestCase):
                 self.assertEqual(value['observed_exception_types'],['java.io.IOException'])
                 self.assertEqual(value['observed_frames'],[])
 
-    def execute_case(self, community_status='owned', community_log=None, *, passed=False, query=True):
+    def execute_case(self, community_status='owned', community_log=None, *, passed=False, query=True, pids='128', pids_limit=128):
         """Run real refusal and JSON output with injected HTTP, login and Docker responses."""
         ns=helpers();secret='private-cookie-key-password-session-sentinel';calls=[]
         if community_log is None:
@@ -188,18 +188,22 @@ class FixtureHardeningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);state={'tests':[]}
             def docker(*args,**kwargs):
-                calls.append(args);self.assertEqual(kwargs,{'check':False})
+                calls.append(args);self.assertEqual(kwargs,{'check':False,'timeout':5} if args[0]=='stats' else {'check':False})
                 if args[0]=='inspect':
                     self.assertIn(args[1],('gateway-id','fixture-config','community-id'))
                     if args[1]=='community-id' and community_status=='absent':
                         return subprocess.CompletedProcess(args,1,'',secret)
                     owner='foreign' if args[1]=='community-id' and community_status=='unowned' else 'this-run'
-                    body=[{'Id':args[1],'Config':{'Labels':{'org.homelab.fixture.owner':owner}}}]
+                    body=[{'Id':args[1],'Config':{'Labels':{'org.homelab.fixture.owner':owner}}, 'HostConfig':{'PidsLimit':pids_limit}}]
                     return subprocess.CompletedProcess(args,0,json.dumps(body),'')
                 if args[0]=='logs':
                     text=community_log if args[1]=='community-id' else 'java.lang.IllegalStateException: '+secret
                     code=1 if args[1]=='community-id' and community_status=='logs-failed' else 0
                     return subprocess.CompletedProcess(args,code,text,'')
+                if args[0]=='stats':
+                    self.assertEqual(args,('stats','--no-stream','--format','{{.PIDs}}','community-id'))
+                    if isinstance(pids,BaseException):raise pids
+                    return subprocess.CompletedProcess(args,1 if pids is None else 0,pids or '',secret)
                 self.assertEqual(args[:2],('rm','--force'))
                 return subprocess.CompletedProcess(args,0,'','')
             def main():
@@ -227,16 +231,34 @@ class FixtureHardeningTests(unittest.TestCase):
         self.assertEqual(summary['status'],'FAIL');self.assertEqual(summary['tests'],4)
         self.assertEqual(summary['error'],'Community query rejected declared read-only fields')
         self.assertEqual(set(summary),{'status','tests','failed_tests','error_type','error','result',
-                                     'query_error_diagnostics','community_exception_diagnostics'})
+                                     'query_error_diagnostics','community_exception_diagnostics','community_process_diagnostics'})
         observed=summary['community_exception_diagnostics']
         self.assertEqual(observed,stored['community_exception_diagnostics'])
         self.assertEqual(observed['observed_exception_types'],['java.lang.NullPointerException'])
         self.assertEqual(observed['observed_frames'],[{'frame':'WebServiceCore.getUserConnections','line':14}])
         self.assertEqual(summary['query_error_diagnostics'],stored['query_error_diagnostics'])
+        self.assertEqual(summary['community_process_diagnostics'],{'pids':128,'pids_limit':128})
+        self.assertEqual(summary['community_process_diagnostics'],stored['community_process_diagnostics'])
         self.assertIn(secret,files['ce-query-errors.json']);self.assertIn(secret,files['community.log'])
         self.assertEqual(calls,[('inspect','gateway-id'),('logs','gateway-id'),('rm','--force','gateway-id'),
             ('inspect','fixture-config'),('logs','fixture-config'),('rm','--force','fixture-config'),
-            ('inspect','community-id'),('logs','community-id'),('rm','--force','community-id')])
+            ('inspect','community-id'),('logs','community-id'),('stats','--no-stream','--format','{{.PIDs}}','community-id'),('rm','--force','community-id')])
+
+    def test_resource_exception_names_and_process_counts_remain_closed(self):
+        """Retain resource-limit evidence without exporting messages or arbitrary Docker output."""
+        project=helpers()['community_exception_projection'];secret='private-cookie-key-password-session-sentinel'
+        names=['java.lang.OutOfMemoryError','java.util.concurrent.RejectedExecutionException','java.net.URISyntaxException']
+        value=project('\n'.join(name+': '+secret for name in names))
+        self.assertEqual(value['observed_exception_types'],names)
+        self.assertNotIn(secret,json.dumps(value))
+        for pids,limit in [(None,None),(OSError(),None),(subprocess.TimeoutExpired('stats',5),None),('private-cookie-key-password-session-sentinel',secret),('1000001',1000001),('12345678',True),('１２８',-2),('-1',False)]:
+            with self.subTest(pids=pids,limit=limit):
+                summary,_,_,_,_=self.execute_case(pids=pids,pids_limit=limit)
+                self.assertEqual(summary['community_process_diagnostics'],{'pids':None,'pids_limit':None})
+        for pids,limit in [('0',-1),('1000000',1000000)]:
+            with self.subTest(pids=pids,limit=limit):
+                summary,_,_,_,_=self.execute_case(pids=pids,pids_limit=limit)
+                self.assertEqual(summary['community_process_diagnostics'],{'pids':int(pids),'pids_limit':limit})
 
     def test_execute_summary_distinguishes_unavailable_unowned_and_unmatched_logs(self):
         """Foreign, missing and failed logs never borrow symbols from other containers."""
@@ -250,6 +272,7 @@ class FixtureHardeningTests(unittest.TestCase):
                 self.assertEqual(value['observed_frames'],[])
                 self.assertEqual(value,stored['community_exception_diagnostics'])
                 if mode in {'absent','unowned'}:
+                    self.assertNotIn('community_process_diagnostics',summary)
                     self.assertNotIn(('logs','community-id'),calls)
                     self.assertNotIn(('rm','--force','community-id'),calls)
                     self.assertNotIn('community.log',files)
@@ -262,6 +285,7 @@ class FixtureHardeningTests(unittest.TestCase):
                 self.assertEqual(summary['status'],'PASS' if passed else 'FAIL')
                 self.assertNotIn('community_exception_diagnostics',summary)
                 self.assertNotIn('community_exception_diagnostics',stored)
+                self.assertNotIn('community_process_diagnostics',summary)
 
     def test_tls_server_explicitly_requires_at_least_tls12(self):
         tree=ast.parse(SOURCE.read_text())

@@ -47,6 +47,22 @@ def flat(raw=None,extra=''):
 
 
 class GraphTests(unittest.TestCase):
+    def test_deferred_jobs_are_explicit_owners_and_validate_disabled_prerequisites(self):
+        plan = fake()
+        plan.resolved['deferred_routed_checks'] = {'room_a':{'name':'Check room web','needs':['db-east','room_a','independent']}}
+        plan.snapshot = copy.deepcopy(plan.resolved)
+        with mock.patch.object(m.component_secrets,'action_inputs',return_value={}):
+            graph = m.model(plan)
+        self.assertEqual(graph['checks']['_check_room_a']['guest'],'room_a')
+        self.assertEqual(graph['checks']['_check_room_a']['workflow_secrets'],[])
+        self.assertEqual(graph['checks']['_check_room_a']['phases'][0]['id'],'http-checks')
+        plan.resolved['enabled'] = ['db-east','room_a'];plan.snapshot = copy.deepcopy(plan.resolved)
+        with mock.patch.object(m.component_secrets,'action_inputs',return_value={}),self.assertRaisesRegex(ValueError,'disabled-dependency'):
+            m.model(plan)
+        plan.resolved['enabled'] = ['db-east'];plan.snapshot = copy.deepcopy(plan.resolved)
+        with mock.patch.object(m.component_secrets,'action_inputs',return_value={}):
+            self.assertEqual(m.model(plan)['checks'],{})
+
     def test_plain_guest_and_app_labels_cannot_become_actions_expressions(self):
         for group, key in (('guests', 'room_a'), ('apps', 'consumer')):
             for value in ('${{ github.run_id }}', 'text ${{ secrets.EXAMPLE }}', 'x\x01y', 'x\x7fy'):

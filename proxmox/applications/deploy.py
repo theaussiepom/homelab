@@ -43,7 +43,9 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
             or phase == component_guest.BACKUP_PHASE and 'backup' not in cfg['app']):
         return {'status':'not_selected','vmid':cfg['guest']['vmid'],
                 'changed':False,'target_contacted':False}
-    require(phase == 'infrastructure' or phase in phases, 'Select this component guest phase')
+    deferred = phase == 'http-checks'
+    require(phase == 'infrastructure' or phase in phases or deferred and
+            cfg['app'].get('route_checks', {}).get('mode') == 'deferred', 'Select this component guest phase')
     site = directory/'site.json'
     def prepare(allow_create):
         prepared, selected = component_inputs.prepare(packet, inputs,
@@ -52,7 +54,13 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
         return component_inputs.binding(cfg,site)
     with DeploymentAttempt(cfg,None,phases,prepare_inputs=prepare) as attempt:
         expected=attempt.binding
-        if attempt.completed(commands.is_ancestor):
+        complete = attempt.completed(commands.is_ancestor)
+        if deferred:
+            import component_routed
+            require(complete, 'Deferred routes require genuine completion of this exact run and binding')
+            return {'vmid':cfg['guest']['vmid'], **component_routed.run(
+                cfg, site, attempt.work, attempt.operation, expected)}
+        if complete:
             return {'status':'passed','vmid':cfg['guest']['vmid'],'changed':False,'target_contacted':False}
         if phase == 'infrastructure':
             attempt.begin_infrastructure()
@@ -82,6 +90,9 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
             result=component_ansible.run_phase(cfg,site,attempt.work,attempt.operation,expected,phase,
                 payload=payload,previously_owned=previously_owned,
                 **({'initialize_runtime':True} if initialize_runtime else {}))
+            if phase == phases[-1] and cfg['app'].get('route_checks', {}).get('mode') == 'inline':
+                import component_routed
+                component_routed.run(cfg, site, attempt.work, attempt.operation, expected)
             result=dict(result,changed=attempt.phase_complete(phase,result,ready,payload=payload))
         return {'status':'passed','vmid':cfg['guest']['vmid'],**result}
 

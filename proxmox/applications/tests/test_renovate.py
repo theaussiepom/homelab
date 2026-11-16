@@ -65,7 +65,7 @@ class RenovateRuntime(unittest.TestCase):
         config=json.loads(raw[len('module.exports = '):-2])
         self.assertEqual(config.pop('vulnerabilityAlerts'),{'enabled':False})
         self.assertEqual(config,{'onboarding':False,'requireConfig':'required',
-            'allowedPostUpgradeCommands':[],'allowScripts':False,
+            'allowedCommands':[],'allowScripts':False,
             'force':{'automerge':False,'platformAutomerge':False}})
 
     def test_unsupported_listener_image_privileges_and_missing_storage_refuse(self):

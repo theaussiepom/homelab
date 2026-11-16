@@ -647,13 +647,15 @@ class Resolver:
         monitoring = component_monitoring.bind(self, exposure)
         backup = component_backup.bind(self)
         component_traffic.bind(self, exposure)
+        import component_routed_checks
+        routed = component_routed_checks.bind(self, exposure, dependencies)
         require(disabled is None or isinstance(disabled, list), 'component.disabled')
         disabled = [] if disabled is None else disabled
         require(all(isinstance(key, str) and key in self.guests for key in disabled)
                 and len(set(disabled)) == len(disabled), 'component.disabled')
         enabled = [key for key in self.guests if key not in disabled]
         require(all(target in enabled for key in enabled
-                    for target in dependencies['guest_dependencies'][key]), 'component.disabled-dependency')
+                    for target in dependencies['guest_dependencies'][key] + routed.get('deferred_routed_checks', {}).get(key, {}).get('needs', [])), 'component.disabled-dependency')
         require(monitoring is None or not enabled or monitoring['guest'] in enabled,
                 'component.monitoring-selection')
         require(type(admit) is bool, 'component.admission')
@@ -670,6 +672,7 @@ class Resolver:
         if backup is not None:
             resolved['backup'] = backup
         resolved.update(exposures)
+        resolved.update(routed)
         resolved.update(dependencies)
         resolved['accounts'] = canonical_accounts
         resolved.update(authentication)

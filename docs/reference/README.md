@@ -40,3 +40,5 @@ Automated checks currently compare the detailed network/NIC [property indexes](n
 Use [CLI](cli.md) for exact flags and output, [validate and generate](../guides/validate-and-generate.md) for the authoring task, [preparation](../guides/prepare-deployment.md) for real prerequisites and [operations](../operations/README.md) for execution and verification.
 
 [Documentation index](../README.md) · [Configuration model](../concepts.md) · [Glossary](../glossary.md)
+
+[Configured web-route checks](routed-checks.md) defines guest check sources, page/provider expectations and explicit deferred jobs.

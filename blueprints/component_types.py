@@ -260,7 +260,10 @@ def guest(value):
     closed(value, ('context', 'template', 'lifecycle', 'identity', 'template_file_id',
                    'root_storage', 'interfaces', 'control_interface'),
            ('display_name', 'resources', 'startup', 'security', 'ssh_public_keys', 'dns_servers',
-            'volumes', 'root_paths', 'compose_projects', 'software', 'runtime', 'network_policy', 'timezone', 'readiness', 'source_policy_route', 'monitoring', 'backup'))
+            'volumes', 'root_paths', 'compose_projects', 'software', 'runtime', 'network_policy', 'timezone', 'readiness', 'source_policy_route', 'monitoring', 'backup', 'route_checks'))
+    if 'route_checks' in value:
+        from component_routed_checks import guest_definition
+        guest_definition(value['route_checks'])
     if 'backup' in value:
         from component_backup_job import enrollment
         enrollment(value['backup'])

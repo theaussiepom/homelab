@@ -107,6 +107,9 @@ def validate(cfg):
     require(path(deployment['runtime_file']) == directory/'component-runtime.json',
             'Bind the actual component runtime input file')
     phases(cfg)
+    if 'route_checks' in app:
+        import component_routed
+        component_routed.configuration(cfg)
     if 'recording_mount' in guest:
         from nfs_mounts import declaration
         selected = declaration(guest['recording_mount'])
