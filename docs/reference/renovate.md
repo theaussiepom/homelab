@@ -31,6 +31,8 @@ The PostgreSQL phase first checks that both the database and role are absent, or
 
 The ownership receipt under `/var/lib/homelab-databases/` is included in the PostgreSQL backup configuration. The existing native PostgreSQL export covers the new database and role. Renovate's secret overlay is protected configuration; scratch repositories and containerbase caches are rebuildable. Recover the matching PostgreSQL state, ownership record and independently held GitHub inputs. No restore has been established by source tests.
 
+The compiler includes the generated public Core file content and its path, ownership and mode in the static inputs for guests containing Renovate. A policy or install-metadata change therefore selects a new immutable input namespace. Other guests do not acquire this artifact. Preparation keeps the existing sealed payload checks: changed bytes cannot overwrite an existing namespace, and a new source identity does not clear a failed-operation hold or authorize recovery.
+
 ## Verification and limits
 
 The [stack example](https://github.com/theaussiepom/homelab-stack/blob/main/examples/catalogue/renovate.yaml) compiles a complete synthetic server/database pair. Tests cover source refusals, runtime restrictions, prepared Core file bytes and mount binding, secret scope and create-once task wiring. After approved CD, verify the delivered file and effective worker configuration, `/health`, the database login, a scheduled scan and a real reviewable image PR. Source compilation, mocked native boundaries and a healthy HTTP process do not establish successful repository scanning or recovery.

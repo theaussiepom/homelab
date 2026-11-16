@@ -16,6 +16,54 @@ from test_component_plan import library, site
 
 class PacketIntegrationTests(unittest.TestCase):
 
+    def test_generated_renovate_policy_changes_namespace_preserving_sealed_payload_and_other_guests(self):
+        import component_payload, renovate
+        # Packet integration receives a conforming app descriptor; the real
+        # renderer, artifact hashing and immutable payload publisher run below.
+        with patch.object(sys, 'path', [str(Path(__file__).resolve().parents[1]/'proxmox/applications/tests'), *sys.path]):
+            from test_renovate import app
+        plan = self.resolve()
+        unrelated = component_packet.lower_plan(plan)['resolver']
+        runtime = component_packet.runtime_config(plan, 'resolver')
+        selected = app()
+        selected.update(project_name='updates', project_file='compose-updates.yml')
+        selected['identity'].update(phase='updates', runtime_id='updates', networks={'default':'updates-default'})
+        for storage in selected['storage_paths'].values():
+            storage['kind'] = 'directory'
+        runtime['applications'] = {'recursive_a':selected}
+        runtime['guest']['memory_mib'] = 8192
+        public = renovate.files()
+        old = copy.deepcopy(public)
+        old[0]['content'] = old[0]['content'].replace('allowedCommands', 'allowedPostUpgradeCommands')
+        def packet(rows):
+            with patch.object(component_packet, 'runtime_config', return_value=copy.deepcopy(runtime)), \
+                 patch.object(renovate, 'files', return_value=copy.deepcopy(rows)), \
+                 patch('private_io.regular', side_effect=AssertionError('no private reads')), \
+                 patch('subprocess.run', side_effect=AssertionError('no execution')):
+                return component_packet.lower_plan(plan)['resolver']
+        before, after = packet(old), packet(public)
+        self.assertNotEqual(before['identity'], after['identity'])
+        self.assertEqual(after, packet(public))
+        self.assertEqual(json.loads(after['files']['component-renovate-inputs.json']), public)
+        for field, value in [('uid', 12022), ('gid', 12022), ('mode', '0600'), ('path', 'policy.js')]:
+            rows = copy.deepcopy(public); rows[0][field] = value
+            self.assertNotEqual(after['identity'], packet(rows)['identity'])
+        with patch.object(renovate, 'files', side_effect=AssertionError('unrelated guest cannot read Renovate policy')):
+            self.assertEqual(component_packet.lower_plan(plan)['resolver'], unrelated)
+        roots = self.root/'inputs'; roots.mkdir(mode=0o700)
+        def prepare(value, rows):
+            namespace = roots/value['identity']; namespace.mkdir(mode=0o700, exist_ok=True)
+            return component_payload.prepare(namespace, value['identity'], 'updates',
+                {'config.js':rows[0]['content'].encode()})
+        sealed = prepare(before, old)
+        snapshot = {p.name:(p.stat().st_ino, p.read_bytes()) for p in sealed.directory.iterdir()}
+        newer = prepare(after, public)
+        self.assertNotEqual(sealed.directory, newer.directory)
+        self.assertEqual(prepare(after, public).check(), newer.check())
+        with self.assertRaises(ValueError):
+            prepare(before, public)
+        self.assertEqual(snapshot, {p.name:(p.stat().st_ino, p.read_bytes()) for p in sealed.directory.iterdir()})
+
     def native(self,adapter):
         settings={'postgresql':('postgresql-16=16.10-1.pgdg13+1',1792,'/var/lib/postgresql',5432),
                   'influxdb':('influxdb2=2.7.12-1',1792,'/var/lib/influxdb',8086)}
