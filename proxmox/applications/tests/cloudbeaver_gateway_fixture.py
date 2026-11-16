@@ -639,6 +639,13 @@ def start_gateway(common, stage):
 
 
 def echo_checks():
+    status, headers, _ = get(provider.public_url+'/', ROOT/'accept-html-cookies.txt', {'Accept':'text/html'})
+    record('anonymous_html_request_redirects_to_declared_provider',
+           status == 302 and headers.get('location', [''])[0].startswith(provider.issuer.rstrip('/')+'/authorize?')
+           and not seen_upstream, status=status)
+    status, _, _ = get(provider.public_url+'/', ROOT/'accept-json-cookies.txt', {'Accept':'text/html,application/json'})
+    record('anonymous_mixed_json_request_is_unauthorized_without_upstream_access',
+           status == 401 and not seen_upstream, status=status)
     forged = {name: ('admin' if name in {'X-Team', 'X-Role', 'X-Role-TE', 'X-Forwarded-Groups'}
                      else 'forged-recovery-admin') for name in HEADERS}
     status, _, _ = get(provider.public_url+'/', ROOT/'anonymous-cookies.txt', forged)
