@@ -35,6 +35,8 @@ All hostnames and aliases of the selected route are checked. Redirects may remai
 
 Each response is inspected through a prefix of at most one MiB. The reader requests at most one additional sentinel byte to distinguish a complete body from a truncated prefix, then closes the connection. A larger response can pass a page check only when HTTP 200 and the actual required marker are present within that prefix. A marker absent from the prefix, including one located only beyond the budget, fails as `marker_missing`; the total response size is not measured. UTF-8 decoding retains replacement of malformed bytes while withholding an incomplete character cut by the inspection boundary. The separate one-MiB limit on command JSON inputs is unchanged. These limits apply to first and later deployments alike.
 
+Authentication redirect checks request `text/html`, matching a browser login entry rather than negotiating a JSON API response. Page checks continue to request `text/html,application/json`. An HTTP 401 response does not satisfy an authentication redirect check; it must redirect to the declared provider. The request profile adds no cookies or application credentials and does not change the allowed origins.
+
 ## First installation and later deployments
 
 Use the [complete synthetic configuration](../examples/route-checks/README.md) to inspect the accepted source and packet. Both installation and later deployments use the same declaration. The selected source must already permit the DNS/HTTPS paths and middleware source; compilation refuses absent guest grants and does not widen access. Controller egress, physical routing, DNS service readiness, public certificates and actual responses still require target evidence.

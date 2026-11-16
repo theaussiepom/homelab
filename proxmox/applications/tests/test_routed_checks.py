@@ -80,6 +80,22 @@ class RoutedRuntimeTests(unittest.TestCase):
              patch.object(m,'verify')as verify,self.assertRaises(SystemExit):m.main()
         parse.assert_not_called();verify.assert_not_called()
 
+    def test_auth_redirect_requests_html_and_page_keeps_mixed_media_without_credentials(self):
+        for mode,accept in [('page','text/html,application/json'),('auth-redirect','text/html')]:
+            value=row()
+            if mode=='auth-redirect':value.update(mode=mode,contains='',auth_origins=['https://idp.example.invalid'])
+            response=MagicMock(status=200 if mode=='page'else 302)
+            response.read.return_value=b'Expected service'if mode=='page'else b''
+            response.getheader.return_value=None if mode=='page'else'https://idp.example.invalid/login?state=synthetic'
+            context=MagicMock(check_hostname=True,verify_mode=ssl.CERT_REQUIRED)
+            with self.subTest(mode=mode),patch.object(m.dns_records,'probe'),\
+                 patch.object(m.socket,'create_connection'),patch.object(m.ssl,'create_default_context',return_value=context),\
+                 patch.object(m.http.client,'HTTPSConnection')as client,patch.object(m.time,'monotonic',return_value=1):
+                client.return_value.getresponse.return_value=response
+                m.check(value,100)
+            client.return_value.request.assert_called_once_with('GET','/',headers={
+                'User-Agent':'HomeLab-route-check/1','Accept':accept})
+
     def test_terminal_diagnostic_keeps_last_stage_and_attempt_without_sensitive_text(self):
         secret = 'PRIVATE-body-cookie-header-url?state=credential'
         first, second = row(), row()
@@ -187,7 +203,7 @@ class RoutedRuntimeTests(unittest.TestCase):
         with patch.object(m,'fetch',side_effect=[(302,'/info',''),(200,None,'EXPECTED SERVICE')]):m.check(value,100)
         value.update(mode='auth-redirect',contains='',auth_origins=['https://idp.example.invalid'])
         with patch.object(m,'fetch',side_effect=[(302,'/start',''),(302,'https://idp.example.invalid/login?state=generated','')]):m.check(value,100)
-        for response in [(200,None,'Expected service'),(403,None,''),(302,None,''),(302,'http://web.example.invalid',''),
+        for response in [(200,None,'Expected service'),(401,None,'Expected service'),(403,None,''),(302,None,''),(302,'http://web.example.invalid',''),
                          (302,'https://foreign.example.invalid',''),(302,'https://u:p@idp.example.invalid',''),(302,'/\r\nbad',''),(302,'/','')]:
             with self.subTest(response=response),patch.object(m,'fetch',return_value=response),self.assertRaises(ValueError):m.check(value,100)
         with patch.object(m,'fetch',side_effect=[(302,'/path'+str(n),'')for n in range(8)]),self.assertRaisesRegex(ValueError,'limit'):m.check(value,100)

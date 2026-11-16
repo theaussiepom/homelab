@@ -131,7 +131,8 @@ def fetch(row, url, deadline):
             if parsed.query:
                 path += '?' + parsed.query
             stage = 'http'
-            connection.request('GET', path, headers={'User-Agent':'HomeLab-route-check/1','Accept':'text/html,application/json'})
+            accept = 'text/html' if row['mode'] == 'auth-redirect' else 'text/html,application/json'
+            connection.request('GET', path, headers={'User-Agent':'HomeLab-route-check/1','Accept':accept})
             response = connection.getresponse()
             body = response.read(BODY_INSPECTION_LIMIT+1)
             # One sentinel byte distinguishes EOF from a truncated prefix. Do
