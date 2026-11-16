@@ -81,6 +81,7 @@ def fetch(row, url, deadline):
     remaining = deadline - time.monotonic()
     require(remaining > 0)
     context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     require(context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED)
     raw = socket.create_connection((row['ingress_address'], parsed.port or 443), timeout=min(10, remaining),
                                    source_address=(row['source_address'], 0))
