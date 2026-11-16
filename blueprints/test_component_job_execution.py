@@ -158,7 +158,7 @@ class ComponentJobExecutionTests(unittest.TestCase):
     def test_management_token_reaches_only_the_guest_backup_deploy_process(self):
         metadata=self.graph['guests']['store']
         metadata['workflow_secrets'].append('PBS_API_TOKEN')
-        metadata['phases'].append({'id':'pbs-agent','name':'Backup','application':None,
+        metadata['phases'].append({'id':'pbs-agent','name':'Configure backup','application':None,
             'inputs':{'PBS_API_TOKEN':{'environment':'PBS_API_TOKEN','workflow_secret':'PBS_API_TOKEN'}}})
         with patch.object(workflows.compiler,'resolve_plan',return_value=object()), \
              patch.object(workflows.component_workflows,'model',return_value=self.graph):

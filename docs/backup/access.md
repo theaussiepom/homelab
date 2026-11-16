@@ -51,7 +51,7 @@ In **your deployment repository**, not the public framework/library, inspect the
 1. Create or select the early **Configure backups** job's Environment: `backup` without local PBS host policy, or the retained `homelab-bootstrap` Environment when the supported local policy is combined with setup.
 2. Also identify every enrolled guest's protected job Environment. The private wrapper derives it from `HOMELAB_ENVIRONMENT_PREFIX` and the authored guest ID; do not infer it from the display label.
 3. Restrict each Environment to your reviewed production branch policy. Apply available reviewer protections according to your plan and repository visibility; not every GitHub plan supports private-repository approval gates.
-4. Add the named secret `PBS_API_TOKEN` with the combined value above to each of those Environments. Explicitly forward it through each reusable-workflow boundary, only to early setup and the enrolled guest's controller-side **Backup** step. Pull-request validation and unrelated app steps do not receive it. Do not use `secrets: inherit`.
+4. Add the named secret `PBS_API_TOKEN` with the combined value above to each of those Environments. Explicitly forward it through each reusable-workflow boundary, only to early setup and the enrolled guest's controller-side **Configure backup** step. Pull-request validation and unrelated app steps do not receive it. Do not use `secrets: inherit`.
 
 The following **alternative GitHub CLI commands** run on your trusted workstation with `gh` installed and already authenticated. They write one Environment secret; they neither create nor protect an Environment. Replace the synthetic repository and Environment values with one reviewed generated job's selection after completing the UI protections above. Repeat for each required Environment; use the same existing management credential, not a new token per guest.
 
@@ -68,9 +68,9 @@ Paste the combined value only at the interactive secret prompt. The listing conf
 
 | Input | Storage | Consumer |
 | --- | --- | --- |
-| `PBS_API_TOKEN` | Early setup's selected protected Environment and each enrolled guest's protected Environment | Only the controller workflow steps for **Configure backups** setup and each guest's **Backup** enrollment; never a guest file or payload input |
+| `PBS_API_TOKEN` | Early setup's selected protected Environment and each enrolled guest's protected Environment | Only the controller workflow steps for **Configure backups** setup and each guest's **Configure backup** enrollment; never a guest file or payload input |
 | `PBS_FIREWALL_SSH_KEY`, when local PBS policy is selected | Existing protected `homelab-bootstrap` Environment | Only that policy's native host step in the combined early job |
-| `APPLICATION_SSH_KEY` and `PROXMOX_APP_TOKEN` | Existing protected guest job Environments, through explicit deployment bindings | Ordinary guest deployment and its Backup phase under that guest's locks; not central schedule setup |
+| `APPLICATION_SSH_KEY` and `PROXMOX_APP_TOKEN` | Existing protected guest job Environments, through explicit deployment bindings | Ordinary guest deployment and its Configure backup phase under that guest's locks; not central schedule setup |
 | PBS endpoint and certificate fingerprint | [Destination configuration](../reference/backup.md#backup-job-destination) | Setup preflight and backup clients |
 | Recovery public PEM | Site-relative public file referenced by [backup configuration](../reference/backup.md#backup-recovery-public-key) | Enrolled clients |
 | Recovery private PEM and passphrase | [Independent recovery stores](recovery-key.md#store-independent-recovery-copies) | Recovery operator only |
