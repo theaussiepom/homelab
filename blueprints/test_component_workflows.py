@@ -50,18 +50,35 @@ class GraphTests(unittest.TestCase):
     def test_deferred_jobs_are_explicit_owners_and_validate_disabled_prerequisites(self):
         plan = fake()
         plan.resolved['deferred_routed_checks'] = {'room_a':{'name':'Check room web','needs':['db-east','room_a','independent']}}
+        plan.resolved['routed_checks'] = {'room_a': {'rows': [None]*17}}
         plan.snapshot = copy.deepcopy(plan.resolved)
         with mock.patch.object(m.component_secrets,'action_inputs',return_value={}):
             graph = m.model(plan)
-        self.assertEqual(graph['checks']['_check_room_a']['guest'],'room_a')
-        self.assertEqual(graph['checks']['_check_room_a']['workflow_secrets'],[])
-        self.assertEqual(graph['checks']['_check_room_a']['phases'][0]['id'],'http-checks')
+        self.assertEqual(graph['checks']['owners']['room_a'], {'name':'Check room web',
+            'needs':['db-east','room_a','independent'], 'endpoint_count':17})
+        self.assertEqual(graph['checks']['needs'], ['selection','db-east','room_a','independent'])
+        self.assertEqual(graph['checks']['timeout_minutes'], 40)
         plan.resolved['enabled'] = ['db-east','room_a'];plan.snapshot = copy.deepcopy(plan.resolved)
         with mock.patch.object(m.component_secrets,'action_inputs',return_value={}),self.assertRaisesRegex(ValueError,'disabled-dependency'):
             m.model(plan)
         plan.resolved['enabled'] = ['db-east'];plan.snapshot = copy.deepcopy(plan.resolved)
         with mock.patch.object(m.component_secrets,'action_inputs',return_value={}):
-            self.assertEqual(m.model(plan)['checks'],{})
+            self.assertNotIn('checks',m.model(plan))
+
+    def test_final_job_is_bounded_and_counts_every_selected_alias(self):
+        self.assertIsNone(m.deferred_job({}, [], False))
+        owners={'leaf':{'name':'Check leaf','needs':['leaf'],'endpoint_count':256}}
+        value=m.deferred_job(owners,['leaf'],True)
+        self.assertEqual(value['needs'],['selection','_backup','leaf'])
+        self.assertEqual(value['timeout_minutes'],330)
+        for change in (lambda x:x['leaf'].update(endpoint_count=257),
+                       lambda x:x['leaf'].update(endpoint_count=0),
+                       lambda x:x['leaf'].update(endpoint_count=True),
+                       lambda x:x['leaf'].update(needs=['missing']),
+                       lambda x:x['leaf'].update(name='${{ secrets.VALUE }}')):
+            value=copy.deepcopy(owners);change(value)
+            with self.assertRaises(ValueError):m.deferred_job(value,['leaf'],False)
+        with self.assertRaises(ValueError):m.deferred_job(owners,[],False)
 
     def test_plain_guest_and_app_labels_cannot_become_actions_expressions(self):
         for group, key in (('guests', 'room_a'), ('apps', 'consumer')):

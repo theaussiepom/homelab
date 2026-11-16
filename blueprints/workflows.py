@@ -190,7 +190,10 @@ if not set(active) <= set(expected['guests']):
 expected['guest_order'] = active
 expected['guests'] = {key: expected['guests'][key] for key in active}
 if 'checks' in expected:
-    expected['checks'] = {key: row for key, row in expected['checks'].items() if row['guest'] in active}
+    owners = {key: row for key, row in expected['checks']['owners'].items() if key in active}
+    checks = component_workflows.deferred_job(owners, active, 'backup' in expected)
+    if checks is None: expected.pop('checks')
+    else: expected['checks'] = checks
 if actual != expected:
     raise SystemExit('Regenerate the exact selected component workflow graph and scalar bindings')
 PYCODE
@@ -199,6 +202,12 @@ PYCODE
             'timeout-minutes': 2, 'steps': [*setup, {'name': 'Validate deployment', 'id': 'selection',
                 'env': {'DISABLED': '${{ inputs.disabled }}',
                         'EXPECTED_MODEL': json.dumps(graph, sort_keys=True)}, 'run': run}]}
+
+
+
+def job_results(needs):
+    """Forward result enums only, never another job's outputs or credentials."""
+    return json.dumps({key: "${{ needs['"+key+"'].result }}" for key in needs}, sort_keys=True)
 
 
 def models(stack, *, site_source, disabled=None):
@@ -234,8 +243,8 @@ def models(stack, *, site_source, disabled=None):
         result['backup.yml'] = {'name':backup_name,'on':workflow_call(['PBS_API_TOKEN']),
             'permissions':{'contents':'read'},'defaults':copy.deepcopy(defaults),'jobs':{'deploy':job}}
         result['backup.yml']['on']['workflow_call']['secrets'] = {'PBS_API_TOKEN': {'required': True}}
-    for guest, metadata in {**graph['guests'], **graph.get('checks', {})}.items():
-        owner = metadata.get('guest', guest)
+    for guest, metadata in graph['guests'].items():
+        owner = guest
         guest_name = label(metadata['name'])
         parent = {'name': guest_name, 'needs': metadata['needs'],
                   'if': PRIVATE_MAIN + " && !contains(fromJSON(inputs.disabled || '[]'), '" + owner + "')",
@@ -262,6 +271,24 @@ def models(stack, *, site_source, disabled=None):
                              **{name: '${{ secrets.' + name + ' }}' for name in COMMON_SECRETS}, **scoped)})
         workflow['jobs']['deploy'] = job
         result['guest-' + guest + '.yml'] = workflow
+    if 'checks' in graph:
+        selected = graph['checks']
+        condition = 'always() && !cancelled() && ' + PRIVATE_MAIN
+        deploy['jobs']['_checks'] = {'name': selected['name'], 'needs': selected['needs'],
+            'if': condition, 'uses': './.github/workflows/web-checks.yml',
+            'with': dict(arguments(), prerequisite_results=job_results(selected['needs'])), 'secrets': {}}
+        call = workflow_call([])
+        call['workflow_call']['secrets'] = {}
+        call['workflow_call']['inputs']['prerequisite_results'] = {'type': 'string', 'required': True}
+        job = {key: copy.deepcopy(recipe[key]) for key in ('runs-on', 'env')}
+        job.update(name=selected['name'], **{'if': condition, 'environment': '${{ inputs.environment_name }}',
+            'timeout-minutes': selected['timeout_minutes']})
+        job['steps'] = [{'name': 'Setup', 'uses': action_source+'guest-setup'+action_revision},
+            {'name': 'Check web endpoints', 'env': {'DISABLED': '${{ inputs.disabled }}',
+                'HOMELAB_CHECK_RESULTS': '${{ inputs.prerequisite_results }}'},
+             'run': '"$HOMELAB_CONFIG_PYTHON" framework-source/blueprints/web_checks.py --stack stack-source --site-root . --disabled "$DISABLED" --results "$HOMELAB_CHECK_RESULTS"'}]
+        result['web-checks.yml'] = {'name': selected['name'], 'on': call,
+            'permissions': {'contents': 'read'}, 'defaults': copy.deepcopy(defaults), 'jobs': {'deploy': job}}
     result['phase.yml'] = {'name': 'Guest phase', 'on': workflow_call(phase=True),
         'permissions': {'contents': 'read'}, 'jobs': {'run': {
             'uses': framework['repository'] + '/.github/workflows/guest-phase.yml@' + framework['revision'],
@@ -290,7 +317,7 @@ def synchronize(stack, *, site_source, disabled=None, check):
     )
     existing = {
         p.name: p
-        for pattern in ("guest-*.yml", "guest-*.yaml", "deploy.yml", "deploy.yaml", "phase.yml", "phase.yaml", "backup.yml", "backup.yaml")
+        for pattern in ("guest-*.yml", "guest-*.yaml", "deploy.yml", "deploy.yaml", "phase.yml", "phase.yaml", "backup.yml", "backup.yaml", "web-checks.yml", "web-checks.yaml")
         for p in directory.glob(pattern)
     }
     unexpected = sorted(set(existing) - set(expected))

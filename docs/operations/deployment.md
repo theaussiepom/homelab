@@ -86,3 +86,5 @@ When infrastructure completed before a later phase failed, the separately review
 Preserve the current pointer to the last successful operation, its immutable receipt, current HOLD and STARTED markers, checkpoints, and input evidence. Do not delete markers or edit state to rerun. Recovery, restore or an explicitly reviewed operator action requires separate authority; this guide introduces no generic override. [Lifecycle](../reference/lifecycle.md) and [Troubleshooting](troubleshooting.md) describe the boundaries.
 
 [Operations index](README.md)
+
+When guests select deferred route checks, one final generated job checks their endpoints concurrently. Each owner requires successful DNS, ingress and any declared identity provider; guest jobs never wait for the final web-check job. Preserve genuine database, broker and preparation readiness edges. Independent startup DNS needs both configured resolvers and explicit network permission. This graph separation does not prove a clean installation: prerequisite storage, PBS/controller setup, local app readiness, certificates and actual routes still need their own verification.

@@ -33,8 +33,9 @@ def configuration(cfg):
     return selected
 
 
-def run(cfg, site, work, operation, expected):
+def run(cfg, site, work, operation, expected, *, executor=None):
     selected = configuration(cfg)
+    require(executor is None or selected['mode'] == 'deferred', 'Parallel checks run only on the controller')
     require(component_inputs.binding(cfg, site) == expected, 'Route inputs changed before checks')
     directory = operation/'http-checks'
     if selected['mode'] == 'deferred':
@@ -45,6 +46,14 @@ def run(cfg, site, work, operation, expected):
     write_new(directory/'selection.json', encoded({'binding': expected, 'operation':str(operation), **selected}))
     environment = {key:value for key,value in os.environ.items()
                    if key != 'PBS_API_TOKEN' and not key.startswith(component_input_secrets.PREFIX)}
+    if executor is not None:
+        result = routed_checks.parallel(selected['rows'], executor)
+        write_new(directory/'checks.log', encoded(result))
+        require(component_inputs.binding(cfg, site) == expected, 'Route inputs changed during checks')
+        if result['status'] != 'passed':
+            raise routed_checks.VerificationFailure(result)
+        write_new(directory/'complete.json', encoded({'binding': expected, 'operation': str(operation), **result}))
+        return result
     if selected['mode'] == 'deferred':
         command = [sys.executable, str(SOURCE/'routed_checks.py'), json.dumps(selected['rows'])]
     else:
