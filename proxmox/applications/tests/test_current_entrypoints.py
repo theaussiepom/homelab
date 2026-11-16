@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 from pathlib import Path
 import runpy
 import subprocess
@@ -15,6 +16,14 @@ import deploy
 
 
 class CurrentEntrypointTests(unittest.TestCase):
+    def test_recovery_enabled_failure_reports_finalization_without_leaking_exception(self):
+        with patch('sys.argv', ['deploy.py', '--packet', '/never-read/packet.json', '--phase', 'infrastructure']), \
+                patch.dict(os.environ, {'HOMELAB_CD_RECOVERY': 'v1'}), \
+                patch.object(deploy, 'run', side_effect=ValueError('PRIVATE')), self.assertRaises(SystemExit) as error:
+            deploy.main()
+        self.assertIn('Generated CD finalization determines rollback or reconciliation.', str(error.exception))
+        self.assertNotIn('PRIVATE', str(error.exception))
+
     def held(self, failure, *, diagnostic_failure=False):
         """Exercise the actual CLI handler; it must dispatch once and keep custody."""
         with (

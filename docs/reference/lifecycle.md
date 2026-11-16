@@ -54,7 +54,7 @@ creation guard: an existing or conflicting leaf is refused, never adopted or
 repaired. App and data ownership remain retained. Later deployments verify the
 same directory; moving or removing an owned directory is refused.
 
-Each later ordinary run records new receipts and a new backend generation. Earlier inactive records remain unchanged historical evidence; they do not permit importing resources. Execution stops when checks find active or pending markers, unresolved records from a newer or different component operation, changed state, or a pointer moved back to an older successful operation. A checkpoint records progress within an operation. Same-run phase continuation verifies that exact operation; a separately reviewed [infrastructure checkpoint admission](../operations/infrastructure-checkpoint.md) can bind genuinely completed infrastructure to one fresh successor after an authorised failure archive. It transfers no application ownership. The workflow does not automatically retry operations or release holds.
+Each later ordinary run records new receipts and a new backend generation. Earlier inactive records remain unchanged historical evidence; they do not permit importing resources. Execution stops when checks find active or pending markers, unresolved records from a newer or different component operation, changed state, or a pointer moved back to an older successful operation. A checkpoint records progress within an operation. Same-run phase continuation verifies that exact operation; a separately reviewed [infrastructure checkpoint admission](../operations/infrastructure-checkpoint.md) can bind genuinely completed infrastructure to one fresh successor after an authorised failure archive. It transfers no application ownership. The workflow never retries the failed forward operation. Generated [CD recovery](../operations/cd-recovery.md) can reverse a supported update and release only its verified hold; other pending or foreign operations remain refusals.
 
 Historical sealed v1 component configurations may contain retired fields. HomeLab reads them as immutable evidence rather than parsing them as new configuration. Their contents do not add migration exceptions, bootstrap adapters or release hooks to the current configuration format.
 
@@ -82,9 +82,9 @@ For an existing guest, the disk and mount-point blocks must remain unchanged, in
 | App removal | Does not delete data or containers automatically; preflight rejects existing project services absent from configuration |
 | DNS alias removal | Removes only a record with its exact previously managed value; conflicts are rejected |
 | Backend rollback/foreign edit | Refuses before new native work |
-| Failure | Preserve HOLD, markers, the prior canonical pointer, immutable receipt and other evidence. Diagnose before separately authorised recovery. |
+| Failure | Preserve immutable history. Generated CD recovery verifies supported rollback before releasing the exact hold; otherwise use Reconcile guest after engineer repair. The deployment stays failed. |
 
-No general rollback, import, destructive replacement, native restore or arbitrary delete contract is provided. The separate [recovery subsystems](../framework-reference.md) have their own qualification and authority.
+The generated [CD recovery contract](../operations/cd-recovery.md) supports rollback of existing owned infrastructure and application controls. Import, destructive replacement, application-data restore and arbitrary deletion remain outside that contract. Other [recovery subsystems](../framework-reference.md) retain their separate qualification and authority.
 
 ## Failure boundaries
 

@@ -236,8 +236,9 @@ def previous(attempt):
     require(isinstance(value.get('binding'),dict) and value['binding'].get('vmid')==attempt.vmid,
             'Preserve the prior component guest binding')
     operation=Path(value['operation'])
-    require(operation.parent==attempt.work and component_success(value,operation)
-            and read_existing(operation/'complete.json')==raw,
+    import component_current
+    require(operation.parent==attempt.work and component_current.owned(value,operation)
+            and read_existing(operation/('owner.json' if value.get('schema') == component_current.OWNER else 'complete.json'))==raw,
             'Preserve the exact canonical and immutable component success')
     selected=value['binding']
     cfg,apps=sealed_inputs(selected)
@@ -308,20 +309,29 @@ def current(attempt):
                 and ready.get('state_identity')==identity,
                 'Preserve this run owned infrastructure checkpoint')
     else:
-        if state_hash!=value['state_sha256'] or ('state_identity'in value and value['state_identity']!=identity):
+        import component_current
+        expected_hash, expected_identity = component_current.backend(attempt.work, value)
+        if state_hash!=expected_hash or expected_identity is not None and expected_identity!=identity:
             from component_checkpoint import admission
             attempt.previous_configuration=admission(attempt,value,state_hash,identity)
-    require('state_identity'not in value or value['state_identity']==identity
+    import component_current
+    selected_current = component_current.read(attempt.work)
+    if selected_current and selected_current[0]['kind'] != 'ordinary':
+        require(int(attempt.operation.name.split('-')[1]) > component_current.epoch(selected_current[0])[0],
+                'A recovered failure requires a fresh deployment run; no forward replay')
+    effective_identity = selected_current[0]['state_identity'] if selected_current else value.get('state_identity')
+    require(effective_identity is None or effective_identity==identity
             or (attempt.hold.exists() or attempt.hold.is_symlink())
             and identity_extension(value['state_identity'], identity,
                                    ip_filter_slots(attempt.cfg['guest']['interfaces'])),
             'Preserve the existing backend resource identity')
-    canonical=Path(value['operation']);epoch=tuple(int(x)for x in canonical.name.removeprefix('ordinary-').split('-'))
+    canonical=Path(value['operation']);epoch=tuple(int(x)for x in canonical.name.partition('-')[2].split('-'))
     for path in attempt.work.iterdir():
         if not re.fullmatch(r'ordinary-[1-9][0-9]*-[1-9][0-9]*',path.name):continue
         private_directory(path);no_markers(path)
         if path==canonical:continue
         if path==attempt.operation and(attempt.hold.exists()or attempt.hold.is_symlink()):continue
+        if selected_current and path.name in selected_current[0]['resolved']:continue
         number=tuple(int(x)for x in path.name.removeprefix('ordinary-').split('-'))
         require(number<epoch,'Preserve newer unresolved ordinary history; no pointer fallback')
         for started_path in path.glob('*-started.json'):

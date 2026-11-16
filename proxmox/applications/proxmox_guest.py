@@ -240,12 +240,15 @@ def new_ip_filters_absent(cfg, plan):
 
 
 def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
-                   previous_configuration=None):
+                   previous_configuration=None, recovery=False, verify_only=False):
     """Plan the existing backend; apply only this reviewed guest's safe delta."""
     from deployment_inputs import binding
 
+    require(type(recovery) is bool and type(verify_only) is bool and (not verify_only or recovery),
+            'Select explicit recovery or observation-only infrastructure')
     host_devices.check(cfg, operation)
     existing = (work / "terraform.tfstate").is_file()
+    require(not recovery or existing, 'Recovery cannot create or adopt a guest')
     recording_mount = None
     nfs_changed = False
     if 'recording_mount' in cfg['guest']:
@@ -290,7 +293,8 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
     log = operation / "infrastructure.log"
     if recording_mount is not None:
         import nfs_attachments
-        nfs_changed = nfs_attachments.attach(cfg, recording_mount, operation, lambda path: api_get(cfg, path))
+        if not recovery:
+            nfs_changed = nfs_attachments.attach(cfg, recording_mount, operation, lambda path: api_get(cfg, path))
         guest_trust(cfg, work, persist=False)
         recording_proof = nfs_mounts.verify(cfg, recording_mount, log,
             lambda path: api_get(cfg, path), label='before')
@@ -354,7 +358,16 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
                 lambda path: api_get(cfg, path), first=staging, label='before',
                 mounts=backup_staging.planned_mounts(value, 'before'))
             staging = (staging_slot, staging_proof, staging, backup_staging.planned_mounts(value, 'after'))
-    require(binding(cfg, site) == expected, "Approved inputs changed while planning")
+    if recovery:
+        from component_generation import sealed_inputs
+        selected, _ = sealed_inputs(expected)
+        require(selected == cfg and all(sha(path) == wanted for path, wanted in expected['input_hashes'].items()),
+                'Preserve the verified recovery inputs while planning')
+    else:
+        require(binding(cfg, site) == expected, 'Approved inputs changed while planning')
+    if verify_only:
+        require(all(row['change']['actions'] == ['no-op'] for row in value['resource_changes']),
+                'Reconciliation requires actual infrastructure to match selected source')
     require(not existing or sha(work / 'terraform.tfstate') == original_state,
             'The owned backend changed while planning')
     changed = any(
@@ -406,7 +419,8 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
         require(backup_staging.verify(cfg, mounts[slot], slot, log, lambda path: api_get(cfg, path),
                 first=first, label='after', mounts=mounts) == proof,
                 'The declared staging filesystem changed across apply')
-    changed = host_devices.attach(cfg, operation) or changed
+    if not recovery:
+        changed = host_devices.attach(cfg, operation) or changed
     if recording_mount is not None:
         require(nfs_mounts.verify(cfg, recording_mount, log, lambda path: api_get(cfg, path),
                                       label='after') == recording_proof,

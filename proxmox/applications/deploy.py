@@ -55,10 +55,14 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
         return component_inputs.binding(cfg,site)
     with DeploymentAttempt(cfg,None,phases,prepare_inputs=prepare) as attempt:
         expected=attempt.binding
+        import component_recovery
         complete = attempt.completed(commands.is_ancestor)
         if deferred:
             import component_routed
-            require(complete, 'Deferred routes require genuine completion of this exact run and binding')
+            if component_recovery.enabled():
+                component_recovery.configured(attempt)
+            else:
+                require(complete, 'Deferred routes require genuine completion of this exact run and binding')
             return {'vmid':cfg['guest']['vmid'], **component_routed.run(
                 cfg, site, attempt.work, attempt.operation, expected,
                 **({'executor': route_executor} if route_executor is not None else {}))}
@@ -66,6 +70,8 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
             return {'status':'passed','vmid':cfg['guest']['vmid'],'changed':False,'target_contacted':False}
         if phase == 'infrastructure':
             attempt.begin_infrastructure()
+            if component_recovery.enabled():
+                component_recovery.once(attempt.operation/'infrastructure-invocation.json', attempt.marker)
             result=proxmox_guest.infrastructure(cfg,site,attempt.work,attempt.operation,expected,
                 **({'previous_configuration': attempt.previous_configuration}
                    if 'job' in cfg['app'].get('backup', {}) or 'recording_mount' in cfg['guest'] else {}),
@@ -89,6 +95,7 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
                     initialize_runtime=previously_owned and not runtime_owned and 'runtime_directory' in app['identity']
                     payload=component_prepare.prepare(cfg,app_id,environment,attempt=attempt)
             ready=attempt.begin_phase(phase,payload=payload)
+            component_recovery.phase_controls(attempt, phase, payload)
             result=component_ansible.run_phase(cfg,site,attempt.work,attempt.operation,expected,phase,
                 payload=payload,previously_owned=previously_owned,
                 **({'initialize_runtime':True} if initialize_runtime else {}))
@@ -113,7 +120,9 @@ def main():
         except Exception:
             diagnostic = {'error_type': 'Exception', 'source': []}
         raise SystemExit(
-            "Deployment held; preserve private inputs, state and all attempt evidence. No automatic replay or restore."
+            "Deployment held; preserve private inputs, state and all attempt evidence. "
+            + ("Generated CD finalization determines rollback or reconciliation."
+               if os.environ.get('HOMELAB_CD_RECOVERY') == 'v1' else "No automatic replay or restore.")
             + '\n' + json.dumps(diagnostic, sort_keys=True)
         ) from None
 

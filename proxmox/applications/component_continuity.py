@@ -9,6 +9,7 @@ from pathlib import Path
 import component_input_secrets
 import component_payload
 import component_generation
+import component_current
 from private_io import read_json, require
 
 SCHEMA = 'homelab-component-private-material-v1'
@@ -47,7 +48,7 @@ def verify(attempt, app, current):
         return
     receipt = read_json(receipt_path, private=True)
     operation = Path(receipt['operation']) if isinstance(receipt.get('operation'), str) else None
-    if operation is not None and component_generation.component_success(receipt, operation):
+    if operation is not None and component_current.owned(receipt, operation):
         proofs = [row for row in receipt['phase_inputs'].values()
                   if row is not None and row['app'] == app['id']]
         require(len(proofs) <= 1, 'Preserve one prior private role owner per app')

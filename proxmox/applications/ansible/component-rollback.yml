@@ -1,0 +1,88 @@
+---
+- name: Recover only managed component configuration
+  hosts: application
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    app: '{{ recovery_app }}'
+  tasks:
+    - name: Restore only inventoried managed files
+      ansible.builtin.command:
+        argv: [python3, -c, '{{ recovery_program }}']
+        stdin: '{{ recovery_restore | to_json }}'
+      changed_when: true
+      no_log: true
+      when: recovery_mode == 'restore'
+
+    - name: Restore the recorded package versions without removing packages
+      ansible.builtin.apt:
+        name: '{{ recovery_packages }}'
+        state: present
+        allow_downgrade: true
+        fail_on_autoremove: true
+      no_log: true
+      when: recovery_mode == 'restore' and recovery_packages | length > 0
+
+    - name: Restart only the owned native units
+      ansible.builtin.systemd_service:
+        name: '{{ item }}'
+        daemon_reload: true
+        state: restarted
+      loop: '{{ recovery_units }}'
+      when: recovery_mode == 'restore'
+
+    - name: Restore only the owned Compose services
+      ansible.builtin.command:
+        argv: "{{ item.argv + ['up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false', '--no-deps'] + item.services }}"
+      loop: '{{ recovery_projects }}'
+      changed_when: true
+      no_log: true
+      when: recovery_mode == 'restore'
+
+    - name: Inspect declared native configuration ownership without following links
+      ansible.builtin.stat:
+        path: '{{ item.path }}'
+        follow: false
+      loop: '{{ recovery_native_files }}'
+      register: recovery_native_metadata
+      no_log: true
+
+    - name: Verify the declared native configuration owner and permissions
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists and item.stat.isreg and not item.stat.islnk
+          - item.stat.nlink == 1 and item.stat.mode == '0600'
+          - item.stat.pw_name == item.item.user and item.stat.gr_name == item.item.group
+      loop: '{{ recovery_native_metadata.results }}'
+      no_log: true
+
+    - name: Verify exact managed controls and running images
+      ansible.builtin.command:
+        argv: [python3, -c, '{{ recovery_program }}']
+        stdin: '{{ recovery_request | to_json }}'
+      register: recovery_controls
+      changed_when: false
+      no_log: true
+
+    - name: Verify existing reply routing without changing it
+      ansible.builtin.import_tasks: tasks/frontend-ready.yml
+      when: recovery_app.frontend_routing is defined
+
+    - name: Verify the selected application health
+      ansible.builtin.command:
+        argv: '{{ item.argv }}'
+      loop: '{{ recovery_health }}'
+      register: recovery_health_result
+      changed_when: false
+      failed_when: recovery_health_result.rc != 0 or (item.expect | default('')) not in recovery_health_result.stdout
+      no_log: true
+
+    - name: Save private managed-control evidence on the controller
+      ansible.builtin.copy:
+        content: '{{ recovery_controls.stdout }}'
+        dest: '{{ recovery_output }}'
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      no_log: true

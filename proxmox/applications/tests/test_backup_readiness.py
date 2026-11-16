@@ -100,6 +100,47 @@ class GuestReadinessTests(unittest.TestCase):
         self.assertTrue(all(b'management-sentinel' not in p.read_bytes()
             for p in self.fixture.fixture.inputs.rglob('*') if p.is_file()))
 
+    def test_verified_rollback_and_reconciled_owner_remain_admissible_without_rotating_backup_keys(self):
+        import component_recovery
+        import component_restore
+        import component_current
+        trust = self.fixture.root
+        self.fixture.source['secret_sources']['ssh']['path'] = str(trust/'ssh-key')
+        self.fixture.source['contexts']['lab']['trust']['known_hosts'] = str(trust/'known-hosts')
+        write_new(trust/'ssh-key', b'synthetic-test-key\n'); write_new(trust/'known-hosts', b'synthetic-pinned-host\n')
+        self.fixture.publish(backup=True, data=False)
+        self.ordinary(); value, admitted = self.admitted(); subject.verify(value, admitted)
+        cfg = self.fixture.cfg; work = self.fixture.work
+        receipt = read_json(work/'ordinary-complete.json', private=True)
+        immutable = Path(receipt['operation'])/'complete.json'; original = immutable.read_bytes()
+        credentials = Path(cfg['app']['backup']['job']['secrets']['password']['path']).parent
+        before = {path.name: (path.stat().st_ino, path.read_bytes()) for path in credentials.iterdir()}
+        def controls(cfg, operation, selection, *, mode, captured=None, **kwargs):
+            return captured or {'files': {path: {'exists': False} for path in selection['files']}, 'packages': [], 'images': []}
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '102', 'GITHUB_RUN_NUMBER': '11', 'HOMELAB_CD_RECOVERY': 'v1',
+                'HOMELAB_CD_DEPENDENCIES': '{"resolver": []}', 'GITHUB_ACTOR': 'example-engineer'}), \
+                patch.object(component_restore, 'execute', side_effect=controls):
+            deploy.run('infrastructure', self.fixture.fixture.packet, inputs=self.fixture.fixture.inputs, environment={})
+            deploy.run('preparation', self.fixture.fixture.packet, inputs=self.fixture.fixture.inputs, environment={})
+            operation = work/'ordinary-102-1'
+            self.assertEqual(component_recovery.restore(cfg, operation)['status'], 'failed_rolled_back')
+            value, admitted = self.admitted(); subject.verify(value, admitted)
+            self.assertEqual(component_current.read(work)[0]['kind'], 'rollback')
+            self.assertNotEqual(next(iter(admitted.values()))[1], digest(original))
+            # Reconciliation is a separate legitimate owner, never a fabricated
+            # ordinary success. Scheduled backup still uses the same keys.
+            with patch.dict(os.environ, {'GITHUB_RUN_ID': '103', 'GITHUB_RUN_NUMBER': '12'}):
+                deploy.run('infrastructure', self.fixture.fixture.packet, inputs=self.fixture.fixture.inputs, environment={})
+                deploy.run('preparation', self.fixture.fixture.packet, inputs=self.fixture.fixture.inputs, environment={})
+            with patch.dict(os.environ, {'GITHUB_RUN_ID': '104', 'GITHUB_RUN_NUMBER': '13'}):
+                component_recovery.reconcile(cfg, work/'ordinary-103-1', immutable, receipt,
+                    reason='Engineer verified repair', actor_context='protected-main-reconciliation',
+                    expected_controls=read_json(work/'ordinary-103-1/controls-before.json', private=True))
+            value, admitted = self.admitted(); subject.verify(value, admitted)
+            self.assertEqual(component_current.read(work)[0]['kind'], 'reconciled')
+        self.assertEqual(before, {path.name: (path.stat().st_ino, path.read_bytes()) for path in credentials.iterdir()})
+        self.assertEqual(immutable.read_bytes(), original)
+
     def test_disabled_or_failed_changed_member_cannot_borrow_an_old_ready_receipt(self):
         self.ordinary();old_value,admitted=self.admitted();subject.verify(old_value,admitted)
         self.fixture.source['backup']['job']['limits']['max_files']+=1

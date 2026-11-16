@@ -210,6 +210,27 @@ def job_results(needs):
     return json.dumps({key: "${{ needs['"+key+"'].result }}" for key in needs}, sort_keys=True)
 
 
+def recovery_workflow(recipe, defaults, framework, graph, mode):
+    """One controller operation, using only already commissioned guest custody."""
+    name = 'Recover pending deployment' if mode == 'pending' else 'Finish deployment'
+    call = workflow_call([])
+    call['workflow_call']['secrets'] = {}
+    call['workflow_call']['inputs']['prerequisite_results'] = {'type': 'string', 'required': False, 'default': '{}'}
+    job = {key: copy.deepcopy(recipe[key]) for key in ('runs-on', 'env')}
+    job.update(name=name, **{'if': PRIVATE_MAIN, 'environment': '${{ inputs.environment_name }}',
+                            'timeout-minutes': 270})
+    job['env'].update(HOMELAB_CD_RECOVERY='v1',
+                      HOMELAB_CD_DEPENDENCIES=json.dumps(graph['dependencies'], sort_keys=True))
+    job['steps'] = [{'name': 'Setup', 'uses': framework['repository']+'/.github/actions/guest-setup@'+framework['revision']},
+        {'name': name, 'env': {'DISABLED': '${{ inputs.disabled }}',
+                              'HOMELAB_RECOVERY_RESULTS': '${{ inputs.prerequisite_results }}'},
+         'run': '"$HOMELAB_CONFIG_PYTHON" framework-source/blueprints/guest_recovery.py '
+                '--stack stack-source --site-root . --disabled "$DISABLED" --mode '+mode+
+                ' --results "$HOMELAB_RECOVERY_RESULTS"'}]
+    return {'name': name, 'on': call, 'permissions': {'contents': 'read'},
+            'defaults': copy.deepcopy(defaults), 'jobs': {'deploy': job}}
+
+
 def models(stack, *, site_source, disabled=None):
     """Generate only the explicitly resolved composition; never a fixed catalogue."""
     plan = compiler.resolve_plan(stack, site_source, disabled)
@@ -228,6 +249,11 @@ def models(stack, *, site_source, disabled=None):
     deploy = {'name': 'Deployment', 'on': workflow_call(names), 'permissions': {'contents': 'read'},
               'jobs': {'selection': selection_job(recipe, graph)}}
     result = {'deploy.yml': deploy}
+    if graph['guests']:
+        result['pending-recovery.yml'] = recovery_workflow(recipe, defaults, framework, graph, 'pending')
+        deploy['jobs']['_recover'] = {'name': 'Recover pending deployment', 'needs': ['selection'],
+            'if': PRIVATE_MAIN, 'uses': './.github/workflows/pending-recovery.yml',
+            'with': arguments(), 'secrets': {}}
     if 'backup' in graph:
         condition = PRIVATE_MAIN + " && !failure() && !cancelled() && needs.selection.result == 'success'"
         backup_name = graph['backup']['name']
@@ -243,6 +269,8 @@ def models(stack, *, site_source, disabled=None):
         result['backup.yml'] = {'name':backup_name,'on':workflow_call(['PBS_API_TOKEN']),
             'permissions':{'contents':'read'},'defaults':copy.deepcopy(defaults),'jobs':{'deploy':job}}
         result['backup.yml']['on']['workflow_call']['secrets'] = {'PBS_API_TOKEN': {'required': True}}
+        if graph['guests']:
+            deploy['jobs']['_backup']['needs'] = [*deploy['jobs']['_backup']['needs'], '_recover']
     for guest, metadata in graph['guests'].items():
         owner = guest
         guest_name = label(metadata['name'])
@@ -250,6 +278,7 @@ def models(stack, *, site_source, disabled=None):
                   'if': PRIVATE_MAIN + " && !contains(fromJSON(inputs.disabled || '[]'), '" + owner + "')",
                   'uses': './.github/workflows/guest-' + guest + '.yml',
                   'with': arguments(), 'secrets': secret_forwarding(metadata['workflow_secrets'])}
+        parent['needs'] = [*parent['needs'], '_recover']
         deploy['jobs'][guest] = parent
         workflow = {'name': guest_name, 'on': workflow_call(metadata['workflow_secrets']),
                     'permissions': {'contents': 'read'}, 'defaults': copy.deepcopy(defaults), 'jobs': {}}
@@ -258,6 +287,8 @@ def models(stack, *, site_source, disabled=None):
                          'Guest phases exceed the portable 360-minute job budget')
         job = {key: copy.deepcopy(recipe[key]) for key in ('environment', 'runs-on', 'env')}
         job.update(name=guest_name, **{'if': parent['if'], 'timeout-minutes': budget})
+        job['env'].update(HOMELAB_CD_RECOVERY='v1',
+                          HOMELAB_CD_DEPENDENCIES=json.dumps(graph['dependencies'], sort_keys=True))
         job['steps'] = [{'name': 'Setup', 'uses': action_source + 'guest-setup' + action_revision,
                          'timeout-minutes': recipe['timeout-minutes']}]
         for phase in metadata['phases']:
@@ -283,12 +314,20 @@ def models(stack, *, site_source, disabled=None):
         job = {key: copy.deepcopy(recipe[key]) for key in ('runs-on', 'env')}
         job.update(name=selected['name'], **{'if': condition, 'environment': '${{ inputs.environment_name }}',
             'timeout-minutes': selected['timeout_minutes']})
+        job['env']['HOMELAB_CD_RECOVERY'] = 'v1'
         job['steps'] = [{'name': 'Setup', 'uses': action_source+'guest-setup'+action_revision},
             {'name': 'Check web endpoints', 'env': {'DISABLED': '${{ inputs.disabled }}',
                 'HOMELAB_CHECK_RESULTS': '${{ inputs.prerequisite_results }}'},
              'run': '"$HOMELAB_CONFIG_PYTHON" framework-source/blueprints/web_checks.py --stack stack-source --site-root . --disabled "$DISABLED" --results "$HOMELAB_CHECK_RESULTS"'}]
         result['web-checks.yml'] = {'name': selected['name'], 'on': call,
             'permissions': {'contents': 'read'}, 'defaults': copy.deepcopy(defaults), 'jobs': {'deploy': job}}
+    if graph['guests']:
+        final_needs = list(deploy['jobs'])
+        deploy['jobs']['_finish'] = {'name': 'Finish deployment', 'needs': final_needs,
+            'if': 'always() && !cancelled() && '+PRIVATE_MAIN,
+            'uses': './.github/workflows/finish-deployment.yml',
+            'with': dict(arguments(), prerequisite_results=job_results(final_needs)), 'secrets': {}}
+        result['finish-deployment.yml'] = recovery_workflow(recipe, defaults, framework, graph, 'finish')
     result['phase.yml'] = {'name': 'Guest phase', 'on': workflow_call(phase=True),
         'permissions': {'contents': 'read'}, 'jobs': {'run': {
             'uses': framework['repository'] + '/.github/workflows/guest-phase.yml@' + framework['revision'],
@@ -317,7 +356,7 @@ def synchronize(stack, *, site_source, disabled=None, check):
     )
     existing = {
         p.name: p
-        for pattern in ("guest-*.yml", "guest-*.yaml", "deploy.yml", "deploy.yaml", "phase.yml", "phase.yaml", "backup.yml", "backup.yaml", "web-checks.yml", "web-checks.yaml")
+        for pattern in ("guest-*.yml", "guest-*.yaml", "deploy.yml", "deploy.yaml", "phase.yml", "phase.yaml", "backup.yml", "backup.yaml", "web-checks.yml", "web-checks.yaml", "pending-recovery.yml", "finish-deployment.yml")
         for p in directory.glob(pattern)
     }
     unexpected = sorted(set(existing) - set(expected))

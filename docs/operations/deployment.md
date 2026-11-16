@@ -39,7 +39,7 @@ Environment creation, package installation or the Ansible version check failing 
 
 The generator creates one job for each enabled guest and preserves the declared dependencies between guests. Each job runs infrastructure, preparation, app phases and, when selected, the monitoring agent followed by the enrolled guest’s **Configure backup** phase. See the [backup sequence and readiness boundary](../backup/configure.md#review-the-generated-change). The infrastructure phase uses OpenTofu with the required plan and state checks. Preparation uses its defined data transfer object (DTO), which contains the inputs for that phase. Each app phase then selects its own fixed payload and protected inputs, plus the Ansible tasks owned by its adapter.
 
-Declared readiness dependencies change the order in which phases run. Value references alone do not. The workflow rejects a selection that disables a required dependency or required monitoring server. Failure stops the chain; the normal CD workflow does not retry, release a HOLD or relabel an incomplete phase as success.
+Declared readiness dependencies change the order in which phases run. Value references alone do not. The workflow rejects a selection that disables a required dependency or required monitoring server. Failure stops the forward chain. Generated [CD recovery](cd-recovery.md) rolls back supported updates, verifies the result and releases their exact holds. The deployment remains failed; no incomplete phase is relabelled as success and no forward operation is retried.
 
 For a declared [source reply policy](../reference/guests.md#source-reply-routing),
 preparation manages the existing guest-local routing helper and boot service.
@@ -83,7 +83,7 @@ After successful CD, verify the intended layer: DNS answer, public TLS, backend 
 
 When infrastructure completed before a later phase failed, the separately reviewed [infrastructure checkpoint admission](infrastructure-checkpoint.md) can bind that exact archived progress to one fresh successor. It preserves prior application ownership and does not release holds or rewrite state.
 
-Preserve the current pointer to the last successful operation, its immutable receipt, current HOLD and STARTED markers, checkpoints, and input evidence. Do not delete markers or edit state to rerun. Recovery, restore or an explicitly reviewed operator action requires separate authority; this guide introduces no generic override. [Lifecycle](../reference/lifecycle.md) and [Troubleshooting](troubleshooting.md) describe the boundaries.
+Use [CD rollback and Reconcile guest](cd-recovery.md) for the supported ordinary-update path and its engineer repair boundary. Preserve the previous successful operation, its immutable receipt, current HOLD and STARTED markers, checkpoints and input evidence. Never delete markers, rewrite history or copy an old backend to rerun. Other restore and operator operations retain their separate authority. [Lifecycle](../reference/lifecycle.md) and [Troubleshooting](troubleshooting.md) describe the ownership boundaries.
 
 [Operations index](README.md)
 

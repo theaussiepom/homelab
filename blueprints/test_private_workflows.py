@@ -100,7 +100,7 @@ class PrivateWorkflowTests(unittest.TestCase):
         self.spec, self.source = composition()
         self.env = {'HOMELAB_STACK_SOURCE':'owner/stack/.github/workflows/deploy.yml@'+'a'*40,
                     'HOMELAB_ENVIRONMENT_PREFIX':'private-apps','HOMELAB_RUNNER_LABELS':'["self-hosted","linux"]',
-                    'HOMELAB_REPOSITORY':'owner/site'}
+                    'HOMELAB_REPOSITORY':'owner/site','HOMELAB_RECOVERY_ENVIRONMENT':'private-recovery'}
         (self.stack/'.github/workflows/phase.yml').write_text('jobs:\n  run:\n    uses: owner/framework/.github/workflows/guest-phase.yml@'+'b'*40+'\n')
         (self.site/'site.json').write_text(json.dumps(self.source))
         (self.stack/'images.json').write_text(json.dumps({'pihole': {
@@ -195,10 +195,10 @@ class PrivateWorkflowTests(unittest.TestCase):
         with patch.object(workflows.component_workflows,'model',side_effect=enrolled):
             operational = p.model(self.stack,self.site)
         for value in (policy_only,operational):
-            self.assertEqual(set(value['jobs']),{'validate','selection','_backup','database','web'})
+            self.assertEqual(set(value['jobs']),{'validate','selection','_backup','_recover','_finish','database','web'})
             backup = value['jobs']['_backup']
             self.assertEqual(backup['name'],'Configure backups')
-            self.assertEqual(backup['needs'],['validate','selection'])
+            self.assertEqual(backup['needs'],['validate','selection','_recover'])
             required = set(("github.repository == 'owner/site' && " + workflows.PRIVATE_MAIN).split(' && '))
             required |= {'!failure()','!cancelled()',"needs.validate.result == 'success'","needs.selection.result == 'success'"}
             self.assertEqual(set(backup['if'].split(' && ')),required)
@@ -216,20 +216,23 @@ class PrivateWorkflowTests(unittest.TestCase):
         self.write_pbs();value=p.model(self.stack,self.site)
         self.assertNotIn('_pbs',value['jobs'])
         backup=value['jobs']['_backup']
-        self.assertEqual(backup['name'],'Configure backups');self.assertEqual(backup['needs'],['validate','selection'])
+        self.assertEqual(backup['name'],'Configure backups');self.assertEqual(backup['needs'],['validate','selection','_recover'])
         self.assertEqual(backup['environment'],'homelab-bootstrap');self.assertEqual(backup['timeout-minutes'],15)
         self.assertNotIn('concurrency',backup)
         native=backup['steps'][-1]
         self.assertEqual(native['env'],{'PBS_FIREWALL_SSH_KEY':'${{ secrets.PBS_FIREWALL_SSH_KEY }}'})
         self.assertEqual(native['if'],"success() && steps.pbs_check_selection.outputs.selected == 'true'")
-        restored=copy.deepcopy(value);del restored['jobs']['_backup'];self.assertEqual(restored,baseline)
+        restored=copy.deepcopy(value);del restored['jobs']['_backup']
+        restored['jobs']['_finish']=baseline['jobs']['_finish']
+        self.assertEqual(restored,baseline)
+        self.assertIn('_backup',value['jobs']['_finish']['needs'])
 
     def test_pbs_and_schedule_share_one_job_before_guests_without_a_final_coordinator(self):
         self.original_graph=workflows.component_workflows.model
         with patch.object(workflows.component_workflows,'model',side_effect=self.with_backup):
             before=p.model(self.stack,self.site);self.write_pbs();after=p.model(self.stack,self.site)
         backup=after['jobs']['_backup']
-        self.assertEqual(backup['needs'],['validate','selection']);self.assertNotIn('_pbs',after['jobs'])
+        self.assertEqual(backup['needs'],['validate','selection','_recover']);self.assertNotIn('_pbs',after['jobs'])
         self.assertEqual(backup['steps'][-1],before['jobs']['_backup']['steps'][-1])
         self.assertEqual(backup['steps'][0],before['jobs']['_backup']['steps'][0])
         self.assertNotIn('if',backup['steps'][-1]);self.assertNotIn('continue-on-error',backup['steps'][-1])
@@ -352,7 +355,7 @@ class PrivateWorkflowTests(unittest.TestCase):
 
     def test_native_jobs_use_only_guest_names_and_preserve_operations(self):
         value=p.model(self.stack,self.site);public=workflows.models(self.stack, site_source=self.site / 'site.json')
-        self.assertEqual(set(value['jobs']),{'validate','selection','database','web'})
+        self.assertEqual(set(value['jobs']),{'validate','selection','_recover','_finish','database','web'})
         self.assertEqual(value['concurrency'],{'group':'homelab-private-deployment','cancel-in-progress':False,'queue':'max'})
         for guest,title in [('database','Database'),('web','Web')]:
             job=value['jobs'][guest];old=public['guest-'+guest+'.yml']['jobs']['deploy']
@@ -525,6 +528,47 @@ class PrivateWorkflowTests(unittest.TestCase):
         with patch('sys.argv',argv),patch('sys.stdout',new=io.StringIO()) as output:
             runpy.run_path(str(Path(p.__file__)),run_name='__main__')
         self.assertFalse(json.loads(output.getvalue())['targets_contacted'])
+
+    def test_reconciliation_has_literal_guest_environments_phase_secret_scope_and_bounded_inputs(self):
+        value = p.reconcile_model(self.stack, self.site)
+        self.assertEqual(value['on']['workflow_dispatch']['inputs']['baseline']['default'], 'last_good')
+        self.assertEqual(value['concurrency']['group'], 'homelab-private-deployment')
+        public = workflows.models(self.stack, site_source=self.site/'site.json')
+        for guest in value['on']['workflow_dispatch']['inputs']['guest']['options']:
+            job = value['jobs'][guest]
+            self.assertEqual(job['environment'], self.env['HOMELAB_ENVIRONMENT_PREFIX']+'-'+guest)
+            self.assertEqual(set(job['steps'][-1]['env']), {'GUEST', 'BASELINE', 'REASON', 'DISABLED'})
+            originals = {step['with']['phase']: step['with'] for step in public['guest-'+guest+'.yml']['jobs']['deploy']['steps'] if 'with' in step}
+            for step in job['steps'][1:-1]:
+                phase = step['env']['PHASE']
+                expected = {workflows.PREFIX+key.upper(): value for key, value in originals[phase].items() if key in workflows.SCALAR_SLOTS}
+                actual = {key: value for key, value in step['env'].items() if key.startswith(workflows.PREFIX)}
+                self.assertEqual(actual, expected)
+                self.assertIn('--reason="$REASON"', step['run'])
+        script = value['jobs']['validate']['steps'][0]['run'].split("<<'PYCODE'\n", 1)[1].rsplit('PYCODE', 1)[0]
+        for baseline, reason, passed in [('last_good', 'repair', True), ('current_main', '-repair', True),
+                                         ('unknown', 'repair', False), ('last_good', ' ', False), ('last_good', 'x'*1025, False)]:
+            result = subprocess.run(['python3', '-c', script], capture_output=True,
+                env={**__import__('os').environ, 'GUEST': 'database', 'BASELINE': baseline, 'REASON': reason})
+            self.assertEqual(result.returncode == 0, passed)
+
+    def test_no_guests_retires_only_generator_owned_reconciliation_and_checks_every_output(self):
+        p.synchronize(self.stack, self.site, check=False)
+        path = self.site/'.github/workflows/reconcile-guest.yml'
+        raw = path.read_text(); path.write_text(raw+'\n')
+        with self.assertRaises(ValueError): p.synchronize(self.stack, self.site, check=True)
+        p.synchronize(self.stack, self.site, check=False)
+        with patch.object(workflows, 'models', return_value={'deploy.yml': {'jobs': {'selection': {}}}}):
+            self.assertIsNone(p.reconcile_model(self.stack, self.site))
+        rendered = p.rendered(self.stack, self.site)
+        with patch.object(p, 'rendered', return_value=rendered), patch.object(p, 'reconcile_model', return_value=None):
+            with self.assertRaises(ValueError): p.synchronize(self.stack, self.site, check=True)
+            self.assertTrue(p.synchronize(self.stack, self.site, check=False))
+            self.assertFalse(path.exists())
+            self.assertFalse(p.synchronize(self.stack, self.site, check=True))
+            path.write_text('foreign workflow\n')
+            with self.assertRaises(ValueError): p.synchronize(self.stack, self.site, check=False)
+            self.assertTrue(path.exists())
 
     def test_metadata_source_selection_rejects_two_pins(self):
         path=self.site/'.github/workflows/deploy.yml'

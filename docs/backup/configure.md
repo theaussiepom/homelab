@@ -50,7 +50,7 @@ Do not edit the OpenTofu backend or a successful deployment receipt during that 
 
 This prerequisite uses existing read permissions: the selected volume-info GET requires storage `Datastore.Audit` and owner-VM `VM.Config.Disk`, or `Datastore.Allocate`; the bounded storage index uses Audit or AllocateSpace. It does not list storage content, activate/import storage or request new grants. Unknown storage formats or an ambiguous API-to-guest filesystem mapping are refused. Consult [the staging contract](../reference/backup.md#backup-client-staging-volume) for the selected shape.
 
-An unresolved deployment HOLD or failed attempt remains a separate environmental decision. Preserve it and its evidence; preparation does not authorize clearing a hold, modifying historical success or resuming a failed operation. Stop before CD until its disposition has been explicitly reviewed. There is no migration flag, imported-success record or ordinary-CD recovery branch.
+Backup preparation preserves deployment holds and failed evidence. Generated [CD recovery](../operations/cd-recovery.md) may release only an exactly owned hold after supported rollback verification; unresolved or foreign holds still stop admission. Backup reads the verified effective guest owner, including a rollback or explicit engineer reconciliation. It never clears a deployment hold, modifies historical success or repairs state itself.
 
 ### Prepare an existing InfluxDB operator token when selected
 
