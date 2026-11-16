@@ -65,7 +65,7 @@ class BackupDocumentation(unittest.TestCase):
         self.assertEqual(model['backup.yml']['jobs']['deploy']['environment'],'backup')
         self.assertIn('PBS_API_TOKEN', model['guest-resolver.yml']['on']['workflow_call']['secrets'])
         steps=model['guest-resolver.yml']['jobs']['deploy']['steps']
-        self.assertEqual([row['name'] for row in steps if 'PBS_API_TOKEN' in row.get('with', {})], ['Backup'])
+        self.assertEqual([row['name'] for row in steps if 'PBS_API_TOKEN' in row.get('with', {})], ['Configure backup'])
         env={'HOMELAB_ENVIRONMENT_PREFIX':'example','HOMELAB_REPOSITORY':'example/private'}
         with patch.object(private_workflows,'settings',return_value=(env,['self-hosted'])), \
              patch.object(private_workflows,'validation_workflow',return_value={'name':'Validate config'}), \
@@ -189,7 +189,7 @@ class BackupDocumentation(unittest.TestCase):
         result = subprocess.run(['bash', '-eu'], input=source, text=True, cwd=ROOT,
                                 env=env, capture_output=True, timeout=30, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), 'Unenrolled: resolver; Backup step: absent')
+        self.assertEqual(result.stdout.strip(), 'Unenrolled: resolver; Configure backup step: absent')
         work = Path(trace.read_text().strip())
         self.assertEqual(work.resolve(), work)
         self.assertTrue(work.is_relative_to(self.root))

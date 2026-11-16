@@ -212,7 +212,7 @@ def model(plan):
             phases.append({'id': AGENT_PHASE, 'name': 'Zabbix agent', 'application': None, 'inputs': {}})
         if 'backup' in guests[guest]:
             inputs = {'PBS_API_TOKEN': {'environment': 'PBS_API_TOKEN', 'workflow_secret': 'PBS_API_TOKEN'}} if operational_backup else {}
-            phases.append({'id': BACKUP_PHASE, 'name': 'Backup', 'application': None, 'inputs': inputs})
+            phases.append({'id': BACKUP_PHASE, 'name': 'Configure backup', 'application': None, 'inputs': inputs})
             if operational_backup:
                 secrets.append('PBS_API_TOKEN')
         result['guests'][guest] = {'name': guest_title,
