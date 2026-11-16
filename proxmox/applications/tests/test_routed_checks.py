@@ -23,6 +23,71 @@ def row():
 
 
 class RoutedRuntimeTests(unittest.TestCase):
+    def test_terminal_diagnostic_keeps_last_stage_and_attempt_without_sensitive_text(self):
+        secret = 'PRIVATE-body-cookie-header-url?state=credential'
+        first, second = row(), row()
+        second.update(host='alias.example.invalid', route_origins=['https://alias.example.invalid'])
+        with patch.object(m, 'check', side_effect=[None, m.RouteFailure('dns', 'invalid_response'),
+                m.RouteFailure('connect', 'timeout')]), patch.object(m.time, 'sleep') as sleep, \
+             patch.object(m.time, 'monotonic', side_effect=[0, 1, 601]), \
+             self.assertRaises(m.VerificationFailure) as caught:
+            m.verify([first, second])
+        expected = {'status':'failed', 'endpoint':1, 'exposure':'web', 'attempts':2,
+                    'stage':'connect', 'cause':'timeout'}
+        self.assertEqual(caught.exception.diagnostic, expected)
+        sleep.assert_called_once_with(2)
+        for error in (caught.exception, m.VerificationFailure({**expected, 'http_status':403})):
+            with patch.object(sys, 'argv', ['route', json.dumps([row()])]), \
+                 patch.object(m, 'verify', side_effect=error), \
+                 patch('sys.stderr', new_callable=io.StringIO) as out, \
+                 self.assertRaises(SystemExit):
+                m.main()
+            diagnostic = json.loads(out.getvalue())
+            self.assertEqual(diagnostic, error.diagnostic)
+            self.assertLess(len(out.getvalue()), 512)
+        for error, cause in ((ValueError(secret), 'invalid_response'),
+                             (http.client.HTTPException(secret), 'protocol_error'),
+                             (OSError(secret), 'io_error')):
+            with patch.object(m, 'check', side_effect=error), \
+                 patch.object(m.time, 'monotonic', side_effect=[0, 601]), \
+                 self.assertRaises(m.VerificationFailure) as caught:
+                m.verify([row()])
+            self.assertEqual(caught.exception.diagnostic['cause'], cause)
+            self.assertNotIn(secret, json.dumps(caught.exception.diagnostic))
+
+    def test_real_request_stages_classify_collaborator_failures_and_close_sockets(self):
+        secret = 'PRIVATE response body https://user:password@foreign.invalid/?state=token'
+        context = MagicMock(check_hostname=True, verify_mode=ssl.CERT_REQUIRED)
+        cases = [('dns', ValueError(secret), 'invalid_response'), ('dns', TimeoutError(secret), 'timeout'),
+                 ('connect', TimeoutError(secret), 'timeout'), ('connect', ConnectionRefusedError(secret), 'refused'),
+                 ('connect', OSError(secret), 'io_error'), ('tls', ssl.SSLCertVerificationError(secret), 'certificate'),
+                 ('tls', ssl.SSLError(secret), 'tls_error'), ('http', http.client.BadStatusLine(secret), 'protocol_error')]
+        for stage, error, cause in cases:
+            with self.subTest(stage=stage, cause=cause), patch.object(m.dns_records, 'probe') as dns, \
+                 patch.object(m.socket, 'create_connection') as connect, \
+                 patch.object(m.ssl, 'create_default_context', return_value=context), \
+                 patch.object(m.http.client, 'HTTPSConnection') as client, \
+                 patch.object(m.time, 'monotonic', return_value=1), self.assertRaises(m.RouteFailure) as caught:
+                context.wrap_socket.side_effect = None
+                selected = {'dns':dns, 'connect':connect, 'tls':context.wrap_socket,
+                            'http':client.return_value.request}[stage]
+                selected.side_effect = error
+                m.fetch(row(), 'https://web.example.invalid', 100)
+            self.assertEqual(caught.exception.details, {'stage':stage, 'cause':cause})
+            self.assertNotIn(secret, str(caught.exception))
+            if stage in ('tls', 'http'):
+                client.return_value.close.assert_called_once()
+                connect.return_value.close.assert_called_once()
+        for status, body, expected in [(403, '', 'unexpected_status'), (200, secret, 'marker_missing')]:
+            with patch.object(m, 'fetch', return_value=(status, None, body)), self.assertRaises(m.RouteFailure) as caught:
+                m.check(row(), 100)
+            self.assertEqual(caught.exception.details, {'stage':'expectation', 'cause':expected, 'http_status':status})
+        for target in ('https://bad:port/', 'https://[bad/', 'https://foreign.invalid/?state='+secret):
+            with patch.object(m, 'fetch', return_value=(302, target, secret)), self.assertRaises(m.RouteFailure) as caught:
+                m.check(row(), 100)
+            self.assertEqual(caught.exception.details['stage'], 'redirect')
+            self.assertNotIn(secret, str(caught.exception))
+
     def test_tls_uses_real_resolver_answer_exact_bound_source_and_fqdn_sni(self):
         value=row();response=MagicMock();response.status=200;response.read.return_value=b'Expected service'
         response.getheader.return_value=None
