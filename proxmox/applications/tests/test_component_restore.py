@@ -48,6 +48,32 @@ class RestoreTests(unittest.TestCase):
             self.assertEqual(command[0], 'ansible-playbook')
             self.assertTrue(command[-1].startswith('@'))
 
+    def test_real_ansible_capture_restore_verify_preserves_literal_program_templates(self):
+        """Exercise the production playbook, including Docker's literal Go templates."""
+        import commands
+        original_write = m.write
+        def local_inventory(path, value):
+            if path.name == 'inventory.json':
+                value = copy.deepcopy(value)
+                host = value['application']['hosts'][self.cfg['app']['hostname']]
+                host.update(ansible_connection='local', ansible_become=False,
+                            ansible_python_interpreter=sys.executable)
+            original_write(path, value)
+        env = {'PATH': str(Path(sys.executable).parent)+os.pathsep+os.environ['PATH'],
+               'ANSIBLE_HOME': str(self.tx.trust/'ansible-home'),
+               'ANSIBLE_LOCAL_TEMP': str(self.tx.trust/'ansible-local'),
+               'ANSIBLE_REMOTE_TEMP': str(self.tx.trust/'ansible-remote')}
+        with patch.object(m, 'write', side_effect=local_inventory), \
+                patch.object(m.component_ansible, 'quiet', commands.quiet), patch.dict(os.environ, env):
+            captured = EXECUTE(self.cfg, self.tx.work, self.selection, mode='capture')
+            m.expected(self.selection, captured)
+            self.control.write_bytes(b'forward {{ literal }} configuration\n')
+            restored = EXECUTE(self.cfg, self.tx.work, self.selection, mode='restore', captured=captured,
+                allowed={str(self.control): [digest(self.control.read_bytes())]})
+            self.assertEqual(restored, captured)
+            self.assertEqual(self.control.read_bytes(), b'previous\n')
+            self.assertEqual(EXECUTE(self.cfg, self.tx.work, self.selection, mode='verify', captured=captured), captured)
+
     def actual_execute(self, mode, **kwargs):
         with patch.object(m.component_ansible, 'quiet', side_effect=self.quiet), \
                 patch.dict(os.environ, {'PBS_API_TOKEN': 'private-sentinel', 'HOMELAB_APP_SECRET_A': 'private-sentinel'}):

@@ -9,7 +9,7 @@
   tasks:
     - name: Restore only inventoried managed files
       ansible.builtin.command:
-        argv: [python3, -c, '{{ recovery_program }}']
+        argv: [python3, -c, "import base64; exec(compile(base64.b64decode('{{ recovery_program }}'), '<homelab-managed-controls>', 'exec'))"]
         stdin: '{{ recovery_restore | to_json }}'
       changed_when: true
       no_log: true
@@ -59,7 +59,7 @@
 
     - name: Verify exact managed controls and running images
       ansible.builtin.command:
-        argv: [python3, -c, '{{ recovery_program }}']
+        argv: [python3, -c, "import base64; exec(compile(base64.b64decode('{{ recovery_program }}'), '<homelab-managed-controls>', 'exec'))"]
         stdin: '{{ recovery_request | to_json }}'
       register: recovery_controls
       changed_when: false
