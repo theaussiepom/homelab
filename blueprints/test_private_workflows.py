@@ -100,7 +100,7 @@ class PrivateWorkflowTests(unittest.TestCase):
         self.spec, self.source = composition()
         self.env = {'HOMELAB_STACK_SOURCE':'owner/stack/.github/workflows/deploy.yml@'+'a'*40,
                     'HOMELAB_ENVIRONMENT_PREFIX':'private-apps','HOMELAB_RUNNER_LABELS':'["self-hosted","linux"]',
-                    'HOMELAB_REPOSITORY':'owner/site','HOMELAB_RECOVERY_ENVIRONMENT':'private-recovery'}
+                    'HOMELAB_REPOSITORY':'owner/site'}
         (self.stack/'.github/workflows/phase.yml').write_text('jobs:\n  run:\n    uses: owner/framework/.github/workflows/guest-phase.yml@'+'b'*40+'\n')
         (self.site/'site.json').write_text(json.dumps(self.source))
         (self.stack/'images.json').write_text(json.dumps({'pihole': {
@@ -195,10 +195,10 @@ class PrivateWorkflowTests(unittest.TestCase):
         with patch.object(workflows.component_workflows,'model',side_effect=enrolled):
             operational = p.model(self.stack,self.site)
         for value in (policy_only,operational):
-            self.assertEqual(set(value['jobs']),{'validate','selection','_backup','_recover','_finish','database','web'})
+            self.assertEqual(set(value['jobs']),{'validate','selection','_backup','database','web'})
             backup = value['jobs']['_backup']
             self.assertEqual(backup['name'],'Configure backups')
-            self.assertEqual(backup['needs'],['validate','selection','_recover'])
+            self.assertEqual(backup['needs'],['validate','selection'])
             required = set(("github.repository == 'owner/site' && " + workflows.PRIVATE_MAIN).split(' && '))
             required |= {'!failure()','!cancelled()',"needs.validate.result == 'success'","needs.selection.result == 'success'"}
             self.assertEqual(set(backup['if'].split(' && ')),required)
@@ -216,23 +216,22 @@ class PrivateWorkflowTests(unittest.TestCase):
         self.write_pbs();value=p.model(self.stack,self.site)
         self.assertNotIn('_pbs',value['jobs'])
         backup=value['jobs']['_backup']
-        self.assertEqual(backup['name'],'Configure backups');self.assertEqual(backup['needs'],['validate','selection','_recover'])
+        self.assertEqual(backup['name'],'Configure backups');self.assertEqual(backup['needs'],['validate','selection'])
         self.assertEqual(backup['environment'],'homelab-bootstrap');self.assertEqual(backup['timeout-minutes'],15)
         self.assertNotIn('concurrency',backup)
         native=backup['steps'][-1]
         self.assertEqual(native['env'],{'PBS_FIREWALL_SSH_KEY':'${{ secrets.PBS_FIREWALL_SSH_KEY }}'})
         self.assertEqual(native['if'],"success() && steps.pbs_check_selection.outputs.selected == 'true'")
         restored=copy.deepcopy(value);del restored['jobs']['_backup']
-        restored['jobs']['_finish']=baseline['jobs']['_finish']
         self.assertEqual(restored,baseline)
-        self.assertIn('_backup',value['jobs']['_finish']['needs'])
+        self.assertNotIn('_finish', value['jobs'])
 
     def test_pbs_and_schedule_share_one_job_before_guests_without_a_final_coordinator(self):
         self.original_graph=workflows.component_workflows.model
         with patch.object(workflows.component_workflows,'model',side_effect=self.with_backup):
             before=p.model(self.stack,self.site);self.write_pbs();after=p.model(self.stack,self.site)
         backup=after['jobs']['_backup']
-        self.assertEqual(backup['needs'],['validate','selection','_recover']);self.assertNotIn('_pbs',after['jobs'])
+        self.assertEqual(backup['needs'],['validate','selection']);self.assertNotIn('_pbs',after['jobs'])
         self.assertEqual(backup['steps'][-1],before['jobs']['_backup']['steps'][-1])
         self.assertEqual(backup['steps'][0],before['jobs']['_backup']['steps'][0])
         self.assertNotIn('if',backup['steps'][-1]);self.assertNotIn('continue-on-error',backup['steps'][-1])
@@ -355,7 +354,7 @@ class PrivateWorkflowTests(unittest.TestCase):
 
     def test_native_jobs_use_only_guest_names_and_preserve_operations(self):
         value=p.model(self.stack,self.site);public=workflows.models(self.stack, site_source=self.site / 'site.json')
-        self.assertEqual(set(value['jobs']),{'validate','selection','_recover','_finish','database','web'})
+        self.assertEqual(set(value['jobs']),{'validate','selection','database','web'})
         self.assertEqual(value['concurrency'],{'group':'homelab-private-deployment','cancel-in-progress':False,'queue':'max'})
         for guest,title in [('database','Database'),('web','Web')]:
             job=value['jobs'][guest];old=public['guest-'+guest+'.yml']['jobs']['deploy']

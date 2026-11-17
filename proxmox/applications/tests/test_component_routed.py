@@ -112,7 +112,7 @@ class RouteCallerTests(unittest.TestCase):
 
 
 class RouteOrdinaryIntegrationTests(unittest.TestCase):
-    def test_pending_candidate_runs_deferred_checks_and_rollback_rechecks_previous_routes(self):
+    def test_deferred_checks_require_guest_completion_and_rollback_rechecks_previous_routes(self):
         import component_recovery
         import test_component_recovery as recovery_fixture
         tx = recovery_fixture.RecoveryTransactions(); tx.setUp(); self.addCleanup(tx.doCleanups)
@@ -123,11 +123,21 @@ class RouteOrdinaryIntegrationTests(unittest.TestCase):
         packet = component_packet.lower_plan(plan, inputs=case.inputs)['resolver']
         write_bytes(case.packet, encoded(packet)); case.cfg = json.loads(packet['files']['site.json'])
         case.all_phases()
+        with patch.object(m, 'run') as routes, self.assertRaisesRegex(ValueError, 'genuine completion'):
+            deploy.run('http-checks', case.packet, inputs=case.inputs, environment={})
+        routes.assert_not_called()
+        self.assertFalse((tx.work/'ordinary-102-1/forward-failure.json').exists())
+        self.assertTrue((tx.work/'ORDINARY-HOLD.json').exists())
+        component_recovery.accept(case.cfg, tx.work/'ordinary-102-1')
+        before = (tx.work/'ordinary-complete.json').read_bytes()
+        with patch.object(m, 'run', side_effect=ValueError('endpoint failed')), self.assertRaisesRegex(ValueError, 'endpoint failed'):
+            deploy.run('http-checks', case.packet, inputs=case.inputs, environment={})
+        self.assertEqual((tx.work/'ordinary-complete.json').read_bytes(), before)
+        self.assertFalse((tx.work/'ordinary-102-1/forward-failure.json').exists())
+        self.assertFalse((tx.work/'ORDINARY-HOLD.json').exists())
         with patch.object(m, 'run', return_value={'status': 'passed'}) as routes:
             self.assertEqual(deploy.run('http-checks', case.packet, inputs=case.inputs, environment={})['status'], 'passed')
-        self.assertTrue((tx.work/'ORDINARY-HOLD.json').exists())
         routes.assert_called_once()
-        component_recovery.accept(case.cfg, tx.work/'ordinary-102-1')
         with patch.dict(os.environ, {'GITHUB_RUN_ID': '103', 'GITHUB_RUN_NUMBER': '12'}):
             deploy.run('infrastructure', case.packet, inputs=case.inputs, environment={})
             deploy.run('preparation', case.packet, inputs=case.inputs, environment={})

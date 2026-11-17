@@ -66,8 +66,7 @@ class BackupDocumentation(unittest.TestCase):
         self.assertIn('PBS_API_TOKEN', model['guest-resolver.yml']['on']['workflow_call']['secrets'])
         steps=model['guest-resolver.yml']['jobs']['deploy']['steps']
         self.assertEqual([row['name'] for row in steps if 'PBS_API_TOKEN' in row.get('with', {})], ['Configure backup'])
-        env={'HOMELAB_ENVIRONMENT_PREFIX':'example','HOMELAB_REPOSITORY':'example/private',
-             'HOMELAB_RECOVERY_ENVIRONMENT':'example-controller'}
+        env={'HOMELAB_ENVIRONMENT_PREFIX':'example','HOMELAB_REPOSITORY':'example/private'}
         with patch.object(private_workflows,'settings',return_value=(env,['self-hosted'])), \
              patch.object(private_workflows,'validation_workflow',return_value={'name':'Validate config'}), \
              patch.object(private_workflows.compiler,'workflow_selection',return_value={'revision':'a'*40,'repository':'example/framework'}), \
@@ -77,8 +76,8 @@ class BackupDocumentation(unittest.TestCase):
             (directory/'deploy.yml').write_text('synthetic private source')
             private=private_workflows.model(self.root,self.root)
         self.assertEqual(private['jobs']['_backup']['environment'],'backup')
-        self.assertEqual(private['jobs']['_backup']['needs'],['validate','selection','_recover'])
-        self.assertEqual(private['jobs']['resolver']['needs'],['selection','_backup','_recover'])
+        self.assertEqual(private['jobs']['_backup']['needs'],['validate','selection'])
+        self.assertEqual(private['jobs']['resolver']['needs'],['selection','_backup'])
         self.assertNotIn('needs',private['jobs']['selection'])
         self.assertNotIn('inputs.',json.dumps(private['jobs']['_backup']))
 

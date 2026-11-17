@@ -25,31 +25,31 @@ class OrchestrationTests(unittest.TestCase):
             'GITHUB_WORKFLOW_REF': 'example/private/.github/workflows/deploy.yml@refs/heads/main',
             'RUNNER_TEMP': str(self.case.root)}
         self.packet = read_json(self.case.packet, private=True)
-        self.graph = {'guests': {'resolver': {}}, 'dependencies': {'resolver': []}}
+        self.packets = {'resolver': self.packet}
 
-    def run_recovery(self, mode, raw='{}', **kwargs):
+    def run_recovery(self, mode, result=None, **kwargs):
+        kwargs.setdefault('guest', 'resolver')
+        if mode == 'finish' and result is None: result = 'failure'
         with ExitStack() as opened:
             opened.enter_context(patch.dict(os.environ, self.env))
             opened.enter_context(patch.object(m.compiler, 'resolve_plan', return_value=self.case.plan))
             opened.enter_context(patch.object(m.compiler, 'site_path', return_value=self.case.root/'consumer/site.json'))
-            opened.enter_context(patch.object(m.compiler, 'lower_plan', return_value={'resolver': self.packet}))
-            opened.enter_context(patch.object(m.component_workflows, 'model', return_value=self.graph))
-            return m.run(self.case.root/'library', self.case.root/'consumer', '[]', mode, raw,
+            opened.enter_context(patch.object(m.compiler, 'lower_plan', return_value=self.packets))
+            return m.run(self.case.root/'library', self.case.root/'consumer', '[]', mode, result=result,
                          environment=self.env, **kwargs)
 
     def test_final_success_commits_and_later_pending_scan_does_not_reverse_accepted_history(self):
         self.case.all_phases()
-        result = self.run_recovery('finish', '{"resolver":"success","selection":"success"}')
+        result = self.run_recovery('finish', 'success')
         self.assertEqual(result['status'], 'passed')
         self.assertFalse((self.transaction.work/'ORDINARY-HOLD.json').exists())
         self.env.update(GITHUB_RUN_ID='103', GITHUB_RUN_NUMBER='12')
         result = self.run_recovery('pending')
         self.assertEqual(result, {'status': 'ready', 'guests': []})
 
-    def test_failed_routes_roll_back_candidate_and_cli_failure_is_preserved(self):
+    def test_failed_guest_rolls_back_candidate_and_failure_is_preserved(self):
         self.case.all_phases()
-        self.graph['checks'] = {}
-        result = self.run_recovery('finish', '{"resolver":"success","selection":"success","_checks":"failure"}')
+        result = self.run_recovery('finish', 'failure')
         self.assertEqual(result['status'], 'failed_rolled_back')
         self.assertFalse(result['deployment_passed'])
         self.assertEqual(m.current.read(self.transaction.work)[0]['kind'], 'rollback')
@@ -69,7 +69,7 @@ class OrchestrationTests(unittest.TestCase):
     def test_reverse_failure_records_terminal_result_and_does_not_retry_next_cd(self):
         operation = self.transaction.fail_after_preparation()
         with patch.object(m.recovery, 'restore', side_effect=ValueError('PRIVATE')):
-            result = self.run_recovery('finish', '{"selection":"failure"}')
+            result = self.run_recovery('finish', 'failure')
         self.assertEqual(result['status'], 'recovery_required')
         self.assertNotIn('PRIVATE', json.dumps(result))
         self.assertTrue((self.transaction.work/'ORDINARY-HOLD.json').exists())
@@ -145,13 +145,83 @@ class OrchestrationTests(unittest.TestCase):
         packet = {'files': {'site.json': json.dumps(cfg)}}
         self.assertEqual(m.operations({'resolver': packet}, pending=True, environment=self.env), {})
         rows = m.operations({'resolver': self.packet}, pending=False, environment=self.env)
-        decisions = m.decision(rows, 'accept'); self.assertEqual(decisions, {'resolver': 'accept'})
-        self.assertEqual(m.decision(rows, 'rollback'), decisions)
-        # A matching failed member omitted by the new selection is still held.
+        decision = m.decision('resolver', self.case.cfg, operation, 'accept'); self.assertEqual(decision, 'accept')
+        self.assertEqual(m.decision('resolver', self.case.cfg, operation, 'rollback'), decision)
+        # Another guest's failed operation is not part of this guest's decision.
         foreign = self.case.state/'611'/operation.name; foreign.mkdir(parents=True, mode=0o700)
         write_new(foreign/'rollback-baseline.json', b'{}\n')
         write_new(foreign.parent/'ORDINARY-HOLD.json', b'{}\n')
-        with self.assertRaisesRegex(ValueError, 'omitted'): m.decision(rows, 'rollback')
+        self.assertEqual(m.decision('resolver', self.case.cfg, operation, 'rollback'), 'accept')
+        self.assertTrue((foreign.parent/'ORDINARY-HOLD.json').exists())
+
+    def test_other_guest_failed_or_unknown_custody_cannot_block_success_or_trigger_rollback(self):
+        # A sibling packet cannot even be decoded. It is outside this job's scope.
+        self.packets['sibling'] = {'files': {'site.json': 'unreadable sibling configuration'}}
+        foreign = self.case.state/'611'; foreign.mkdir(mode=0o700)
+        write_new(foreign/'ORDINARY-HOLD.json', b'preserved sibling failure\n')
+        write_new(foreign/'ordinary-complete.json', b'preserved sibling success\n')
+        before = {p.name: p.read_bytes() for p in foreign.iterdir()}
+        self.case.all_phases()
+        self.assertEqual(self.run_recovery('finish', 'success')['status'], 'passed')
+        self.assertFalse((self.transaction.work/'ORDINARY-HOLD.json').exists())
+        self.assertEqual({p.name: p.read_bytes() for p in foreign.iterdir()}, before)
+        self.env.update(GITHUB_RUN_ID='103', GITHUB_RUN_NUMBER='12')
+        self.assertEqual(self.run_recovery('pending')['status'], 'ready')
+        self.assertEqual({p.name: p.read_bytes() for p in foreign.iterdir()}, before)
+
+    def test_failed_guest_recovery_does_not_touch_sibling_success(self):
+        self.packets['sibling'] = {'files': {'site.json': 'outside this guest'}}
+        foreign = self.case.state/'611'; foreign.mkdir(mode=0o700)
+        write_new(foreign/'ordinary-complete.json', b'completed sibling deployment\n')
+        before = (foreign/'ordinary-complete.json').read_bytes()
+        self.transaction.fail_after_preparation()
+        self.assertEqual(self.run_recovery('finish', 'failure')['status'], 'failed_rolled_back')
+        self.assertEqual((foreign/'ordinary-complete.json').read_bytes(), before)
+        self.assertEqual(sorted(p.name for p in foreign.iterdir()), ['ordinary-complete.json'])
+
+    def test_legacy_accept_decision_is_resumed_for_only_its_selected_guest(self):
+        self.case.all_phases()
+        operation = self.transaction.work/'ordinary-102-1'
+        root = self.case.state/'deployments'; root.mkdir(mode=0o700)
+        folder = root/'102-1'; folder.mkdir(mode=0o700)
+        from private_io import sha
+        legacy = {'schema': 'homelab-component-deployment-decision-v1', 'mode': 'accept',
+                  'members': {'resolver': {'operation': str(operation), 'baseline_sha256': sha(operation/'rollback-baseline.json')},
+                              'other': {'operation': '/not-read', 'baseline_sha256': 'not-read'}}}
+        write_new(folder/'decision.json', encoded(legacy))
+        self.env.update(GITHUB_RUN_ID='103', GITHUB_RUN_NUMBER='12')
+        self.assertEqual(self.run_recovery('pending')['guests'][0]['status'], 'accepted')
+        self.assertEqual(read_json(folder/'decision.json', private=True), legacy)
+        self.assertFalse((self.transaction.work/'ORDINARY-HOLD.json').exists())
+
+    def test_guest_decision_refuses_changed_baseline_or_conflicting_legacy_decision(self):
+        operation = self.transaction.fail_after_preparation()
+        self.assertEqual(m.decision('resolver', self.case.cfg, operation, 'rollback'), 'rollback')
+        path = self.transaction.work/'recovery-102-1/decision.json'
+        saved = read_json(path, private=True)
+        write_bytes(path, encoded({**saved, 'mode': 'unknown'}))
+        with self.assertRaisesRegex(ValueError, 'exact guest'): m.decision('resolver', self.case.cfg, operation, 'accept')
+        write_bytes(path, encoded(saved))
+        root = self.case.state/'deployments'; root.mkdir(mode=0o700)
+        folder = root/'102-1'; folder.mkdir(mode=0o700)
+        write_new(folder/'decision.json', encoded({'schema': 'bad'}))
+        with self.assertRaisesRegex(ValueError, 'legacy'): m.decision('resolver', self.case.cfg, operation, 'accept')
+        write_bytes(folder/'decision.json', encoded({'schema': 'homelab-component-deployment-decision-v1',
+            'mode': 'accept', 'members': {'resolver': saved['member']}}))
+        with self.assertRaisesRegex(ValueError, 'exact guest'): m.decision('resolver', self.case.cfg, operation, 'accept')
+
+    def test_legacy_decision_rejects_public_parent(self):
+        operation = self.transaction.fail_after_preparation()
+        root = self.case.state/'deployments'; root.mkdir(mode=0o700)
+        folder = root/'102-1'; folder.mkdir(mode=0o700)
+        write_new(folder/'decision.json', encoded({'schema': 'unused'}))
+        root.chmod(0o755)
+        with self.assertRaises(ValueError):
+            m.decision('resolver', self.case.cfg, operation, 'rollback')
+
+    def test_success_without_completed_candidate_is_refused(self):
+        with self.assertRaisesRegex(ValueError, 'completed deployment candidate'):
+            self.run_recovery('finish', 'success')
 
     def test_scoped_expected_input_preparation_reuses_readonly_agent_and_backup_contracts(self):
         import component_inputs
@@ -191,8 +261,11 @@ class OrchestrationTests(unittest.TestCase):
                            ('GITHUB_RUN_ID', '0'), ('GITHUB_RUN_ATTEMPT', 'bad'), ('GITHUB_RUN_NUMBER', '0')]:
             with self.subTest(key=key), patch.dict(self.env, {key: value}), self.assertRaises(ValueError):
                 self.run_recovery('pending')
-        for raw in ('null', '[]', '{"unknown":"success"}', '{"resolver":"passed"}'):
-            with self.assertRaises(ValueError): m.results(raw, ['resolver'])
+        for result in ('passed', 'cancelled', 'skipped', '{}'):
+            with self.assertRaises(ValueError): self.run_recovery('finish', result)
+        with self.assertRaises(ValueError): self.run_recovery('pending', 'success')
+        for guest in (None, 'unknown'):
+            with self.assertRaises(ValueError): self.run_recovery('pending', guest=guest)
         self.env.update(GITHUB_EVENT_NAME='workflow_dispatch',
             GITHUB_WORKFLOW_REF='example/private/.github/workflows/reconcile-guest.yml@refs/heads/main')
         for kwargs in ({'guest': 'unknown'}, {'guest': 'resolver', 'baseline': 'unknown'},
@@ -202,7 +275,7 @@ class OrchestrationTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.run_recovery('reconcile', guest='resolver', reason='repair')
 
     def test_cli_exit_codes_summary_and_sanitized_errors(self):
-        argv = ['recovery', '--stack', 'stack', '--site-root', 'site', '--mode', 'finish']
+        argv = ['recovery', '--stack', 'stack', '--site-root', 'site', '--mode', 'finish', '--guest', 'resolver', '--result', 'success']
         summary = self.case.root/'summary.txt'
         for status, code in [('passed', 0), ('ready', 0), ('reconciled', 0), ('prepared', 0),
                              ('failed_rolled_back', 1), ('failed_no_change', 1), ('recovery_required', 1)]:
@@ -223,40 +296,12 @@ class OrchestrationTests(unittest.TestCase):
         self.assertEqual(stopped.exception.code, 1)
 
 
-class CohortTests(unittest.TestCase):
-    def test_dependents_reverse_first_and_all_probes_precede_any_hold_release(self):
+class GuestIsolationTests(unittest.TestCase):
+    def test_multiple_guest_settlement_is_refused_before_any_native_action(self):
         rows = {name: ({}, Path('/unused')/name/'ordinary-102-1', {}) for name in ['provider', 'consumer']}
-        events = []
-        def stage(label, result):
-            def call(cfg, operation, *args, **kwargs):
-                events.append((label, operation.parent.name))
-                return result.copy()
-            return call
-        with patch.object(m, 'decision', return_value=dict.fromkeys(rows, 'rollback')), \
-                patch.object(m.recovery, 'locked', side_effect=lambda cfg: nullcontext()), \
-                patch.object(m.recovery, 'restore', side_effect=stage('restore', {'status': 'rollback_prepared'})), \
-                patch.object(m.recovery, 'verify_restore', side_effect=stage('verify', {'proof': True})), \
-                patch.object(m.recovery, 'finish_restore', side_effect=stage('release', {'status': 'failed_rolled_back'})):
-            outcome = m.settle(rows, {'consumer': ['provider'], 'provider': []}, 'rollback')
-        self.assertEqual(events, [('restore', 'consumer'), ('restore', 'provider'), ('verify', 'consumer'),
-                                  ('verify', 'provider'), ('release', 'consumer'), ('release', 'provider')])
-        self.assertTrue(all(row['status'] == 'failed_rolled_back' for row in outcome))
-
-    def test_consumer_failure_blocks_provider_and_probe_failure_keeps_every_hold(self):
-        rows = {name: ({}, Path('/unused')/name/'ordinary-102-1', {}) for name in ['provider', 'consumer']}
-        for fail_restore in (True, False):
-            calls = []
-            with patch.object(m, 'decision', return_value=dict.fromkeys(rows, 'rollback')), \
-                    patch.object(m.recovery, 'locked', side_effect=lambda cfg: nullcontext()), \
-                    patch.object(m, 'recovery_required') as terminal, \
-                    patch.object(m.recovery, 'restore', side_effect=ValueError() if fail_restore else
-                                 lambda cfg, op, **kw: calls.append(op.parent.name) or {'status': 'rollback_prepared'}), \
-                    patch.object(m.recovery, 'verify_restore', side_effect=ValueError()), \
-                    patch.object(m.recovery, 'finish_restore') as release:
-                outcome = m.settle(rows, {'consumer': ['provider'], 'provider': []}, 'rollback')
-            release.assert_not_called(); self.assertTrue(terminal.called)
-            self.assertTrue(all(row['status'] == 'recovery_required' for row in outcome))
-            self.assertEqual(calls, [] if fail_restore else ['consumer', 'provider'])
+        with patch.object(m.recovery, 'locked') as native, self.assertRaisesRegex(ValueError, 'only the selected guest'):
+            m.settle(rows, 'rollback')
+        native.assert_not_called()
 
 
 if __name__ == '__main__': unittest.main()

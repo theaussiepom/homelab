@@ -1,4 +1,4 @@
-"""Protected ordinary-CD finalization and the Reconcile guest workflow."""
+"""Guest-owned ordinary-CD recovery and completion, plus Reconcile guest."""
 import argparse
 import json
 import os
@@ -9,7 +9,6 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import compile as compiler
-import component_workflows
 import component_current as current
 import component_generation as generation
 import component_recovery as recovery
@@ -31,15 +30,6 @@ def context(mode, environment):
                 'Use only the Reconcile guest workflow')
     for name in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_RUN_NUMBER'):
         require(re.fullmatch('[1-9][0-9]*', environment.get(name, '')), 'Identify the exact recovery run')
-
-
-def results(raw, guests):
-    value = json.loads(raw)
-    require(isinstance(value, dict) and set(value) <= set(guests) | {
-        'selection', 'validate', '_backup', '_checks', '_recover'}
-        and all(v in ('success', 'failure', 'cancelled', 'skipped') for v in value.values()),
-        'Use only selected prerequisite result enums')
-    return value
 
 
 def configuration(packet):
@@ -97,45 +87,36 @@ def operations(packets, *, pending, environment):
     return selected
 
 
-def decision(rows, mode):
-    """A durable decision prevents an interrupted commit becoming a rollback."""
-    grouped = {}
-    for guest, (cfg, operation, value) in rows.items():
-        root = Path(cfg['paths']['state_root'])
-        grouped.setdefault((root, operation.name), {})[guest] = {
-            'operation': str(operation), 'baseline_sha256': sha(operation/'rollback-baseline.json')}
-    decisions = {}
-    for (root, name), members in grouped.items():
-        # Source selection may change between runs. An omitted member's hold
-        # cannot disappear from a failed cohort merely because it is disabled.
-        selected_paths = {row['operation'] for row in members.values()}
-        for path in root.glob('*/'+name+'/rollback-baseline.json'):
-            operation = path.parent
-            if str(operation) not in selected_paths:
-                require(not current.exists(operation.parent/'ORDINARY-HOLD.json'),
-                        'A held deployment member was omitted; reconcile the complete failed cohort')
-        base = root/'deployments'
-        private_directory(base, create=not base.exists())
-        folder = base/name.removeprefix('ordinary-')
-        private_directory(folder, create=not folder.exists())
-        path = folder/'decision.json'
-        proposed = {'schema': 'homelab-component-deployment-decision-v1', 'mode': mode, 'members': members}
-        if current.exists(path):
-            recorded = read_json(path, private=True)
-            require(set(recorded) == set(proposed) and recorded['schema'] == proposed['schema']
-                    and recorded['mode'] in ('accept', 'rollback')
-                    and all(recorded['members'].get(key) == row for key, row in members.items()),
-                    'Preserve the exact immutable deployment decision')
-            for row in recorded['members'].values():
-                operation = Path(row['operation'])
-                require(operation.name == name and operation.parent.parent == root
-                        and sha(operation/'rollback-baseline.json') == row['baseline_sha256'],
-                        'Preserve every member of the recorded deployment decision')
-            decisions.update({guest: recorded['mode'] for guest in members})
-        else:
-            recovery.once(path, proposed)
-            decisions.update({guest: mode for guest in members})
-    return decisions
+def decision(guest, cfg, operation, mode):
+    """Keep an interrupted guest acceptance from becoming a rollback."""
+    member = {'operation': str(operation), 'baseline_sha256': sha(operation/'rollback-baseline.json')}
+    root = Path(cfg['paths']['state_root'])
+    legacy = root/'deployments'/operation.name.removeprefix('ordinary-')/'decision.json'
+    folder = operation.parent/operation.name.replace('ordinary-', 'recovery-', 1)
+    private_directory(folder, create=not folder.exists())
+    path = folder/'decision.json'
+    proposed = {'schema': 'homelab-component-guest-decision-v1', 'mode': mode, 'member': member}
+    # Preserve decisions from the former coordinator without scanning or
+    # changing another guest. New decisions live under this guest's custody.
+    if current.exists(legacy):
+        private_directory(legacy.parent.parent)
+        private_directory(legacy.parent)
+        recorded = read_json(legacy, private=True)
+        require(recorded.get('schema') == 'homelab-component-deployment-decision-v1'
+                and recorded.get('mode') in ('accept', 'rollback')
+                and isinstance(recorded.get('members'), dict)
+                and recorded['members'].get(guest) == member,
+                'Preserve the recorded legacy deployment decision')
+        proposed['mode'] = recorded['mode']
+    if current.exists(path):
+        recorded = read_json(path, private=True)
+        require(set(recorded) == set(proposed) and recorded['schema'] == proposed['schema']
+                and recorded['member'] == member and recorded['mode'] in ('accept', 'rollback')
+                and (not current.exists(legacy) or recorded['mode'] == proposed['mode']),
+                'Preserve the exact guest deployment decision')
+        return recorded['mode']
+    recovery.once(path, proposed)
+    return proposed['mode']
 
 
 def recovery_required(cfg, operation):
@@ -146,49 +127,21 @@ def recovery_required(cfg, operation):
                                             'failed_operation': str(operation)})
 
 
-def settle(rows, dependencies, mode):
-    decisions = decision(rows, mode)
-    outcome, blocked = [], set()
-    for guest in recovery.order(dependencies, list(rows)):
-        cfg, operation, value = rows[guest]
-        providers = set(dependencies[guest])
-        if guest in blocked:
-            outcome.append({'guest': guest, 'status': 'recovery_required', 'cause': 'dependent_recovery_failed'})
-            blocked.update(providers)
-            continue
+def settle(rows, mode):
+    """One guest is the complete recovery unit; other guests are never inspected."""
+    require(len(rows) <= 1, 'Settle only the selected guest')
+    outcome = []
+    for guest, (cfg, operation, _) in rows.items():
         try:
             with recovery.locked(cfg):
-                result = (recovery.accept(cfg, operation) if decisions[guest] == 'accept'
-                          else recovery.restore(cfg, operation, finalize=False))
+                selected = decision(guest, cfg, operation, mode)
+                result = (recovery.accept(cfg, operation) if selected == 'accept'
+                          else recovery.restore(cfg, operation))
             outcome.append({'guest': guest, **result})
         except Exception as error:
             recovery_required(cfg, operation)
             outcome.append({'guest': guest, 'status': 'recovery_required',
                             'diagnostic': deploy.failure_diagnostic(error)})
-            blocked.update(providers)
-    prepared = [row['guest'] for row in outcome if row['status'] == 'rollback_prepared']
-    proofs = {}
-    if not any(row['status'] == 'recovery_required' for row in outcome):
-        for guest in prepared:
-            cfg, operation, _ = rows[guest]
-            try:
-                with recovery.locked(cfg):
-                    proofs[guest] = recovery.verify_restore(cfg, operation)
-            except Exception as error:
-                outcome.append({'guest': guest, 'status': 'recovery_required',
-                                'diagnostic': deploy.failure_diagnostic(error)})
-                break
-    verified_cohort = len(proofs) == len(prepared) and not any(row['status'] == 'recovery_required' for row in outcome)
-    for row in outcome:
-        if row['status'] != 'rollback_prepared':
-            continue
-        guest = row['guest']; cfg, operation, _ = rows[guest]
-        if verified_cohort:
-            with recovery.locked(cfg):
-                row.update(recovery.finish_restore(cfg, operation, proofs[guest]))
-        else:
-            row.update(status='recovery_required', cause='recovery_scope_not_verified')
-            recovery_required(cfg, operation)
     return outcome
 
 
@@ -250,13 +203,12 @@ def target(packet, work, environment, *, phase=None):
                  'site_revision': environment['GITHUB_SHA']}
 
 
-def run(stack, site, disabled, mode, raw_results='{}', *, guest=None, baseline='last_good',
+def run(stack, site, disabled, mode, *, guest=None, result=None, baseline='last_good',
         reason='', phase=None, environment=os.environ):
     context(mode, environment)
     require(mode in ('pending', 'finish', 'reconcile', 'prepare'), 'Select one fixed recovery operation')
     selected_disabled = [] if mode in ('reconcile', 'prepare') else compiler.parse_disabled(disabled)
     plan = compiler.resolve_plan(stack, compiler.site_path(site), selected_disabled, admit=True)
-    graph = component_workflows.model(plan)
     packets = compiler.lower_plan(plan)
     if mode in ('reconcile', 'prepare'):
         require(guest in packets and baseline in ('last_good', 'current_main'), 'Select one known guest and baseline')
@@ -292,26 +244,18 @@ def run(stack, site, disabled, mode, raw_results='{}', *, guest=None, baseline='
             value = recovery.reconcile(cfg, operation, selected_path, selected,
                 reason=reason, actor_context='protected-main-reconciliation', expected_controls=expected_controls)
         return {'status': 'reconciled', 'guests': [{'guest': guest, **value}]}
-    rows = operations(packets, pending=mode == 'pending', environment=environment)
-    if mode == 'pending':
-        dependencies = graph['dependencies']
-        if rows:
-            dependencies = next(iter(rows.values()))[2]['dependencies']
-            require(all(value['dependencies'] == dependencies for _, _, value in rows.values()),
-                    'Resume only the same preserved deployment dependency graph')
-        outcome = settle(rows, dependencies, 'rollback')
-        return {'status': 'recovery_required' if any(v['status'] == 'recovery_required' for v in outcome) else 'ready',
-                'guests': outcome}
-    observed = results(raw_results, plan.resolved['guests'])
-    required = {'selection', *graph['guests'], *({'_backup'} if 'backup' in graph else set()),
-                *({'_checks'} if 'checks' in graph else set())}
-    required |= set(observed) & {'validate', '_recover', '_backup', '_checks'}
-    passed = required <= observed.keys() and all(observed[key] == 'success' for key in required)
-    outcome = settle(rows, graph['dependencies'], 'accept' if passed else 'rollback')
+    require(guest in packets, 'Select one enabled guest for recovery and completion')
+    require(result in ('success', 'failure') if mode == 'finish' else result is None,
+            'Use only this guest job success or failure result')
+    rows = operations({guest: packets[guest]}, pending=mode == 'pending', environment=environment)
+    passed = mode == 'finish' and result == 'success'
+    require(not passed or bool(rows), 'Guest success requires its completed deployment candidate')
+    outcome = settle(rows, 'accept' if passed else 'rollback')
+    passed = passed and all(v['status'] == 'accepted' for v in outcome)
     status = ('recovery_required' if any(v['status'] == 'recovery_required' for v in outcome)
-              else 'passed' if passed else 'failed_rolled_back'
+              else 'ready' if mode == 'pending' else 'passed' if passed else 'failed_rolled_back'
               if any(v['status'] == 'failed_rolled_back' for v in outcome) else 'failed_no_change')
-    return {'status': status, 'guests': outcome, 'deployment_passed': passed}
+    return {'status': status, 'guests': outcome, **({'deployment_passed': passed} if mode == 'finish' else {})}
 
 
 def main():
@@ -320,20 +264,20 @@ def main():
     parser.add_argument('--site-root', type=Path, required=True)
     parser.add_argument('--disabled', default='[]')
     parser.add_argument('--mode', choices=['pending', 'finish', 'reconcile', 'prepare'], required=True)
-    parser.add_argument('--results', default='{}')
-    parser.add_argument('--guest')
+    parser.add_argument('--result', choices=['success', 'failure'])
+    parser.add_argument('--guest', required=True)
     parser.add_argument('--phase')
     parser.add_argument('--baseline', choices=['last_good', 'current_main'], default='last_good')
     parser.add_argument('--reason', default='')
     args = parser.parse_args()
     try:
         os.umask(0o077)
-        value = run(args.stack, args.site_root, args.disabled, args.mode, args.results,
-                    guest=args.guest, baseline=args.baseline, reason=args.reason, phase=args.phase)
+        value = run(args.stack, args.site_root, args.disabled, args.mode,
+                    guest=args.guest, result=args.result, baseline=args.baseline, reason=args.reason, phase=args.phase)
         print(json.dumps(value, sort_keys=True))
         if os.environ.get('GITHUB_STEP_SUMMARY'):
             with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as output:
-                output.write('## Deployment recovery\n\n```json\n'+json.dumps(value, indent=2)+'\n```\n')
+                output.write('## Guest deployment recovery\n\n```json\n'+json.dumps(value, indent=2)+'\n```\n')
         return 0 if value['status'] in ('passed', 'ready', 'reconciled', 'prepared') else 1
     except Exception as error:
         print(json.dumps({'status': 'recovery_required', 'diagnostic': deploy.failure_diagnostic(error)}, sort_keys=True))
