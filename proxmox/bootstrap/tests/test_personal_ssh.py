@@ -68,7 +68,7 @@ class HostTests(unittest.TestCase):
         before=copy.deepcopy(self.value)
         for mutation in ['source','content']:
             with self.subTest(mutation=mutation):
-                self.value = snapshot(b'changed') if mutation=='content' else snapshot(b'original')
+                self.value = snapshot(b'changed') if mutation=='content' else copy.deepcopy(before)
                 with self.assertRaises(ValueError):host.run(REQUEST, 'b'*64 if mutation=='source' else SOURCE, plan['plan_sha256'])
         self.assertFalse(self.writes)
         with patch.object(host,'inspect',return_value=(before,[9])),self.assertRaises(ValueError):host.run(REQUEST,SOURCE,plan['plan_sha256'])
@@ -140,7 +140,7 @@ class CommandTests(unittest.TestCase):
         self.root=Path(self.tmp.name);self.work=self.root/'work';self.path=self.root/'request.json'
         self.path.write_text(json.dumps(REQUEST));self.value=snapshot(b'original\n')
 
-    def remote(self,host_name,request,source,apply):
+    def remote(self,host_name,request,source,apply,modules):
         def store(before,raw):self.value=snapshot(raw)
         with patch.object(host,'platform'),patch.object(host,'locked',side_effect=nullcontext),\
                 patch.object(host,'inspect',side_effect=lambda:(copy.deepcopy(self.value),[1,2,0,0,3])),patch.object(host,'store',side_effect=store):
@@ -170,18 +170,44 @@ class CommandTests(unittest.TestCase):
 
     def test_transport_pins_exact_host_and_never_opens_private_key_contents(self):
         key=self.root/'key';known=self.root/'known';key.touch();known.touch()
+        modules=tuple((m.__name__,base64.b64encode(Path(m.__file__).read_bytes()).decode())for m in (control,keys,host))
         with patch.dict(os.environ,{'HOMELAB_SSH_KEY':str(key),'HOMELAB_KNOWN_HOSTS':str(known)}),\
                 patch.object(cli.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'{"status":"ready"}'))as call:
-            self.assertEqual(cli.remote('pve-example',REQUEST,SOURCE,''),{'status':'ready'})
+            self.assertEqual(cli.remote('pve-example',REQUEST,SOURCE,'',modules),{'status':'ready'})
             argv=call.call_args.args[0]
             self.assertEqual(argv[-2:],['root@pve-example','env PYTHONDONTWRITEBYTECODE=1 python3 -'])
             self.assertIn('StrictHostKeyChecking=yes',argv);self.assertIn('ControlMaster=no',argv)
             self.assertIn('UserKnownHostsFile='+str(known),argv)
             compile(call.call_args.kwargs['input'],'<packed-bootstrap>','exec')
-            with patch.object(cli.subprocess,'run',return_value=subprocess.CompletedProcess([],1)),self.assertRaises(cli.Refused):cli.remote('pve-example',REQUEST,SOURCE,'')
-            with self.assertRaises(cli.Refused):cli.remote('bad;host',REQUEST,SOURCE,'')
+            with patch.object(cli.subprocess,'run',return_value=subprocess.CompletedProcess([],1)),self.assertRaises(cli.Refused):cli.remote('pve-example',REQUEST,SOURCE,'',modules)
+            with self.assertRaises(cli.Refused):cli.remote('bad;host',REQUEST,SOURCE,'',modules)
             known.unlink()
-            with self.assertRaises(cli.Refused):cli.remote('pve-example',REQUEST,SOURCE,'')
+            with self.assertRaises(cli.Refused):cli.remote('pve-example',REQUEST,SOURCE,'',modules)
+
+    def test_apply_sends_hashed_snapshot_when_a_module_changes_before_packing(self):
+        module=self.root/'module.py'
+        before=Path(host.__file__).read_bytes()+b'\n# Original owned fixture\n'
+        changed=before+b'# Concurrent fixture change\n';module.write_bytes(before)
+        key=self.root/'key';known=self.root/'known';key.touch();known.touch()
+        transmit=cli.remote
+        def racing(host_name,request,source,apply,modules):
+            module.write_bytes(changed)
+            self.assertEqual(source,cli.digest([Path(cli.__file__).read_text(),modules]))
+            def transport(argv,**kwargs):
+                program=kwargs['input']
+                self.assertIn(base64.b64encode(before).decode(),program)
+                self.assertNotIn(base64.b64encode(changed).decode(),program)
+                result=self.remote(host_name,request,source,apply,modules)
+                return subprocess.CompletedProcess(argv,0,json.dumps(result))
+            with patch.object(cli.subprocess,'run',side_effect=transport):
+                return transmit(host_name,request,source,apply,modules)
+        with patch.object(host,'__file__',str(module)),\
+                patch.dict(os.environ,{'HOMELAB_SSH_KEY':str(key),'HOMELAB_KNOWN_HOSTS':str(known)}):
+            plan=self.invoke()
+            with patch.object(cli,'remote',side_effect=racing):
+                result=cli.run(self.work,self.path,'pve-example',plan['plan_sha256'])
+        self.assertEqual(result['key_writes'],1)
+        self.assertEqual(module.read_bytes(),changed)
 
     def test_dangling_unknown_marker_prevents_contact(self):
         self.work.mkdir();(self.work/'SSH-UNKNOWN.json').symlink_to(self.root/'absent')
