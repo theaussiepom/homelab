@@ -110,6 +110,9 @@ class RestoreTests(unittest.TestCase):
         with patch.object(m.component_ansible, 'variables', return_value=variables), \
                 patch('component_generation.sealed_inputs', return_value=(cfg, {})):
             selected = m.descriptor(owner, cfg)
+            self.assertIn('/usr/local/bin/homelab-component-preflight.py', selected['files'])
+            self.assertEqual(selected['metadata']['/usr/local/bin/homelab-component-preflight.py'],
+                             {'uid': 0, 'gid': 0, 'mode': 0o700})
             self.assertIn('/opt/homelab-app/frontend-routing.json', selected['files'])
             self.assertEqual(selected['images'][0]['service'], 'recursive')
             self.assertIn('/opt/example/runtime.json', selected['expected'])
@@ -118,6 +121,9 @@ class RestoreTests(unittest.TestCase):
             variables['app']['database'] = {'user': 'example', 'group': 'example',
                 'config_files': [{'source': str(payload/'application.json'), 'destination': '/etc/example/native.conf'}]}
             selected = m.descriptor(owner, cfg)
+            for inventory in ('files', 'expected', 'metadata'):
+                self.assertNotIn('/usr/local/bin/homelab-component-preflight.py', selected[inventory])
+            self.assertIn('/opt/example/check.py', selected['files'])
             self.assertEqual(selected['units'], ['example.service'])
             self.assertEqual(selected['metadata']['/etc/example/native.conf'], {'mode': 0o600})
             self.assertEqual(selected['native_files'], [{'path': '/etc/example/native.conf', 'user': 'example', 'group': 'example'}])
