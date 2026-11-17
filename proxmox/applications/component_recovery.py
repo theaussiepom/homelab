@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+from types import SimpleNamespace
 
 import component_current as current
 import component_generation as generation
@@ -115,6 +116,11 @@ def baseline(operation, cfg):
     require(value['schema'] == SCHEMA and value['marker']['operation'] == str(operation)
             and value['marker']['binding']['vmid'] == cfg['guest']['vmid']
             and isinstance(value['dependencies'], dict), 'Bind this exact failed guest operation')
+    workflow = value['marker'].get('workflow')
+    require(isinstance(workflow, list) and len(workflow) == 2
+            and workflow[0] == os.environ.get('GITHUB_REPOSITORY')
+            and isinstance(workflow[1], str) and workflow[1].startswith(workflow[0]+'/.github/workflows/'),
+            'Preserve another repository or workflow owner; recovery cannot adopt its hold')
     require(value['credentials'] == credentials(cfg), 'Recovery credentials or pinned trust changed')
     return value
 
@@ -252,7 +258,8 @@ def accept(cfg, operation):
     value = baseline(operation, cfg)
     candidate = read_json(operation/'complete.json', private=True)
     require(generation.component_success(candidate, operation)
-            and candidate['binding'] == value['marker']['binding'], 'Require genuine complete guest phases')
+            and candidate['binding'] == value['marker']['binding']
+            and candidate['workflow'] == value['marker']['workflow'], 'Require genuine complete guest phases')
     state_hash, identity = generation.backend(work, {'vmid': cfg['guest']['vmid'], 'node': cfg['site']['node']})
     require(candidate['state_sha256'] == state_hash and candidate['state_identity'] == identity,
             'Candidate backend changed before final acceptance')
@@ -281,6 +288,8 @@ def restore(cfg, operation, *, finalize=True):
         release(work, value['marker'])
         return {'status': 'failed_rolled_back', 'vmid': cfg['guest']['vmid']}
     selected_path, selected, old = owner(value, work)
+    require(selected['workflow'] == value['marker']['workflow'],
+            'Rollback cannot transfer ownership between deployment workflows')
     require(all(old['guest'].get(key) == cfg['guest'].get(key)
                 for key in ('vmid', 'hostname', 'volumes', 'recording_mount', 'serial_device'))
             and old['site']['node'] == cfg['site']['node'],
@@ -402,8 +411,13 @@ def reconcile(cfg, operation, selected_path, selected, *, reason, actor_context,
     hold = read_json(work/'ORDINARY-HOLD.json', private=True)
     require(hold['operation'] == str(operation) and hold['binding']['vmid'] == cfg['guest']['vmid'],
             'Reconcile exactly the selected guest ordinary hold')
-    original = read_json(current.owner_path(work), private=True)
-    original_cfg, _ = generation.sealed_inputs(original['binding'])
+    prior = generation.previous(SimpleNamespace(cfg=cfg, work=work, vmid=cfg['guest']['vmid'],
+                                               receipt=current.owner_path(work)))
+    require(prior is not None, 'Reconciliation requires genuine immutable prior ownership')
+    original, original_cfg, _ = prior
+    require(hold['workflow'] == original['workflow']
+            and original['workflow'][0] == os.environ.get('GITHUB_REPOSITORY'),
+            'Reconciliation cannot transfer a foreign workflow hold or owner')
     require(all(original_cfg['guest'].get(key) == cfg['guest'].get(key)
                 for key in ('vmid', 'hostname', 'volumes', 'recording_mount', 'serial_device'))
             and all(original_cfg['site'][key] == cfg['site'][key] for key in ('node', 'api_endpoint'))

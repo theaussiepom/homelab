@@ -154,6 +154,41 @@ class RecoveryTransactions(unittest.TestCase):
             component_recovery.verify_restore(self.cfg, operation)
         self.assertTrue((self.work/'ORDINARY-HOLD.json').exists())
 
+    def test_foreign_repository_workflow_and_fabricated_canonical_owner_refuse_before_native(self):
+        operation = self.fail_after_preparation()
+        import proxmox_guest
+        with patch.object(proxmox_guest, 'infrastructure') as native:
+            with patch.dict(os.environ, {'GITHUB_REPOSITORY': 'foreign/repository'}):
+                with self.assertRaisesRegex(ValueError, 'another repository'):
+                    component_recovery.restore(self.cfg, operation)
+                with self.assertRaisesRegex(ValueError, 'foreign workflow'):
+                    component_recovery.reconcile(self.cfg, operation, Path(self.owner['operation'])/'complete.json', self.owner,
+                        reason='repair', actor_context='protected-main-reconciliation')
+            hold = read_json(self.work/'ORDINARY-HOLD.json', private=True)
+            hold['workflow'] = ['foreign/repository', 'foreign/repository/.github/workflows/deploy.yml']
+            write_bytes(self.work/'ORDINARY-HOLD.json', encoded(hold))
+            with self.assertRaisesRegex(ValueError, 'foreign workflow'):
+                component_recovery.reconcile(self.cfg, operation, Path(self.owner['operation'])/'complete.json', self.owner,
+                    reason='repair', actor_context='protected-main-reconciliation')
+            forged = copy.deepcopy(self.owner); forged['operation'] = str(self.work/'ordinary-99-1')
+            write_bytes(self.work/'ordinary-complete.json', encoded(forged))
+            with self.assertRaises(FileNotFoundError):
+                component_recovery.reconcile(self.cfg, operation, Path(self.owner['operation'])/'complete.json', self.owner,
+                    reason='repair', actor_context='protected-main-reconciliation')
+        native.assert_not_called()
+        self.assertTrue((self.work/'ORDINARY-HOLD.json').exists())
+
+    def test_same_repository_foreign_workflow_cannot_borrow_a_previous_owner(self):
+        operation = self.fail_after_preparation()
+        baseline = read_json(operation/'rollback-baseline.json', private=True)
+        baseline['marker']['workflow'][1] = 'example/private/.github/workflows/foreign.yml'
+        write_bytes(operation/'rollback-baseline.json', encoded(baseline))
+        write_bytes(self.work/'ORDINARY-HOLD.json', encoded(baseline['marker']))
+        import proxmox_guest
+        with patch.object(proxmox_guest, 'infrastructure') as native, self.assertRaisesRegex(ValueError, 'deployment workflows'):
+            component_recovery.restore(self.cfg, operation)
+        native.assert_not_called()
+
     def test_immutable_recovery_attempts_are_bounded_and_new_installations_remain_allowed(self):
         directory = self.work/'recovery-200-1'; directory.mkdir(mode=0o700)
         for index in range(8): self.assertEqual(component_recovery.attempt_directory(directory, 'infrastructure').name, 'infrastructure-'+str(index+1))
