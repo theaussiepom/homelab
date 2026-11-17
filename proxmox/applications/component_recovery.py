@@ -83,6 +83,17 @@ def credentials(cfg):
                 private=key in ('api_token', 'private_key'))) for key in names}
 
 
+def monitoring_ownership(cfg):
+    """Prepared payload locations follow sealed inputs, not agent ownership."""
+    value = cfg['app'].get('monitoring')
+    if value is None:
+        return None
+    expected = Path(cfg['deployment']['input_directory'])/'applications/agent/monitoring-agent.json'
+    require(isinstance(value, dict) and value.get('credential_file') == str(expected),
+            'Bind monitoring credentials to their exact sealed prepared input')
+    return {key: selected for key, selected in value.items() if key != 'credential_file'}
+
+
 def begin(attempt):
     if not enabled():
         return
@@ -296,10 +307,13 @@ def restore(cfg, operation, *, finalize=True):
                 for key in ('vmid', 'hostname', 'volumes', 'recording_mount', 'serial_device'))
             and old['site']['node'] == cfg['site']['node'],
             'Rollback preserves guest storage, hardware and application ownership')
-    require(all(old['app'].get(key) == cfg['app'].get(key) for key in ('backup', 'monitoring')),
+    require(old['app'].get('backup') == cfg['app'].get('backup')
+            and monitoring_ownership(old) == monitoring_ownership(cfg),
             'Changed backup or monitoring ownership needs engineer reconciliation')
     recovery = work/operation.name.replace('ordinary-', 'recovery-', 1)
     private_directory(recovery, create=not recovery.exists())
+    if not current.exists(recovery/'started.json'):
+        component_restore.verify_agents(selected, old, recovery)
     once(recovery/'started.json', {'schema': RESULT, 'operation': str(operation),
                                   'baseline_sha256': sha(operation/'rollback-baseline.json')})
     if not current.exists(operation/'infrastructure-invocation.json'):
@@ -362,6 +376,7 @@ def verify_restore(cfg, operation):
         selection = component_restore.descriptor(selected, old)
         captured = read_json(operation/'controls-before.json', private=True)
         component_restore.execute(old, recovery, selection, mode='verify', captured=captured)
+        component_restore.verify_agents(selected, old, recovery)
         if 'route_checks' in old['app']:
             import component_routed
             routes = attempt_directory(recovery, 'routes')

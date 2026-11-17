@@ -340,6 +340,88 @@ class RecoveryTransactions(unittest.TestCase):
             component_recovery.restore(self.cfg, failed)
         self.assertEqual(self.inspections, [])
 
+    def test_new_sealed_monitoring_payload_path_is_not_new_monitoring_ownership(self):
+        failed = self.fail_after_preparation()
+        previous = copy.deepcopy(self.cfg)
+        candidate = copy.deepcopy(self.cfg)
+        candidate['deployment']['input_directory'] = str(self.trust/'new-static-inputs')
+        for cfg in (previous, candidate):
+            cfg['app']['monitoring'] = {
+                'hostname': 'example-resolver', 'psk_identity': 'example-resolver',
+                'credential_file': str(Path(cfg['deployment']['input_directory'])/
+                                       'applications/agent/monitoring-agent.json')}
+        import proxmox_guest
+        with patch.object(component_recovery, 'owner', return_value=(
+                Path(self.owner['operation'])/'complete.json', self.owner, previous)), \
+                patch.object(component_restore, 'verify_agents') as agents, \
+                patch.object(proxmox_guest, 'infrastructure', side_effect=RuntimeError('native boundary reached')) as native:
+            with self.assertRaisesRegex(RuntimeError, 'native boundary reached'):
+                component_recovery.restore(candidate, failed, finalize=False)
+        native.assert_called_once()
+        agents.assert_called_once_with(self.owner, previous, self.work/'recovery-102-1')
+        self.assertTrue((self.work/'ORDINARY-HOLD.json').exists())
+
+    def test_payload_relocation_does_not_excuse_monitoring_or_backup_changes(self):
+        failed = self.fail_after_preparation()
+        original_hold = (self.work/'ORDINARY-HOLD.json').read_bytes()
+        import proxmox_guest
+        for change in ('hostname', 'psk_identity', 'foreign_path', 'missing_path',
+                       'removed', 'added', 'invalid_type', 'backup'):
+            with self.subTest(change=change):
+                previous = copy.deepcopy(self.cfg)
+                candidate = copy.deepcopy(self.cfg)
+                candidate['deployment']['input_directory'] = str(self.trust/'new-static-inputs')
+                for cfg in (previous, candidate):
+                    cfg['app']['monitoring'] = {
+                        'hostname': 'example-resolver', 'psk_identity': 'example-resolver',
+                        'credential_file': str(Path(cfg['deployment']['input_directory'])/
+                                               'applications/agent/monitoring-agent.json')}
+                if change in ('hostname', 'psk_identity'):
+                    candidate['app']['monitoring'][change] = 'another-agent'
+                elif change == 'foreign_path':
+                    candidate['app']['monitoring']['credential_file'] = str(self.trust/'foreign.json')
+                elif change == 'missing_path':
+                    del candidate['app']['monitoring']['credential_file']
+                elif change == 'removed':
+                    del candidate['app']['monitoring']
+                elif change == 'added':
+                    del previous['app']['monitoring']
+                elif change == 'invalid_type':
+                    candidate['app']['monitoring'] = []
+                else:
+                    candidate['app']['backup'] = {'changed': True}
+                with patch.object(component_recovery, 'owner', return_value=(
+                        Path(self.owner['operation'])/'complete.json', self.owner, previous)), \
+                        patch.object(component_restore, 'verify_agents') as agents, \
+                        patch.object(proxmox_guest, 'infrastructure') as native:
+                    with self.assertRaises(ValueError):
+                        component_recovery.restore(candidate, failed, finalize=False)
+                native.assert_not_called()
+                agents.assert_not_called()
+                self.assertEqual((self.work/'ORDINARY-HOLD.json').read_bytes(), original_hold)
+
+    def test_installed_agent_drift_refuses_before_any_native_reversal(self):
+        failed = self.fail_after_preparation()
+        original_hold = (self.work/'ORDINARY-HOLD.json').read_bytes()
+        import proxmox_guest
+        with patch.object(component_restore, 'verify_agents', side_effect=ValueError('agent drift')), \
+                patch.object(proxmox_guest, 'infrastructure') as native:
+            with self.assertRaisesRegex(ValueError, 'agent drift'):
+                component_recovery.restore(self.cfg, failed, finalize=False)
+        native.assert_not_called()
+        self.assertFalse((self.work/'recovery-102-1/started.json').exists())
+        self.assertEqual((self.work/'ORDINARY-HOLD.json').read_bytes(), original_hold)
+
+    def test_restored_group_requires_installed_agent_verification_before_release(self):
+        failed = self.fail_after_preparation()
+        component_recovery.restore(self.cfg, failed, finalize=False)
+        original_hold = (self.work/'ORDINARY-HOLD.json').read_bytes()
+        with patch.object(component_restore, 'verify_agents', side_effect=ValueError('agent drift')):
+            with self.assertRaisesRegex(ValueError, 'agent drift'):
+                component_recovery.verify_restore(self.cfg, failed)
+        self.assertEqual((self.work/'ORDINARY-HOLD.json').read_bytes(), original_hold)
+        self.assertFalse((self.work/'current-state.json').exists())
+
     def test_final_acceptance_keeps_candidate_pending_until_checks_pass(self):
         self.case.all_phases()
         operation = self.work/'ordinary-102-1'
