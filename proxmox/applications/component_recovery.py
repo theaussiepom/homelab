@@ -83,6 +83,31 @@ def credentials(cfg):
                 private=key in ('api_token', 'private_key'))) for key in names}
 
 
+def monitoring_ownership(cfg):
+    """Prepared payload locations follow sealed inputs, not agent ownership."""
+    value = cfg['app'].get('monitoring')
+    if value is None:
+        return None
+    require(isinstance(value, dict) and 'credential_file' in value,
+            'Preserve the selected monitoring agent credential location')
+    directory = Path(cfg['deployment']['input_directory'])/'applications'
+    fields = {'credential_file': ('monitoring-agent.json', None),
+              'database_password_file': ('monitoring-database-password', None),
+              'storage_password_file': ('monitoring-storage-password', 'postgresql'),
+              'server_file': ('monitoring-server.json', 'zabbix')}
+    selected = dict(value)
+    for key, (leaf, adapter) in fields.items():
+        if key not in value:
+            continue
+        owners = ['agent'] if adapter is None else [
+            row['id'] for row in cfg['deployment']['applications'].values() if row['adapter'] == adapter]
+        locations = {str(directory/owner/leaf): str(Path(owner)/leaf) for owner in owners}
+        require(isinstance(value[key], str) and value[key] in locations,
+                'Bind monitoring credentials to their exact sealed prepared input')
+        selected[key] = locations[value[key]]
+    return selected
+
+
 def begin(attempt):
     if not enabled():
         return
@@ -296,10 +321,13 @@ def restore(cfg, operation, *, finalize=True):
                 for key in ('vmid', 'hostname', 'volumes', 'recording_mount', 'serial_device'))
             and old['site']['node'] == cfg['site']['node'],
             'Rollback preserves guest storage, hardware and application ownership')
-    require(all(old['app'].get(key) == cfg['app'].get(key) for key in ('backup', 'monitoring')),
+    require(old['app'].get('backup') == cfg['app'].get('backup')
+            and monitoring_ownership(old) == monitoring_ownership(cfg),
             'Changed backup or monitoring ownership needs engineer reconciliation')
     recovery = work/operation.name.replace('ordinary-', 'recovery-', 1)
     private_directory(recovery, create=not recovery.exists())
+    if not current.exists(recovery/'started.json') and current.exists(operation/'infrastructure-invocation.json'):
+        component_restore.verify_agents(selected, old, recovery)
     once(recovery/'started.json', {'schema': RESULT, 'operation': str(operation),
                                   'baseline_sha256': sha(operation/'rollback-baseline.json')})
     if not current.exists(operation/'infrastructure-invocation.json'):
@@ -362,6 +390,7 @@ def verify_restore(cfg, operation):
         selection = component_restore.descriptor(selected, old)
         captured = read_json(operation/'controls-before.json', private=True)
         component_restore.execute(old, recovery, selection, mode='verify', captured=captured)
+        component_restore.verify_agents(selected, old, recovery)
         if 'route_checks' in old['app']:
             import component_routed
             routes = attempt_directory(recovery, 'routes')
