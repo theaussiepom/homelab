@@ -18,6 +18,27 @@ import component_control as c
 
 class ManagedControls(unittest.TestCase):
 
+    def test_change_during_final_capture_cannot_return_a_stale_permission_snapshot(self):
+        expected = {key: self.before[key] for key in ('uid', 'gid', 'mode')}
+        self.path.write_bytes(b'candidate\n')
+        candidate = c.capture_file(str(self.path))
+        original = os.stat
+        calls = 0
+        def changed_during_capture(path, *args, **kwargs):
+            nonlocal calls
+            if path == self.path.name and 'dir_fd' in kwargs:
+                calls += 1
+                if calls == 2:
+                    self.path.chmod(0o644)
+            return original(path, *args, **kwargs)
+        with patch.object(os, 'stat', side_effect=changed_during_capture):
+            with self.assertRaises(ValueError):
+                c.restore_file(str(self.path), self.before, [candidate['sha256']], metadata=expected)
+        self.assertEqual(self.path.read_bytes(), b'candidate\n')
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o644)
+        self.assertFalse(list(self.root.glob('.homelab-recovery-*')))
+
+
     def test_optional_metadata_guard_refuses_late_drift_and_preserves_ordinary_restores(self):
         expected = {key: self.before[key] for key in ('uid', 'gid', 'mode')}
         self.path.write_bytes(b'candidate\n')

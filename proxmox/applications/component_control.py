@@ -3,6 +3,8 @@
 Input paths are selected by the controller's verified component descriptors.
 No directory recursion, application-data capture, shell or database command is
 provided. Capture output is private and must never be written to public logs.
+The protected caller holds the existing guest deployment lock. Out-of-band
+root writers are not serialized by the final comparison and atomic rename.
 """
 import base64
 from contextlib import contextmanager
@@ -52,9 +54,10 @@ def capture_file(path):
                 require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size <= MAX_BYTES)
                 raw = stream.read(MAX_BYTES + 1)
                 after = os.stat(name, dir_fd=directory, follow_symlinks=False)
-                require(len(raw) <= MAX_BYTES and
-                        (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) ==
-                        (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns))
+                fields = ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns',
+                          'st_uid', 'st_gid', 'st_mode', 'st_nlink')
+                require(len(raw) <= MAX_BYTES and all(
+                    getattr(info, key) == getattr(after, key) for key in fields))
         return {'exists': True, 'content': base64.b64encode(raw).decode(),
                 'sha256': fingerprint(raw), 'uid': info.st_uid, 'gid': info.st_gid,
                 'mode': stat.S_IMODE(info.st_mode)}

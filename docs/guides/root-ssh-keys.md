@@ -66,9 +66,15 @@ admitted key list. Foreign content or permission changes retain the hold.
 Recovery checks the captured owner and mode before restoring any controls.
 The existing file writer checks them again before replacing the shared file,
 so a permission change after preflight also stops restoration.
+Each capture checks ownership, mode and change time again after reading.
 Read-only reconciliation
 checks declared key presence while retaining unrelated authorizations.
 Private SSH keys, passwords and application data are outside this operation.
+
+Keep key maintenance within protected CD, whose existing guest deployment lock
+serializes supported writers. Finish CD before making an out-of-band root edit
+to this shared file. The final comparison and atomic replacement do not form a
+transaction with a concurrent administrator's commands.
 
 Resolve pending attempts from older framework versions before adopting this
 capability. Their saved inventories may lack the key-file preimage; recovery
