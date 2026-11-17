@@ -3,6 +3,8 @@
 Input paths are selected by the controller's verified component descriptors.
 No directory recursion, application-data capture, shell or database command is
 provided. Capture output is private and must never be written to public logs.
+The protected caller holds the existing guest deployment lock. Out-of-band
+root writers are not serialized by the final comparison and atomic rename.
 """
 import base64
 from contextlib import contextmanager
@@ -52,9 +54,10 @@ def capture_file(path):
                 require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size <= MAX_BYTES)
                 raw = stream.read(MAX_BYTES + 1)
                 after = os.stat(name, dir_fd=directory, follow_symlinks=False)
-                require(len(raw) <= MAX_BYTES and
-                        (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) ==
-                        (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns))
+                fields = ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns',
+                          'st_uid', 'st_gid', 'st_mode', 'st_nlink')
+                require(len(raw) <= MAX_BYTES and all(
+                    getattr(info, key) == getattr(after, key) for key in fields))
         return {'exists': True, 'content': base64.b64encode(raw).decode(),
                 'sha256': fingerprint(raw), 'uid': info.st_uid, 'gid': info.st_gid,
                 'mode': stat.S_IMODE(info.st_mode)}
@@ -75,9 +78,18 @@ def validate_file(value):
     return raw
 
 
-def restore_file(path, value, allowed):
+def validate_metadata(value):
+    require(isinstance(value, dict) and set(value) == {'uid', 'gid', 'mode'}
+            and all(type(value[key]) is int and value[key] >= 0 for key in value)
+            and value['mode'] <= 0o777)
+
+
+def restore_file(path, value, allowed, *, metadata=None):
     raw = validate_file(value)
     actual = capture_file(path)
+    if metadata is not None:
+        validate_metadata(metadata)
+        require(actual['exists'] and {key: actual[key] for key in metadata} == metadata)
     if actual == value:
         return False
     require(isinstance(allowed, list) and len(allowed) <= 4
@@ -169,10 +181,16 @@ def images(rows):
 
 
 def run(value):
-    require(isinstance(value, dict) and set(value) == {'mode', 'files', 'packages', 'images', 'allowed'}
+    fields = {'mode', 'files', 'packages', 'images', 'allowed'}
+    require(isinstance(value, dict) and (set(value) == fields
+            or set(value) == fields | {'metadata'} and value['mode'] == 'restore')
             and value['mode'] in ('capture', 'restore', 'verify') and isinstance(value['files'], dict)
             and len(value['files']) <= 256 and isinstance(value['allowed'], dict)
             and set(value['allowed']) <= set(value['files']))
+    metadata = value.get('metadata', {})
+    require(isinstance(metadata, dict) and set(metadata) <= set(value['files']))
+    for expected in metadata.values():
+        validate_metadata(expected)
     mode = value['mode']
     if mode == 'capture':
         require(all(row is None for row in value['files'].values()) and not value['allowed'])
@@ -182,7 +200,7 @@ def run(value):
         if mode == 'restore':
             restore_images(value['images'])
             for path, row in value['files'].items():
-                restore_file(path, row, value['allowed'].get(path, []))
+                restore_file(path, row, value['allowed'].get(path, []), metadata=metadata.get(path))
         files = {path: capture_file(path) for path in value['files']}
         require(files == value['files'])
     require(sum(len(validate_file(row) or b'') for row in files.values()) <= MAX_BYTES)

@@ -7,6 +7,14 @@
   vars:
     app: '{{ recovery_app }}'
   tasks:
+    - name: Verify shared root SSH key custody before any control recovery
+      ansible.builtin.command:
+        argv: [python3, -c, "import base64; exec(compile(base64.b64decode('{{ recovery_root_keys.program }}'), '<homelab-root-keys>', 'exec'))"]
+        stdin: '{{ recovery_root_keys.request | to_json }}'
+      changed_when: false
+      no_log: true
+      when: recovery_root_keys is defined
+
     - name: Restore only inventoried managed files
       ansible.builtin.command:
         argv: [python3, -c, "import base64; exec(compile(base64.b64decode('{{ recovery_program }}'), '<homelab-managed-controls>', 'exec'))"]

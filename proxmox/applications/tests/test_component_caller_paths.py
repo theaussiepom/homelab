@@ -57,7 +57,8 @@ class CallerCase(unittest.TestCase):
         phase={'id':app['id'],'adapter':adapter,'lifecycle':app['lifecycle'],'runtime_id':'selected'}
         if roles:phase.update(project=app['project_name'],compose_file=app['project_file'],
                               services=contract.ordered_services(app))
-        cfg={'schema':'homelab-component-guest-v1','site':{'node':'fixture-node',
+        cfg={'schema':'homelab-component-guest-v1','ssh_public_keys':[],
+             'site':{'node':'fixture-node',
               'api_endpoint':'https://198.18.25.10:8006/'},
              'guest':{'vmid':610,'hostname':'fixture','interfaces':[
                  {'ipv4':'198.18.20.10/24','mac':'02:00:00:20:00:10'},{'ipv4':'manual'}]},

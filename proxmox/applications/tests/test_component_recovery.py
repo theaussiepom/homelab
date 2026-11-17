@@ -344,6 +344,9 @@ class RecoveryTransactions(unittest.TestCase):
 
     def test_new_sealed_monitoring_payload_path_is_not_new_monitoring_ownership(self):
         failed = self.fail_after_preparation()
+        # This unit varies monitoring ownership only; keep the independently
+        # bound control descriptor conforming before its fake native boundary.
+        selection = component_restore.descriptor(self.owner, self.cfg)
         previous = copy.deepcopy(self.cfg)
         candidate = copy.deepcopy(self.cfg)
         candidate['deployment']['input_directory'] = str(self.trust/'new-static-inputs')
@@ -356,6 +359,7 @@ class RecoveryTransactions(unittest.TestCase):
         with patch.object(component_recovery, 'owner', return_value=(
                 Path(self.owner['operation'])/'complete.json', self.owner, previous)), \
                 patch.object(component_restore, 'verify_agents') as agents, \
+                patch.object(component_restore, 'descriptor', return_value=selection), \
                 patch.object(proxmox_guest, 'infrastructure', side_effect=RuntimeError('native boundary reached')) as native:
             with self.assertRaisesRegex(RuntimeError, 'native boundary reached'):
                 component_recovery.restore(candidate, failed, finalize=False)
@@ -424,11 +428,13 @@ class RecoveryTransactions(unittest.TestCase):
 
     def assert_optional_monitoring_relocation_reaches_native(self, field):
         failed = self.fail_after_preparation()
+        selection = component_restore.descriptor(self.owner, self.cfg)
         previous, candidate = self.monitoring_relocation(field)
         import proxmox_guest
         with patch.object(component_recovery, 'owner', return_value=(
                 Path(self.owner['operation'])/'complete.json', self.owner, previous)), \
                 patch.object(component_restore, 'verify_agents') as agents, \
+                patch.object(component_restore, 'descriptor', return_value=selection), \
                 patch.object(proxmox_guest, 'infrastructure', side_effect=RuntimeError('native boundary reached')) as native:
             with self.assertRaisesRegex(RuntimeError, 'native boundary reached'):
                 component_recovery.restore(candidate, failed, finalize=False)

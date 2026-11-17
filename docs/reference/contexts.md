@@ -41,6 +41,13 @@ A context supplies the provider, trust and controller inputs for a [guest](guest
 
 A context change can affect every guest that uses it. [Ownership checks](lifecycle.md#later-deployments-and-ownership-checks) preserve provider, node and state identities. Changing a context key or credential-source reference does not import an installation or rotate its protected credentials. Trust and path updates must pass runtime checks; successful configuration checks do not prove that the controller can reach the target.
 
+`ssh_public_keys` supplies the root keys at guest creation and additive
+maintenance during Ansible preparation. Existing key entries and restrictions
+are preserved; removing a declaration does not revoke its installed key.
+Key-only updates preserve the guest resource. Follow
+[root SSH key maintenance](../guides/root-ssh-keys.md) for file custody,
+network-policy requirements, recovery and connection verification.
+
 ## Worked context
 
 This minimal context follows the tutorial's `contexts.lab` shape. Its endpoint and secret-source IDs are declared in that same site. The paths are public synthetic examples: source checks validate their spelling without opening them.

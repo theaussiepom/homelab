@@ -8,6 +8,13 @@ The generated **Recover pending deployment** job runs before guest changes. It c
 
 Before an update changes infrastructure, CD saves private copies of the previous deployment's managed configuration leaves, permissions, exact installed package versions and container image identities. OpenTofu plans against the actual backend to restore the previous allowed infrastructure settings; Ansible restores the captured application controls and starts the owned services with their previous image selections. Existing plan guards still reject imports, destructive replacements, changed disks, moved storage, foreign identities and unknown values. No historical OpenTofu state file is copied over the actual backend.
 
+[Root public-key maintenance](../guides/root-ssh-keys.md) includes the exact
+shared authorization-file preimage. Recovery admits only that preimage or its
+declared additive postimage, preserves unknown prior entries, and refuses
+foreign edits. It never copies private SSH keys. Older pending attempts without
+this control in their saved inventory require resolution under their previous
+qualified framework before adoption; the new owner does not recapture history.
+
 For a mutable container tag, recovery first verifies that the captured image ID still exists locally, then restores the owned Compose reference to that ID. Compose starts with pulling and building disabled. The running container and the local reference must both match the captured ID, so a later service restart retains that selection. Missing images or inconsistent immutable references retain the hold; recovery does not fetch a replacement image.
 
 Recovery verifies the restored configuration, package and image selection, application health, reply routing and previously declared route checks. Every affected guest must pass before any rollback hold is released. The canonical `ordinary-complete.json` and failed operation remain historical evidence. A separate `current-state.json` identifies the verified effective owner, current backend and exact resolved failure markers. Deployment and backup readers use that verified state; a reconciliation record is never an ordinary phase success.
