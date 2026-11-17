@@ -85,14 +85,20 @@ def contents(snapshot):
     return raw
 
 
-def updated(snapshot, keys):
-    raw = contents(snapshot)
+def append(raw, keys):
+    """Build an additive public-key update independently of the file's owner."""
+    require(isinstance(raw, bytes))
     wanted = declarations(keys)
     known = installed(raw)
     missing = [key for key, public in zip(keys, wanted, strict=True) if public not in known]
     if missing:
         raw += (b'\n' if raw and not raw.endswith(b'\n') else b'') + ('\n'.join(missing) + '\n').encode()
     require(len(raw) <= component_control.MAX_BYTES)
+    return raw
+
+
+def updated(snapshot, keys):
+    raw = append(contents(snapshot), keys)
     return {**snapshot, 'content': base64.b64encode(raw).decode(),
             'sha256': hashlib.sha256(raw).hexdigest()}
 

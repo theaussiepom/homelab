@@ -49,6 +49,7 @@ def descriptor(owner, cfg):
         for row in values['component_helpers']:
             source(SOURCE/row['source'], row['destination'], mode=int(row['mode'], 8))
         if 'component_compose_file' in values:
+            source(SOURCE/'component-preflight.py', '/usr/local/bin/homelab-component-preflight.py', mode=0o700)
             source(values['component_compose_source'], values['component_compose_file'])
             args = ['docker', 'compose', '-f', values['component_compose_file']]
             if 'component_environment_file' in values:
@@ -68,7 +69,6 @@ def descriptor(owner, cfg):
                 native_files.append({'path': row['destination'], 'user': native['user'], 'group': native['group']})
             units.update(values['component_native_services'])
         health.extend(values['app']['health_checks'])
-    source(SOURCE/'component-preflight.py', '/usr/local/bin/homelab-component-preflight.py', mode=0o700)
     # These fixed helpers are touched by ordinary preparation, never app data.
     if 'frontend_routing' in cfg['app']:
         source(SOURCE/'ingress_routing.py', '/opt/homelab-app/ingress-routing.py', mode=0o700)

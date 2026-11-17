@@ -1,4 +1,4 @@
-# Maintain root SSH public keys through CD
+# Maintain root SSH public keys
 
 Use the existing `ssh_public_keys` list in a
 [context](../reference/contexts.md#context-ssh-public-keys) or
@@ -88,5 +88,59 @@ updates, constrained and unknown keys, custody failures, exact rollback,
 foreign edits, legacy inventory refusal and a fresh ordinary deployment.
 Linux-only metadata cases require the actual Linux test environment. Native
 plan, connection and route acceptance remain separate deployment evidence.
+
+## Proxmox host personal access
+
+The guest declarations above maintain guest accounts. For an existing
+single-node Proxmox installation, use the separate bootstrap operation below.
+It preserves Proxmox's `/root/.ssh/authorized_keys` link to
+`/etc/pve/priv/authorized_keys`, all existing key lines, and the target's
+root:www-data ownership and mode 0600. It uses the same Ed25519 identity parser
+and additive behavior as the guest maintainer. Constrained keys keep their
+options; omission never revokes an existing key. Multi-node clusters and other
+authentication layouts are refused before key changes.
+
+Prerequisites are a ready Proxmox node, the existing working bootstrap SSH key,
+and [verified host keys](../../proxmox/host-access.md). The operator needs the
+framework's normal local source/hosted gates and authority for this host change.
+The command adds keys to an existing account; it does not change sshd, firewall
+rules, API tokens, guest configuration or running services. Network admission
+and a successful personal connection need their own verification.
+
+Copy [the complete public request](../../proxmox/bootstrap/personal-ssh.example.json)
+to a private path. Its closed fields are:
+
+| Field | Required value |
+| --- | --- |
+| `node` | The existing node's exact hostname, 1–63 lowercase letters, digits or hyphens, starting with a letter. |
+| `keys` | A nonempty list of at most 64 distinct Ed25519 public keys, each containing only its type and encoded body. Empty lists, duplicates, options, comments, private keys and unknown request fields are refused. |
+
+From `proxmox/bootstrap`, with `HOMELAB_SSH_KEY` and `HOMELAB_KNOWN_HOSTS`
+pointing to the existing private identity and verified public trust file:
+
+```sh
+./bootstrap personal-ssh --host 198.18.25.10 --request /private/ssh.json --work /private/host-ssh
+./bootstrap personal-ssh --host 198.18.25.10 --request /private/ssh.json --work /private/host-ssh --apply PLAN_SHA256
+```
+
+Replace the synthetic host and paths with the selected values, and
+`PLAN_SHA256` with the first command's `plan_sha256`. The plan binds the request,
+source, existing file metadata, bytes and link identity. Apply rechecks them,
+appends only missing keys with Proxmox's cluster-file writer, then verifies the
+exact result. Supported invocations serialize with a host lock. Finish this
+operation before an independent administrator edits the shared key store; the
+last preimage comparison is not a transaction with an unrelated writer.
+
+Plan and apply again after success to verify `changed: false` and
+`key_writes: 0`. A timeout or incomplete readback preserves its private local
+attempt and `SSH-UNKNOWN.json`; inspect the actual file through the established
+route before considering another write. The command never retries an uncertain
+apply or clears a global deployment hold. Keep bootstrap access until a new
+personal SSH connection passes with explicit host-key checking. Workstation
+aliases use the personal identity and verified host pin, not the bootstrap key.
+
+This command supports later additive updates on the same ready single-node
+installation. It requires the installed Proxmox-managed link and existing key
+file; it does not create a host, cluster or first authentication layout.
 
 [Deployment](../operations/deployment.md) · [Documentation index](../README.md)
