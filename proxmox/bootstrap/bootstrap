@@ -61,6 +61,10 @@ case "${1:-help}" in
     shift
     exec python3 "$base/reconcile_access.py" "$@"
     ;;
+  personal-ssh)
+    shift
+    exec python3 "$base/personal_ssh.py" "$@"
+    ;;
   nfs-access)
     shift
     exec python3 "$base/nfs_access.py" "$@"
@@ -152,6 +156,7 @@ print(repository)
     echo "Save private state/configuration: ./bootstrap backup /private/bundle /new/private/backup-directory"
     echo "Prepare CD access and NAS, or verify a completed setup: ./bootstrap configure /private/bundle /private/deployment.json [--apply PLAN_SHA256]"
     echo "Reconcile only existing deployment-token permissions: ./bootstrap reconcile-access --work /private/access --request /private/access-request.json --host HOST [--apply PLAN_SHA256]"
+    echo "Add personal root SSH keys to Proxmox: ./bootstrap personal-ssh --work /private/ssh --request /private/ssh.json --host HOST [--apply PLAN_SHA256]"
     echo "Provision restricted NFS attachment: ./bootstrap nfs-access --repository OWNER/PRIVATE-SITE --host HOST_IP --runner RUNNER_IP --environment JOB_ENVIRONMENT --out /new/private/attempt"
     echo "Enable main-branch bootstrap CD: ./bootstrap cd-access --bundle /private/bundle --out /new/private/cd-access"
     ;;

@@ -6,6 +6,11 @@ Run this after installing Proxmox. You will create one small Debian container, c
 
 **OpenTofu** creates the container. **Ansible** installs its tools and GitHub **runner**, the service that receives jobs. No database is required. Other guests and application deployment come later.
 
+For later personal administration of an existing single-node host, follow
+[Proxmox host personal SSH](../../docs/guides/root-ssh-keys.md#proxmox-host-personal-access).
+That bootstrap operation preserves existing authorisations and the cluster key
+store. Guest key additions continue through their ordinary protected CD.
+
 ```mermaid
 flowchart LR
     A[Your settings] --> B[Create one guest]
