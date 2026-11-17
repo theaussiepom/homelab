@@ -312,7 +312,7 @@ def restore(cfg, operation, *, finalize=True):
             'Changed backup or monitoring ownership needs engineer reconciliation')
     recovery = work/operation.name.replace('ordinary-', 'recovery-', 1)
     private_directory(recovery, create=not recovery.exists())
-    if not current.exists(recovery/'started.json'):
+    if not current.exists(recovery/'started.json') and current.exists(operation/'infrastructure-invocation.json'):
         component_restore.verify_agents(selected, old, recovery)
     once(recovery/'started.json', {'schema': RESULT, 'operation': str(operation),
                                   'baseline_sha256': sha(operation/'rollback-baseline.json')})

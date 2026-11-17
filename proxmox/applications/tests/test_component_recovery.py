@@ -159,7 +159,9 @@ class RecoveryTransactions(unittest.TestCase):
         before = sha(self.work/'terraform.tfstate')
         with patch.object(component_restore, 'execute', side_effect=ValueError('capture refused')):
             with self.assertRaises(ValueError): deploy.run('infrastructure', self.case.packet, inputs=self.case.inputs, environment={})
-        result = component_recovery.restore(self.cfg, self.work/'ordinary-102-1')
+        with patch.object(component_restore, 'verify_agents') as agents:
+            result = component_recovery.restore(self.cfg, self.work/'ordinary-102-1')
+        agents.assert_not_called()
         self.assertEqual(result['status'], 'failed_no_change')
         self.assertEqual(sha(self.work/'terraform.tfstate'), before)
         self.assertFalse((self.work/'ORDINARY-HOLD.json').exists())
