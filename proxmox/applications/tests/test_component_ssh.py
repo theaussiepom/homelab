@@ -22,6 +22,38 @@ KEY_C = 'ssh-ed25519 ' + base64.b64encode(m.WIRE_PREFIX + b'c' * 32).decode()
 
 
 class RootKeyTests(unittest.TestCase):
+
+    def test_trailing_comments_never_remove_existing_key_restrictions(self):
+        prefixes = (b'restrict ', b'command="printf \\"hello there\\"",restrict ',
+                    b'command="printf\vhello",restrict ', b'from="198.18.0.0/24",restrict\t')
+        comments = (b" operator's key", b' operator "unfinished',
+                    b' operator\\key ' + bytes([255]), b'\0ignored " quote')
+        for prefix in prefixes:
+            for comment in comments:
+                original = prefix + KEY_A.encode() + comment + b'\n'
+                self.path.write_bytes(original)
+                with self.subTest(prefix=prefix, comment=comment):
+                    self.assertEqual(m.installed(original), {KEY_A.split()[1]})
+                    self.assertFalse(m.run({'mode': 'install', 'keys': [KEY_A]})['changed'])
+                    self.assertEqual(self.path.read_bytes(), original)
+                    m.run({'mode': 'install', 'keys': [KEY_A, KEY_B]})
+                    self.assertEqual(self.path.read_bytes(), original + (KEY_B + '\n').encode())
+        public = KEY_A.split()[1].encode()
+        original = b'restrict ssh-ed25519 ' + public[:32] + b'\v' + public[32:] + b'\r\n'
+        self.assertEqual(m.installed(original), {KEY_A.split()[1]})
+
+    def test_permission_drift_after_inspection_is_refused_at_the_existing_writer(self):
+        original = component_control.restore_file
+        def changed_metadata(path, value, allowed, **kwargs):
+            self.path.chmod(0o644)
+            return original(path, value, allowed, **kwargs)
+        with patch.object(component_control, 'restore_file', side_effect=changed_metadata):
+            with self.assertRaises(ValueError):
+                m.run({'mode': 'install', 'keys': [KEY_A, KEY_B]})
+        self.assertEqual(self.path.read_bytes(), self.before)
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o644)
+
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -71,6 +103,17 @@ class RootKeyTests(unittest.TestCase):
                 else:
                     expected += (KEY_A + '\n' + KEY_B + '\n').encode()
                 self.assertEqual(base64.b64decode(result['content']), expected)
+
+    def test_existing_root_only_executable_file_mode_is_preserved(self):
+        self.path.chmod(0o700)
+        before = m.inspect()
+        self.assertTrue(m.run({'mode': 'install', 'keys': [KEY_A, KEY_B]})['changed'])
+        self.assertEqual(self.path.read_bytes(), self.before + (KEY_B + '\n').encode())
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o700)
+        self.assertFalse(m.run({'mode': 'install', 'keys': [KEY_A, KEY_B]})['changed'])
+        component_control.restore_file(str(self.path), before, [m.inspect()['sha256']])
+        self.assertEqual(self.path.read_bytes(), self.before)
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o700)
 
     def test_key_parser_rejects_wrong_types_wire_formats_noncanonical_bytes_and_options(self):
         wrong = base64.b64encode(b'x' * 51).decode()
@@ -166,15 +209,15 @@ class RootKeyTests(unittest.TestCase):
 
     def test_foreign_edits_before_and_after_write_are_preserved_and_refused(self):
         original = component_control.restore_file
-        def edited_before(path, value, allowed):
+        def edited_before(path, value, allowed, **kwargs):
             self.path.write_bytes(self.before + (KEY_C + '\n').encode())
-            return original(path, value, allowed)
+            return original(path, value, allowed, **kwargs)
         with patch.object(component_control, 'restore_file', side_effect=edited_before), self.assertRaises(ValueError):
             m.run({'mode': 'install', 'keys': [KEY_A, KEY_B]})
         self.assertEqual(self.path.read_bytes(), self.before + (KEY_C + '\n').encode())
         self.path.write_bytes(self.before)
-        def edited_after(path, value, allowed):
-            changed = original(path, value, allowed)
+        def edited_after(path, value, allowed, **kwargs):
+            changed = original(path, value, allowed, **kwargs)
             self.path.write_bytes(self.path.read_bytes() + (KEY_C + '\n').encode())
             return changed
         with patch.object(component_control, 'restore_file', side_effect=edited_after), self.assertRaises(ValueError):

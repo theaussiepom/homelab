@@ -29,6 +29,32 @@ KEY_D = 'ssh-ed25519 ' + base64.b64encode(component_ssh.WIRE_PREFIX + b'd' * 32)
 
 
 class RootSSHRecovery(unittest.TestCase):
+
+    def test_root_metadata_drift_between_preflight_and_restore_is_preserved(self):
+        choice = {'files': {str(self.keys): None}, 'root_ssh_keys': [KEY_A],
+                  'expected': {}, 'metadata': {}, 'packages': [], 'images': [],
+                  'projects': [], 'units': [], 'health': [], 'native_files': []}
+        def local_transport(argv, environment, log):
+            values = read_json(Path(argv[-1][1:]), private=True)
+            component_ssh.run(values['recovery_root_keys']['request'])
+            if values['recovery_mode'] == 'restore':
+                self.keys.chmod(0o644)  # A foreign change after the read-only preflight.
+                self.assertEqual(values['recovery_restore']['metadata'],
+                    {str(self.keys): {'uid': os.getuid(), 'gid': os.getgid(), 'mode': 0o600}})
+                component_control.run(values['recovery_restore'])
+            result = component_control.run(values['recovery_request'])
+            write_new(Path(values['recovery_output']), encoded(result))
+        with patch.object(component_ansible, 'quiet', side_effect=local_transport):
+            captured = EXECUTE(self.tx.cfg, self.tx.work, choice, mode='capture')
+            candidate = self.original + (KEY_B + '\n').encode()
+            self.keys.write_bytes(candidate)
+            with self.assertRaises(ValueError):
+                EXECUTE(self.tx.cfg, self.tx.work, choice, mode='restore',
+                        captured=captured, allowed={str(self.keys): [sha(self.keys)]})
+        self.assertEqual(self.keys.read_bytes(), candidate)
+        self.assertEqual(self.keys.stat().st_mode & 0o777, 0o644)
+
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -131,6 +157,20 @@ class RootSSHRecovery(unittest.TestCase):
         self.assertEqual(self.keys.read_bytes(), foreign)
         self.assertEqual((self.tx.work/'ordinary-complete.json').read_bytes(), self.tx.before)
         self.assertTrue((self.tx.work/'ORDINARY-HOLD.json').exists())
+
+    def test_root_only_executable_authorization_file_survives_real_receipt_rollback(self):
+        self.keys.chmod(0o700)
+        self.select_next_keys()
+        failed = self.tx.fail_after_preparation()
+        self.assertEqual(self.keys.read_bytes(), self.original + (KEY_B + '\n').encode())
+        self.assertEqual(self.keys.stat().st_mode & 0o777, 0o700)
+        captured = read_json(failed/'controls-before.json', private=True)
+        self.assertEqual(captured['files'][str(self.keys)]['mode'], 0o700)
+        self.assertEqual(component_recovery.restore(self.tx.cfg, failed)['status'], 'failed_rolled_back')
+        self.assertEqual(self.keys.read_bytes(), self.original)
+        self.assertEqual(self.keys.stat().st_mode & 0o777, 0o700)
+        self.assertFalse((self.tx.work/'ORDINARY-HOLD.json').exists())
+        self.assertEqual((self.tx.work/'ordinary-complete.json').read_bytes(), self.tx.before)
 
     def test_legacy_inventory_without_key_preimage_stops_before_infrastructure_reversal(self):
         original = component_restore.descriptor

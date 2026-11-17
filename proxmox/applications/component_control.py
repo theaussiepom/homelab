@@ -75,9 +75,18 @@ def validate_file(value):
     return raw
 
 
-def restore_file(path, value, allowed):
+def validate_metadata(value):
+    require(isinstance(value, dict) and set(value) == {'uid', 'gid', 'mode'}
+            and all(type(value[key]) is int and value[key] >= 0 for key in value)
+            and value['mode'] <= 0o777)
+
+
+def restore_file(path, value, allowed, *, metadata=None):
     raw = validate_file(value)
     actual = capture_file(path)
+    if metadata is not None:
+        validate_metadata(metadata)
+        require(actual['exists'] and {key: actual[key] for key in metadata} == metadata)
     if actual == value:
         return False
     require(isinstance(allowed, list) and len(allowed) <= 4
@@ -169,10 +178,16 @@ def images(rows):
 
 
 def run(value):
-    require(isinstance(value, dict) and set(value) == {'mode', 'files', 'packages', 'images', 'allowed'}
+    fields = {'mode', 'files', 'packages', 'images', 'allowed'}
+    require(isinstance(value, dict) and (set(value) == fields
+            or set(value) == fields | {'metadata'} and value['mode'] == 'restore')
             and value['mode'] in ('capture', 'restore', 'verify') and isinstance(value['files'], dict)
             and len(value['files']) <= 256 and isinstance(value['allowed'], dict)
             and set(value['allowed']) <= set(value['files']))
+    metadata = value.get('metadata', {})
+    require(isinstance(metadata, dict) and set(metadata) <= set(value['files']))
+    for expected in metadata.values():
+        validate_metadata(expected)
     mode = value['mode']
     if mode == 'capture':
         require(all(row is None for row in value['files'].values()) and not value['allowed'])
@@ -182,7 +197,7 @@ def run(value):
         if mode == 'restore':
             restore_images(value['images'])
             for path, row in value['files'].items():
-                restore_file(path, row, value['allowed'].get(path, []))
+                restore_file(path, row, value['allowed'].get(path, []), metadata=metadata.get(path))
         files = {path: capture_file(path) for path in value['files']}
         require(files == value['files'])
     require(sum(len(validate_file(row) or b'') for row in files.values()) <= MAX_BYTES)

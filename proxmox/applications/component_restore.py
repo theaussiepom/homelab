@@ -164,6 +164,8 @@ def execute(cfg, operation, selection, *, mode, captured=None, allowed=None):
             key: captured['files'][component_ssh.ROOT_KEYS][key] for key in ('uid', 'gid', 'mode')}
         variables['recovery_root_keys'] = component_ssh.transport(
             selection['root_ssh_keys'], mode='verify', metadata=metadata)
+        if mode == 'restore':
+            restore['metadata'] = {component_ssh.ROOT_KEYS: metadata}
     write(folder/'variables.json', variables)
     write(folder/'inventory.json', {'application': {'hosts': {cfg['app']['hostname']: {
         'ansible_host': cfg['app']['address'], 'ansible_user': 'root'}}}})

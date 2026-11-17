@@ -8,7 +8,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shlex
 import stat
 import sys
 
@@ -45,26 +44,44 @@ def declarations(keys):
     return identities
 
 
+def field(line):
+    """Read one key/options field; double quotes belong only to that prefix."""
+    line = line.lstrip(b' \t')
+    end, quoted = 0, False
+    while end < len(line) and (quoted or line[end] not in b' \t'):
+        if line[end:end + 2] == b'\\"':
+            end += 2
+        else:
+            if line[end] == ord('"'):
+                quoted = not quoted
+            end += 1
+    require(not quoted)
+    return line[:end], line[end:].lstrip(b' \t')
+
+
 def installed(raw):
     found = set()
-    for line in raw.splitlines():
+    for line in raw.split(b'\n'):
+        line = line.partition(b'\0')[0].lstrip(b' \t')
+        if not line or line.startswith(b'#'):
+            continue
         try:
-            fields = shlex.split(line.decode('utf-8', 'surrogateescape'), comments=True)
+            kind, remainder = field(line)
+            if kind != b'ssh-ed25519':
+                kind, remainder = field(remainder)
+            if kind == b'ssh-ed25519':
+                public, _ = field(remainder)
+                wire = base64.b64decode(public.translate(None, b'\r\v\f'), validate=True)
+                found.add(identity('ssh-ed25519 ' + base64.b64encode(wire).decode()))
         except ValueError:
             continue  # Preserve unrecognised lines byte-for-byte.
-        index = 0 if fields and fields[0] == 'ssh-ed25519' else 1
-        if len(fields) >= index + 2 and fields[index] == 'ssh-ed25519':
-            try:
-                found.add(identity(' '.join(fields[index:index + 2])))
-            except ValueError:
-                pass
     return found
 
 
 def contents(snapshot):
     raw = component_control.validate_file(snapshot)
     require(raw is not None and snapshot['uid'] == ROOT_UID and snapshot['gid'] == ROOT_GID
-            and snapshot['mode'] in (0o600, 0o640, 0o644))
+            and snapshot['mode'] in (0o600, 0o640, 0o644, 0o700))
     return raw
 
 
@@ -116,7 +133,8 @@ def run(value):
                 and metadata == {key: before[key] for key in metadata})
     if value['mode'] == 'install':
         after = updated(before, value['keys'])
-        changed = component_control.restore_file(ROOT_KEYS, after, [before['sha256']])
+        changed = component_control.restore_file(ROOT_KEYS, after, [before['sha256']],
+            metadata={key: before[key] for key in ('uid', 'gid', 'mode')})
     else:
         after, changed = before, False
     actual = inspect()

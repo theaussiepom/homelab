@@ -17,6 +17,63 @@ import component_control as c
 
 
 class ManagedControls(unittest.TestCase):
+
+    def test_optional_metadata_guard_refuses_late_drift_and_preserves_ordinary_restores(self):
+        expected = {key: self.before[key] for key in ('uid', 'gid', 'mode')}
+        self.path.write_bytes(b'candidate\n')
+        candidate = c.capture_file(str(self.path))
+        request = {'mode': 'restore', 'files': {str(self.path): self.before},
+                   'packages': [], 'images': [], 'allowed': {str(self.path): [candidate['sha256']]},
+                   'metadata': {str(self.path): expected}}
+        self.path.chmod(0o644)
+        with self.assertRaises(ValueError):
+            c.run(request)
+        self.assertEqual(self.path.read_bytes(), b'candidate\n')
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o644)
+        self.path.chmod(0o600)
+        self.assertEqual(c.run(request)['files'][str(self.path)], self.before)
+        self.assertFalse(c.restore_file(str(self.path), self.before, [], metadata=expected))
+        self.path.write_bytes(b'candidate\n')
+        self.path.chmod(0o400)
+        ordinary = copy.deepcopy(request)
+        ordinary.pop('metadata')
+        self.assertEqual(c.run(ordinary)['files'][str(self.path)], self.before)
+
+    def test_metadata_guard_rejects_malformed_expectations_and_a_removed_shared_file(self):
+        expected = {key: self.before[key] for key in ('uid', 'gid', 'mode')}
+        for value in ([], {}, dict(expected, uid=True), dict(expected, uid=-1),
+                      dict(expected, mode=0o1000), dict(expected, extra=0)):
+            with self.subTest(metadata=value), self.assertRaises(ValueError):
+                c.restore_file(str(self.path), self.before, [], metadata=value)
+        request = {'mode': 'restore', 'files': {str(self.path): self.before},
+                   'packages': [], 'images': [], 'allowed': {}}
+        for metadata in ([], None, {'/unknown': expected}, {str(self.path): None}):
+            with self.subTest(metadata=metadata), self.assertRaises(ValueError):
+                c.run(dict(request, metadata=metadata))
+        for mode in ('capture', 'verify'):
+            with self.subTest(mode=mode), self.assertRaises(ValueError):
+                c.run(dict(request, mode=mode, metadata={str(self.path): expected}))
+        self.path.unlink()
+        with self.assertRaises(ValueError):
+            c.restore_file(str(self.path), self.before, [], metadata=expected)
+        self.assertFalse(self.path.exists())
+
+    def test_metadata_guard_catches_drift_after_capture_before_atomic_replacement(self):
+        expected = {key: self.before[key] for key in ('uid', 'gid', 'mode')}
+        self.path.write_bytes(b'candidate\n')
+        current = c.capture_file(str(self.path))
+        original = os.fchown
+        def intervening_change(fd, uid, gid):
+            original(fd, uid, gid)
+            self.path.chmod(0o644)
+        with patch.object(os, 'fchown', side_effect=intervening_change):
+            with self.assertRaises(ValueError):
+                c.restore_file(str(self.path), self.before, [current['sha256']], metadata=expected)
+        self.assertEqual(self.path.read_bytes(), b'candidate\n')
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o644)
+        self.assertFalse(list(self.root.glob('.homelab-recovery-*')))
+
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()

@@ -47,13 +47,14 @@ From the consuming deployment repository root:
 Preparation preserves all existing lines, including unknown keys, comments,
 non-UTF8 comment bytes and options on an already-present key. Matching uses the
 Ed25519 wire identity, so an existing constrained key retains its options.
+Trailing comments remain opaque, including unmatched quotes and non-UTF8 bytes.
 Omitting a key from a later list does not revoke it. Key removal and rotation
 need their own reviewed configuration operation.
 
 ## Custody and recovery
 
 The existing file must be a single regular file owned by root:root, with mode
-0600, 0640 or 0644, beneath a root-owned SSH directory without group/other write
+0600, 0640, 0644 or 0700, beneath a root-owned SSH directory without group/other write
 access. Links, unmodelled extended attributes and conflicting custody are
 refused. The bounded control writer preserves the original file's owner, mode
 and every pre-existing byte while atomically appending missing keys.
@@ -63,6 +64,8 @@ file with the other controls. A failed update may restore only its exact
 preimage or the exact append postimage computed from that preimage and the
 admitted key list. Foreign content or permission changes retain the hold.
 Recovery checks the captured owner and mode before restoring any controls.
+The existing file writer checks them again before replacing the shared file,
+so a permission change after preflight also stops restoration.
 Read-only reconciliation
 checks declared key presence while retaining unrelated authorizations.
 Private SSH keys, passwords and application data are outside this operation.
