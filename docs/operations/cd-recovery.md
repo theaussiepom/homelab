@@ -8,6 +8,8 @@ The generated **Recover pending deployment** job runs before guest changes. It c
 
 Before an update changes infrastructure, CD saves private copies of the previous deployment's managed configuration leaves, permissions, exact installed package versions and container image identities. OpenTofu plans against the actual backend to restore the previous allowed infrastructure settings; Ansible restores the captured application controls and starts the owned services with their previous image selections. Existing plan guards still reject imports, destructive replacements, changed disks, moved storage, foreign identities and unknown values. No historical OpenTofu state file is copied over the actual backend.
 
+For a mutable container tag, recovery first verifies that the captured image ID still exists locally, then restores the owned Compose reference to that ID. Compose starts with pulling and building disabled. The running container and the local reference must both match the captured ID, so a later service restart retains that selection. Missing images or inconsistent immutable references retain the hold; recovery does not fetch a replacement image.
+
 Recovery verifies the restored configuration, package and image selection, application health, reply routing and previously declared route checks. Every affected guest must pass before any rollback hold is released. The canonical `ordinary-complete.json` and failed operation remain historical evidence. A separate `current-state.json` identifies the verified effective owner, current backend and exact resolved failure markers. Deployment and backup readers use that verified state; a reconciliation record is never an ordinary phase success.
 
 ## When an engineer is needed
@@ -15,6 +17,8 @@ Recovery verifies the restored configuration, package and image selection, appli
 The MVP restores deployment-managed infrastructure and existing application control files. It does not restore application data, databases, schemas, private account state or external systems. It does not remove newly installed packages. Backup and monitoring ownership must remain unchanged. A newly introduced application control path keeps its supported installation behavior. If that update fails, CD records that the previous control inventory is incomplete and retains its hold instead of claiming a complete rollback. Verify the repaired current-main installation through Reconcile guest; last-good reconciliation cannot erase that missing baseline. New app ownership still needs its supported first-installation recovery. First installation has no last good owner and therefore no automatic rollback baseline.
 
 Changed credentials or trust, a foreign hold, changed resource identity, missing or tampered evidence, an unfinished infrastructure apply, or a configuration writer killed before a known outcome retain their holds. A failed or unverifiable rollback records `recovery_required`; subsequent ordinary CD does not repeatedly run the failed reversal. An interrupted publication that already has a verified current-state pointer can finish its exact hold release without repeating native work.
+
+A returned Ansible process is insufficient evidence after connection loss. Automatic reversal of a failed task requires its complete single-host recap with no unreachable host. A timeout, signal, transport failure or missing recap retains the hold for reconciliation.
 
 ## Reconcile guest
 
@@ -27,6 +31,8 @@ After repairing the cause through its supported owner, run **Reconcile guest** f
 | `reason` | Required engineering recovery note, 1–1024 UTF-8 bytes after trimming. State the repair and disposition of any application data or schema issue. The reason is retained privately with the source revision and GitHub actor. |
 
 For `current_main`, each application prepares only its own declared scalar secret inputs; the final verification step receives no application secret values. Credentials, resource identities, guest storage and existing application ownership must remain continuous. OpenTofu requires a no-op resource plan and may persist refreshed state through its own engine. Ansible performs read-only configuration and health checks. A mismatch keeps the hold. A pass records a distinct reconciled owner and releases only that hold, allowing a **new** ordinary deployment.
+
+Reconciliation also checks installed PBS coverage, retained backup credential bytes and source ownership, plus the monitoring configuration, PSK, ownership receipt, selected package versions and active service. It refuses an interrupted monitoring installation. Preparing these payloads locally cannot establish guest readiness. These checks neither enroll a backup client nor rotate credentials, capture a backup or change agent settings.
 
 ## Generate and verify the source
 

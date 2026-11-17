@@ -136,7 +136,7 @@ class DeploymentAttempt:
     def __exit__(self, *exc):
         try:
             from component_recovery import record_failure
-            record_failure(self, exc[0])
+            record_failure(self, exc[1])
         finally:
             self.locks.__exit__(*exc)
 

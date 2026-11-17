@@ -1,5 +1,7 @@
 """Restore and inspect deployment-managed controls through the Ansible owner."""
 import os
+import base64
+import json
 from pathlib import Path
 
 import component_ansible
@@ -31,7 +33,7 @@ def descriptor(owner, cfg):
             continue
         payload = AppPayload.load(Path(owner['binding']['app_inputs_directory'])/proof['app'], proof)
         if phase in ('zabbix-agent', 'pbs-agent'):
-            continue  # Their persistent ownership is unchanged by guest recovery.
+            continue  # Agent settings are inspected separately, never restored here.
         values = component_ansible.variables(cfg, phase, payload=payload, previously_owned=True)
         app = values['component_application']
         for row in values['component_runtime_files']:
@@ -71,6 +73,57 @@ def descriptor(owner, cfg):
                          for argv, services in projects.items()]}
 
 
+def agent_descriptor(owner, cfg):
+    """Verify installed agent settings and retained credentials without applying them."""
+    import backup_agent
+    import monitoring_paths
+    files, expected, metadata, named, semantic, absent, packages, health = {}, {}, {}, [], {}, [], [], []
+
+    def control(target, raw=None, *, mode=0o600, user='root', group='root', value=None):
+        files[target] = None
+        metadata[target] = {'mode': mode}
+        named.append({'path': target, 'user': user, 'group': group, 'mode': f'{mode:04o}'})
+        if raw is not None:
+            expected[target] = digest(raw)
+        if value is not None:
+            semantic[target] = value
+
+    for phase in ('pbs-agent', 'zabbix-agent'):
+        proof = owner['phase_inputs'].get(phase)
+        if proof is None:
+            continue
+        payload = AppPayload.load(Path(owner['binding']['app_inputs_directory'])/proof['app'], proof)
+        values = component_ansible.variables(cfg, phase, payload=payload, previously_owned=True)
+        if phase == 'pbs-agent':
+            control('/etc/homelab-backup/coverage.json', values['backup_agent']['inventory'].encode())
+            control('/opt/homelab-backup/OWNER.json', value={'schema': 'homelab-backup-source-v1'})
+            for name, raw in backup_agent.verify_inputs(cfg['app']['backup'], payload).items():
+                if name != 'application.json':
+                    control('/etc/homelab-backup/'+name, raw)
+        else:
+            paths = monitoring_paths.PATHS
+            control(paths['configuration'], values['monitoring_agent_configuration'].encode(), mode=0o640, group='zabbix')
+            control(paths['key'], (read_json(payload.directory/'monitoring-agent.json', private=True)['psk']+'\n').encode(),
+                    mode=0o400, user='zabbix', group='zabbix')
+            control(paths['receipt'], value={**{key: cfg['app']['monitoring'][key] for key in ('hostname', 'psk_identity')},
+                                            'version': values['monitoring_agent_package']['version']})
+            files[paths['hold']] = None; absent.append(paths['hold'])
+            packages.append('zabbix-agent2='+values['monitoring_agent_package']['version'])
+            if 'postgresql' in cfg['app']['monitoring']['profiles']:
+                packages.append('zabbix-agent2-plugin-postgresql='+values['monitoring_postgresql_package']['version'])
+            health.append({'argv': ['systemctl', 'is-active', '--quiet', 'zabbix-agent2']})
+    return {'files': files, 'expected': expected, 'metadata': metadata, 'native_files': named,
+            'json': semantic, 'absent': absent, 'packages': packages, 'health': health,
+            'projects': [], 'images': [], 'units': []}
+
+
+def verify_agents(owner, cfg, operation):
+    """Locally prepared payloads do not prove the guest installed their settings."""
+    selection = agent_descriptor(owner, cfg)
+    if selection['files']:
+        expected(selection, execute(cfg, operation, selection, mode='capture'))
+
+
 def execute(cfg, operation, selection, *, mode, captured=None, allowed=None):
     """No fresh provisioning or database/schema action is present in this playbook."""
     import proxmox_guest
@@ -81,9 +134,10 @@ def execute(cfg, operation, selection, *, mode, captured=None, allowed=None):
     folder = attempt_directory(operation, 'controls-'+mode)
     request = {'mode': 'capture' if mode == 'capture' else 'verify',
                'files': selection['files'] if mode == 'capture' else captured['files'],
-               'packages': selection['packages'], 'images': selection['images'], 'allowed': {}}
+               'packages': selection['packages'],
+               'images': selection['images'] if mode == 'capture' else captured['images'], 'allowed': {}}
     restore = {'mode': 'restore', 'files': captured['files'] if captured else {},
-               'packages': [], 'images': [], 'allowed': allowed or {}}
+               'packages': [], 'images': captured['images'] if captured else [], 'allowed': allowed or {}}
     variables = {'recovery_app': cfg['app'], 'recovery_mode': mode, 'recovery_program': Path(component_control.__file__).read_text(),
                  'recovery_request': request, 'recovery_restore': restore,
                  'recovery_packages': captured['packages'] if captured else [],
@@ -116,8 +170,15 @@ def expected(selection, captured):
         row = captured['files'][path]
         require(row.get('exists') and row['sha256'] == wanted,
                 'Installed managed configuration differs from selected source')
-        require(all(row.get(key) == value for key, value in selection['metadata'][path].items()),
+    for path, wanted in selection.get('json', {}).items():
+        row = captured['files'][path]
+        require(row.get('exists') and json.loads(base64.b64decode(row['content'], validate=True)) == wanted,
+                'Installed agent ownership differs from selected source')
+    for path, wanted in selection['metadata'].items():
+        require(all(captured['files'][path].get(key) == value for key, value in wanted.items()),
                 'Installed managed configuration permissions differ from selected source')
+    require(all(captured['files'][path] == {'exists': False} for path in selection.get('absent', [])),
+            'An interrupted monitoring installation requires engineer repair')
     for wanted, actual in zip(selection['packages'], captured['packages'], strict=True):
         require('=' not in wanted or wanted == actual, 'Installed package differs from selected source')
     return captured

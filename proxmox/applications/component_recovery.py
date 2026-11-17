@@ -22,15 +22,17 @@ SCHEMA = 'homelab-component-rollback-baseline-v1'
 RESULT = 'homelab-component-recovery-result-v1'
 
 
-def record_failure(attempt, error_type):
+def record_failure(attempt, error):
     """Called before releasing the existing attempt locks; never logs error values."""
+    from component_ansible import CompletedTaskFailure
     operation = getattr(attempt, 'operation', None)
-    if error_type is not None and enabled() and operation is not None and (operation/'rollback-baseline.json').exists():
+    if error is not None and enabled() and operation is not None and (operation/'rollback-baseline.json').exists():
         once(operation/'forward-failure.json', {
             'schema': 'homelab-component-forward-failure-v1',
             'marker_sha256': sha(attempt.hold),
-            'command_returned': issubclass(error_type, Exception)
-                and not issubclass(error_type, subprocess.TimeoutExpired)})
+            'command_returned': isinstance(error, Exception)
+                and (not isinstance(error, (subprocess.CalledProcessError, subprocess.TimeoutExpired))
+                     or isinstance(error, CompletedTaskFailure))})
 
 
 def enabled():
@@ -441,6 +443,7 @@ def reconcile(cfg, operation, selected_path, selected, *, reason, actor_context,
         component_restore.expected(selection, actual)
     else:
         require(actual == expected_controls, 'Installed controls differ from the recorded last-good deployment')
+    component_restore.verify_agents(selected, cfg, recovery)
     if 'route_checks' in cfg['app']:
         import component_routed
         routes = attempt_directory(recovery, 'routes')

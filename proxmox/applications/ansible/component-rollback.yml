@@ -34,7 +34,7 @@
 
     - name: Restore only the owned Compose services
       ansible.builtin.command:
-        argv: "{{ item.argv + ['up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false', '--no-deps'] + item.services }}"
+        argv: "{{ item.argv + ['up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false', '--no-deps', '--pull', 'never', '--no-build'] + item.services }}"
       loop: '{{ recovery_projects }}'
       changed_when: true
       no_log: true
@@ -52,7 +52,7 @@
       ansible.builtin.assert:
         that:
           - item.stat.exists and item.stat.isreg and not item.stat.islnk
-          - item.stat.nlink == 1 and item.stat.mode == '0600'
+          - item.stat.nlink == 1 and item.stat.mode == item.item.mode | default('0600')
           - item.stat.pw_name == item.item.user and item.stat.gr_name == item.item.group
       loop: '{{ recovery_native_metadata.results }}'
       no_log: true

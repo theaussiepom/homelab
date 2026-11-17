@@ -108,5 +108,50 @@ class ManagedControls(unittest.TestCase):
         for name in ('--remove', 'x;rm', 'a b', 'a='):
             with self.subTest(package=name), self.assertRaises(ValueError): c.packages([name])
 
+    def test_mutable_tag_restore_selects_captured_id_and_preserves_restart_selection(self):
+        selected = {'project': 'example', 'service': 'web', 'image': 'example/web:latest'}
+        old, new = 'sha256:'+'a'*64, 'sha256:'+'b'*64
+        tag, running, available, calls = {'id': old}, {'id': old}, {old, new}, []
+        def command(argv):
+            calls.append(argv)
+            if argv[1] == 'ps': return 'c'*64
+            if argv[1] == 'inspect': return running['id']+' true'
+            if argv[2] == 'tag':
+                tag['id'] = argv[3]; return ''
+            return tag['id'] if argv[-1] == selected['image'] else (argv[-1] if argv[-1] in available else '')
+        with patch.object(c, 'command', side_effect=command):
+            captured = c.images([selected])
+            tag['id'] = running['id'] = new  # A forward pull advanced the same :latest reference.
+            request = {'mode': 'restore', 'files': {str(self.path): self.before},
+                       'packages': [], 'images': captured, 'allowed': {}}
+            self.assertEqual(c.run(request)['images'], [])  # Container startup is the Ansible owner's next step.
+            self.assertEqual(tag['id'], old)
+            running['id'] = tag['id']  # Compose up --pull never, then a later ordinary service restart.
+            self.assertEqual(c.images(captured), captured)
+            self.assertEqual(c.images([selected]), captured)
+            running['id'] = new
+            with self.assertRaises(ValueError): c.images(captured)
+            available.remove(old)
+            self.path.write_bytes(b'forward configuration')
+            with self.assertRaises(ValueError): c.run(request)
+            self.assertEqual(self.path.read_bytes(), b'forward configuration')
+        self.assertFalse(any('pull' in argv or 'prune' in argv or 'rmi' in argv for argv in calls))
+
+    def test_immutable_image_refs_and_conflicting_or_missing_ids_refuse_before_retagging(self):
+        pinned = {'project': 'example', 'service': 'web', 'image': 'example/web@sha256:'+'a'*64,
+                  'image_id': 'sha256:'+'b'*64}
+        with patch.object(c, 'command', return_value=pinned['image_id']) as command:
+            c.restore_images([pinned, dict(pinned, image=pinned['image_id'])])
+            self.assertFalse(any(call.args[0][2] == 'tag' for call in command.call_args_list))
+            command.return_value = 'sha256:'+'c'*64
+            with self.assertRaises(ValueError): c.restore_images([pinned])
+        mutable = dict(pinned, image='example/web:latest')
+        with patch.object(c, 'command', side_effect=lambda argv: argv[-1]) as command:
+            with self.assertRaises(ValueError):
+                c.restore_images([mutable, dict(mutable, image_id='sha256:'+'c'*64)])
+            self.assertFalse(any(call.args[0][2] == 'tag' for call in command.call_args_list))
+        for invalid in (dict(mutable, image_id='not-an-id'), {key: value for key, value in mutable.items() if key != 'image_id'}):
+            with self.subTest(row=invalid), self.assertRaises(ValueError): c.restore_images([invalid])
+
 
 if __name__ == '__main__': unittest.main()

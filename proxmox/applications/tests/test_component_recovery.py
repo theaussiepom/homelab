@@ -13,6 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(ROOT/'blueprints'), str(ROOT/'proxmox/applications')]
 import component_current
+import component_ansible
 import component_generation
 import component_recovery
 import component_restore
@@ -105,6 +106,54 @@ class RecoveryTransactions(unittest.TestCase):
         with self.assertRaises(ValueError): component_recovery.reverse_settled(recovery, 'controls-restore')
         write_new(folder/'result.json', encoded({'files': {}}))
         component_recovery.reverse_settled(recovery, 'controls-restore')
+
+    def test_ansible_unreachable_return_preserves_hold_without_reversing_remote_writer(self):
+        failed = self.fail_after_preparation()
+        phase = next(iter(self.cfg['deployment']['applications']))
+        def unreachable(argv, environment, log):
+            write_new(log, ('PLAY RECAP '+ '*'*20+'\n'+self.cfg['app']['hostname']+
+                ' : ok=1 changed=1 unreachable=1 failed=0 skipped=0 rescued=0 ignored=0\n').encode())
+            raise subprocess.CalledProcessError(4, argv, output='PRIVATE')
+        with patch.object(component_ansible, 'quiet', side_effect=unreachable):
+            with self.assertRaises(subprocess.CalledProcessError):
+                deploy.run(phase, self.case.packet, inputs=self.case.inputs, environment={})
+        self.assertFalse(read_json(failed/'forward-failure.json', private=True)['command_returned'])
+        self.assertNotIn('PRIVATE', (failed/'forward-failure.json').read_text())
+        calls = len(self.case.infra)
+        self.inspections.clear()
+        with self.assertRaisesRegex(ValueError, 'uncertain forward'): component_recovery.restore(self.cfg, failed)
+        self.assertEqual(len(self.case.infra), calls)
+        self.assertEqual(self.inspections, [])
+        self.assertTrue((self.work/'ORDINARY-HOLD.json').exists())
+
+    def test_ansible_completed_task_failure_can_rollback_with_failed_run_evidence(self):
+        failed = self.fail_after_preparation()
+        phase = next(iter(self.cfg['deployment']['applications']))
+        def failed_task(argv, environment, log):
+            write_new(log, ('PLAY RECAP '+ '*'*20+'\n'+self.cfg['app']['hostname']+
+                ' : ok=1 changed=1 unreachable=0 failed=1 skipped=0 rescued=0 ignored=0\n').encode())
+            raise subprocess.CalledProcessError(2, argv)
+        with patch.object(component_ansible, 'quiet', side_effect=failed_task):
+            with self.assertRaises(component_ansible.CompletedTaskFailure):
+                deploy.run(phase, self.case.packet, inputs=self.case.inputs, environment={})
+        self.assertTrue(read_json(failed/'forward-failure.json', private=True)['command_returned'])
+        self.assertEqual(component_recovery.restore(self.cfg, failed)['status'], 'failed_rolled_back')
+        self.assertTrue((failed/'forward-failure.json').exists())
+
+    def test_only_a_complete_reachable_single_host_failure_recap_is_settled(self):
+        log = self.trust/'failed.log'
+        error = subprocess.CalledProcessError(2, ['ansible-playbook'])
+        valid = 'PLAY RECAP '+ '*'*20+'\nexample : ok=1 changed=0 unreachable=0 failed=1 skipped=0 rescued=0 ignored=0\n'
+        for content in (b'no recap', valid.replace('unreachable=0', 'unreachable=1').encode(),
+                        valid.replace('failed=1', 'failed=0').encode(),
+                        (valid+valid.partition('\n')[2].replace('example', 'foreign')).encode(), b'\xff'):
+            write_bytes(log, content)
+            self.assertFalse(component_ansible.completed_failure(error, log, 'example'))
+        write_bytes(log, valid.encode())
+        self.assertTrue(component_ansible.completed_failure(error, log, 'example'))
+        self.assertFalse(component_ansible.completed_failure(error, log, 'other'))
+        self.assertFalse(component_ansible.completed_failure(subprocess.CalledProcessError(-9, error.cmd), log, 'example'))
+        self.assertFalse(component_ansible.completed_failure(error, self.trust/'missing.log', 'example'))
 
     def test_pre_mutation_failure_releases_only_its_unchanged_hold(self):
         before = sha(self.work/'terraform.tfstate')

@@ -125,21 +125,45 @@ def packages(names):
     return result
 
 
+def image_selection(row, *, captured=False):
+    require(isinstance(row, dict) and set(row) == {'project', 'service', 'image'} | (
+                {'image_id'} if captured or 'image_id' in row else set())
+                and all(isinstance(row[k], str) and re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,127}', row[k])
+                        for k in ('project', 'service'))
+                and isinstance(row['image'], str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_./:@+-]{0,511}', row['image'])
+                and ('image_id' not in row or isinstance(row['image_id'], str)
+                     and re.fullmatch('sha256:[0-9a-f]{64}', row['image_id'])))
+
+
+def restore_images(rows):
+    """Check all retained IDs before retargeting only their owned Compose refs."""
+    require(isinstance(rows, list) and len(rows) <= 128)
+    refs = {}
+    for row in rows:
+        image_selection(row, captured=True)
+        wanted = row['image_id']
+        require(refs.setdefault(row['image'], wanted) == wanted)
+        require(command(['docker', 'image', 'inspect', '--format', '{{.Id}}', wanted]) == wanted)
+        if '@' in row['image'] or row['image'].startswith('sha256:'):
+            require(command(['docker', 'image', 'inspect', '--format', '{{.Id}}', row['image']]) == wanted)
+    for ref, wanted in refs.items():
+        if '@' not in ref and not ref.startswith('sha256:'):
+            command(['docker', 'image', 'tag', wanted, ref])
+
+
 def images(rows):
     require(isinstance(rows, list) and len(rows) <= 128)
     result = []
     for row in rows:
-        require(isinstance(row, dict) and set(row) == {'project', 'service', 'image'}
-                and all(isinstance(row[k], str) and re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,127}', row[k])
-                        for k in ('project', 'service'))
-                and isinstance(row['image'], str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_./:@+-]{0,511}', row['image']))
+        image_selection(row)
         ids = command(['docker', 'ps', '--all', '--quiet', '--no-trunc', '--filter',
                        'label=com.docker.compose.project=' + row['project'], '--filter',
                        'label=com.docker.compose.service=' + row['service']])
         require(re.fullmatch('[0-9a-f]{64}', ids))
         actual = command(['docker', 'inspect', '--format', '{{.Image}} {{.State.Running}}', ids])
         image = command(['docker', 'image', 'inspect', '--format', '{{.Id}}', row['image']])
-        require(re.fullmatch('sha256:[0-9a-f]{64}', image) and actual == image + ' true')
+        require(re.fullmatch('sha256:[0-9a-f]{64}', image) and actual == image + ' true'
+                and row.get('image_id', image) == image)
         result.append({**row, 'image_id': image})
     return result
 
@@ -156,12 +180,14 @@ def run(value):
     else:
         require(sum(len(validate_file(row) or b'') for row in value['files'].values()) <= MAX_BYTES)
         if mode == 'restore':
+            restore_images(value['images'])
             for path, row in value['files'].items():
                 restore_file(path, row, value['allowed'].get(path, []))
         files = {path: capture_file(path) for path in value['files']}
         require(files == value['files'])
     require(sum(len(validate_file(row) or b'') for row in files.values()) <= MAX_BYTES)
-    return {'files': files, 'packages': packages(value['packages']), 'images': images(value['images'])}
+    return {'files': files, 'packages': packages(value['packages']),
+            'images': [] if mode == 'restore' else images(value['images'])}
 
 
 def main():

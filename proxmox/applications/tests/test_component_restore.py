@@ -1,5 +1,6 @@
 """Managed-control transport uses real local files and synthetic remote commands."""
 import copy
+import base64
 import os
 from pathlib import Path
 import sys
@@ -102,8 +103,50 @@ class RestoreTests(unittest.TestCase):
         self.assertFalse(stat['ansible.builtin.stat']['follow'])
         checks = next(task for task in tasks if task['name'].startswith('Verify the declared native'))['ansible.builtin.assert']['that']
         self.assertIn('item.stat.pw_name == item.item.user and item.stat.gr_name == item.item.group', checks)
-        self.assertIn("item.stat.nlink == 1 and item.stat.mode == '0600'", checks)
+        self.assertIn("item.stat.nlink == 1 and item.stat.mode == item.item.mode | default('0600')", checks)
         self.assertIn('item.stat.exists and item.stat.isreg and not item.stat.islnk', checks)
+        compose = next(task for task in tasks if task['name'] == 'Restore only the owned Compose services')
+        self.assertIn("'--pull', 'never', '--no-build'", compose['ansible.builtin.command']['argv'])
+
+    def test_monitoring_reconciliation_checks_installed_config_key_owner_version_and_no_hold(self):
+        import component_ansible
+        import monitoring_paths
+        import test_component_agent_phase
+        case = test_component_agent_phase.AgentCallerTests(); case.setUp(); self.addCleanup(case.doCleanups)
+        with patch.object(component_ansible, 'quiet', side_effect=case.ansible), \
+                patch.dict(os.environ, {'HOMELAB_CD_RECOVERY': ''}): case.fixture.all_phases()
+        cfg = case.cfg
+        owner = read_json(case.fixture.state/'610/ordinary-complete.json', private=True)
+        selected = m.agent_descriptor(owner, cfg)
+        paths = monitoring_paths.PATHS
+        payload = Path(owner['binding']['app_inputs_directory'])/'agent'
+        variables = component_ansible.variables(cfg, 'zabbix-agent',
+            payload=m.AppPayload.load(payload, owner['phase_inputs']['zabbix-agent']), previously_owned=True)
+        raw = {paths['configuration']: variables['monitoring_agent_configuration'].encode(),
+               paths['key']: (read_json(payload/'monitoring-agent.json', private=True)['psk']+'\n').encode(),
+               paths['receipt']: encoded(selected['json'][paths['receipt']])}
+        actual = {'files': {path: {'exists': True, 'content': base64.b64encode(value).decode(),
+            'sha256': digest(value), **selected['metadata'][path]} for path, value in raw.items()},
+            'packages': selected['packages'], 'images': []}
+        actual['files'][paths['hold']] = {'exists': False}
+        m.expected(selected, actual)
+        self.assertEqual(selected['health'], [{'argv': ['systemctl', 'is-active', '--quiet', 'zabbix-agent2']}])
+        self.assertIn({'path': paths['key'], 'user': 'zabbix', 'group': 'zabbix', 'mode': '0400'}, selected['native_files'])
+        for mutate in (lambda v: v['files'][paths['configuration']].update(sha256='a'*64),
+                       lambda v: v['files'][paths['key']].update(sha256='a'*64),
+                       lambda v: v['files'][paths['key']].update(mode=0o600),
+                       lambda v: v['files'][paths['receipt']].update(content=base64.b64encode(b'{}').decode()),
+                       lambda v: v['files'][paths['hold']].update(exists=True),
+                       lambda v: v.update(packages=['zabbix-agent2=old'])):
+            bad = copy.deepcopy(actual); mutate(bad)
+            with patch.object(m, 'execute', return_value=bad) as inspect, self.assertRaises(ValueError):
+                m.verify_agents(owner, cfg, self.tx.work)
+            self.assertEqual(inspect.call_args.kwargs, {'mode': 'capture'})
+        with patch.object(m, 'execute', return_value=actual): m.verify_agents(owner, cfg, self.tx.work)
+        cfg = copy.deepcopy(cfg); cfg['app']['monitoring']['profiles'].append('postgresql')
+        with patch.object(m.component_ansible, 'variables', return_value=variables):
+            selected = m.agent_descriptor(owner, cfg)
+        self.assertIn('zabbix-agent2-plugin-postgresql='+variables['monitoring_postgresql_package']['version'], selected['packages'])
 
 
 EXECUTE = m.execute
