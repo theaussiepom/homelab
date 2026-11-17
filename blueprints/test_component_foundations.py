@@ -23,8 +23,7 @@ def props():
         'zigbee2mqtt': {'adapter': 'ember', 'mqtt_base_topic': 'home'},
         'traefik': {'dashboard': True, 'provider': {'context': 'lab', 'token_id': 'reader@pve!routes',
             'discovery': {'local_directory': '/example/local/service-discovery',
-                          'mirror_directory': '/example/mirror/service-discovery', 'owner_sha256': 'a' * 64,
-                          'guests': ['application']}},
+                          'mirror_directory': '/example/mirror/service-discovery', 'scope': 'all-guests'}},
             'acme': {'email': 'operator@example.invalid', 'resolvers': [{'external': 'dns'}],
                      'propagation_timeout_seconds': 2100}}}
 
@@ -88,7 +87,7 @@ class FoundationPropertyTests(unittest.TestCase):
             lambda v: v['provider'].update(context='../outside'),
             lambda v: v['provider']['discovery'].update(owner_sha256='z' * 64),
             lambda v: v['provider']['discovery'].update(guests=['application', 'application']),
-            lambda v: v['provider']['discovery'].update(guests=[]),
+            lambda v: v['provider']['discovery'].update(scope='selected-guests'),
             lambda v: v['provider']['discovery'].update(mirror_directory='/example/local/service-discovery'),
             lambda v: v['provider']['discovery'].update(local_directory='/example/wrong'),
             lambda v: v['acme'].update(email='invalid'),
@@ -171,7 +170,7 @@ class FoundationBindingTests(unittest.TestCase):
         settings.bind(resolver)
         selected = resolver.apps['application']['settings']
         self.assertEqual(selected['provider']['url'], 'https://198.18.20.2:8006')
-        self.assertEqual(selected['provider']['discovery']['guests'], [611])
+        self.assertEqual(selected['provider']['discovery']['scope'], 'all-guests')
         self.assertEqual(selected['acme']['resolvers'], ['198.18.20.53:53'])
         resolver.apps['application']['properties']['acme']['resolvers'].append({'external': 'dns'})
         with self.assertRaisesRegex(ComponentError, 'dns-endpoint'):

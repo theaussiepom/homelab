@@ -22,12 +22,12 @@ class ScopeTests(unittest.TestCase):
         self.local=self.root/'local/service-discovery';self.mirror=self.root/'mirror/service-discovery'
         self.local.mkdir(parents=True);self.mirror.mkdir(parents=True)
         self.value={'local_directory':str(self.local),'mirror_directory':str(self.mirror),
-            'owner_sha256':'a'*64,'guests':[808,809]}
+            'scope':'all-guests'}
         self.endpoint='https://198.18.25.10:8006';self.token_id='root@pam!discovery';self.ca_file='/public/ca.pem'
         (self.root/'secret').write_text('synthetic-token\n');(self.root/'secret').chmod(0o600)
         self.cfg={'guest':{'vmid':818,'interfaces':[{'ipv4':'198.18.25.33/24'}]},'site':{'node':'fixture-pve'}}
-        self.owner={'endpoint':'https://198.18.25.10:8006/','node':'fixture-pve',
-            'configuration':{'vmid':818,'address':'198.18.25.33','guests':[808,809]}}
+        self.owner={'schema':'homelab-service-discovery-v2','endpoint':'https://198.18.25.10:8006/','node':'fixture-pve',
+            'configuration':{'vmid':818,'address':'198.18.25.33','scope':'all-guests'}}
 
     def verify(self,api=None):
         return d.verify_selection(self.cfg,self.value,endpoint=self.endpoint,token_id=self.token_id,
@@ -52,6 +52,8 @@ class ScopeTests(unittest.TestCase):
             (root/'scope-extensions').mkdir()
             for i in range(1,6):(root/'scope-extensions'/f'{i:04}.json').write_text('{}')
         self.assertEqual(len(d.scope_source_files(self.value)),16)
+        for root in (self.local,self.mirror):(root/'read-scope.json').write_text('{}')
+        self.assertEqual(len(d.scope_source_files(self.value)),18)
         bad=self.local/'scope-extensions/unbounded.json';bad.write_text('{}')
         with self.assertRaises(ValueError):d.scope_source_files(self.value)
         bad.unlink()
@@ -59,9 +61,9 @@ class ScopeTests(unittest.TestCase):
         with self.assertRaises(ValueError):d.scope_source_files(self.value)
 
     def test_exact_owner_scope_node_endpoint_and_visible_configs(self):
-        access=Mock();access.scope_owner.return_value=self.owner;access.owner_sha256.return_value='a'*64
+        access=Mock();access.OWNER_SCHEMA='homelab-service-discovery-v2';access.scope_owner.return_value=self.owner;access.owner_sha256.return_value='a'*64
         access.retained.return_value='root@pam!discovery=synthetic-token';access.identity.return_value=('user','root@pam!discovery')
-        api=Mock();api.discovery.return_value.call.return_value={'data':{'hostname':'fixture'}}
+        api=Mock();api.discovery.return_value.call.return_value={'data':[{'vmid':818,'node':'fixture-pve'},{'vmid':999,'node':'fixture-pve'}]}
         with patch.object(d,'provider',return_value=access):
             result=self.verify(api)
             self.assertEqual(result['visible_guests'],2);self.assertFalse(result['writes'])
@@ -75,7 +77,7 @@ class ScopeTests(unittest.TestCase):
             (self.root/'secret').write_text('foreign-token')
             with self.assertRaisesRegex(ValueError,'Configured discovery'):self.verify(api)
             (self.root/'secret').write_text('synthetic-token')
-            self.assertEqual(api.discovery.return_value.call.call_count,2)
+            self.assertEqual(api.discovery.return_value.call.call_count,1)
             for key,value in [('node','foreign'),('endpoint','https://198.18.25.11:8006/')]:
                 old=self.owner[key];self.owner[key]=value
                 with self.assertRaises(ValueError):self.verify(api)
@@ -84,10 +86,10 @@ class ScopeTests(unittest.TestCase):
             with self.assertRaises(ValueError):self.verify(api)
             access.retained.return_value='root@pam!discovery=synthetic-token';api.discovery.return_value.call.return_value={'data':{}}
             with self.assertRaises(ValueError):self.verify(api)
-            api.discovery.return_value.call.return_value={'data':{'hostname':'fixture'}}
+            api.discovery.return_value.call.return_value={'data':[{'vmid':818,'node':'fixture-pve'},{'vmid':999,'node':'fixture-pve'}]}
             for error in (HTTPError('https://pve.example.invalid',403,'private response',{},None),URLError('transport'),TimeoutError('timeout'),HTTPException('private protocol error'),ValueError('bad native envelope')):
                 api.discovery.return_value.call.side_effect=error
-                with self.assertRaisesRegex(ValueError,'declared guest is not visible'):self.verify(api)
+                with self.assertRaisesRegex(ValueError,'Guest discovery is not visible'):self.verify(api)
             api.discovery.return_value.call.side_effect=None
             with patch.object(d,'Reader',return_value=api):self.verify()
         with patch.object(d.importlib,'import_module',return_value=SimpleNamespace(__file__='/foreign/provider_access.py')):
@@ -95,14 +97,14 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(Path(d.provider().__file__).resolve(),d.BOOTSTRAP/'provider_access.py')
 
     def test_real_permission_verifier_malformed_data_has_safe_recovery_error(self):
-        actual=d.provider();access=Mock();access.scope_owner.return_value=self.owner
+        actual=d.provider();access=Mock();access.OWNER_SCHEMA='homelab-service-discovery-v2';access.scope_owner.return_value=self.owner
         access.owner_sha256.return_value='a'*64
         access.retained.return_value='root@pam!discovery=synthetic-token'
         access.identity.return_value=('user','root@pam!discovery')
         access.verify_secret.side_effect=actual.verify_secret
         api=Mock()
-        permissions={path:{'VM.Audit':0,'Sys.Audit':0}
-                     for path in ('/nodes/fixture-pve','/vms/808','/vms/809')}
+        permissions={path:{'VM.Audit':flag,'Sys.Audit':flag}
+                     for path,flag in (('/nodes/fixture-pve',0),('/vms',1),('/vms/808',1),('/vms/809',1))}
         malformed=[None,[]]
         for value in (1,['VM.Audit','Sys.Audit'],'private malformed value',
                       {'VM.Audit':0,'Sys.Audit':[]}):
@@ -120,7 +122,7 @@ class ScopeTests(unittest.TestCase):
         response.read.return_value=b'{"data":{"hostname":"fixture"}}'
         opener=Mock();opener.open.return_value=response
         with patch.object(d.ssl,'create_default_context',return_value=object()) as tls,patch.object(d.urllib.request,'build_opener',return_value=opener):
-            self.assertEqual(reader.call('/nodes/fixture-pve/lxc/808/config')['data']['hostname'],'fixture')
+            self.assertEqual(reader.call('/cluster/resources?type=vm')['data']['hostname'],'fixture')
             tls.assert_called_once_with(cafile='/public/ca.pem')
             request=opener.open.call_args.args[0];self.assertEqual(request.get_method(),'GET')
             self.assertEqual(request.get_header('Authorization'),'PVEAPIToken=synthetic')

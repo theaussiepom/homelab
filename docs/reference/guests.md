@@ -35,10 +35,17 @@ Use only the listed fields. Required fields have no default, and null does not r
 | <a id="guest-readiness"></a>`readiness` | Optional ordered list; omitted `[]` | Each exactly `{stage: preparation, target: {app: id, endpoint: name}}`; target must be on another guest |
 | <a id="guest-source-policy-route"></a>`source_policy_route` | Optional closed object | Exactly `{interface: nic_id}`; selected non-default static NIC requires a gateway different from its address; manages the [source reply policy](#source-reply-routing) |
 | <a id="guest-monitoring"></a>`monitoring` | Optional closed object | Exactly `{profile: id}`; replaces template selection; see [monitoring](zabbix.md) |
+| <a id="guest-route-checks"></a>`route_checks` | Optional closed object | Select [configured DNS/TLS/HTTP checks](routed-checks.md), inline or explicitly deferred, and their source/prerequisites. No default selection. |
 
 ## Defaults and resolution
 
 The compiler merges resources, startup and security by direct field: it starts with the complete template, then applies the guest's explicit keys. Omitting a block or supplying an empty map preserves the template values; null is rejected. Guest software and runtime lists append to the template lists, so an empty guest list cannot remove a template selection. A guest monitoring selection replaces the complete template reference. Empty or null values do not disable monitoring.
+
+A guest's `ssh_public_keys` override uses the same
+[additive root-key maintenance](../guides/root-ssh-keys.md) as its context.
+Preserve the deployment public key. Ordinary preparation appends missing
+declared keys and retains existing options and unrelated authorizations;
+omitting an installed key does not revoke it.
 
 For the tutorial's `base` template, adding `resources: {memory_mib: 1024}` produces CPU 1, memory 1024 MiB, root 8 GiB and an authored OS reserve of 128 MiB. Runtime budgeting can raise the effective OS reserve to its minimum of 256 MiB or to meet selected requirements. The declared reserve and effective allocation can therefore differ. See the [complete library](../examples/first-configuration/stack.json).
 

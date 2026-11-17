@@ -33,6 +33,15 @@ class BackendUnits(unittest.TestCase):
   self.assertEqual(set(case('traefik')['app']['listeners']),{'http_listener','https_listener'})
 
 class GatewayUnits(unittest.TestCase):
+ def test_generic_routed_selection_retires_only_the_two_superseded_route_rows(self):
+  for name in ('cloudbeaver','music_assistant'):
+   selected=case(name);app=selected['app'];app['health']={'ready':{'type':'adapter','check':'readiness'}}
+   before=h.checks(app,{},compose_file=selected['compose_file'])
+   after=h.checks(app,{},compose_file=selected['compose_file'],routed=True)
+   self.assertEqual(len(before),2);self.assertEqual(after,before[:1])
+   self.assertIn('--resolve',before[1]['argv'])
+   self.assertNotIn('--resolve',after[0]['argv'])
+
  def test_cloud_uses_selected_runtime_leaf_and_canonical_signin_budget(self):
   v=case('cloudbeaver')
   with patch.object(h,'_runtime_file',return_value='/opt/homelab-app/runtime/other/cloudbeaver-public.json') as runtime,patch.object(h,'_public',return_value=('https://db.example.invalid','db.example.invalid','198.18.44.9',{})):

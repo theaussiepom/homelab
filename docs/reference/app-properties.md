@@ -42,10 +42,9 @@ The optional `client_access` list preserves order, defaults to [] and accepts at
 | dashboard | Optional Boolean; defaults to false |
 | provider | Optional in structural validation but required by the current rendered adapter. Requires context ID and token_id. |
 | provider.token_id | Non-whitespace realm-qualified identity with one ! suffix, e.g. synthetic reader@pve!discovery |
-| provider.discovery | Optional object accepting only local_directory, mirror_directory, owner_sha256 and guests |
+| provider.discovery | Optional object accepting only local_directory, mirror_directory and scope |
 | discovery directories | Distinct canonical absolute paths ending in /service-discovery |
-| discovery.owner_sha256 | Lowercase 64-hex owner digest |
-| discovery.guests | 1–32 unique guest IDs from the same context; the compiler substitutes their VMIDs |
+| discovery.scope | Required literal `all-guests`; verifies retained read-only metadata access for current and future guests. No default. Old `guests` and `owner_sha256` fields are rejected. Routing still requires configured Notes labels; see [discovery ownership](../../proxmox/bootstrap/SERVICE-DISCOVERY.md). |
 | acme | Optional in structural validation but required by the current adapter. Requires email and resolvers. |
 | acme.email | Non-whitespace email with one @ and dotted domain |
 | acme.resolvers | 1–3 endpoint references that resolve to unique IPv4 DNS sockets on port 53 using TCP/UDP |

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Materialize the same pinned guest recipes as plain private native jobs.
 
-Each job uses its own main-only Environment containing exactly its former
-explicit secret subset. This module reads source only; it never handles values.
+Deployment jobs retain their former explicit Environment secret subset. Final
+read-only checks use an explicit common Environment without secret forwarding.
+This module reads source only; it never handles credential values.
 """
 import argparse
 import copy
@@ -28,7 +29,7 @@ def settings(site):
     compiler.require(isinstance(value, dict) and isinstance(value.get('env'), dict),
                      'Declare private workflow source settings')
     env = value['env']
-    compiler.require(REQUIRED <= env.keys() <= REQUIRED | {'HOMELAB_DISABLED'}
+    compiler.require(REQUIRED <= env.keys() <= REQUIRED | {'HOMELAB_DISABLED', 'HOMELAB_CHECK_ENVIRONMENT', 'HOMELAB_RECOVERY_ENVIRONMENT'}
                      and all(isinstance(v, str) and '${{' not in v and '\n' not in v for v in env.values()),
                      'Use literal closed private workflow settings')
     selected = compiler.workflow_selection(path, 'deploy.yml')
@@ -191,7 +192,7 @@ def model(stack, site):
     disabled = env.get('HOMELAB_DISABLED', '[]')
     disabled_rows = compiler.workflow_disabled((site / '.github/workflows/deploy.yml').read_text())
     source = workflows.models(stack, site_source=compiler.site_path(site), disabled=disabled_rows)
-    compiler.require(not pbs or all(key in ('selection', '_backup') or re.fullmatch('[a-z][a-z0-9_-]*', key)
+    compiler.require(not pbs or all(key in ('selection', '_backup', '_checks', '_recover', '_finish') or re.fullmatch('[a-z][a-z0-9_-]*', key)
                                    for key in source['deploy.yml']['jobs']),
                      'Keep only public guest jobs and the early Configure backups job')
     repository = 'github.repository == ' + repr(env['HOMELAB_REPOSITORY'])
@@ -208,16 +209,33 @@ def model(stack, site):
         if guest == 'selection':
             continue
         caller = source['deploy.yml']['jobs'][guest]
-        filename = 'backup.yml' if guest == '_backup' else 'guest-' + guest + '.yml'
+        filename = ('web-checks.yml' if guest == '_checks' else 'backup.yml' if guest == '_backup'
+                    else 'pending-recovery.yml' if guest == '_recover' else 'finish-deployment.yml' if guest == '_finish'
+                    else 'guest-' + guest + '.yml')
         job = bind(copy.deepcopy(source[filename]['jobs']['deploy']), disabled)
+        owners = {step['with']['guest'] for step in job['steps'] if 'guest' in step.get('with', {})}
+        compiler.require(guest in ('_backup', '_checks', '_recover', '_finish') or len(owners) == 1, 'Bind one actual guest Environment')
+        owner = next(iter(owners)) if owners else 'backup'
+        common = (env.get('HOMELAB_CHECK_ENVIRONMENT', '') if guest == '_checks' else
+                  env.get('HOMELAB_RECOVERY_ENVIRONMENT', env.get('HOMELAB_CHECK_ENVIRONMENT', '')))
+        if guest in ('_checks', '_recover', '_finish'):
+            compiler.require(re.fullmatch('[a-z][a-z0-9-]{0,99}', common),
+                             'Declare the existing common controller check Environment')
         job.update(name=caller['name'], needs=copy.deepcopy(caller['needs']),
-                   environment='backup' if guest == '_backup' else env['HOMELAB_ENVIRONMENT_PREFIX'] + '-' + guest,
+                   environment=common if guest in ('_checks', '_recover', '_finish') else 'backup' if guest == '_backup' else env['HOMELAB_ENVIRONMENT_PREFIX'] + '-' + owner,
                    **{'runs-on': labels, 'if': repository + ' && ' + caller['if'].replace("inputs.disabled || '[]'", repr(disabled or '[]'))})
         # Enrolled guests inherit config validation through their setup barrier.
         # Other guests still need it while the source checks run independently.
-        if guest == '_backup' or '_backup' not in job['needs']:
+        if guest in ('_backup', '_checks', '_recover', '_finish') or '_backup' not in job['needs']:
             job['needs'].insert(0, 'validate')
-            job['if'] += " && needs.validate.result == 'success'"
+            if guest not in ('_checks', '_finish'):
+                job['if'] += " && needs.validate.result == 'success'"
+        if guest == '_checks':
+            job['steps'][-1]['env']['HOMELAB_CHECK_RESULTS'] = workflows.job_results(job['needs'])
+        if guest == '_finish':
+            job['steps'][-1]['env']['HOMELAB_RECOVERY_RESULTS'] = workflows.job_results(job['needs'])
+        if guest == '_recover':
+            job['steps'][-1]['env']['HOMELAB_RECOVERY_RESULTS'] = '{}'
         text = json.dumps(job)
         compiler.require(not WORKFLOW_INPUTS.search(text) and 'secrets: inherit' not in text,
                          'Materialize only closed guest workflow inputs')
@@ -229,18 +247,22 @@ def model(stack, site):
         framework = compiler.workflow_selection(stack/'.github/workflows/phase.yml', 'guest-phase.yml')
         steps = pbs_steps(pbs, framework)
         if '_backup' not in result['jobs']:
-            result['jobs']['_backup'] = {'name': 'Configure backups', 'needs': ['validate', 'selection'],
+            result['jobs']['_backup'] = {'name': 'Configure backups', 'needs': ['validate', 'selection', *(['_recover'] if '_recover' in result['jobs'] else [])],
                 'if': condition + " && !failure() && !cancelled() && needs.validate.result == 'success' && needs.selection.result == 'success'",
                 'runs-on': labels, 'environment': pbs['jobs']['firewall']['environment'],
                 'timeout-minutes': pbs['jobs']['firewall']['timeout-minutes'],
                 'steps': [{'name': 'Setup', 'uses': framework['repository'] + '/.github/actions/guest-setup@' + framework['revision']}]}
         backup = result['jobs']['_backup']
-        compiler.require(backup['name'] == 'Configure backups' and backup['needs'] == ['validate', 'selection']
+        compiler.require(backup['name'] == 'Configure backups' and backup['needs'] == ['validate', 'selection', *(['_recover'] if '_recover' in result['jobs'] else [])]
                          and backup['steps'][0].get('name') == 'Setup',
                          'Keep one early Configure backups job, never a final guest coordinator')
         backup['environment'] = pbs['jobs']['firewall']['environment']
         backup['timeout-minutes'] = pbs['jobs']['firewall']['timeout-minutes']
         backup['steps'][1:1] = steps
+        if '_finish' in result['jobs'] and '_backup' not in result['jobs']['_finish']['needs']:
+            finish = result['jobs']['_finish']
+            finish['needs'].append('_backup')
+            finish['steps'][-1]['env']['HOMELAB_RECOVERY_RESULTS'] = workflows.job_results(finish['needs'])
     return result
 
 
@@ -248,15 +270,79 @@ def rendered(stack, site):
     return HEADER + yaml.safe_dump(model(stack, site), sort_keys=False, width=1000)
 
 
+def reconcile_model(stack, site):
+    """Literal guest Environments and secret subsets; no arbitrary target writer."""
+    env, labels = settings(site)
+    source = workflows.models(stack, site_source=compiler.site_path(site), disabled=[])
+    framework = compiler.workflow_selection(stack/'.github/workflows/phase.yml', 'guest-phase.yml')
+    guests = [key for key in source['deploy.yml']['jobs'] if not key.startswith('_') and key != 'selection']
+    if not guests:
+        return None
+    condition = ('github.repository == '+repr(env['HOMELAB_REPOSITORY'])+
+                 " && github.event.repository.private == true && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'")
+    validation = {'name': 'Validate reconciliation', 'runs-on': 'ubuntu-24.04', 'if': condition,
+                  'steps': [{'name': 'Check selected guest', 'env': {'GUEST': '${{ inputs.guest }}',
+                             'BASELINE': '${{ inputs.baseline }}', 'REASON': '${{ inputs.reason }}'},
+                             'run': 'python3 - <<\'PYCODE\'\nimport os\nif os.environ["GUEST"] not in '+repr(guests)+
+                                    ': raise SystemExit("Select an existing owned guest")\n'+
+                                    'if os.environ["BASELINE"] not in ("last_good", "current_main") or not 0 < len(os.environ["REASON"].strip().encode()) <= 1024:\n'+
+                                    '    raise SystemExit("Select a baseline and supply a bounded recovery note")\nPYCODE\n'}]}
+    result = {'name': 'Reconcile guest', 'on': {'workflow_dispatch': {'inputs': {
+        'guest': {'description': 'Guest repaired by the engineer', 'type': 'choice', 'options': guests, 'required': True},
+        'baseline': {'description': 'Configuration to verify', 'type': 'choice',
+                     'options': ['last_good', 'current_main'], 'default': 'last_good', 'required': True},
+        'reason': {'description': 'Recovery note; application data/schema issues have been handled',
+                   'type': 'string', 'required': True}}}}, 'permissions': {'contents': 'read'},
+        'concurrency': {'group': 'homelab-private-deployment', 'cancel-in-progress': False, 'queue': 'max'},
+        'defaults': {'run': {'shell': 'bash'}}, 'jobs': {'validate': validation}}
+    for guest in guests:
+        original = source['guest-'+guest+'.yml']['jobs']['deploy']
+        preparation = []
+        for step in original['steps']:
+            phase = step.get('with', {}).get('phase')
+            if phase is None or phase == 'infrastructure':
+                continue
+            scoped = {workflows.PREFIX+slot.upper(): value for slot, value in step['with'].items()
+                      if slot in workflows.SCALAR_SLOTS}
+            preparation.append({'name': 'Prepare expected '+phase, 'if': "inputs.baseline == 'current_main'",
+                'env': {'GUEST': guest, 'PHASE': phase, 'REASON': '${{ inputs.reason }}', **scoped},
+                'run': '"$HOMELAB_CONFIG_PYTHON" framework-source/blueprints/guest_recovery.py '
+                       '--stack stack-source --site-root . --mode prepare --baseline current_main '
+                       '--guest "$GUEST" --phase "$PHASE" --reason="$REASON"'})
+        result['jobs'][guest] = {'name': 'Reconcile '+guest, 'needs': ['validate'],
+            'if': condition+' && inputs.guest == '+repr(guest), 'runs-on': labels,
+            'environment': env['HOMELAB_ENVIRONMENT_PREFIX']+'-'+guest, 'timeout-minutes': 45,
+            'env': {'HOMELAB_DEPLOYMENT_WORKFLOW': '${{ github.workflow_ref }}'},
+            'steps': [{'name': 'Setup', 'uses': framework['repository']+'/.github/actions/guest-setup@'+framework['revision']},
+                      *preparation,
+                      {'name': 'Reconcile guest', 'env': {'GUEST': guest, 'BASELINE': '${{ inputs.baseline }}',
+                          'REASON': '${{ inputs.reason }}', 'DISABLED': env.get('HOMELAB_DISABLED', '[]')},
+                       'run': '"$HOMELAB_CONFIG_PYTHON" framework-source/blueprints/guest_recovery.py '
+                              '--stack stack-source --site-root . --disabled "$DISABLED" --mode reconcile '
+                              '--guest "$GUEST" --baseline "$BASELINE" --reason="$REASON"'}]}
+    return result
+
+
 def synchronize(stack, site, *, check):
-    expected = rendered(stack, site)
-    path = site / '.github/workflows/deploy.yml'
-    if check:
-        compiler.require(path.read_text() == expected, 'Regenerate the exact private guest workflow; do not alter jobs or secret scope')
-        return False
-    changed = path.read_text() != expected
-    if changed:
-        path.write_text(expected)
+    reconciler = reconcile_model(stack, site)
+    outputs = {'deploy.yml': rendered(stack, site),
+               'reconcile-guest.yml': None if reconciler is None else HEADER+yaml.safe_dump(reconciler, sort_keys=False, width=1000)}
+    changed = False
+    for name, expected in outputs.items():
+        path = site/'.github/workflows'/name
+        compiler.require(not path.is_symlink(), 'Keep generated private workflows regular')
+        if expected is None:
+            if path.exists():
+                compiler.require(not check and path.read_text().startswith(HEADER),
+                                 'Retire only this generator owned obsolete reconciliation workflow')
+                path.unlink(); changed = True
+            continue
+        different = not path.exists() or path.read_text() != expected
+        if check:
+            compiler.require(not different, 'Regenerate the exact private guest workflow; do not alter jobs or secret scope')
+        elif different:
+            path.write_text(expected)
+        changed = different or changed
     return changed
 
 

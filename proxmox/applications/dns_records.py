@@ -129,9 +129,12 @@ def reconcile(records, compose, *, service="pihole", previous=None):
     return True
 
 
-def probe(name, address):
+def probe(name, address, *, server="127.0.0.1", source=None):
     """Query Pi-hole directly; fallback DNS cannot hide a missing managed record."""
     validate({name: address})
+    for value in (server, *([] if source is None else [source])):
+        if not isinstance(value, str) or str(ipaddress.IPv4Address(value)) != value:
+            raise ValueError("Use exact IPv4 DNS server and source addresses")
     question = (
         b"".join(bytes([len(part)]) + part.encode() for part in name.split("."))
         + b"\0\0\1\0\1"
@@ -139,7 +142,9 @@ def probe(name, address):
     query = struct.pack("!6H", 0x4D51, 0x100, 1, 0, 0, 0) + question
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
         client.settimeout(5)
-        client.connect(("127.0.0.1", 53))
+        if source is not None:
+            client.bind((source, 0))
+        client.connect((server, 53))
         client.send(query)
         response = client.recv(8192)
     identity, flags, questions, answers, _, _ = struct.unpack("!6H", response[:12])

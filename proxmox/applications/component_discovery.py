@@ -20,8 +20,7 @@ def verify(cfg, app, raw_record, api=None):
     scope = provider.get('discovery')
     if scope is None:
         return {'status': 'not_selected', 'writes': False}
-    protected=cfg['deployment']['protected_guests']
-    scope = discovery_scope.selected_scope(scope,protected)
+    scope = discovery_scope.selected_scope(scope)
     deployment_state.bootstrap_closed(Path(scope['local_directory']).parent)
     require(isinstance(raw_record, bytes) and 0 < len(raw_record) <= 65536,
             'Supply the selected bounded retained provider record')
@@ -30,4 +29,4 @@ def verify(cfg, app, raw_record, api=None):
         return provider['token_id']+'='+token
     return discovery_scope.verify_selection(cfg, scope, endpoint=provider['url'],
         token_id=provider['token_id'], ca_file=provider['ca_file'],
-        read_configured=configured, api=api, protected_guests=protected)
+        read_configured=configured, api=api)

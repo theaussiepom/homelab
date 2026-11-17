@@ -25,7 +25,12 @@ class InfrastructureNoopTests(unittest.TestCase):
     def test_pbs_preparation_forwards_empty_backup_selection_without_an_apply(self):
         self.existing_noop(backup=True)
 
-    def existing_noop(self, backup=False):
+    def test_reconciliation_noop_is_read_only_and_refuses_resource_updates(self):
+        self.existing_noop(recovery=True, verify_only=True)
+        with self.assertRaisesRegex(ValueError, 'actual infrastructure'):
+            self.existing_noop(recovery=True, verify_only=True, update=True)
+
+    def existing_noop(self, backup=False, recovery=False, verify_only=False, update=False):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             cfg = guest(root)
@@ -47,6 +52,8 @@ class InfrastructureNoopTests(unittest.TestCase):
                 row["change"].update(
                     actions=["no-op"], before=copy.deepcopy(row["change"]["after"])
                 )
+            if update:
+                plan['resource_changes'][0]['change']['actions'] = ['update']
             commands = []
 
             def quiet(args, environment, log):
@@ -56,7 +63,7 @@ class InfrastructureNoopTests(unittest.TestCase):
 
             with (
                 patch.object(
-                    deployment_inputs, "binding", return_value={"approved": True}
+                    deployment_inputs, "binding", return_value={"approved": True, 'input_hashes': {}}
                 ),
                 patch.object(pve, "backup"),
                 patch.object(pve, "quiet", side_effect=quiet),
@@ -66,14 +73,18 @@ class InfrastructureNoopTests(unittest.TestCase):
                     return_value=json.dumps(plan).encode(),
                 ),
                 patch.object(pve.guest_identity, "pin") as pin,
+                patch('component_generation.sealed_inputs', return_value=(cfg, {})),
+                patch.object(pve.host_devices, 'attach', return_value=False) as attach,
             ):
                 result = pve.infrastructure(
-                    cfg, root / "site", work, operation, {"approved": True}
+                    cfg, root / "site", work, operation, {"approved": True, 'input_hashes': {}},
+                    recovery=recovery, verify_only=verify_only,
                 )
             self.assertFalse(result["created"])
             self.assertFalse(result["changed"])
             self.assertFalse(any("apply" in command for command in commands))
             pin.assert_not_called()
+            self.assertEqual(attach.call_count, 0 if recovery else 1)
             self.assertEqual(state.read_bytes(), b"existing authoritative backend")
 
     def test_pre_creation_backup_records_absence_without_fabricating_state(self):

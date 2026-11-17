@@ -1,0 +1,14 @@
+---
+- name: Verify this guest's configured routed endpoints
+  hosts: application
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Check guest identity and existing paths
+      ansible.builtin.import_tasks: tasks/component-ready.yml
+
+    - name: Verify real DNS and authenticated TLS for every selected hostname
+      ansible.builtin.command:
+        argv: "{{ route_check_argv }}"
+      changed_when: false

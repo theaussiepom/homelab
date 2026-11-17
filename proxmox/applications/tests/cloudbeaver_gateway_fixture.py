@@ -518,7 +518,9 @@ def community_exception_projection(log):
     types = {'java.lang.NullPointerException', 'java.util.ConcurrentModificationException',
              'java.lang.IllegalStateException', 'java.lang.IllegalArgumentException',
              'java.util.NoSuchElementException', 'java.lang.ClassCastException',
-             'java.io.IOException', 'org.jkiss.dbeaver.DBException', 'io.cloudbeaver.DBWebException'}
+             'java.io.IOException', 'org.jkiss.dbeaver.DBException', 'io.cloudbeaver.DBWebException',
+             'java.lang.OutOfMemoryError', 'java.util.concurrent.RejectedExecutionException',
+             'java.net.URISyntaxException'}
     frames = {'io.cloudbeaver.service.core.impl.WebServiceCore.getUserConnections': 'WebServiceCore.getUserConnections',
               'io.cloudbeaver.model.session.WebSession.getAccessibleProjects': 'WebSession.getAccessibleProjects',
               'io.cloudbeaver.WebServiceUtils.getApplicableDriversIds': 'WebServiceUtils.getApplicableDriversIds'}
@@ -637,6 +639,13 @@ def start_gateway(common, stage):
 
 
 def echo_checks():
+    status, headers, _ = get(provider.public_url+'/', ROOT/'accept-html-cookies.txt', {'Accept':'text/html'})
+    record('anonymous_html_request_redirects_to_declared_provider',
+           status == 302 and headers.get('location', [''])[0].startswith(provider.issuer.rstrip('/')+'/authorize?')
+           and not seen_upstream, status=status)
+    status, _, _ = get(provider.public_url+'/', ROOT/'accept-json-cookies.txt', {'Accept':'text/html,application/json'})
+    record('anonymous_mixed_json_request_is_unauthorized_without_upstream_access',
+           status == 401 and not seen_upstream, status=status)
     forged = {name: ('admin' if name in {'X-Team', 'X-Role', 'X-Role-TE', 'X-Forwarded-Groups'}
                      else 'forged-recovery-admin') for name in HEADERS}
     status, _, _ = get(provider.public_url+'/', ROOT/'anonymous-cookies.txt', forged)
@@ -827,6 +836,16 @@ def execute():
                     write(ROOT/logfile, logs.stdout+logs.stderr)
                     if query_failed and logfile == 'community.log' and logs.returncode == 0:
                         result['community_exception_diagnostics'] = community_exception_projection(logs.stdout+logs.stderr)
+                    if query_failed and logfile == 'community.log':
+                        try:
+                            stats = docker('stats', '--no-stream', '--format', '{{.PIDs}}', details['Id'], timeout=5, check=False)
+                            pids = stats.stdout.strip() if stats.returncode == 0 else ''
+                        except (OSError, subprocess.SubprocessError):
+                            pids = ''
+                        limit = details.get('HostConfig', {}).get('PidsLimit')
+                        result['community_process_diagnostics'] = {
+                            'pids': int(pids) if pids.isascii() and pids.isdecimal() and len(pids) <= 7 and int(pids) <= 1000000 else None,
+                            'pids_limit': limit if type(limit) is int and -1 <= limit <= 1000000 else None}
                     removed = docker('rm', '--force', details['Id'], check=False)
                     result['owned_fixture_container_removed'] = removed.returncode == 0
                 elif query_failed and owned == (ce_id or ce_name):
@@ -850,6 +869,8 @@ def execute():
             summary['query_error_diagnostics'] = result['query_error_diagnostics']
         if 'community_exception_diagnostics' in result:
             summary['community_exception_diagnostics'] = result['community_exception_diagnostics']
+        if 'community_process_diagnostics' in result:
+            summary['community_process_diagnostics'] = result['community_process_diagnostics']
         print(json.dumps(summary))
     if result['status'] != 'PASS':
         raise SystemExit(1)

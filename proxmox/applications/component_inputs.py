@@ -104,7 +104,7 @@ def binding(cfg, site):
             external += [row['source'] for row in app['settings'].get('route_ca_files',{}).values()]
             scope=app['settings']['provider'].get('discovery')
             if scope is not None:
-                external += discovery_scope.scope_source_files(scope,cfg['deployment']['protected_guests'])
+                external += discovery_scope.scope_source_files(scope)
     if cfg['guest'].get('serial_device'):
         external += [cfg['paths']['host_device_key'], cfg['paths']['host_known_hosts']]
     if 'recording_mount' in cfg['guest']:

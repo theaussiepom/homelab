@@ -295,7 +295,7 @@ class BackupIntegration(unittest.TestCase):
             self.assertTrue(cfg['guest']['volumes']['data']['backup'])
             self.assertFalse(cfg['guest']['volumes']['cache']['backup'])
             self.assertEqual(cfg['deployment']['phases'][-1], backup.PHASE)
-            self.assertEqual(component_workflows.model(plan)['guests']['resolver']['phases'][-1]['name'], 'Backup')
+            self.assertEqual(component_workflows.model(plan)['guests']['resolver']['phases'][-1]['name'], 'Configure backup')
             component_guest.packet(packet, component_packet.INPUTS)
             from test_component_backup_job import fixture as operational_fixture
             job, _ = operational_fixture()

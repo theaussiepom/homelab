@@ -70,7 +70,10 @@ def lower_guest(plan, guest_id, *, inputs=INPUTS):
         app = runtime['applications'][app_id]
         phase = app['identity']['phase']
         compose = '/opt/homelab-app/' + app['project_file'] if 'project_file' in app else None
-        selected = component_checks.checks(app, runtime['guest'], compose_file=compose)
+        routed = guest_id in plan.resolved.get('routed_checks', {}) and any(
+            row['target'].get('app') == app_id for row in plan.resolved['exposures'].values() if row['type'] == 'http')
+        selected = component_checks.checks(app, runtime['guest'], compose_file=compose,
+                                           **({'routed': True} if routed else {}))
         require(bool(selected), 'component.health-required')
         checks[phase] = selected
         payload_phases[phase] = app_id
@@ -104,6 +107,8 @@ def lower_guest(plan, guest_id, *, inputs=INPUTS):
             'packages': copy.deepcopy(software['packages']), 'repositories': repositories,
             'required_paths': list(required.values()), 'service_health_checks': checks,
             'health_checks': [row for rows in checks.values() for row in rows]}}
+    if guest_id in plan.resolved.get('routed_checks', {}):
+        cfg['app']['route_checks'] = copy.deepcopy(plan.resolved['routed_checks'][guest_id])
     if 'frontend_routing' in guest:
         cfg['app']['frontend_routing'] = copy.deepcopy(guest['frontend_routing'])
     if 'monitoring' in guest:

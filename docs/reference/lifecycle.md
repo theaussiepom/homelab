@@ -45,7 +45,16 @@ A fresh guest must have neither a prior ordinary HomeLab owner nor an existing b
 
 The controller checks the current pointer to the last successful ordinary operation (the canonical record) and the immutable receipt for that operation. It also verifies the sealed static configuration, completion evidence for each phase, and each AppPayload—the recorded inputs for an app—against the current backend and guest and app identities. These checks preserve the previous API provider, node, VMID, hostname, and ownership of storage and runtime services. They also check that workflow history continues from the previous run. A newly selected retained app cannot take over names or paths that HomeLab does not already own.
 
-Each later ordinary run records new receipts and a new backend generation. Earlier inactive records remain unchanged historical evidence; they do not permit importing resources. Execution stops when checks find active or pending markers, unresolved records from a newer or different component operation, changed state, or a pointer moved back to an older successful operation. A checkpoint records progress within an operation and can be reused only through the existing procedure that verifies it belongs to that exact operation. The workflow does not automatically retry operations or release holds.
+An already owned app may acquire its first generated runtime-file directory when
+an adapter adds managed files. Its prior sealed app must have no runtime
+directory or owned runtime leaves, and every other persistent identity and
+storage field must remain equal. The compiler reserves only the adapter's fixed
+leaves and checks peer conflicts. The directory uses the existing fresh-namespace
+creation guard: an existing or conflicting leaf is refused, never adopted or
+repaired. App and data ownership remain retained. Later deployments verify the
+same directory; moving or removing an owned directory is refused.
+
+Each later ordinary run records new receipts and a new backend generation. Earlier inactive records remain unchanged historical evidence; they do not permit importing resources. Execution stops when checks find active or pending markers, unresolved records from a newer or different component operation, changed state, or a pointer moved back to an older successful operation. A checkpoint records progress within an operation. Same-run phase continuation verifies that exact operation; a separately reviewed [infrastructure checkpoint admission](../operations/infrastructure-checkpoint.md) can bind genuinely completed infrastructure to one fresh successor after an authorised failure archive. It transfers no application ownership. The workflow never retries the failed forward operation. Generated [CD recovery](../operations/cd-recovery.md) can reverse a supported update and release only its verified hold; other pending or foreign operations remain refusals.
 
 Historical sealed v1 component configurations may contain retired fields. HomeLab reads them as immutable evidence rather than parsing them as new configuration. Their contents do not add migration exceptions, bootstrap adapters or release hooks to the current configuration format.
 
@@ -73,9 +82,9 @@ For an existing guest, the disk and mount-point blocks must remain unchanged, in
 | App removal | Does not delete data or containers automatically; preflight rejects existing project services absent from configuration |
 | DNS alias removal | Removes only a record with its exact previously managed value; conflicts are rejected |
 | Backend rollback/foreign edit | Refuses before new native work |
-| Failure | Preserve HOLD, markers, the prior canonical pointer, immutable receipt and other evidence. Diagnose before separately authorised recovery. |
+| Failure | Preserve immutable history. Generated CD recovery verifies supported rollback before releasing the exact hold; otherwise use Reconcile guest after engineer repair. The deployment stays failed. |
 
-No general rollback, import, destructive replacement, native restore or arbitrary delete contract is provided. The separate [recovery subsystems](../framework-reference.md) have their own qualification and authority.
+The generated [CD recovery contract](../operations/cd-recovery.md) supports rollback of existing owned infrastructure and application controls. Import, destructive replacement, application-data restore and arbitrary deletion remain outside that contract. Other [recovery subsystems](../framework-reference.md) retain their separate qualification and authority.
 
 ## Failure boundaries
 
@@ -87,9 +96,11 @@ Compilation, controller tests, isolated Docker protocol tests, protected CD runs
 
 Each generated guest job ends with **Cleanup**, including after a failed phase. The standalone reusable phase workflow also ends with cleanup. It takes the same database-network, workflow and deployment locks in the same order. A busy lock defers cleanup; it never interrupts another deployment or backup. Cleanup receives the compiled packet and job outcome, with no application secrets. Its failure leaves the deployment outcome unchanged and appears as a deferred cleanup in the job log.
 
-The current backend, canonical success pointer, immutable phase receipts and sealed static/application inputs remain authoritative. Cleanup does not relocate or rewrite these records. It removes the finished attempt's reproducible OpenTofu working directory, downloaded providers, saved plan, phase variables/inventory/rendered scratch and full logs. Before deleting logs it records up to eight private 1 KiB tails, the run/source identity and outcome. `job-history.json` retains the latest 20 operation summaries. These summaries are diagnostics, never proof of deployment success.
+The current backend, canonical success pointer, verified `current-state.json`, immutable phase receipts and sealed static/application inputs remain authoritative. Cleanup validates the effective owner and does not relocate or rewrite these records. It removes the finished attempt's reproducible OpenTofu working directory, downloaded providers, saved plan, phase variables/inventory/rendered scratch and ordinary phase logs. Before deleting logs it records up to eight private 1 KiB tails, the run/source identity and guest job outcome. `job-history.json` retains the latest 20 operation summaries. These summaries are diagnostics, never proof of final deployment acceptance.
 
-After validating the genuine current success, cleanup retires older completed operation trees and their superseded generated inputs. Inputs still referenced by current or unresolved custody remain. Failed attempts finalized by this implementation can have their bulk reclaimed on subsequent jobs; the exact HOLD, checkpoints and required input generation remain until separately authorized recovery resolves them. Older unclassified failures without a finished-job record are preserved for explicit compatibility review. A completion filename alone is insufficient authority to delete a generation.
+After validating the genuine current success, cleanup can retire older completed operation trees and their superseded generated inputs when the guest has no recovery history. Inputs still referenced by current or unresolved custody remain. With CD rollback baselines, verified current state, recovery directories or reviewed infrastructure admission records, it retains all operation receipts and sealed input generations: those records contain references between generations. Provider downloads and ordinary phase scratch can still be reclaimed. Recovery control snapshots, capture/restore logs and operator archives remain untouched; their retirement requires separate compatibility review.
+
+Cleanup runs before the deployment's final acceptance or rollback. It preserves the pending hold and all inputs needed by either decision. Failed attempts finalized by this implementation can have their bulk reclaimed on subsequent jobs; the exact HOLD, checkpoints and required input generation remain until separately authorized recovery resolves them. Older unclassified failures without a finished-job record are preserved for explicit compatibility review. A completion filename alone is insufficient authority to delete a generation.
 
 Deletion uses an explicit inventory of owned regular files and directories, checks identities, refuses symlinks, hard links, special files and filesystem crossings, and leaves unknown operation files alone. Runtime-owned application paths, imported data, external credentials, backend state, backup records and recovery stores are outside the deletion scope. An unexpected state file or recovery marker inside scratch stops its removal.
 

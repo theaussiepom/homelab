@@ -10,6 +10,7 @@ import re
 from types import SimpleNamespace
 
 import cleanup_files as files
+import component_current as current
 import component_generation as generation
 import component_guest
 import component_inputs
@@ -82,6 +83,16 @@ def bulk(operation, phases):
                             or 'HOLD' in Path(item).name or 'VERIFYING' in Path(item).name
                             for item in entries), 'Preserve state or recovery markers in scratch')
             files.remove(operation, entries)
+
+
+def recovery_history(work, operations):
+    """Recovery references span generations; this finalizer never retires them."""
+    roots = [work/current.NAME, *work.glob('recovery-*'), *work.glob('operator-recovery-*'),
+             *work.glob('infrastructure-admission*')]
+    records = ('rollback-baseline.json', 'rollback-ready.json', 'controls-before.json',
+               'forward-failure.json', 'infrastructure-invocation.json', 'infrastructure-admission.json')
+    return any(current.exists(path) for path in roots) or any(
+        current.exists(operation/name) for operation in operations for name in records)
 
 
 def retire(work, operation, parent, protected, canonical, record, binding):
@@ -166,6 +177,7 @@ def locked(cfg, outcome):
         require(Path(hold['operation']).parent == work and hold['workflow'] == attempt.workflow,
                 'Preserve foreign deployment hold ownership')
         epoch(Path(hold['operation']))
+    attempt.receipt = current.owner_path(work)
     canonical = None
     if attempt.receipt.exists() or attempt.receipt.is_symlink():
         # Inspect the current configuration, not potentially rejected new inputs.
@@ -176,6 +188,10 @@ def locked(cfg, outcome):
         canonical = generation.previous(SimpleNamespace(work=work, receipt=attempt.receipt,
             vmid=attempt.vmid, cfg=current_cfg))[0]
     operations = sorted((path for path in work.iterdir() if re.fullmatch(OPERATION, path.name)), key=epoch)
+    # Keep every historical input generation while recovery or a reviewed
+    # checkpoint owns references between them. Bulk cleanup remains independent
+    # of final acceptance, rollback and reconciliation.
+    preserve_history = recovery_history(work, operations)
     protected = {Path(cfg['deployment']['input_directory'])}
     if canonical is not None:
         protected.add(input_directory(canonical['binding'], parent, attempt.vmid))
@@ -187,6 +203,8 @@ def locked(cfg, outcome):
             no_markers(operation)
         ticket = operation/RETIRING
         if ticket.exists() or ticket.is_symlink():
+            if preserve_history:
+                continue
             require(canonical is not None, 'Cleanup retirement needs current ownership')
             require(hold is None or hold.get('operation') != str(operation),
                     'Preserve a held retirement operation')
@@ -234,7 +252,7 @@ def locked(cfg, outcome):
             phases = list(marker['phase_inputs']) if passed else read_json(directory/'site.json', private=True)['deployment']['phases']
         bulk(operation, phases)
         held = hold is not None and hold.get('operation') == str(operation)
-        if canonical is not None and epoch(operation) < epoch(Path(canonical['operation'])) and not held:
+        if not preserve_history and canonical is not None and epoch(operation) < epoch(Path(canonical['operation'])) and not held:
             candidates.append((operation, record, marker['binding']))
         else:
             protected.add(directory)

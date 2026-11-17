@@ -180,9 +180,11 @@ class RecordingInfrastructureBoundary(unittest.TestCase):
             def quiet(argv,environment,log):
                 commands.append(argv)
                 if 'plan'in argv:(log.parent/'guest.tfplan').write_bytes(b'saved no-op plan')
-            for mismatch in (False,True):
-                operation=root/('mismatch'if mismatch else 'repeat');operation.mkdir()
+            for label, mismatch, recovery in [('repeat',False,False),('mismatch',True,False),('recovery',False,True)]:
+                operation=root/label;operation.mkdir()
+                expected={'input_hashes':{}} if recovery else {'approved':True}
                 with patch.object(deployment_inputs,'binding',return_value={'approved':True}), \
+                     patch('component_generation.sealed_inputs',return_value=(selected,{})), \
                      patch.object(pve,'backup'),patch.object(pve,'quiet',side_effect=quiet), \
                      patch.object(nfs_attachments,'attach',return_value=False)as attach, \
                      patch.object(pve,'guest_trust')as trust, \
@@ -191,12 +193,12 @@ class RecordingInfrastructureBoundary(unittest.TestCase):
                      patch.object(mount,'verify',side_effect=['proof','different'if mismatch else 'proof'])as verify:
                     if mismatch:
                         with self.assertRaises(ValueError):
-                            pve.infrastructure(selected,root/'site',work,operation,{'approved':True},previous_configuration=previous)
+                            pve.infrastructure(selected,root/'site',work,operation,expected,previous_configuration=previous,recovery=recovery)
                     else:
-                        result=pve.infrastructure(selected,root/'site',work,operation,{'approved':True},previous_configuration=previous)
+                        result=pve.infrastructure(selected,root/'site',work,operation,expected,previous_configuration=previous,recovery=recovery)
                         self.assertFalse(result['changed']);self.assertFalse(result['created'])
                     original.assert_called_once_with(selected,previous,work)
-                    attach.assert_called_once()
+                    self.assertEqual(attach.call_count,0 if recovery else 1)
                     self.assertEqual([x.kwargs['label']for x in verify.call_args_list],['before','after'])
                     trust.assert_called_once_with(selected,work,persist=False)
             self.assertFalse(any('apply'in row for row in commands))

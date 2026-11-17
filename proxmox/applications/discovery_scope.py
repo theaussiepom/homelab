@@ -13,7 +13,6 @@ import ssl
 import sys
 import urllib.request
 from urllib.parse import urlsplit
-from urllib.parse import quote
 
 from private_io import require
 import network_endpoints
@@ -21,23 +20,16 @@ import network_endpoints
 BOOTSTRAP = Path(__file__).resolve().parents[1] / 'bootstrap'
 
 
-def selected_scope(value, protected_guests=None):
-    """Validate the same explicit finite discovery scope without guest-kind tags."""
+def selected_scope(value):
+    """Select read-only discovery for all guests without a permission inventory."""
     require(isinstance(value, dict) and set(value) ==
-            {'local_directory', 'mirror_directory', 'owner_sha256', 'guests'},
-            'Bind one exact finite owned discovery scope')
+            {'local_directory', 'mirror_directory', 'scope'} and value['scope'] == 'all-guests',
+            'Bind the owned all-guest read-only discovery scope')
     for name in ('local_directory', 'mirror_directory'):
         path = value[name]
         require(isinstance(path, str) and Path(path).is_absolute() and '..' not in Path(path).parts
                 and Path(path).name == 'service-discovery', 'Bind existing discovery custody directories')
-    protected = {900,4914,4915,4920} if protected_guests is None else protected_guests
-    require(isinstance(protected,(list,set)) and all(type(v) is int and v>=1 for v in protected)
-            and len(set(protected))==len(protected), 'Preserve explicit context protection')
-    require(value['local_directory'] != value['mirror_directory']
-            and isinstance(value['owner_sha256'], str) and re.fullmatch('[0-9a-f]{64}', value['owner_sha256'])
-            and isinstance(value['guests'], list) and 1 <= len(value['guests']) <= 32
-            and all(type(v) is int and v >= 100 and v not in protected for v in value['guests'])
-            and len(set(value['guests'])) == len(value['guests']), 'Bind one exact finite owned discovery scope')
+    require(value['local_directory'] != value['mirror_directory'], 'Keep discovery custody independent')
     return value
 
 
@@ -72,12 +64,15 @@ def provider():
 
 
 
-def scope_source_files(value, protected_guests=None):
-    value=selected_scope(value,protected_guests)
+def scope_source_files(value):
+    value=selected_scope(value)
     result = []
     for key in ('local_directory', 'mirror_directory'):
         root = Path(value[key])
         result += [str(root / name) for name in ('owner.json', 'token.json', 'READY.json')]
+        policy = root/'read-scope.json'
+        if policy.exists() or policy.is_symlink():
+            result.append(str(policy))
         extensions = root / 'scope-extensions'
         if extensions.exists() or extensions.is_symlink():
             require(extensions.is_dir() and not extensions.is_symlink(), 'Preserve real discovery extension directories')
@@ -102,9 +97,8 @@ class Reader:
         return Reader(self.endpoint, self.ca_file, token)
 
     def call(self, path):
-        require(self.token is not None and (path == '/access/permissions'
-                or re.fullmatch('/nodes/[A-Za-z0-9-]+/lxc/[1-9][0-9]*/config', path)),
-                'Use only read-only discovery permission and guest-config endpoints')
+        require(self.token is not None and path in ('/access/permissions', '/cluster/resources?type=vm'),
+                'Use only read-only discovery permission and guest-list endpoints')
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
                     urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=self.ca_file)))
         request = urllib.request.Request(self.endpoint.rstrip('/') + '/api2/json' + path,
@@ -117,22 +111,20 @@ class Reader:
         return value
 
 
-def verify_selection(cfg, value, *, endpoint, token_id, ca_file, read_configured, api=None,
-                     protected_guests=None):
+def verify_selection(cfg, value, *, endpoint, token_id, ca_file, read_configured, api=None):
     """Verify existing owned scope, mirrored READY/token and exact effective GETs."""
-    value = selected_scope(value,protected_guests)
+    value = selected_scope(value)
     access = provider()
     local, mirror = Path(value['local_directory']), Path(value['mirror_directory'])
     owner = access.scope_owner(local, mirror)
-    require(access.owner_sha256(owner) == value['owner_sha256']
-            and owner['configuration']['guests'] == value['guests']
+    require(owner['schema'] == access.OWNER_SCHEMA and owner['configuration']['scope'] == 'all-guests'
             and owner['configuration']['vmid'] == cfg['guest']['vmid']
             and owner['configuration']['address'] in network_endpoints.addresses(cfg['guest'])
             and owner['node'] == cfg['site']['node']
             and origin(owner['endpoint']) == origin(endpoint),
             'Discovery desired scope is not owned; complete reviewed privileged bootstrap CD')
     selected_config = {'node': owner['node'], 'endpoint': owner['endpoint'],
-        'service_discovery': owner['configuration'], 'applications': [{'vmid': v} for v in value['guests']]}
+        'service_discovery': owner['configuration'], 'applications': [{'vmid': cfg['guest']['vmid']}]}
     access.validate(selected_config)
     require(access.identity(selected_config)[1] == token_id,
             'Preserve the retained discovery identity')
@@ -149,12 +141,12 @@ def verify_selection(cfg, value, *, endpoint, token_id, ca_file, read_configured
     except (OSError, ValueError, TypeError, AttributeError, HTTPException):
         raise ValueError('Discovery read access is not verified; complete reviewed privileged bootstrap CD') from None
     reader = api.discovery(configured)
-    for vmid in value['guests']:
-        try:
-            config = reader.call('/nodes/' + quote(owner['node'], safe='') + '/lxc/' + str(vmid) + '/config')['data']
-        except (OSError, ValueError, HTTPException):
-            raise ValueError('A declared guest is not visible; complete reviewed privileged bootstrap CD') from None
-        require(isinstance(config, dict) and isinstance(config.get('hostname'), str) and config['hostname'],
-                'A declared guest is not visible; complete reviewed privileged bootstrap CD')
+    try:
+        guests = reader.call('/cluster/resources?type=vm')['data']
+    except (OSError, ValueError, HTTPException):
+        raise ValueError('Guest discovery is not visible; complete reviewed privileged bootstrap CD') from None
+    require(isinstance(guests, list) and all(isinstance(row, dict) for row in guests)
+            and sum(row.get('vmid') == cfg['guest']['vmid'] and row.get('node') == owner['node'] for row in guests) == 1,
+            'The owned discovery guest is not visible')
     return {'status': 'verified', 'owned_scope': True, 'effective_permissions': True,
-            'visible_guests': len(value['guests']), 'writes': False}
+            'visible_guests': len(guests), 'scope': 'all-guests', 'writes': False}

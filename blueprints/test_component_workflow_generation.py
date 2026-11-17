@@ -58,7 +58,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
         result=self.model(value)
         self.assertEqual(result['deploy.yml']['jobs']['_backup']['name'],'Configure backups')
         self.assertEqual(result['backup.yml']['name'],'Configure backups')
-        self.assertEqual(result['deploy.yml']['jobs']['_backup']['needs'],['selection'])
+        self.assertEqual(result['deploy.yml']['jobs']['_backup']['needs'],['selection','_recover'])
         self.assertIn("needs.selection.result == 'success'",result['deploy.yml']['jobs']['_backup']['if'])
         job=result['backup.yml']['jobs']['deploy']
         self.assertEqual(job['name'],'Configure backups')
@@ -67,6 +67,15 @@ class WorkflowIntegrationTests(unittest.TestCase):
         for guest in ('store','viewer'):
             self.assertNotIn('PBS_API_TOKEN',json.dumps(result['guest-'+guest+'.yml']))
         self.assertNotIn('secrets: inherit',json.dumps(result))
+
+    def test_backup_only_source_has_no_guest_recovery_or_finalizer(self):
+        value = graph(); value.update(guests={}, guest_order=[], dependencies={})
+        value['backup'] = {'name': 'Configure backups', 'needs': ['selection'],
+                           'environment': 'backup', 'workflow_secrets': ['PBS_API_TOKEN']}
+        result = self.model(value)
+        self.assertNotIn('_recover', result['deploy.yml']['jobs'])
+        self.assertNotIn('_finish', result['deploy.yml']['jobs'])
+        self.assertEqual(result['deploy.yml']['jobs']['_backup']['needs'], ['selection'])
 
     def test_phase_recipe_and_composites_preserve_setup_and_separate_credential_scopes(self):
         job, defaults = w.phase_recipe()
@@ -91,8 +100,11 @@ class WorkflowIntegrationTests(unittest.TestCase):
 
     def test_actual_graph_names_edges_app_order_and_per_phase_scalars_are_preserved(self):
         result = self.model(); deploy = result['deploy.yml']
-        self.assertEqual(list(deploy['jobs']), ['selection', 'store', 'viewer'])
-        self.assertEqual(deploy['jobs']['viewer']['needs'], ['selection', 'store'])
+        self.assertEqual(list(deploy['jobs']), ['selection', '_recover', 'store', 'viewer', '_finish'])
+        self.assertEqual(deploy['jobs']['viewer']['needs'], ['selection', 'store', '_recover'])
+        self.assertIn('always()', deploy['jobs']['_finish']['if'])
+        self.assertEqual(deploy['jobs']['_finish']['secrets'], {})
+        self.assertEqual(deploy['jobs']['_recover']['secrets'], {})
         self.assertEqual(deploy['jobs']['viewer']['name'], 'Tools')
         self.assertNotIn('uses', result['guest-viewer.yml']['jobs']['deploy'])
         for guest, name in [('store', 'Database'), ('viewer', 'Tools')]:
@@ -130,7 +142,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
     def test_owned_generated_files_detect_drift_and_refuse_obsolete_or_symlink_paths(self):
         with patch.object(w.compiler,'resolve_plan',return_value=object()),patch.object(w.component_workflows,'model',return_value=graph()):
             with self.assertRaisesRegex(ValueError,'stale'): w.synchronize(self.stack,site_source=self.site,check=True)
-            self.assertEqual(w.synchronize(self.stack,site_source=self.site,check=False),{'workflows':4,'changed':4})
+            self.assertEqual(w.synchronize(self.stack,site_source=self.site,check=False),{'workflows':6,'changed':6})
             self.assertEqual(w.synchronize(self.stack,site_source=self.site,check=True)['changed'],0)
             p=self.stack/'.github/workflows/guest-viewer.yml';p.write_text('changed\n');before=p.read_bytes()
             with self.assertRaisesRegex(ValueError,'stale'):w.synchronize(self.stack,site_source=self.site,check=True)
@@ -187,16 +199,16 @@ class WorkflowIntegrationTests(unittest.TestCase):
     def test_real_minimal_plan_has_no_implicit_guest_or_peer_application(self):
         stack,source=self._source_fixture()
         result=w.models(stack,site_source=self.root/'site.yaml')
-        self.assertEqual(set(result),{'deploy.yml','phase.yml','guest-resolver.yml'})
-        self.assertEqual(result['deploy.yml']['jobs']['resolver']['needs'],['selection'])
+        self.assertEqual(set(result),{'deploy.yml','phase.yml','guest-resolver.yml','pending-recovery.yml','finish-deployment.yml'})
+        self.assertEqual(result['deploy.yml']['jobs']['resolver']['needs'],['selection','_recover'])
         self.assertEqual([s['with']['phase'] for s in result['guest-resolver.yml']['jobs']['deploy']['steps'][1:-1]],
                          ['infrastructure','preparation','recursive_a'])
 
     def test_real_duplicate_and_guest_stage_plans_reach_generator(self):
         stack,source=self._source_fixture(duplicate=True,remote=True)
         result=w.models(stack,site_source=self.root/'site.yaml')
-        self.assertEqual(set(result),{'deploy.yml','phase.yml','guest-resolver.yml','guest-remote.yml'})
-        self.assertEqual(result['deploy.yml']['jobs']['resolver']['needs'],['selection','remote'])
+        self.assertEqual(set(result),{'deploy.yml','phase.yml','guest-resolver.yml','guest-remote.yml','pending-recovery.yml','finish-deployment.yml'})
+        self.assertEqual(result['deploy.yml']['jobs']['resolver']['needs'],['selection','remote','_recover'])
         self.assertEqual(result['guest-resolver.yml']['jobs']['deploy']['name'],source['guests']['resolver']['identity']['hostname'])
         self.assertEqual([s['with']['phase'] for s in result['guest-resolver.yml']['jobs']['deploy']['steps'][1:-1]],
                          ['infrastructure','preparation','recursive_a','backup'])
@@ -241,7 +253,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
     def test_private_materialization_uses_actual_site_and_retains_queue_and_scalar_scope(self):
         site=self.root/'consumer';(site/'.github/workflows').mkdir(parents=True)
         locator='example/stack/.github/workflows/deploy.yml@'+'2'*40
-        env={'HOMELAB_STACK_SOURCE':locator,'HOMELAB_ENVIRONMENT_PREFIX':'fixture','HOMELAB_RUNNER_LABELS':'["self-hosted"]','HOMELAB_REPOSITORY':'example/consumer','HOMELAB_DISABLED':'[]'}
+        env={'HOMELAB_STACK_SOURCE':locator,'HOMELAB_ENVIRONMENT_PREFIX':'fixture','HOMELAB_RUNNER_LABELS':'["self-hosted"]','HOMELAB_REPOSITORY':'example/consumer','HOMELAB_DISABLED':'[]','HOMELAB_RECOVERY_ENVIRONMENT':'fixture-recovery'}
         doc={'env':env,'jobs':{}}
         (site/'.github/workflows/deploy.yml').write_text(yaml.safe_dump(doc,sort_keys=False).replace("HOMELAB_DISABLED: '[]'","HOMELAB_DISABLED: '[]'"))
         (site/'site.yaml').write_text('schema: homelab-components-v1\nkind: site\n')
@@ -256,7 +268,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
         self.assertEqual(result['concurrency'],{'group':'homelab-private-deployment','cancel-in-progress':False,'queue':'max'})
         self.assertNotIn('needs',result['jobs']['selection'])
         viewer=result['jobs']['viewer'];self.assertEqual(viewer['environment'],'fixture-viewer')
-        self.assertEqual(viewer['needs'],['validate','selection','store']);self.assertEqual(viewer['runs-on'],['self-hosted'])
+        self.assertEqual(viewer['needs'],['validate','selection','store','_recover']);self.assertEqual(viewer['runs-on'],['self-hosted'])
         self.assertNotIn('inputs.',json.dumps(viewer));self.assertNotIn('secrets: inherit',json.dumps(result))
         self.assertEqual(viewer['steps'][-2]['with']['cloudbeaver_client_secret'],'${{ secrets.EXAMPLE_OIDC_SECRET }}')
 

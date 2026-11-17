@@ -17,6 +17,8 @@ from host_api import normalized, same_allowance
 PRIVILEGES = {'Sys.Audit', 'VM.Audit'}
 SCHEMA = 'homelab-service-discovery-v1'
 EXTENSION_SCHEMA = 'homelab-service-discovery-extension-v1'
+OWNER_SCHEMA = 'homelab-service-discovery-v2'
+READ_SCOPE_SCHEMA = 'homelab-service-discovery-read-scope-v1'
 
 
 class ProviderAccessError(ValueError):
@@ -42,25 +44,16 @@ def address(value):
 
 def validate(c):
     s = c['service_discovery']
-    require(isinstance(s, dict) and set(s) == {'vmid', 'address', 'guests'},
+    require(isinstance(s, dict) and set(s) == {'vmid', 'address', 'scope'}
+            and s['scope'] == 'all-guests',
             'Use the closed service discovery configuration')
     apps = {a['vmid'] for a in c['applications']}
-    require(type(s['vmid']) is int and s['vmid'] in apps,
+    require(type(s['vmid']) is int and 100 <= s['vmid'] <= 999999999 and s['vmid'] in apps,
             'Discovery must belong to a declared application guest')
-    require(isinstance(s['guests'], list) and 1 <= len(s['guests']) <= 32
-            and all(type(v) is int and v in apps for v in s['guests'])
-            and len(set(s['guests'])) == len(s['guests']) and s['vmid'] in s['guests'],
-            'Discovery may read only a finite list of declared application guests')
     require(address(s['address']) != address(urlsplit(c['endpoint']).hostname),
             'Discovery guest and host API addresses must differ')
-    if 'service_discovery_extension' in c:
-        e = c['service_discovery_extension']
-        require(isinstance(e, dict) and set(e) == {'owner_sha256', 'guests'}
-                and isinstance(e['owner_sha256'], str) and re.fullmatch(r'[a-f0-9]{64}', e['owner_sha256'])
-                and isinstance(e['guests'], list) and 1 <= len(e['guests']) <= 31
-                and all(type(v) is int and v in s['guests'] for v in e['guests'])
-                and len(set(e['guests'])) == len(e['guests']),
-                'Use the exact previous owner hash and finite added discovery guests')
+    require('service_discovery_extension' not in c,
+            'Discovery reads all guests; per-guest permission extensions are retired')
 
 
 def identity(c):
@@ -70,6 +63,10 @@ def identity(c):
 
 def acl_rows(c):
     role = identity(c)[2]
+    if c['service_discovery'].get('scope') == 'all-guests':
+        return {('/nodes/' + c['node'], role, 0), ('/vms', role, 1)}
+    # Historical owner records alone retain the old finite grants for proof
+    # of an exact, already-owned conversion. New inputs cannot select them.
     return {(path, role, 0) for path in ['/nodes/' + c['node']] +
             ['/vms/' + str(v) for v in c['service_discovery']['guests']]}
 
@@ -99,7 +96,8 @@ def preceding_rules_irrelevant(rows, source):
 
 
 def owner(c):
-    return {'schema': SCHEMA, 'node': c['node'], 'endpoint': c['endpoint'],
+    return {'schema': OWNER_SCHEMA if c['service_discovery'].get('scope') == 'all-guests' else SCHEMA,
+            'node': c['node'], 'endpoint': c['endpoint'],
             'configuration': c['service_discovery'], 'identity': identity(c)[1], 'role': identity(c)[2]}
 
 
@@ -121,6 +119,22 @@ def extension_guests(previous, following):
     return added
 
 
+def read_scope_transition(previous, following):
+    """Prove one legacy-to-all-guests policy change, never another identity."""
+    configuration = previous.get('configuration', {})
+    require(previous.get('schema') == SCHEMA and set(configuration) == {'vmid', 'address', 'guests'}
+            and isinstance(configuration['guests'], list) and configuration['guests']
+            and all(type(v) is int and 100 <= v <= 999999999 for v in configuration['guests'])
+            and len(set(configuration['guests'])) == len(configuration['guests'])
+            and type(configuration['vmid']) is int and configuration['vmid'] in configuration['guests'],
+            'Preserve the genuine historical discovery owner')
+    expected = copy.deepcopy(previous)
+    expected['schema'] = OWNER_SCHEMA
+    expected['configuration'] = {key: configuration[key] for key in ('vmid', 'address')}
+    expected['configuration']['scope'] = 'all-guests'
+    require(following == expected, 'Only the unchanged owned identity may acquire all-guest reads')
+
+
 def scope_owner(local, remote):
     """Read immutable original custody plus a mirrored, append-only scope chain."""
     value = json.loads(read_private(local / 'owner.json'))
@@ -128,37 +142,45 @@ def scope_owner(local, remote):
     require(left.exists() == right.exists(), 'Discovery extension NAS custody is missing')
     if not left.exists():
         require(not left.is_symlink() and not right.is_symlink(), 'Discovery extensions cannot be symlinks')
-        return value
-    private_directory(left)
-    private_directory(right)
-    names = sorted(p.name for p in left.iterdir())
-    require(names == sorted(p.name for p in right.iterdir()) and 1 <= len(names) <= 31
-            and names == [f'{i:04d}.json' for i in range(1, len(names) + 1)],
-            'Discovery extension sequence or NAS copy differs')
-    for name in names:
-        raw = read_private(left / name)
-        require(raw == read_private(right / name), 'Discovery extension receipt and NAS copy differ')
+    else:
+        private_directory(left)
+        private_directory(right)
+        names = sorted(p.name for p in left.iterdir())
+        require(names == sorted(p.name for p in right.iterdir()) and 1 <= len(names) <= 31
+                and names == [f'{i:04d}.json' for i in range(1, len(names) + 1)],
+                'Discovery extension sequence or NAS copy differs')
+        for name in names:
+            raw = read_private(left / name)
+            require(raw == read_private(right / name), 'Discovery extension receipt and NAS copy differ')
+            receipt = json.loads(raw)
+            require(isinstance(receipt, dict) and set(receipt) == {'schema', 'previous_owner_sha256', 'owner'}
+                    and receipt['schema'] == EXTENSION_SCHEMA
+                    and receipt['previous_owner_sha256'] == owner_sha256(value),
+                    'Discovery extension owner chain differs')
+            extension_guests(value, receipt['owner'])
+            value = receipt['owner']
+    policy, mirrored = local/'read-scope.json', remote/'read-scope.json'
+    require(policy.exists() == mirrored.exists(), 'Discovery read-scope NAS custody is missing')
+    if policy.exists() or policy.is_symlink() or mirrored.is_symlink():
+        raw = read_private(policy)
+        require(raw == read_private(mirrored), 'Discovery read-scope receipt and NAS copy differ')
         receipt = json.loads(raw)
         require(isinstance(receipt, dict) and set(receipt) == {'schema', 'previous_owner_sha256', 'owner'}
-                and receipt['schema'] == EXTENSION_SCHEMA
+                and receipt['schema'] == READ_SCOPE_SCHEMA
                 and receipt['previous_owner_sha256'] == owner_sha256(value),
-                'Discovery extension owner chain differs')
-        extension_guests(value, receipt['owner'])
+                'Discovery read-scope owner chain differs')
+        read_scope_transition(value, receipt['owner'])
         value = receipt['owner']
     return value
 
 
-def append_scope(local, remote, previous, following):
-    require(scope_owner(local, remote) == previous, 'Discovery custody changed before extension completion')
-    extension_guests(previous, following)
-    folders = (local / 'scope-extensions', remote / 'scope-extensions')
-    for folder in folders:
-        private_directory(folder, create=not folder.exists())
-    name = f'{len(list(folders[0].iterdir())) + 1:04d}.json'
-    receipt = {'schema': EXTENSION_SCHEMA, 'previous_owner_sha256': owner_sha256(previous), 'owner': following}
-    for folder in folders:
-        save_new(folder / name, receipt)
-    require(scope_owner(local, remote) == following, 'Discovery extension readback differs')
+def append_read_scope(local, remote, previous, following):
+    require(scope_owner(local, remote) == previous, 'Discovery custody changed before read-scope completion')
+    read_scope_transition(previous, following)
+    receipt = {'schema': READ_SCOPE_SCHEMA, 'previous_owner_sha256': owner_sha256(previous), 'owner': following}
+    for folder in (local, remote):
+        save_new(folder/'read-scope.json', receipt)
+    require(scope_owner(local, remote) == following, 'Discovery read-scope readback differs')
 
 
 def private_directory(path, create=False):
@@ -198,12 +220,11 @@ def save_new(path, value):
     require(read_private(path) == raw, 'Private discovery receipt readback failed')
 
 
-def retained(c, root, backup, allow_extension=False):
+def retained(c, root, backup, allow_scope_change=False):
     local, remote = root / 'service-discovery', backup / 'service-discovery'
     require(local.exists() == remote.exists(), 'Discovery state or NAS copy is missing; no adoption')
     if not local.exists():
         require(not local.is_symlink() and not remote.is_symlink(), 'Discovery state cannot be a symlink')
-        require('service_discovery_extension' not in c, 'A discovery extension requires existing owned access')
         return None
     private_directory(local)
     private_directory(remote)
@@ -212,12 +233,9 @@ def retained(c, root, backup, allow_extension=False):
                 'Private discovery state and NAS copy differ')
     current = scope_owner(local, remote)
     if current != owner(c):
-        e = c.get('service_discovery_extension')
-        require(allow_extension and e is not None,
+        require(allow_scope_change,
                 'Discovery configuration changed; no permission expansion or token rotation')
-        require(e['owner_sha256'] == owner_sha256(current)
-                and extension_guests(current, owner(c)) == e['guests'],
-                'Discovery extension differs from the exact previous owner and added guests')
+        read_scope_transition(current, owner(c))
     require(json.loads(read_private(local / 'READY.json')) == {'schema': SCHEMA, 'status': 'ready'},
             'Partial discovery setup needs review; no automatic continuation')
     value = json.loads(read_private(local / 'token.json'))
@@ -230,7 +248,7 @@ def retained(c, root, backup, allow_extension=False):
 
 def inspect(api, c, root, backup):
     validate(c)
-    secret = retained(c, root, backup, allow_extension=True)
+    secret = retained(c, root, backup, allow_scope_change=True)
     current = scope_owner(root / 'service-discovery', backup / 'service-discovery') if secret else None
     baseline = dict(c, service_discovery=current['configuration']) if current else c
     token_id, token, role_id = identity(c)
@@ -259,16 +277,18 @@ def inspect(api, c, root, backup):
                 'Discovery read-only role privileges differ')
         require(len(tokens) == 1 and tokens[0].get('privsep') == 1 and tokens[0].get('expire') == 0
                 and tokens[0].get('comment') == rule['comment'], 'Discovery token metadata differs')
-        require(actual == acl_rows(baseline), 'Discovery token scope differs; no automatic rewrite')
+        require(actual in (acl_rows(baseline), acl_rows(c)),
+                'Discovery token scope differs; no automatic rewrite')
         require(len(owned) == 1 and same_allowance(owned[0], rule)
                 and preceding_rules_irrelevant(rules[:rules.index(owned[0])], c['service_discovery']['address']),
                 'Discovery firewall rule differs or earlier rule overlap is unproved; no automatic rewrite')
-        verify_secret(api, baseline, secret)
+        verify_secret(api, c if actual == acl_rows(c) else baseline, secret)
     result = {'exists': secret is not None, 'role': roles, 'metadata': tokens,
             'acl': [list(r) for r in sorted(actual)], 'rules': normalized(rules), 'options': options}
     if current is not None:
         result['scope_owner'] = current
         result['missing_acl'] = [list(r) for r in sorted(acl_rows(c) - actual)]
+        result['obsolete_acl'] = [list(r) for r in sorted(actual - acl_rows(c))]
     return result
 
 
@@ -276,10 +296,16 @@ def verify_secret(api, c, secret):
     """Prove the saved secret still authenticates with only the declared grants."""
     reader = api.discovery(secret)
     permissions = reader.call('/access/permissions')['data']
+    require(isinstance(permissions, dict), 'Discovery effective permissions differ')
     effective = {path: value for path, value in permissions.items() if value}
-    require(set(effective) == {path for path, _, _ in acl_rows(c)}
-            and all(set(values) == PRIVILEGES and all(value == 0 for value in values.values())
-                    for values in effective.values()), 'Discovery effective permissions differ')
+    expected = {path: propagate for path, _, propagate in acl_rows(c)}
+    require(set(expected) <= set(effective), 'Discovery effective permissions differ')
+    for path, values in effective.items():
+        inherited = (c['service_discovery'].get('scope') == 'all-guests'
+                     and re.fullmatch(r'/vms/[1-9][0-9]*', path))
+        require((path in expected or inherited) and isinstance(values, dict) and set(values) == PRIVILEGES
+                and all(type(value) is int and value == expected.get(path, 1) for value in values.values()),
+                'Discovery effective permissions differ')
 
 
 def reconcile(api, c, before, root, backup):
@@ -288,27 +314,31 @@ def reconcile(api, c, before, root, backup):
     rule = allowance(c)
     if before['exists']:
         missing = before['missing_acl']
-        if missing:
+        obsolete = before['obsolete_acl']
+        if before['scope_owner'] != owner(c):
             # The ordinary bootstrap hold is already set. Partial ACL/custody
             # failure stays held; an automatic repeat cannot adopt it.
             for path, role_id, propagate in missing:
                 api.call('/access/acl', 'PUT', {'path': path, 'roles': role_id,
                          'tokens': token, 'propagate': propagate})
-            expected = dict(before, scope_owner=owner(c), missing_acl=[],
+            for path, role_id, propagate in obsolete:
+                api.call('/access/acl', 'PUT', {'path': path, 'roles': role_id,
+                         'tokens': token, 'propagate': propagate, 'delete': 1})
+            expected = dict(before, scope_owner=owner(c), missing_acl=[], obsolete_acl=[],
                             acl=[list(r) for r in sorted(acl_rows(c))])
             # Verify native permissions/metadata/firewall before committing the
-            # immutable extension receipt. The old owner/token stay untouched.
+            # immutable read-scope receipt. The old owner/token stay untouched.
             verification = copy.deepcopy(c)
             verification['service_discovery'] = before['scope_owner']['configuration']
-            verification.pop('service_discovery_extension', None)
             secret = retained(verification, root, backup)
             verify_secret(api, c, secret)
-            append_scope(root / 'service-discovery', backup / 'service-discovery',
+            append_read_scope(root / 'service-discovery', backup / 'service-discovery',
                          before['scope_owner'], owner(c))
             require(inspect(api, c, root, backup) == expected,
-                    'Discovery extension changed metadata, firewall or scope')
+                    'Discovery read-scope changed metadata, firewall or scope')
         return {'status': 'ready', 'created': False, 'token_id': token,
-                'secret_file': 'service-discovery/token.json', 'new_acl_rows': len(missing), 'firewall_rule_created': False}
+                'secret_file': 'service-discovery/token.json', 'new_acl_rows': len(missing),
+                'removed_acl_rows': len(obsolete), 'firewall_rule_created': False}
     local, remote = root / 'service-discovery', backup / 'service-discovery'
     private_directory(local, create=True)
     private_directory(remote, create=True)

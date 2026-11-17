@@ -54,7 +54,8 @@ def runtime_config(plan, guest_id):
         selected = copy.deepcopy(app)
         if app['adapter'] == 'traefik':
             selected['route_plan'] = {
-                'routes': copy.deepcopy(plan.resolved['routes'].get(app_id, {})),
+                'routes': {key:copy.deepcopy({field:value for field,value in row.items() if field != 'check'})
+                           for key,row in plan.resolved['routes'].get(app_id, {}).items()},
                 **{key:copy.deepcopy(plan.resolved[key]) for key in
                    ('middlewares', 'transports', 'canonical_middlewares')}}
         selected['input_sources'] = copy.deepcopy(app.get('secret_bindings', {}))

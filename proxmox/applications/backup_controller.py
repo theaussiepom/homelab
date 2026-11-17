@@ -22,6 +22,7 @@ import backup_capture
 import backup_source
 import backup_user
 import component_generation
+import component_current
 import deployment_state
 from custody_records import no_markers
 from private_io import encoded, private_directory, private_writer, read_json, regular, require, sha, write_new, sync
@@ -59,7 +60,7 @@ def admit(name, row):
             *root.glob('database-server-cutover-*'), *work.glob('database-*'), *work.glob('ordinary-*')]:
         if directory.is_dir():
             private_directory(directory); no_markers(directory)
-    receipt_path = work/'ordinary-complete.json'
+    receipt_path = component_current.owner_path(work)
     receipt = read_json(receipt_path, private=True)
     source = Path(receipt['binding']['app_inputs_directory']).parent/'site.json'
     cfg = read_json(source, private=True)
@@ -77,19 +78,21 @@ def admit(name, row):
     require(all(sha(path) == expected for path, expected in receipt['binding']['input_hashes'].items()),
             'A deployed private input or trust binding changed')
     state_hash, identity = component_generation.backend(work, row)
-    require(state_hash == receipt['state_sha256'] and identity == receipt['state_identity'],
+    expected_hash, expected_identity = component_current.backend(work, receipt)
+    require(state_hash == expected_hash and identity == expected_identity,
             'Preserve the completed backend generation; backup cannot repair state')
     from proxmox_guest import guest_trust
     guest_trust(cfg, work, persist=False)
     inventory = cfg['app']['backup']; job = backup_policy.validate(inventory['job'])
     require(job['group']['member'] == name, 'Bind the stable recovery member')
-    return cfg, sha(receipt_path)
+    return cfg, component_current.generation_hash(work)
 
 
 def controls(cfg):
     """Bind installed Compose control bytes to sealed ordinary phase inputs."""
     from component_payload import AppPayload
-    receipt = read_json(Path(cfg['paths']['state_root'])/str(cfg['guest']['vmid'])/'ordinary-complete.json', private=True)
+    receipt = read_json(component_current.owner_path(
+        Path(cfg['paths']['state_root'])/str(cfg['guest']['vmid'])), private=True)
     selected = {}
     for row in backup_capture.recipes(cfg['app']['backup'])['pause']:
         selected[row['file']] = sha(Path(cfg['deployment']['input_directory'])/Path(row['file']).name)

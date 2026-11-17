@@ -12,11 +12,13 @@ import yaml
 
 import component_secrets
 import component_connections
+import routed_checks
 from component_plan import RESERVED
 from component_sources import identifier, require
 
 FLAT_INPUTS = {'HOMELAB_STACK_SOURCE', 'HOMELAB_ENVIRONMENT_PREFIX', 'HOMELAB_RUNNER_LABELS',
-               'HOMELAB_REPOSITORY', 'HOMELAB_DISABLED'}
+               'HOMELAB_REPOSITORY', 'HOMELAB_DISABLED', 'HOMELAB_CHECK_ENVIRONMENT',
+               'HOMELAB_RECOVERY_ENVIRONMENT'}
 REUSABLE_INPUTS = {'disabled', 'runner_labels', 'environment_name'}
 AGENT_PHASE = 'zabbix-agent'
 BACKUP_PHASE = 'pbs-agent'
@@ -138,6 +140,25 @@ def application_order(plan, guest):
     return _ordered_apps(plan.resolved['apps'], plan.resolved['app_dependencies'], guest)
 
 
+
+def deferred_job(owners, active, backup):
+    """One finite final job, with per-owner prerequisites retained for admission."""
+    if not owners:
+        return None
+    require(set(owners) <= set(active), 'component.workflow-disabled-dependency')
+    for owner,row in owners.items():
+        label(row['name'])
+        require(set(row['needs']) <= set(active) and owner in row['needs'],
+                'component.workflow-disabled-dependency')
+        require(type(row['endpoint_count']) is int and row['endpoint_count'] > 0,
+                'component.route-check')
+    count = sum(row['endpoint_count'] for row in owners.values())
+    require(count <= routed_checks.MAX_ENDPOINTS, 'component.route-check')
+    return {'name': 'Check web endpoints', 'needs': ['selection', *(['_backup'] if backup else []), *active],
+            'owners': owners, 'endpoint_count': count,
+            'timeout_minutes': 10 + 10*((count+routed_checks.CONCURRENCY-1)//routed_checks.CONCURRENCY)}
+
+
 def model(plan):
     """Return graph/phase metadata for the selected source Plan, never secrets.
 
@@ -192,12 +213,18 @@ def model(plan):
             phases.append({'id': AGENT_PHASE, 'name': 'Zabbix agent', 'application': None, 'inputs': {}})
         if 'backup' in guests[guest]:
             inputs = {'PBS_API_TOKEN': {'environment': 'PBS_API_TOKEN', 'workflow_secret': 'PBS_API_TOKEN'}} if operational_backup else {}
-            phases.append({'id': BACKUP_PHASE, 'name': 'Backup', 'application': None, 'inputs': inputs})
+            phases.append({'id': BACKUP_PHASE, 'name': 'Configure backup', 'application': None, 'inputs': inputs})
             if operational_backup:
                 secrets.append('PBS_API_TOKEN')
         result['guests'][guest] = {'name': guest_title,
                                   'needs': ['selection', *(['_backup'] if operational_backup and 'backup' in guests[guest] else []), *dependencies[guest]],
                                   'phases': phases, 'workflow_secrets': secrets}
+    owners = {owner: {'name': label(row['name']), 'needs': row['needs'],
+                      'endpoint_count': len(resolved['routed_checks'][owner]['rows'])}
+              for owner,row in resolved.get('deferred_routed_checks', {}).items() if owner in active}
+    checks = deferred_job(owners, active, operational_backup)
+    if checks is not None:
+        result['checks'] = checks
     if operational_backup:
         result['backup'] = {'name':'Configure backups', 'needs':['selection'],
                             'environment':'backup', 'workflow_secrets':['PBS_API_TOKEN']}

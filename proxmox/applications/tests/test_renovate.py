@@ -65,7 +65,7 @@ class RenovateRuntime(unittest.TestCase):
         config=json.loads(raw[len('module.exports = '):-2])
         self.assertEqual(config.pop('vulnerabilityAlerts'),{'enabled':False})
         self.assertEqual(config,{'onboarding':False,'requireConfig':'required',
-            'allowedPostUpgradeCommands':[],'allowScripts':False,
+            'allowedCommands':[],'allowScripts':False,
             'force':{'automerge':False,'platformAutomerge':False}})
 
     def test_unsupported_listener_image_privileges_and_missing_storage_refuse(self):
@@ -180,6 +180,12 @@ class RenovatePreparation(CallerCase):
         self.assertEqual(actual['component_runtime_directory']['directory'],
                          selected['identity']['runtime_directory'])
         self.assertNotIn('component_application_database', actual)
+        extended=component_ansible.variables(cfg,'selected',payload=payload,previously_owned=True,initialize_runtime=True)
+        self.assertTrue(extended['component_preflight']['previously_owned'])
+        self.assertEqual(extended['component_runtime_directory'],{
+            'directory':selected['identity']['runtime_directory'],'lifecycle':'fresh','previously_owned':False})
+        with self.assertRaises(ValueError):
+            component_ansible.variables(cfg,'selected',payload=payload,initialize_runtime=True)
 
     def test_postgresql_receives_only_the_same_password_and_no_worker_credentials(self):
         cfg, selected = self.case('postgresql', {'settings':{'application_database':{

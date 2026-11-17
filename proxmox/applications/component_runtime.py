@@ -818,4 +818,9 @@ def artifacts(cfg):
         native[app_id] = {key: selected[key] for key in ('services', 'identity')}
     if native:
         result['component-native.json'] = (json.dumps(native, indent=2) + '\n').encode()
+    if any(app.get('adapter') == 'renovate' for app in cfg['applications'].values()):
+        import renovate
+        # Public generated policy must select its immutable namespace before
+        # private preparation. Reuse the payload generator, including metadata.
+        result['component-renovate-inputs.json'] = (json.dumps(renovate.files(), sort_keys=True) + '\n').encode()
     return result

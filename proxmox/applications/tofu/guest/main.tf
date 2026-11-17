@@ -75,8 +75,9 @@ resource "proxmox_virtual_environment_container" "guest" {
   wait_for_ip { ipv4 = true }
   lifecycle {
     prevent_destroy = true
-    # A registered host capability owns devices; API tokens cannot modify them.
-    ignore_changes = [device_passthrough]
+    # Devices belong to the host capability. The provider's ForceNew account
+    # block bootstraps SSH; ongoing public-key additions belong to Ansible.
+    ignore_changes = [device_passthrough, initialization[0].user_account]
   }
 }
 

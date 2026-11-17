@@ -204,19 +204,10 @@ def backup_continuity(previous, current):
             'Preserve backup destination and encryption ownership; rotation needs an explicit handover')
 
 
-def previous(attempt):
-    """Validate the actual prior canonical/immutable component and sealed inputs."""
-    if not attempt.receipt.exists() and not attempt.receipt.is_symlink():return None
-    raw=regular(attempt.receipt,private=True);value=decode(raw)
-    require(isinstance(value,dict)and isinstance(value.get('operation'),str),
-            'Existing ownership requires a genuine component ordinary success')
-    require(isinstance(value.get('binding'),dict) and value['binding'].get('vmid')==attempt.vmid,
-            'Preserve the prior component guest binding')
-    operation=Path(value['operation'])
-    require(operation.parent==attempt.work and component_success(value,operation)
-            and read_existing(operation/'complete.json')==raw,
-            'Preserve the exact canonical and immutable component success')
-    selected=value['binding'];directory=Path(selected['app_inputs_directory']).parent
+def sealed_inputs(selected):
+    """Read genuine sealed static inputs without granting application ownership."""
+    component_binding(selected)
+    directory=Path(selected['app_inputs_directory']).parent
     site=directory/'site.json';runtime=directory/'component-runtime.json'
     require(sha(site)==selected['site_sha256'] and selected['input_hashes'].get(str(runtime))==sha(runtime),
             'Preserve prior sealed component source and runtime')
@@ -227,14 +218,33 @@ def previous(attempt):
     hashes=static(cfg,site)
     require(all(selected['input_hashes'].get(path)==value for path,value in hashes.items()),
             'Preserve every prior sealed static input')
-    require(cfg.get('schema')=='homelab-component-guest-v1'
-            and cfg['site']['node']==attempt.cfg['site']['node']
-            and cfg['site']['api_endpoint']==attempt.cfg['site']['api_endpoint']
-            and all(cfg['guest'][key]==attempt.cfg['guest'][key]for key in('vmid','hostname'))
+    require(cfg.get('schema')=='homelab-component-guest-v1' and cfg['guest']['vmid']==selected['vmid']
             and cfg['deployment']['input_directory']==str(directory)
             and selected['app_inputs_directory']==str(directory/'applications')
             and cfg['deployment']['input_identity']==selected['input_identity']
-            and cfg['deployment']['runtime_file']==str(runtime)
+            and cfg['deployment']['runtime_file']==str(runtime),
+            'Preserve the sealed component input identity')
+    return cfg,apps
+
+
+def previous(attempt):
+    """Validate the actual prior canonical/immutable component and sealed inputs."""
+    if not attempt.receipt.exists() and not attempt.receipt.is_symlink():return None
+    raw=regular(attempt.receipt,private=True);value=decode(raw)
+    require(isinstance(value,dict)and isinstance(value.get('operation'),str),
+            'Existing ownership requires a genuine component ordinary success')
+    require(isinstance(value.get('binding'),dict) and value['binding'].get('vmid')==attempt.vmid,
+            'Preserve the prior component guest binding')
+    operation=Path(value['operation'])
+    import component_current
+    require(operation.parent==attempt.work and component_current.owned(value,operation)
+            and read_existing(operation/('owner.json' if value.get('schema') == component_current.OWNER else 'complete.json'))==raw,
+            'Preserve the exact canonical and immutable component success')
+    selected=value['binding']
+    cfg,apps=sealed_inputs(selected)
+    require(cfg['site']['node']==attempt.cfg['site']['node']
+            and cfg['site']['api_endpoint']==attempt.cfg['site']['api_endpoint']
+            and all(cfg['guest'][key]==attempt.cfg['guest'][key]for key in('vmid','hostname'))
             and set(value['phase_inputs'])==set(cfg['deployment']['phases'])
             and cfg['deployment']['payload_phases']=={phase:proof['app']for phase,proof in value['phase_inputs'].items()if proof is not None},
             'Preserve the prior component guest and phase owners')
@@ -299,19 +309,29 @@ def current(attempt):
                 and ready.get('state_identity')==identity,
                 'Preserve this run owned infrastructure checkpoint')
     else:
-        require(state_hash==value['state_sha256'] and ('state_identity'not in value or value['state_identity']==identity),
-                'Current backend changed outside its ordinary success')
-    require('state_identity'not in value or value['state_identity']==identity
+        import component_current
+        expected_hash, expected_identity = component_current.backend(attempt.work, value)
+        if state_hash!=expected_hash or expected_identity is not None and expected_identity!=identity:
+            from component_checkpoint import admission
+            attempt.previous_configuration=admission(attempt,value,state_hash,identity)
+    import component_current
+    selected_current = component_current.read(attempt.work)
+    if selected_current and selected_current[0]['kind'] != 'ordinary':
+        require(int(attempt.operation.name.split('-')[1]) > component_current.epoch(selected_current[0])[0],
+                'A recovered failure requires a fresh deployment run; no forward replay')
+    effective_identity = selected_current[0]['state_identity'] if selected_current else value.get('state_identity')
+    require(effective_identity is None or effective_identity==identity
             or (attempt.hold.exists() or attempt.hold.is_symlink())
             and identity_extension(value['state_identity'], identity,
                                    ip_filter_slots(attempt.cfg['guest']['interfaces'])),
             'Preserve the existing backend resource identity')
-    canonical=Path(value['operation']);epoch=tuple(int(x)for x in canonical.name.removeprefix('ordinary-').split('-'))
+    canonical=Path(value['operation']);epoch=tuple(int(x)for x in canonical.name.partition('-')[2].split('-'))
     for path in attempt.work.iterdir():
         if not re.fullmatch(r'ordinary-[1-9][0-9]*-[1-9][0-9]*',path.name):continue
         private_directory(path);no_markers(path)
         if path==canonical:continue
         if path==attempt.operation and(attempt.hold.exists()or attempt.hold.is_symlink()):continue
+        if selected_current and path.name in selected_current[0]['resolved']:continue
         number=tuple(int(x)for x in path.name.removeprefix('ordinary-').split('-'))
         require(number<epoch,'Preserve newer unresolved ordinary history; no pointer fallback')
         for started_path in path.glob('*-started.json'):

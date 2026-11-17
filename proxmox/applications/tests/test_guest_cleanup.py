@@ -192,6 +192,36 @@ class GuestCleanupTests(unittest.TestCase):
         self.assertTrue((self.inputs/'mariadb'/('a'*64)).exists())
         self.assertTrue((legacy/'preparation-started.json').exists())
 
+    def test_recovery_and_reviewed_checkpoint_records_preserve_all_generations(self):
+        active = self.complete(); self.scratch(active)
+        old = self.work/'ordinary-1-1'
+        records = [self.work/'recovery-2-1', self.work/'operator-recovery-2-1',
+                   self.work/'infrastructure-admission.json', self.work/'infrastructure-admission-claim.json',
+                   *(active/name for name in ('rollback-baseline.json', 'rollback-ready.json',
+                       'controls-before.json', 'forward-failure.json', 'infrastructure-invocation.json',
+                       'infrastructure-admission.json'))]
+        for path in records:
+            with self.subTest(record=path.name):
+                io.write_new(path, b'preserved recovery evidence')
+                self.assertEqual(self.clean()['retired'], 0)
+                self.assertTrue(old.is_dir())
+                self.assertTrue((self.inputs/'mariadb'/('e'*64)/'site.json').is_file())
+                self.assertEqual(path.read_bytes(), b'preserved recovery evidence')
+                path.unlink()
+        self.assertFalse((active/'tofu').exists())
+        self.assertEqual(self.clean()['retired'], 1)
+
+    def test_recovery_custody_defers_an_interrupted_retirement(self):
+        self.complete(); old = self.work/'ordinary-1-1'
+        with patch.object(cleanup_files, 'remove', side_effect=OSError('synthetic')), self.assertRaises(OSError):
+            self.clean()
+        ticket = (old/cleanup.RETIRING).read_bytes()
+        archive = self.work/'operator-recovery-2-1'; archive.mkdir(mode=0o700)
+        self.assertEqual(self.clean()['retired'], 0)
+        self.assertEqual((old/cleanup.RETIRING).read_bytes(), ticket)
+        archive.rmdir()
+        self.assertEqual(self.clean()['retired'], 1)
+
     def test_first_install_failure_and_missing_attempt_do_not_require_or_invent_success(self):
         # A separate genuine fresh fixture has neither canonical proof nor history.
         fresh = self.root/'fresh'; fresh.mkdir(mode=0o700)
@@ -298,6 +328,84 @@ class GuestCleanupTests(unittest.TestCase):
         result = subprocess.run(command[:3]+['failure']+command[4:], text=True, capture_output=True)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(json.loads(result.stdout), {'status':'no_packet'})
+
+
+class RecoveryCleanupTests(unittest.TestCase):
+    def setUp(self):
+        # Reuse genuine current recovery transactions, replacing only native
+        # execution through the existing fixture.
+        import test_component_recovery as transactions
+        self.transaction = transactions.RecoveryTransactions()
+        self.transaction.setUp(); self.addCleanup(self.transaction.doCleanups)
+        self.case = self.transaction.case
+        self.work = self.transaction.work
+        context = patch.object(cleanup, 'bootstrap_closed')
+        context.start(); self.addCleanup(context.stop)
+
+    def clean(self, outcome='success'):
+        return cleanup.run(self.case.packet, outcome, inputs=self.case.inputs)
+
+    def downloads(self, operation):
+        (operation/'tofu').mkdir(mode=0o700)
+        io.write_new(operation/'tofu/provider', b'reproducible provider download')
+
+    def test_cleanup_before_acceptance_preserves_the_baseline_and_later_owner(self):
+        import component_current as current
+        import component_recovery as recovery
+        self.case.all_phases(); operation = self.work/'ordinary-102-1'
+        self.downloads(operation)
+        paths = [self.work/'ORDINARY-HOLD.json', self.work/'ordinary-complete.json',
+                 self.work/'terraform.tfstate', operation/'rollback-baseline.json', operation/'controls-before.json']
+        before = {path: path.read_bytes() for path in paths}
+        self.assertEqual(self.clean()['retired'], 0)
+        self.assertFalse((operation/'tofu').exists())
+        self.assertEqual({path: path.read_bytes() for path in paths}, before)
+        self.assertEqual(recovery.accept(self.case.cfg, operation)['status'], 'accepted')
+        effective = current.read(self.work)
+        self.assertEqual(self.clean()['retired'], 0)
+        self.assertEqual(current.read(self.work), effective)
+        # The accepted operation's rollback baseline still resolves the old
+        # immutable owner after cleanup, including when a later job starts.
+        baseline = recovery.baseline(operation, self.case.cfg)
+        self.assertEqual(recovery.owner(baseline, self.work)[1], self.transaction.owner)
+        with patch.dict(os.environ, GITHUB_RUN_ID='103', GITHUB_RUN_NUMBER='12'):
+            self.case.all_phases()
+            self.assertEqual(self.clean()['retired'], 0)
+            self.assertEqual(recovery.accept(self.case.cfg, self.work/'ordinary-103-1')['status'], 'accepted')
+        self.assertEqual(current.read(self.work)[0]['kind'], 'ordinary')
+
+    def test_failure_cleanup_preserves_real_rollback_and_resolved_failure_evidence(self):
+        import component_current as current
+        import component_recovery as recovery
+        operation = self.transaction.fail_after_preparation(); self.downloads(operation)
+        held = (self.work/'ORDINARY-HOLD.json').read_bytes()
+        self.assertEqual(self.clean('failure')['retired'], 0)
+        self.assertEqual((self.work/'ORDINARY-HOLD.json').read_bytes(), held)
+        self.assertFalse((operation/'tofu').exists())
+        self.assertEqual(recovery.restore(self.case.cfg, operation)['status'], 'failed_rolled_back')
+        effective = current.read(self.work)
+        self.assertIn(operation.name, effective[0]['resolved'])
+        self.assertEqual(self.clean('failure')['retired'], 0)
+        self.assertEqual(current.read(self.work), effective)
+
+    def test_reconciled_owner_and_corrupt_current_pointer_are_not_retired(self):
+        import component_current as current
+        import component_recovery as recovery
+        operation = self.transaction.fail_after_preparation()
+        self.clean('failure'); self.transaction.native = 'old'
+        owner = self.transaction.owner
+        with patch.dict(os.environ, GITHUB_RUN_ID='104', GITHUB_RUN_NUMBER='13'):
+            self.assertEqual(recovery.reconcile(self.case.cfg, operation,
+                Path(owner['operation'])/'complete.json', owner,
+                reason='Verified synthetic repair', actor_context='protected-main-reconciliation')['status'], 'reconciled')
+            effective = current.read(self.work)
+            self.assertEqual(effective[1]['schema'], current.OWNER)
+            self.assertEqual(self.clean('failure')['retired'], 0)
+            self.assertEqual(current.read(self.work), effective)
+        self.downloads(operation)
+        io.write_bytes(self.work/current.NAME, io.encoded({}))
+        with self.assertRaises(ValueError): self.clean('failure')
+        self.assertTrue((operation/'tofu/provider').exists())
 
 
 if __name__ == '__main__': unittest.main()
