@@ -1,0 +1,24 @@
+name: Guest cleanup
+description: Reclaim eligible guest deployment scratch under custody locks
+inputs:
+  guest:
+    description: Selected guest
+    required: true
+  phase:
+    description: Selected phase
+    required: true
+runs:
+  using: composite
+  steps:
+  - name: Clean guest files
+    if: always()
+    continue-on-error: true
+    env:
+      GUEST: ${{ inputs.guest }}
+      PHASE: ${{ inputs.phase }}
+      OUTCOME: ${{ job.status }}
+    run: "if [ -n \"${HOMELAB_CONFIG_PYTHON:-}\" ] && [ -f framework-source/proxmox/applications/guest_cleanup.py\
+      \ ]; then\n  \"$HOMELAB_CONFIG_PYTHON\" framework-source/proxmox/applications/guest_cleanup.py\
+      \ --outcome \"$OUTCOME\" --packet \"$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json\"\
+      \nfi\n"
+    shell: bash

@@ -181,3 +181,14 @@ jobs:
             if [ -z "${!app_secret_slot}" ]; then unset "$app_secret_slot"; fi
           done
           exec python3 framework-source/proxmox/applications/deploy.py --phase "$PHASE" --packet "$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json"
+      - name: Clean guest files
+        if: always()
+        continue-on-error: true
+        env:
+          GUEST: ${{ inputs.guest }}
+          PHASE: ${{ inputs.phase }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          if [ -n "${HOMELAB_CONFIG_PYTHON:-}" ] && [ -f framework-source/proxmox/applications/guest_cleanup.py ]; then
+            "$HOMELAB_CONFIG_PYTHON" framework-source/proxmox/applications/guest_cleanup.py --outcome "$OUTCOME" --packet "$RUNNER_TEMP/guest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GUEST}-${PHASE}.json"
+          fi

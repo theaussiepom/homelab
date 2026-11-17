@@ -120,7 +120,7 @@ def main():
         except Exception:
             diagnostic = {'error_type': 'Exception', 'source': []}
         raise SystemExit(
-            "Deployment held; preserve private inputs, state and all attempt evidence. "
+            "Deployment held; preserve private inputs, state and custody records. "
             + ("Generated CD finalization determines rollback or reconciliation."
                if os.environ.get('HOMELAB_CD_RECOVERY') == 'v1' else "No automatic replay or restore.")
             + '\n' + json.dumps(diagnostic, sort_keys=True)

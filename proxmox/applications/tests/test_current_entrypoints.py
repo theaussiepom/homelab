@@ -43,7 +43,7 @@ class CurrentEntrypointTests(unittest.TestCase):
             run.assert_called_once()
             text = str(stopped.exception.code)
             self.assertTrue(stopped.exception.__suppress_context__)
-            self.assertTrue(text.startswith('Deployment held; preserve private inputs, state and all attempt evidence.'))
+            self.assertTrue(text.startswith('Deployment held; preserve private inputs, state and custody records.'))
             self.assertIn('No automatic replay or restore.', text)
             for value in (text, output.getvalue(), errors.getvalue()):
                 self.assertNotIn('PRIVATE_SENTINEL', value)
