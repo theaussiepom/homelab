@@ -138,7 +138,8 @@ def execute(cfg, operation, selection, *, mode, captured=None, allowed=None):
                'images': selection['images'] if mode == 'capture' else captured['images'], 'allowed': {}}
     restore = {'mode': 'restore', 'files': captured['files'] if captured else {},
                'packages': [], 'images': captured['images'] if captured else [], 'allowed': allowed or {}}
-    variables = {'recovery_app': cfg['app'], 'recovery_mode': mode, 'recovery_program': Path(component_control.__file__).read_text(),
+    variables = {'recovery_app': cfg['app'], 'recovery_mode': mode,
+                 'recovery_program': base64.b64encode(Path(component_control.__file__).read_bytes()).decode(),
                  'recovery_request': request, 'recovery_restore': restore,
                  'recovery_packages': captured['packages'] if captured else [],
                  'recovery_projects': selection['projects'], 'recovery_units': selection['units'],
