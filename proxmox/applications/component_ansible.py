@@ -3,6 +3,7 @@ import copy
 import os
 from pathlib import Path
 import re
+import subprocess
 
 import component_guest
 import component_inputs
@@ -25,6 +26,24 @@ HELPERS = {'pihole': [('dns_records.py','dns_records.py')],
         ('mqtt-explorer-account.py','/opt/homelab-app/mqtt-explorer-account.py'),
         ('mqtt_explorer_state.py','/opt/homelab-app/mqtt_explorer_state.py','0600')],
     'music_assistant': [('music_assistant.py','music_assistant.py')]}
+
+
+class CompletedTaskFailure(subprocess.CalledProcessError):
+    """A failed synchronous task with a complete, reachable single-host recap."""
+
+
+def completed_failure(error, log, hostname):
+    """A returned SSH process alone does not establish the remote writer's end."""
+    if error.returncode != 2:
+        return False
+    try:
+        recap = regular(log, private=True).decode().rsplit('PLAY RECAP ', 1)
+    except (OSError, ValueError):
+        return False
+    return len(recap) == 2 and re.fullmatch(
+        r'\*+\s*' + re.escape(hostname) + r'\s+:\s+ok=\d+\s+changed=\d+\s+'
+        r'unreachable=0\s+failed=[1-9]\d*\s+skipped=\d+\s+rescued=\d+\s+ignored=\d+\s*',
+        recap[1]) is not None
 
 
 def variables(cfg, phase, *, payload=None, previously_owned=False, initialize_runtime=False):
@@ -215,7 +234,12 @@ def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, prev
     from ansible_guest import ansible_environment
     environment={key:value for key,value in os.environ.items()
                  if key != 'PBS_API_TOKEN' and not key.startswith(component_input_secrets.PREFIX)}
-    quiet(command,ansible_environment(cfg,environment),phase_work/'application.log')
+    try:
+        quiet(command,ansible_environment(cfg,environment),phase_work/'application.log')
+    except subprocess.CalledProcessError as error:
+        if completed_failure(error, phase_work/'application.log', cfg['app']['hostname']):
+            raise CompletedTaskFailure(error.returncode, error.cmd) from None
+        raise
     require(component_inputs.binding(cfg,site)==expected, 'Static component inputs changed during Ansible')
     if payload is not None:payload.check()
     if phase == component_guest.BACKUP_PHASE and 'job' in cfg['app']['backup']:

@@ -1,0 +1,415 @@
+"""Real custody/receipt transactions; native deployment and inspection are fakes."""
+import copy
+import base64
+import os
+from pathlib import Path
+import sys
+import tempfile
+import subprocess
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[3]
+sys.path[:0] = [str(ROOT/'blueprints'), str(ROOT/'proxmox/applications')]
+import component_current
+import component_ansible
+import component_generation
+import component_recovery
+import component_restore
+import deploy
+from private_io import encoded, read_json, sha, write_new, write_bytes
+import test_component_deployment as fixture
+
+
+class RecoveryTransactions(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
+        self.trust = Path(temporary.name).resolve(); self.trust.chmod(0o700)
+        for name in ('key', 'token', 'known_hosts'):
+            write_new(self.trust/name, ('synthetic-'+name+'\n').encode())
+        original = fixture.site
+        def source():
+            value = original()
+            value['secret_sources']['token']['path'] = str(self.trust/'token')
+            value['secret_sources']['ssh']['path'] = str(self.trust/'key')
+            value['contexts']['lab']['trust']['known_hosts'] = str(self.trust/'known_hosts')
+            return value
+        with patch.object(fixture, 'site', side_effect=source):
+            self.case = fixture.DeploymentIntegrationTests(); self.case.setUp()
+        self.addCleanup(self.case.doCleanups)
+        self.case.all_phases()
+        self.cfg, self.work = self.case.cfg, self.case.state/'610'
+        self.before = (self.work/'ordinary-complete.json').read_bytes()
+        self.owner = read_json(self.work/'ordinary-complete.json', private=True)
+        self.native = 'old'; self.inspections = []
+        context = patch('component_restore.execute', side_effect=self.controls)
+        context.start(); self.addCleanup(context.stop)
+        context = patch.dict(os.environ, {'HOMELAB_CD_RECOVERY': 'v1', 'GITHUB_ACTOR': 'example-engineer',
+            'GITHUB_RUN_ID': '102', 'GITHUB_RUN_NUMBER': '11',
+            'HOMELAB_CD_DEPENDENCIES': '{"resolver": []}'})
+        context.start(); self.addCleanup(context.stop)
+
+    def controls(self, cfg, operation, selection, *, mode, captured=None, allowed=None):
+        self.inspections.append(mode)
+        self.assertEqual(cfg['guest']['vmid'], 610)
+        if mode == 'restore':
+            self.native = 'old'
+        elif mode == 'verify' and self.native != 'old':
+            raise ValueError('Synthetic service has not been restored')
+        files = {}
+        sources = [*Path(cfg['deployment']['input_directory']).rglob('*'),
+                   ROOT/'proxmox/applications/component-preflight.py']
+        raw = {sha(path): path.read_bytes() for path in sources if path.is_file()}
+        for path in selection['files']:
+            wanted = selection['expected'].get(path)
+            files[path] = ({'exists': True, 'content': base64.b64encode(raw[wanted]).decode(),
+                'sha256': wanted, **selection['metadata'][path]} if wanted else {'exists': False})
+        return {'files': files,
+                'packages': [], 'images': []}
+
+    def fail_after_preparation(self):
+        deploy.run('infrastructure', self.case.packet, inputs=self.case.inputs, environment={})
+        deploy.run('preparation', self.case.packet, inputs=self.case.inputs, environment={})
+        self.native = 'new'
+        return self.work/'ordinary-102-1'
+
+    def test_caught_failure_can_reverse_but_unknown_or_timed_out_writer_requires_reconciliation(self):
+        failed = self.fail_after_preparation()
+        phase = next(iter(self.cfg['deployment']['applications']))
+        with patch('component_ansible.run_phase', side_effect=ValueError('PRIVATE')):
+            with self.assertRaises(ValueError): deploy.run(phase, self.case.packet, inputs=self.case.inputs, environment={})
+        marker = read_json(failed/'forward-failure.json', private=True)
+        self.assertTrue(marker['command_returned'])
+        self.assertNotIn('PRIVATE', (failed/'forward-failure.json').read_text())
+        marker['command_returned'] = False
+        write_bytes(failed/'forward-failure.json', encoded(marker))
+        with self.assertRaisesRegex(ValueError, 'uncertain forward'): component_recovery.restore(self.cfg, failed)
+        write_bytes(failed/'forward-failure.json', encoded({**marker, 'command_returned': True}))
+        self.assertEqual(component_recovery.restore(self.cfg, failed)['status'], 'failed_rolled_back')
+
+    def test_timeout_record_and_incomplete_reverse_apply_or_configuration_are_not_replayed(self):
+        failed = self.fail_after_preparation()
+        phase = next(iter(self.cfg['deployment']['applications']))
+        with patch('component_ansible.run_phase', side_effect=subprocess.TimeoutExpired('PRIVATE', 1)):
+            with self.assertRaises(subprocess.TimeoutExpired): deploy.run(phase, self.case.packet, inputs=self.case.inputs, environment={})
+        self.assertFalse(read_json(failed/'forward-failure.json', private=True)['command_returned'])
+        write_new(failed/'apply-window.json', encoded({'started_at_ns': 1}))
+        with self.assertRaises(ValueError): component_recovery.forward_settled(failed, read_json(self.work/'ORDINARY-HOLD.json', private=True))
+        recovery = self.work/'recovery-102-1'; recovery.mkdir(mode=0o700)
+        folder = recovery/'infrastructure-1'; folder.mkdir(mode=0o700)
+        write_new(folder/'apply-window.json', encoded({'started_at_ns': 1}))
+        with self.assertRaises(ValueError): component_recovery.reverse_settled(recovery, 'infrastructure')
+        write_bytes(folder/'apply-window.json', encoded({'started_at_ns': 1, 'finished_at_ns': 2}))
+        component_recovery.reverse_settled(recovery, 'infrastructure')
+        folder = recovery/'controls-restore-1'; folder.mkdir(mode=0o700)
+        with self.assertRaises(ValueError): component_recovery.reverse_settled(recovery, 'controls-restore')
+        write_new(folder/'result.json', encoded({'files': {}}))
+        component_recovery.reverse_settled(recovery, 'controls-restore')
+
+    def test_ansible_unreachable_return_preserves_hold_without_reversing_remote_writer(self):
+        failed = self.fail_after_preparation()
+        phase = next(iter(self.cfg['deployment']['applications']))
+        def unreachable(argv, environment, log):
+            write_new(log, ('PLAY RECAP '+ '*'*20+'\n'+self.cfg['app']['hostname']+
+                ' : ok=1 changed=1 unreachable=1 failed=0 skipped=0 rescued=0 ignored=0\n').encode())
+            raise subprocess.CalledProcessError(4, argv, output='PRIVATE')
+        with patch.object(component_ansible, 'quiet', side_effect=unreachable):
+            with self.assertRaises(subprocess.CalledProcessError):
+                deploy.run(phase, self.case.packet, inputs=self.case.inputs, environment={})
+        self.assertFalse(read_json(failed/'forward-failure.json', private=True)['command_returned'])
+        self.assertNotIn('PRIVATE', (failed/'forward-failure.json').read_text())
+        calls = len(self.case.infra)
+        self.inspections.clear()
+        with self.assertRaisesRegex(ValueError, 'uncertain forward'): component_recovery.restore(self.cfg, failed)
+        self.assertEqual(len(self.case.infra), calls)
+        self.assertEqual(self.inspections, [])
+        self.assertTrue((self.work/'ORDINARY-HOLD.json').exists())
+
+    def test_ansible_completed_task_failure_can_rollback_with_failed_run_evidence(self):
+        failed = self.fail_after_preparation()
+        phase = next(iter(self.cfg['deployment']['applications']))
+        def failed_task(argv, environment, log):
+            write_new(log, ('PLAY RECAP '+ '*'*20+'\n'+self.cfg['app']['hostname']+
+                ' : ok=1 changed=1 unreachable=0 failed=1 skipped=0 rescued=0 ignored=0\n').encode())
+            raise subprocess.CalledProcessError(2, argv)
+        with patch.object(component_ansible, 'quiet', side_effect=failed_task):
+            with self.assertRaises(component_ansible.CompletedTaskFailure):
+                deploy.run(phase, self.case.packet, inputs=self.case.inputs, environment={})
+        self.assertTrue(read_json(failed/'forward-failure.json', private=True)['command_returned'])
+        self.assertEqual(component_recovery.restore(self.cfg, failed)['status'], 'failed_rolled_back')
+        self.assertTrue((failed/'forward-failure.json').exists())
+
+    def test_only_a_complete_reachable_single_host_failure_recap_is_settled(self):
+        log = self.trust/'failed.log'
+        error = subprocess.CalledProcessError(2, ['ansible-playbook'])
+        valid = 'PLAY RECAP '+ '*'*20+'\nexample : ok=1 changed=0 unreachable=0 failed=1 skipped=0 rescued=0 ignored=0\n'
+        for content in (b'no recap', valid.replace('unreachable=0', 'unreachable=1').encode(),
+                        valid.replace('failed=1', 'failed=0').encode(),
+                        (valid+valid.partition('\n')[2].replace('example', 'foreign')).encode(), b'\xff'):
+            write_bytes(log, content)
+            self.assertFalse(component_ansible.completed_failure(error, log, 'example'))
+        write_bytes(log, valid.encode())
+        self.assertTrue(component_ansible.completed_failure(error, log, 'example'))
+        self.assertFalse(component_ansible.completed_failure(error, log, 'other'))
+        self.assertFalse(component_ansible.completed_failure(subprocess.CalledProcessError(-9, error.cmd), log, 'example'))
+        self.assertFalse(component_ansible.completed_failure(error, self.trust/'missing.log', 'example'))
+
+    def test_pre_mutation_failure_releases_only_its_unchanged_hold(self):
+        before = sha(self.work/'terraform.tfstate')
+        with patch.object(component_restore, 'execute', side_effect=ValueError('capture refused')):
+            with self.assertRaises(ValueError): deploy.run('infrastructure', self.case.packet, inputs=self.case.inputs, environment={})
+        result = component_recovery.restore(self.cfg, self.work/'ordinary-102-1')
+        self.assertEqual(result['status'], 'failed_no_change')
+        self.assertEqual(sha(self.work/'terraform.tfstate'), before)
+        self.assertFalse((self.work/'ORDINARY-HOLD.json').exists())
+        component_recovery.release(self.work, {})
+
+    def test_first_installation_can_complete_without_a_rollback_owner(self):
+        original = fixture.site
+        def source():
+            value = original()
+            value['secret_sources']['token']['path'] = str(self.trust/'token')
+            value['secret_sources']['ssh']['path'] = str(self.trust/'key')
+            value['contexts']['lab']['trust']['known_hosts'] = str(self.trust/'known_hosts')
+            return value
+        with patch.object(fixture, 'site', side_effect=source):
+            case = fixture.DeploymentIntegrationTests(); case.setUp(); self.addCleanup(case.doCleanups)
+        case.all_phases()
+        work = case.state/'610'; operation = work/'ordinary-101-1'
+        self.assertIsNone(read_json(operation/'rollback-baseline.json', private=True)['owner'])
+        self.assertEqual(component_recovery.accept(case.cfg, operation)['status'], 'accepted')
+        self.assertFalse((work/'ORDINARY-HOLD.json').exists())
+
+    def test_completed_verification_is_immutable_and_new_held_operation_is_not_closed(self):
+        operation = self.fail_after_preparation()
+        component_recovery.restore(self.cfg, operation)
+        state, _ = component_current.read(self.work)
+        proof = Path(state['verification']['path']); raw = proof.read_bytes()
+        component_recovery.verified(self.work, proof.parent, 'rollback', Path(state['owner']['path']),
+            state['state_sha256'], state['state_identity'], state['resolved'], reason='Continuation preserves original note')
+        self.assertEqual(proof.read_bytes(), raw)
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '103', 'GITHUB_RUN_NUMBER': '12'}):
+            deploy.run('infrastructure', self.case.packet, inputs=self.case.inputs, environment={})
+        self.assertFalse(component_recovery.close_published(self.cfg))
+        self.assertTrue((self.work/'ORDINARY-HOLD.json').exists())
+
+    def test_backend_change_after_reverse_checkpoint_refuses_verification(self):
+        operation = self.fail_after_preparation()
+        component_recovery.restore(self.cfg, operation, finalize=False)
+        backend = self.work/'terraform.tfstate'; state = read_json(backend, private=True); state['serial'] += 1
+        write_bytes(backend, encoded(state))
+        with self.assertRaisesRegex(ValueError, 'checkpoint changed'):
+            component_recovery.verify_restore(self.cfg, operation)
+        self.assertTrue((self.work/'ORDINARY-HOLD.json').exists())
+
+    def test_foreign_repository_workflow_and_fabricated_canonical_owner_refuse_before_native(self):
+        operation = self.fail_after_preparation()
+        import proxmox_guest
+        with patch.object(proxmox_guest, 'infrastructure') as native:
+            with patch.dict(os.environ, {'GITHUB_REPOSITORY': 'foreign/repository'}):
+                with self.assertRaisesRegex(ValueError, 'another repository'):
+                    component_recovery.restore(self.cfg, operation)
+                with self.assertRaisesRegex(ValueError, 'foreign workflow'):
+                    component_recovery.reconcile(self.cfg, operation, Path(self.owner['operation'])/'complete.json', self.owner,
+                        reason='repair', actor_context='protected-main-reconciliation')
+            hold = read_json(self.work/'ORDINARY-HOLD.json', private=True)
+            hold['workflow'] = ['foreign/repository', 'foreign/repository/.github/workflows/deploy.yml']
+            write_bytes(self.work/'ORDINARY-HOLD.json', encoded(hold))
+            with self.assertRaisesRegex(ValueError, 'foreign workflow'):
+                component_recovery.reconcile(self.cfg, operation, Path(self.owner['operation'])/'complete.json', self.owner,
+                    reason='repair', actor_context='protected-main-reconciliation')
+            forged = copy.deepcopy(self.owner); forged['operation'] = str(self.work/'ordinary-99-1')
+            write_bytes(self.work/'ordinary-complete.json', encoded(forged))
+            with self.assertRaises(FileNotFoundError):
+                component_recovery.reconcile(self.cfg, operation, Path(self.owner['operation'])/'complete.json', self.owner,
+                    reason='repair', actor_context='protected-main-reconciliation')
+        native.assert_not_called()
+        self.assertTrue((self.work/'ORDINARY-HOLD.json').exists())
+
+    def test_same_repository_foreign_workflow_cannot_borrow_a_previous_owner(self):
+        operation = self.fail_after_preparation()
+        baseline = read_json(operation/'rollback-baseline.json', private=True)
+        baseline['marker']['workflow'][1] = 'example/private/.github/workflows/foreign.yml'
+        write_bytes(operation/'rollback-baseline.json', encoded(baseline))
+        write_bytes(self.work/'ORDINARY-HOLD.json', encoded(baseline['marker']))
+        import proxmox_guest
+        with patch.object(proxmox_guest, 'infrastructure') as native, self.assertRaisesRegex(ValueError, 'deployment workflows'):
+            component_recovery.restore(self.cfg, operation)
+        native.assert_not_called()
+
+    def test_immutable_recovery_attempts_are_bounded_and_new_installations_remain_allowed(self):
+        directory = self.work/'recovery-200-1'; directory.mkdir(mode=0o700)
+        for index in range(8): self.assertEqual(component_recovery.attempt_directory(directory, 'infrastructure').name, 'infrastructure-'+str(index+1))
+        with self.assertRaisesRegex(ValueError, 'limit reached'): component_recovery.attempt_directory(directory, 'infrastructure')
+        with self.assertRaises(ValueError): component_recovery.attempt_directory(directory, '../foreign')
+        file = directory/'proof.json'; component_recovery.once(file, {'a': 1}); component_recovery.once(file, {'a': 1})
+        with self.assertRaises(ValueError): component_recovery.once(file, {'a': 2})
+        self.fail_after_preparation()
+        phase = next(iter(self.cfg['deployment']['applications']))
+        import component_ansible
+        original = component_ansible.run_phase
+        with patch.object(component_restore, 'descriptor', return_value={'files': {'/opt/example/new.conf': None}}), \
+                patch('component_ansible.run_phase', wraps=original) as native:
+            self.assertEqual(deploy.run(phase, self.case.packet, inputs=self.case.inputs, environment={})['status'], 'passed')
+        native.assert_called_once()
+        operation = self.work/'ordinary-102-1'
+        self.assertEqual(read_json(operation/(phase+'-rollback-limit.json'), private=True)['new_control_paths'], ['/opt/example/new.conf'])
+        with self.assertRaisesRegex(ValueError, 'newly installed control namespace'):
+            component_recovery.restore(self.cfg, operation)
+        with patch.dict(os.environ, {'HOMELAB_CD_RECOVERY': 'unknown'}), self.assertRaises(ValueError): component_recovery.enabled()
+
+    def test_candidate_accept_interruption_finishes_metadata_without_repeating_native_work(self):
+        self.case.all_phases(); operation = self.work/'ordinary-102-1'
+        with patch.object(component_recovery, 'replace_receipt', side_effect=OSError('synthetic publication interruption')):
+            with self.assertRaises(OSError): component_recovery.accept(self.cfg, operation)
+        calls = list(self.inspections)
+        self.assertTrue(component_recovery.close_published(self.cfg))
+        self.assertEqual(calls, self.inspections)
+        self.assertFalse(component_recovery.close_published(self.cfg))
+        self.assertEqual(component_current.read(self.work)[0]['kind'], 'ordinary')
+
+    def test_reversal_resumes_completed_native_checkpoints_and_published_exact_hold(self):
+        operation = self.fail_after_preparation()
+        component_recovery.restore(self.cfg, operation, finalize=False)
+        calls = list(self.inspections)
+        component_recovery.restore(self.cfg, operation, finalize=False)
+        self.assertEqual(self.inspections, calls)
+        release = component_recovery.release
+        with patch.object(component_recovery, 'release', side_effect=OSError('synthetic interruption')):
+            with self.assertRaises(OSError): component_recovery.finish_restore(self.cfg, operation)
+        self.assertEqual(component_recovery.restore(self.cfg, operation)['status'], 'failed_rolled_back')
+        self.assertFalse((self.work/'ORDINARY-HOLD.json').exists())
+
+    def test_manual_last_good_with_captured_controls_and_legacy_identity(self):
+        operation = self.fail_after_preparation(); self.native = 'old'
+        owner = copy.deepcopy(self.owner); owner.pop('state_identity')
+        write_bytes(self.work/'ordinary-complete.json', encoded(owner))
+        immutable = Path(owner['operation'])/'complete.json'; write_bytes(immutable, encoded(owner))
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '104', 'GITHUB_RUN_NUMBER': '13'}):
+            result = component_recovery.reconcile(self.cfg, operation, immutable, owner,
+                reason='Verified engineer repair', actor_context='protected-main-reconciliation',
+                expected_controls=read_json(operation/'controls-before.json', private=True))
+        self.assertEqual(result['status'], 'reconciled')
+
+    def test_partial_failure_rolls_back_without_history_rewrite_and_next_cd_completes(self):
+        failed = self.fail_after_preparation()
+        old = {p.name: p.read_bytes() for p in Path(self.owner['operation']).glob('*.json')}
+        with component_recovery.locked(self.cfg):
+            result = component_recovery.restore(self.cfg, failed)
+        self.assertEqual(result['status'], 'failed_rolled_back')
+        self.assertEqual(self.native, 'old')
+        self.assertFalse((self.work/'ORDINARY-HOLD.json').exists())
+        self.assertEqual((self.work/'ordinary-complete.json').read_bytes(), self.before)
+        self.assertEqual(old, {p.name: p.read_bytes() for p in Path(self.owner['operation']).glob('*.json')})
+        self.assertTrue(failed.is_dir())
+        self.assertFalse((failed/'complete.json').exists())
+        state, owner = component_current.read(self.work)
+        self.assertEqual(state['kind'], 'rollback')
+        self.assertEqual(owner, self.owner)
+        self.assertNotEqual(state['state_sha256'], owner['state_sha256'])
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '103', 'GITHUB_RUN_NUMBER': '12'}):
+            self.case.all_phases()
+            self.assertEqual((self.work/'ordinary-complete.json').read_bytes(), self.before)
+            with component_recovery.locked(self.cfg):
+                component_recovery.accept(self.cfg, self.work/'ordinary-103-1')
+        self.assertEqual(component_current.read(self.work)[0]['kind'], 'ordinary')
+        self.assertFalse((self.work/'ORDINARY-HOLD.json').exists())
+        self.assertEqual(read_json(self.work/'ordinary-complete.json', private=True)['run_number'], 12)
+
+    def test_failed_restore_keeps_hold_and_old_pointer(self):
+        failed = self.fail_after_preparation()
+        hold = (self.work/'ORDINARY-HOLD.json').read_bytes()
+        with patch.object(component_restore, 'execute', side_effect=ValueError('restore refused')):
+            with component_recovery.locked(self.cfg), self.assertRaises(ValueError):
+                component_recovery.restore(self.cfg, failed)
+        self.assertEqual((self.work/'ORDINARY-HOLD.json').read_bytes(), hold)
+        self.assertEqual((self.work/'ordinary-complete.json').read_bytes(), self.before)
+        self.assertFalse((self.work/'current-state.json').exists())
+
+    def test_changed_credentials_or_foreign_hold_refuse_before_native_restore(self):
+        failed = self.fail_after_preparation()
+        self.inspections.clear()
+        token = self.trust/'token'; original = token.read_bytes()
+        write_bytes(token, b'different\n')
+        with self.assertRaisesRegex(ValueError, 'credentials'):
+            component_recovery.restore(self.cfg, failed)
+        write_bytes(token, original)
+        write_bytes(self.work/'ORDINARY-HOLD.json', encoded({'foreign': True}))
+        with self.assertRaisesRegex(ValueError, 'exact unresolved'):
+            component_recovery.restore(self.cfg, failed)
+        self.assertEqual(self.inspections, [])
+
+    def test_final_acceptance_keeps_candidate_pending_until_checks_pass(self):
+        self.case.all_phases()
+        operation = self.work/'ordinary-102-1'
+        self.assertTrue((operation/'complete.json').exists())
+        self.assertTrue((self.work/'ORDINARY-HOLD.json').exists())
+        self.assertEqual((self.work/'ordinary-complete.json').read_bytes(), self.before)
+        with component_recovery.locked(self.cfg):
+            component_recovery.accept(self.cfg, operation)
+        self.assertEqual(component_current.read(self.work)[0]['kind'], 'ordinary')
+        self.assertFalse((self.work/'ORDINARY-HOLD.json').exists())
+
+    def test_resolved_failure_tampering_is_not_a_new_admission(self):
+        failed = self.fail_after_preparation()
+        with component_recovery.locked(self.cfg):
+            component_recovery.restore(self.cfg, failed)
+        write_bytes(failed/'preparation-complete.json', encoded({'tampered': True}))
+        with self.assertRaisesRegex(ValueError, 'failure evidence changed'):
+            component_current.read(self.work)
+
+    def test_recovery_dependency_order_is_reverse_of_real_startup_edges(self):
+        self.assertEqual(component_recovery.order({'db': [], 'app': ['db'], 'web': ['app']},
+                                                 ['db', 'app', 'web']), ['web', 'app', 'db'])
+        with self.assertRaises(ValueError):
+            component_recovery.order({'a': ['b'], 'b': ['a']}, ['a', 'b'])
+
+    def test_manual_reconciliation_creates_distinct_owner_then_fresh_cd_succeeds(self):
+        failed = self.fail_after_preparation()
+        self.native = 'old'  # The engineer repaired the application/data.
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '104', 'GITHUB_RUN_NUMBER': '13'}):
+            with component_recovery.locked(self.cfg):
+                result = component_recovery.reconcile(self.cfg, failed,
+                    Path(self.owner['operation'])/'complete.json', self.owner,
+                    reason='Engineer repaired the failed application', actor_context='protected-main-reconciliation')
+        self.assertEqual(result['status'], 'reconciled')
+        state, owner = component_current.read(self.work)
+        self.assertEqual(state['kind'], 'reconciled')
+        self.assertEqual(owner['status'], 'reconciled')
+        with self.assertRaises(ValueError):
+            component_generation.component_success(owner, Path(owner['operation']))
+        self.assertEqual((self.work/'ordinary-complete.json').read_bytes(), self.before)
+        self.assertFalse((self.work/'ORDINARY-HOLD.json').exists())
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '105', 'GITHUB_RUN_NUMBER': '14'}):
+            self.case.all_phases()
+            with component_recovery.locked(self.cfg):
+                component_recovery.accept(self.cfg, self.work/'ordinary-105-1')
+        self.assertEqual(component_current.read(self.work)[0]['kind'], 'ordinary')
+
+    def test_pointer_before_hold_release_interruption_is_metadata_only_on_resume(self):
+        failed = self.fail_after_preparation()
+        class Interrupted(BaseException): pass
+        with patch.object(component_recovery, 'release', side_effect=Interrupted):
+            with component_recovery.locked(self.cfg), self.assertRaises(Interrupted):
+                component_recovery.restore(self.cfg, failed)
+        self.assertTrue((self.work/'ORDINARY-HOLD.json').exists())
+        self.inspections.clear()
+        self.assertTrue(component_recovery.close_published(self.cfg))
+        self.assertFalse((self.work/'ORDINARY-HOLD.json').exists())
+        self.assertEqual(self.inspections, [])
+        self.assertFalse(component_recovery.close_published(self.cfg))
+
+    def test_failed_read_only_reconciliation_never_releases_hold_or_applies_configuration(self):
+        failed = self.fail_after_preparation()
+        original = (self.work/'ORDINARY-HOLD.json').read_bytes()
+        with patch.object(component_restore, 'expected', side_effect=ValueError('mismatch')):
+            with component_recovery.locked(self.cfg), self.assertRaises(ValueError):
+                component_recovery.reconcile(self.cfg, failed, Path(self.owner['operation'])/'complete.json',
+                    self.owner, reason='Repair reviewed', actor_context='protected-main-reconciliation')
+        self.assertEqual((self.work/'ORDINARY-HOLD.json').read_bytes(), original)
+        self.assertNotIn('restore', self.inspections)
+
+
+if __name__ == '__main__':
+    unittest.main()

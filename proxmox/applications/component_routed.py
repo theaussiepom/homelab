@@ -33,12 +33,19 @@ def configuration(cfg):
     return selected
 
 
-def run(cfg, site, work, operation, expected, *, executor=None):
+def run(cfg, site, work, operation, expected, *, executor=None, historical=False):
     selected = configuration(cfg)
     require(executor is None or selected['mode'] == 'deferred', 'Parallel checks run only on the controller')
-    require(component_inputs.binding(cfg, site) == expected, 'Route inputs changed before checks')
+    def bound():
+        if historical:
+            import component_generation
+            from private_io import sha
+            selected, _ = component_generation.sealed_inputs(expected)
+            return selected == cfg and all(sha(path) == wanted for path, wanted in expected['input_hashes'].items())
+        return component_inputs.binding(cfg, site) == expected
+    require(type(historical) is bool and bound(), 'Route inputs changed before checks')
     directory = operation/'http-checks'
-    if selected['mode'] == 'deferred':
+    if selected['mode'] == 'deferred' and not historical:
         # Ordinary completion stays immutable; this job has separate evidence.
         directory = work/('http-checks-' + operation.name.removeprefix('ordinary-'))
     directory.mkdir(mode=0o700)
@@ -49,7 +56,7 @@ def run(cfg, site, work, operation, expected, *, executor=None):
     if executor is not None:
         result = routed_checks.parallel(selected['rows'], executor)
         write_new(directory/'checks.log', encoded(result))
-        require(component_inputs.binding(cfg, site) == expected, 'Route inputs changed during checks')
+        require(bound(), 'Route inputs changed during checks')
         if result['status'] != 'passed':
             raise routed_checks.VerificationFailure(result)
         write_new(directory/'complete.json', encoded({'binding': expected, 'operation': str(operation), **result}))
@@ -73,7 +80,7 @@ def run(cfg, site, work, operation, expected, *, executor=None):
         command = ['ansible-playbook','-i',str(directory/'inventory.json'),'--private-key',cfg['paths']['private_key'],
                    str(SOURCE/'ansible/component-route-checks.yml'),'--extra-vars','@'+str(directory/'variables.json')]
     quiet(command, environment, directory/'checks.log')
-    require(component_inputs.binding(cfg, site) == expected, 'Route inputs changed during checks')
+    require(bound(), 'Route inputs changed during checks')
     if selected['mode'] == 'inline':
         counts = re.findall(r'changed=(\d+)', (directory/'checks.log').read_text())
         require(counts and all(value == '0' for value in counts), 'Route checks must be read-only')

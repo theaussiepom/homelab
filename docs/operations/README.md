@@ -8,7 +8,8 @@ Use these guides to prepare, deploy and maintain a configuration through its sup
 | A supported new installation is ready to execute | [Deploy and verify](deployment.md#first-installation) |
 | An existing service managed by HomeLab needs a declared change | [Later deployments](verify-and-maintain.md#later-deployments) and [lifecycle](../reference/lifecycle.md) |
 | The workflow completed and the service needs verification | [Service verification](verify-and-maintain.md#service-verification) |
-| Source, admission, a phase or the service failed | [Troubleshooting](troubleshooting.md) |
+| A guest deployment failed | [CD rollback and Reconcile guest](cd-recovery.md) |
+| Source, admission or the service failed | [Troubleshooting](troubleshooting.md) |
 | Set up backups or verify unattended recovery | [Complete backup guide](../backup/README.md), from server and key setup through restore and maintenance |
 | Host installation/bootstrap or a specific recovery subsystem is needed | [Separate subsystem contracts](../framework-reference.md) |
 

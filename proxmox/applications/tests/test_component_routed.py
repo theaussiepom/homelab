@@ -60,6 +60,16 @@ class RouteCallerTests(unittest.TestCase):
         self.assertEqual(command[1],str(m.SOURCE/'routed_checks.py'))
         self.assertTrue((self.work/'http-checks-101-1/complete.json').is_file())
         m.proxmox_guest.guest_trust.assert_not_called()
+
+    def test_historical_recovery_uses_sealed_binding_and_operation_local_route_evidence(self):
+        self.cfg['app']['route_checks']['mode'] = 'deferred'
+        expected = {'input_hashes': {}}
+        with patch('component_generation.sealed_inputs', return_value=(self.cfg, {})), \
+                patch.object(m, 'quiet', side_effect=self.quiet):
+            result = m.run(self.cfg, self.root/'site.json', self.work, self.operation, expected, historical=True)
+        self.assertEqual(result['routed_endpoints'], 1)
+        self.assertTrue((self.operation/'http-checks/complete.json').is_file())
+        self.binding.assert_not_called()
     def test_shared_pool_retains_private_evidence_binding_and_failure(self):
         with ThreadPoolExecutor(max_workers=1) as pool:
             with self.assertRaisesRegex(ValueError,'only on the controller'):
@@ -102,6 +112,40 @@ class RouteCallerTests(unittest.TestCase):
 
 
 class RouteOrdinaryIntegrationTests(unittest.TestCase):
+    def test_pending_candidate_runs_deferred_checks_and_rollback_rechecks_previous_routes(self):
+        import component_recovery
+        import test_component_recovery as recovery_fixture
+        tx = recovery_fixture.RecoveryTransactions(); tx.setUp(); self.addCleanup(tx.doCleanups)
+        case = tx.case
+        resolved = copy.deepcopy(case.plan.resolved)
+        resolved['routed_checks'] = {'resolver': {'mode': 'deferred', 'rows': [row()]}}
+        plan = component_plan.Plan(case.plan.library, case.plan.site, resolved, case.plan.pins)
+        packet = component_packet.lower_plan(plan, inputs=case.inputs)['resolver']
+        write_bytes(case.packet, encoded(packet)); case.cfg = json.loads(packet['files']['site.json'])
+        case.all_phases()
+        with patch.object(m, 'run', return_value={'status': 'passed'}) as routes:
+            self.assertEqual(deploy.run('http-checks', case.packet, inputs=case.inputs, environment={})['status'], 'passed')
+        self.assertTrue((tx.work/'ORDINARY-HOLD.json').exists())
+        routes.assert_called_once()
+        component_recovery.accept(case.cfg, tx.work/'ordinary-102-1')
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '103', 'GITHUB_RUN_NUMBER': '12'}):
+            deploy.run('infrastructure', case.packet, inputs=case.inputs, environment={})
+            deploy.run('preparation', case.packet, inputs=case.inputs, environment={})
+            with patch.object(m, 'run', return_value={'status': 'passed'}) as routes:
+                component_recovery.restore(case.cfg, tx.work/'ordinary-103-1')
+            self.assertTrue(routes.call_args.kwargs['historical'])
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '104', 'GITHUB_RUN_NUMBER': '13'}):
+            deploy.run('infrastructure', case.packet, inputs=case.inputs, environment={})
+            deploy.run('preparation', case.packet, inputs=case.inputs, environment={})
+        import component_current
+        owner_path = component_current.owner_path(tx.work); owner = read_json(owner_path, private=True)
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '105', 'GITHUB_RUN_NUMBER': '14'}), \
+                patch.object(m, 'run', return_value={'status': 'passed'}) as routes:
+            component_recovery.reconcile(case.cfg, tx.work/'ordinary-104-1', owner_path, owner,
+                reason='Engineer repaired routes', actor_context='protected-main-reconciliation',
+                expected_controls=read_json(tx.work/'ordinary-104-1/controls-before.json', private=True))
+            self.assertTrue(routes.call_args.kwargs['historical'])
+
     def fixture(self,mode):
         case=fixture.DeploymentIntegrationTests();case.setUp();self.addCleanup(case.doCleanups)
         resolved=copy.deepcopy(case.plan.resolved)

@@ -17,7 +17,8 @@ from component_plan import RESERVED
 from component_sources import identifier, require
 
 FLAT_INPUTS = {'HOMELAB_STACK_SOURCE', 'HOMELAB_ENVIRONMENT_PREFIX', 'HOMELAB_RUNNER_LABELS',
-               'HOMELAB_REPOSITORY', 'HOMELAB_DISABLED', 'HOMELAB_CHECK_ENVIRONMENT'}
+               'HOMELAB_REPOSITORY', 'HOMELAB_DISABLED', 'HOMELAB_CHECK_ENVIRONMENT',
+               'HOMELAB_RECOVERY_ENVIRONMENT'}
 REUSABLE_INPUTS = {'disabled', 'runner_labels', 'environment_name'}
 AGENT_PHASE = 'zabbix-agent'
 BACKUP_PHASE = 'pbs-agent'

@@ -2,6 +2,7 @@
 from pathlib import Path
 
 import backup_agent
+import component_current
 from component_guest import BACKUP_PHASE
 from component_payload import AppPayload
 from private_io import digest, encoded, private_directory, read_json, require, sha
@@ -39,8 +40,9 @@ def verify(schedule, admitted):
         inventory = cfg['app']['backup']
         require(digest(encoded(inventory)) == schedule['coverage'][name],
                 'Deploy the current declared backup coverage, including disabled members')
-        receipt_path = Path(cfg['paths']['state_root'])/str(cfg['guest']['vmid'])/'ordinary-complete.json'
-        require(sha(receipt_path) == proof, 'Preserve the admitted completed guest generation')
+        work = Path(cfg['paths']['state_root'])/str(cfg['guest']['vmid'])
+        receipt_path = component_current.owner_path(work)
+        require(component_current.generation_hash(work) == proof, 'Preserve the admitted completed guest generation')
         receipt = read_json(receipt_path, private=True)
         selected = receipt['phase_inputs'][BACKUP_PHASE]
         payload = AppPayload.load(Path(receipt['binding']['app_inputs_directory'])/'backup-agent', selected)

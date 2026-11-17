@@ -3,6 +3,7 @@ import json
 from pathlib import Path,PurePosixPath
 
 import component_generation
+import component_current
 import renovate
 from component_payload import AppPayload
 from private_io import read_json, require, sha
@@ -63,7 +64,7 @@ def namespaces(attempt, app):
         return False, False
     receipt = read_json(attempt.receipt, private=True)
     operation = Path(receipt['operation']) if isinstance(receipt.get('operation'), str) else None
-    if operation is None or not component_generation.component_success(receipt, operation):
+    if operation is None or not component_current.owned(receipt, operation):
         return False, False
     proofs=[proof for proof in receipt['phase_inputs'].values()
             if proof is not None and proof['app'] not in ('agent', 'backup-agent')]

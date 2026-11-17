@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import stat
 import component_generation
+import component_current
 from custody_records import no_markers, read_existing
 from component_payload import AppPayload, BINDING_SCHEMA
 from private_io import (
@@ -44,6 +45,42 @@ def custody_paths(root, work):
             (work / 'workflow.lock', False), (work / 'deployment.lock', False)]
 
 
+def custody_markers(root, work):
+    """One unchanged refusal boundary shared by deployment and recovery."""
+    no_markers(root)
+    coordinated = [*root.glob("database-network-cutover-*"),
+                   *root.glob("database-server-cutover-*")]
+    for directory in [work, *coordinated]:
+        private_directory(directory)
+        no_markers(directory, own_ordinary=directory == work)
+        require(
+            not any(
+                p.exists() or p.is_symlink()
+                for p in directory.glob("*HOLD.json")
+                if p != (work/'ORDINARY-HOLD.json')
+            )
+            and not any(
+                (directory / n).exists() or (directory / n).is_symlink()
+                for n in HOLDS - {"ORDINARY-HOLD.json"}
+            )
+            and not (
+                (directory / "VERIFYING.json").exists()
+                or (directory / "VERIFYING.json").is_symlink()
+            ),
+            "Preserve an unresolved operation or verification hold",
+        )
+    for child in work.iterdir():
+        if child.name.startswith("database-"):
+            require(not child.is_symlink(), "Preserve unexpected nested custody")
+            if child.is_dir():
+                private_directory(child)
+                no_markers(child)
+    require(
+        not any(work.glob("database-*/*HOLD.json")),
+        "Preserve a nested database operation hold",
+    )
+
+
 class DeploymentAttempt:
     """Own an existing state directory and one GitHub run's ordered phase evidence."""
 
@@ -61,7 +98,8 @@ class DeploymentAttempt:
         self.prepare_inputs = prepare_inputs
         self.phases = phases
         self.hold = self.work / "ORDINARY-HOLD.json"
-        self.receipt = self.work / "ordinary-complete.json"
+        self.canonical = self.work / "ordinary-complete.json"
+        self.receipt = self.canonical
         self.locks = ExitStack()
 
     def __enter__(self):
@@ -78,43 +116,16 @@ class DeploymentAttempt:
                 fcntl.flock(
                     stream, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB
                 )
-            no_markers(self.root)
-            coordinated = [*self.root.glob("database-network-cutover-*"),
-                           *self.root.glob("database-server-cutover-*")]
-            for directory in [self.work, *coordinated]:
-                private_directory(directory)
-                no_markers(directory, own_ordinary=directory == self.work)
-                require(
-                    not any(
-                        p.exists() or p.is_symlink()
-                        for p in directory.glob("*HOLD.json")
-                        if p != self.hold
-                    )
-                    and not any(
-                        (directory / n).exists() or (directory / n).is_symlink()
-                        for n in HOLDS - {"ORDINARY-HOLD.json"}
-                    )
-                    and not (
-                        (directory / "VERIFYING.json").exists()
-                        or (directory / "VERIFYING.json").is_symlink()
-                    ),
-                    "Preserve an unresolved operation or verification hold",
-                )
-            for child in self.work.iterdir():
-                if child.name.startswith("database-"):
-                    require(not child.is_symlink(), "Preserve unexpected nested custody")
-                    if child.is_dir():
-                        private_directory(child)
-                        no_markers(child)
-            require(
-                not any(self.work.glob("database-*/*HOLD.json")),
-                "Preserve a nested database operation hold",
-            )
+            custody_markers(self.root, self.work)
             if self.prepare_inputs is not None:
                 # Existing ordinary custody is verification-only. No selected
                 # app secret/account inputs are accepted by this callback.
                 self.binding = self.prepare_inputs(not (self.hold.exists() or self.hold.is_symlink()))
                 component_generation.binding(self.binding)
+            self.receipt = component_current.owner_path(self.work)
+            from component_recovery import enabled
+            require(not component_current.exists(self.work/component_current.NAME) or enabled(),
+                    'Effective recovery state requires the versioned generated CD entry point')
             self._require_backend()
             self.custody_identity = component_generation.current(self)
             return self
@@ -123,7 +134,11 @@ class DeploymentAttempt:
             raise
 
     def __exit__(self, *exc):
-        return self.locks.__exit__(*exc)
+        try:
+            from component_recovery import record_failure
+            record_failure(self, exc[1])
+        finally:
+            self.locks.__exit__(*exc)
 
     def _require_backend(self):
         """Only an empty guest history may start without its backend."""
@@ -158,8 +173,7 @@ class DeploymentAttempt:
         if self.receipt.exists() or self.receipt.is_symlink():
             self._select_run()
             old = json.loads(regular(self.receipt, private=True))
-            from component_generation import component_success
-            require(component_success(old, Path(old.get('operation', ''))),
+            require(component_current.owned(old, Path(old.get('operation', ''))),
                     'Current ownership requires a genuine component ordinary success')
             require(
                 old.get("workflow") == self.workflow
@@ -255,6 +269,8 @@ class DeploymentAttempt:
         write_new(self.hold, encoded(self.marker))
         from component_checkpoint import claim
         claim(self)
+        from component_recovery import begin
+        begin(self)
 
     def infrastructure_complete(self, result):
         state_hash, identity = component_generation.backend(self.work,
@@ -367,7 +383,10 @@ class DeploymentAttempt:
             "Deployment hold ownership changed",
         )
         write_new(self.operation / "complete.json", encoded(receipt))
-        replace_receipt(self.receipt, receipt)
+        from component_recovery import enabled
+        if enabled():
+            return changed
+        replace_receipt(self.canonical, receipt)
         require(
             regular(self.hold, private=True) == encoded(self.marker),
             "Deployment hold ownership changed",
