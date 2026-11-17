@@ -11,6 +11,7 @@ The component compiler produces a guest packet: a file containing the generated 
 | Static desired inputs | [component_inputs.py](component_inputs.py) |
 | One app's private inputs | [component_prepare.py](component_prepare.py), [component_payload.py](component_payload.py) |
 | Locks, holds and ordinary receipts | [deployment_state.py](deployment_state.py) |
+| End-of-job scratch cleanup and bounded diagnostics | [guest_cleanup.py](guest_cleanup.py), [cleanup_files.py](cleanup_files.py) |
 | Provider/state reconciliation | [proxmox_guest.py](proxmox_guest.py), [OpenTofu module](tofu/guest/main.tf) |
 | Selected Ansible variables and execution | [component_ansible.py](component_ansible.py) |
 | App rendering and owned file identities | [component_runtime.py](component_runtime.py), [application_contract.py](application_contract.py) |
