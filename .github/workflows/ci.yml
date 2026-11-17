@@ -169,8 +169,11 @@ jobs:
       - name: Fetch only the selected immutable application images
         run: |
           docker pull --platform linux/amd64 ghcr.io/pegaprox/pegaprox@sha256:8d295a524a52f0b923616a3eb415ff6422fe62beba5bb441f35c75d8985f1add
+          docker pull --platform linux/amd64 ghcr.io/pegaprox/pegaprox@sha256:3c8cb496769f05e8c37a6e9cb37a4700df2a37898c073b635c83d734014065f7
       - name: Replace retained PegaProx TLS with HTTP and verify proxy trust and restart
         run: python3 proxmox/applications/tests/pegaprox_runtime_fixture.py
+      - name: Qualify native OIDC settings and token verification through the pinned upgrade
+        run: python3 proxmox/applications/tests/pegaprox_oidc_fixture.py
   applications:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     name: Application contracts and runtime components (Docker)

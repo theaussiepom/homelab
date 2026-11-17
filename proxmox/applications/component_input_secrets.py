@@ -15,7 +15,7 @@ ROLES = {
     'authentik': {'secret_key', 'postgresql_password', 'smtp_password'},
     'traefik': {'cloudflare_dns_token', 'proxmox_token', 'cloudflare_origin_token'},
     'zabbix': {'database_password'}, 'node_red': {'api_token'},
-    'bitwarden': {'runtime_environment'}, 'pegaprox': {'database_key'},
+    'bitwarden': {'runtime_environment'}, 'pegaprox': {'database_key', 'client_secret', 'management_token'},
     'winet': {'options'}, 'mqtt': {'probe'}, 'cloudbeaver': {'client_secret'},
     'mqtt_explorer': {'broker_password'},
 }

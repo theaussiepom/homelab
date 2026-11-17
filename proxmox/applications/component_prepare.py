@@ -52,6 +52,9 @@ def install_rows(app, rows, payload):
             and selected['directory'] == root and set(selected['files']) == allowed,
             'Preserve the compiled runtime leaf ownership')
     downloaded=set()
+    if app['adapter']=='pegaprox' and 'authentication_resolved' in app:
+        # The reconciler creates this protected success record only after API verification.
+        downloaded={'pegaprox-oidc-applied.json'}
     if app['adapter']=='cloudbeaver' and app['settings'].get('mariadb_jdbc'):
         downloaded={'mariadb-java-client-'+app['settings']['mariadb_jdbc']['version']+'.jar'}
     require({row.get('path') for row in rows if isinstance(row,dict)}==allowed-downloaded,

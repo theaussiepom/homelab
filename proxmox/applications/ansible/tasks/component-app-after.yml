@@ -1,4 +1,12 @@
 ---
+- name: Reconcile the declared native PegaProx login
+  ansible.builtin.command:
+    argv: "{{ component_pegaprox_oidc.argv }}"
+  register: component_pegaprox_login
+  changed_when: (component_pegaprox_login.stdout | from_json).changed
+  no_log: true
+  when: component_pegaprox_oidc is defined and not ansible_check_mode
+
 - name: Reconcile only Pi-hole's owned DNS records
   ansible.builtin.command:
     argv: "{{ pihole_records.reconcile_argv }}"

@@ -212,6 +212,7 @@ For first installation, preserve provider/ACME connectivity and provision the re
 | type | Required fields | Constraints |
 | --- | --- | --- |
 | cloudbeaver-oidc | provider, client_id, client_secret, display_name, user_claim | OIDC provider; secret-source ID; claim sub/preferred_username/email |
+| [pegaprox-oidc](pegaprox-oidc.md) | provider, client_id, client_secret, management_token, display_name, user_claim, enabled, allow_private_ip, group_mappings | Native confidential OIDC, separate management credential, fixed viewer fallback and verified TLS/JWT settings |
 | node-red-retained-oidc | provider, client_id | Matching retained-node-red-oidc provider, no nonstandard origin port |
 | zabbix-saml | provider, default_login | SAML provider; default_login zabbix or saml |
 

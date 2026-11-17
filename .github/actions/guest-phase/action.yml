@@ -41,7 +41,13 @@ inputs:
   node_red_api_token:
     description: Existing scoped credential
     required: false
+  pegaprox_client_secret:
+    description: Existing scoped credential
+    required: false
   pegaprox_database_key:
+    description: Existing scoped credential
+    required: false
+  pegaprox_management_token:
     description: Existing scoped credential
     required: false
   postgresql_application_database_password:
@@ -142,6 +148,10 @@ runs:
       HOMELAB_APP_SECRET_MQTT_PROBE: ${{ inputs.mqtt_probe }}
       HOMELAB_APP_SECRET_NODE_RED_API_TOKEN: ${{ inputs.node_red_api_token }}
       HOMELAB_APP_SECRET_PEGAPROX_DATABASE_KEY: ${{ inputs.pegaprox_database_key }}
+      HOMELAB_APP_SECRET_PEGAPROX_CLIENT_SECRET: ${{ inputs.pegaprox_client_secret
+        }}
+      HOMELAB_APP_SECRET_PEGAPROX_MANAGEMENT_TOKEN: ${{ inputs.pegaprox_management_token
+        }}
       HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_DNS_TOKEN: ${{ inputs.traefik_cloudflare_dns_token
         }}
       HOMELAB_APP_SECRET_TRAEFIK_CLOUDFLARE_ORIGIN_TOKEN: ${{ inputs.traefik_cloudflare_origin_token
@@ -155,7 +165,8 @@ runs:
       \ app_secret_slot in HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY\
       \ HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD HOMELAB_APP_SECRET_BITWARDEN_RUNTIME_ENVIRONMENT\
       \ HOMELAB_APP_SECRET_CLOUDBEAVER_CLIENT_SECRET HOMELAB_APP_SECRET_MQTT_EXPLORER_BROKER_PASSWORD\
-      \ HOMELAB_APP_SECRET_MQTT_PROBE HOMELAB_APP_SECRET_NODE_RED_API_TOKEN HOMELAB_APP_SECRET_PEGAPROX_DATABASE_KEY\
+      \ HOMELAB_APP_SECRET_MQTT_PROBE HOMELAB_APP_SECRET_NODE_RED_API_TOKEN HOMELAB_APP_SECRET_PEGAPROX_CLIENT_SECRET\
+      \ HOMELAB_APP_SECRET_PEGAPROX_DATABASE_KEY HOMELAB_APP_SECRET_PEGAPROX_MANAGEMENT_TOKEN\
       \ HOMELAB_APP_SECRET_POSTGRESQL_APPLICATION_DATABASE_PASSWORD HOMELAB_APP_SECRET_RENOVATE_ACCEPT_TERMS\
       \ HOMELAB_APP_SECRET_RENOVATE_DATABASE_PASSWORD HOMELAB_APP_SECRET_RENOVATE_GITHUB_APP_ID\
       \ HOMELAB_APP_SECRET_RENOVATE_GITHUB_APP_KEY HOMELAB_APP_SECRET_RENOVATE_LICENSE_KEY\
