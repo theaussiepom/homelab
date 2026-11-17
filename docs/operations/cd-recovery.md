@@ -12,7 +12,7 @@ For a mutable container tag, recovery first verifies that the captured image ID 
 
 Recovery verifies the restored configuration, package and image selection, application health, reply routing and previously declared route checks. Every affected guest must pass before any rollback hold is released. The canonical `ordinary-complete.json` and failed operation remain historical evidence. A separate `current-state.json` identifies the verified effective owner, current backend and exact resolved failure markers. Deployment and backup readers use that verified state; a reconciliation record is never an ordinary phase success.
 
-An ordinary source change can move a prepared monitoring input into a new sealed input directory. Recovery requires that exact derived location in each configuration and compares all remaining monitoring ownership settings. It verifies the previously installed backup and monitoring settings, credentials and package selections before native reversal and again after restoring controls. Moving the prepared input alone does not authorize credential rotation or a new monitoring owner.
+An ordinary source change can move prepared monitoring inputs into a new sealed input directory. Recovery requires the exact agent credential and database-password locations, and the selected PostgreSQL storage-password or Zabbix server-payload location when present. It compares their relative application owners, field presence and every other monitoring setting. It verifies the previously installed backup and monitoring settings, credentials and package selections before native reversal and again after restoring controls. Moving a prepared input alone does not authorize credential rotation or a new monitoring owner.
 
 ## When an engineer is needed
 

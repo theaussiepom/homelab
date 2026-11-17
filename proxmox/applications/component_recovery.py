@@ -88,10 +88,24 @@ def monitoring_ownership(cfg):
     value = cfg['app'].get('monitoring')
     if value is None:
         return None
-    expected = Path(cfg['deployment']['input_directory'])/'applications/agent/monitoring-agent.json'
-    require(isinstance(value, dict) and value.get('credential_file') == str(expected),
-            'Bind monitoring credentials to their exact sealed prepared input')
-    return {key: selected for key, selected in value.items() if key != 'credential_file'}
+    require(isinstance(value, dict) and 'credential_file' in value,
+            'Preserve the selected monitoring agent credential location')
+    directory = Path(cfg['deployment']['input_directory'])/'applications'
+    fields = {'credential_file': ('monitoring-agent.json', None),
+              'database_password_file': ('monitoring-database-password', None),
+              'storage_password_file': ('monitoring-storage-password', 'postgresql'),
+              'server_file': ('monitoring-server.json', 'zabbix')}
+    selected = dict(value)
+    for key, (leaf, adapter) in fields.items():
+        if key not in value:
+            continue
+        owners = ['agent'] if adapter is None else [
+            row['id'] for row in cfg['deployment']['applications'].values() if row['adapter'] == adapter]
+        locations = {str(directory/owner/leaf): str(Path(owner)/leaf) for owner in owners}
+        require(isinstance(value[key], str) and value[key] in locations,
+                'Bind monitoring credentials to their exact sealed prepared input')
+        selected[key] = locations[value[key]]
+    return selected
 
 
 def begin(attempt):
