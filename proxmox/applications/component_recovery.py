@@ -341,6 +341,9 @@ def restore(cfg, operation, *, finalize=True):
     forward_settled(operation, value['marker'])
     require(not list(operation.glob('*-rollback-limit.json')),
             'A newly installed control namespace requires engineer reconciliation')
+    selection = component_restore.descriptor(selected, old)
+    captured = read_json(operation/'controls-before.json', private=True)
+    component_restore.verify_inventory(selection, captured)
     state_hash, identity = generation.backend(work, {'vmid': old['guest']['vmid'], 'node': old['site']['node']})
     original_identity = value['state_identity']
     require(identity == original_identity, 'Recovery cannot adopt changed backend resources')
@@ -353,8 +356,6 @@ def restore(cfg, operation, *, finalize=True):
         once(recovery/'infrastructure-restored.json', result)
     require(read_json(recovery/'infrastructure-restored.json', private=True)['state_sha256'] == sha(work/'terraform.tfstate'),
             'The restored infrastructure checkpoint changed before configuration recovery')
-    selection = component_restore.descriptor(selected, old)
-    captured = read_json(operation/'controls-before.json', private=True)
     if not current.exists(recovery/'controls-restored.json'):
         reverse_settled(recovery, 'controls-restore')
         # Only old controls or this source's exact declared replacement bytes
@@ -370,6 +371,11 @@ def restore(cfg, operation, *, finalize=True):
         allowed = {path: list(dict.fromkeys([*( [row['sha256']] if row['exists'] else []),
                        *([replacement[path]] if path in replacement else [])]))
                    for path, row in captured['files'].items()}
+        import component_ssh
+        if 'preparation' in started and component_ssh.ROOT_KEYS in captured['files']:
+            postimage = component_ssh.updated(captured['files'][component_ssh.ROOT_KEYS], cfg['ssh_public_keys'])
+            allowed[component_ssh.ROOT_KEYS] = list(dict.fromkeys([
+                *allowed[component_ssh.ROOT_KEYS], postimage['sha256']]))
         result = component_restore.execute(old, recovery, selection, mode='restore',
                                            captured=captured, allowed=allowed)
         once(recovery/'controls-restored.json', result)

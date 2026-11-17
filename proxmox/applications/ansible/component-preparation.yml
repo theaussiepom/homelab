@@ -10,6 +10,15 @@
     - name: Check guest identity
       ansible.builtin.import_tasks: tasks/component-ready.yml
 
+    - name: Add declared root SSH public keys while preserving existing authorizations
+      ansible.builtin.command:
+        argv: [python3, -c, "import base64; exec(compile(base64.b64decode('{{ component_root_keys.program }}'), '<homelab-root-keys>', 'exec'))"]
+        stdin: '{{ component_root_keys.request | to_json }}'
+      register: component_root_keys_result
+      changed_when: (component_root_keys_result.stdout | from_json).changed
+      no_log: true
+      when: component_root_keys is defined
+
     - name: Prepare declared native account identities
       ansible.builtin.include_tasks: tasks/component-native-account.yml
       loop: "{{ component_native_applications }}"

@@ -10,6 +10,7 @@ import component_inputs
 import component_input_secrets
 import component_discovery
 import component_app_hooks
+import component_ssh
 import bitwarden_runtime
 from application_contract import ordered_services
 import proxmox_guest
@@ -64,6 +65,8 @@ def variables(cfg, phase, *, payload=None, previously_owned=False, initialize_ru
     runtime = read_json(Path(cfg['deployment']['runtime_file']),private=True)
     if phase == 'preparation':
         require(payload is None, 'Preparation cannot consume an app secret payload')
+        if cfg['ssh_public_keys']:
+            result['component_root_keys'] = component_ssh.transport(cfg['ssh_public_keys'], mode='install')
         for app_id, row in native.items():
             selected = runtime['applications'][app_id]
             result['component_native_applications'].append({

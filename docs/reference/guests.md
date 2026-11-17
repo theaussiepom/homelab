@@ -41,6 +41,12 @@ Use only the listed fields. Required fields have no default, and null does not r
 
 The compiler merges resources, startup and security by direct field: it starts with the complete template, then applies the guest's explicit keys. Omitting a block or supplying an empty map preserves the template values; null is rejected. Guest software and runtime lists append to the template lists, so an empty guest list cannot remove a template selection. A guest monitoring selection replaces the complete template reference. Empty or null values do not disable monitoring.
 
+A guest's `ssh_public_keys` override uses the same
+[additive root-key maintenance](../guides/root-ssh-keys.md) as its context.
+Preserve the deployment public key. Ordinary preparation appends missing
+declared keys and retains existing options and unrelated authorizations;
+omitting an installed key does not revoke it.
+
 For the tutorial's `base` template, adding `resources: {memory_mib: 1024}` produces CPU 1, memory 1024 MiB, root 8 GiB and an authored OS reserve of 128 MiB. Runtime budgeting can raise the effective OS reserve to its minimum of 256 MiB or to meet selected requirements. The declared reserve and effective allocation can therefore differ. See the [complete library](../examples/first-configuration/stack.json).
 
 ### Resource fields

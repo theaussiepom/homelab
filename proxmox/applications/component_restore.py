@@ -6,10 +6,17 @@ from pathlib import Path
 
 import component_ansible
 import component_control
+import component_ssh
 from component_payload import AppPayload
 from private_io import digest, encoded, private_directory, read_json, regular, require, write, sha
 
 SOURCE = Path(__file__).resolve().parent
+
+
+def verify_inventory(selection, captured):
+    require(isinstance(captured, dict) and isinstance(captured.get('files'), dict)
+            and set(captured['files']) == set(selection['files']),
+            'Saved control inventory differs; reconcile before adopting new managed controls')
 
 
 def descriptor(owner, cfg):
@@ -67,10 +74,15 @@ def descriptor(owner, cfg):
         source(SOURCE/'ingress_routing.py', '/opt/homelab-app/ingress-routing.py', mode=0o700)
         files['/opt/homelab-app/frontend-routing.json'] = None
         files['/etc/systemd/system/homelab-frontend-routing.service'] = None
-    return {'files': files, 'expected': expected, 'metadata': metadata, 'packages': cfg['app'].get('packages', []),
+    result = {'files': files, 'expected': expected, 'metadata': metadata, 'packages': cfg['app'].get('packages', []),
             'images': images, 'units': sorted(units), 'health': health, 'native_files': native_files,
             'projects': [{'argv': list(argv), 'services': list(dict.fromkeys(services))}
                          for argv, services in projects.items()]}
+    if cfg['ssh_public_keys']:
+        files[component_ssh.ROOT_KEYS] = None
+        metadata[component_ssh.ROOT_KEYS] = {'uid': 0, 'gid': 0}
+        result['root_ssh_keys'] = cfg['ssh_public_keys'].copy()
+    return result
 
 
 def agent_descriptor(owner, cfg):
@@ -129,6 +141,8 @@ def execute(cfg, operation, selection, *, mode, captured=None, allowed=None):
     import proxmox_guest
     from ansible_guest import ansible_environment
     require(mode in ('capture', 'restore', 'verify'), 'Select one fixed managed-control operation')
+    if mode != 'capture':
+        verify_inventory(selection, captured)
     proxmox_guest.guest_trust(cfg, Path(cfg['paths']['state_root'])/str(cfg['guest']['vmid']), persist=False)
     from component_recovery import attempt_directory
     folder = attempt_directory(operation, 'controls-'+mode)
@@ -145,6 +159,11 @@ def execute(cfg, operation, selection, *, mode, captured=None, allowed=None):
                  'recovery_projects': selection['projects'], 'recovery_units': selection['units'],
                  'recovery_native_files': selection['native_files'],
                  'recovery_health': selection['health'], 'recovery_output': str(folder/'result.json')}
+    if 'root_ssh_keys' in selection:
+        metadata = None if mode == 'capture' else {
+            key: captured['files'][component_ssh.ROOT_KEYS][key] for key in ('uid', 'gid', 'mode')}
+        variables['recovery_root_keys'] = component_ssh.transport(
+            selection['root_ssh_keys'], mode='verify', metadata=metadata)
     write(folder/'variables.json', variables)
     write(folder/'inventory.json', {'application': {'hosts': {cfg['app']['hostname']: {
         'ansible_host': cfg['app']['address'], 'ansible_user': 'root'}}}})
@@ -167,6 +186,8 @@ def execute(cfg, operation, selection, *, mode, captured=None, allowed=None):
 
 def expected(selection, captured):
     """Read-only reconciliation compares installed controls with selected source."""
+    if 'root_ssh_keys' in selection:
+        component_ssh.verify(captured['files'][component_ssh.ROOT_KEYS], selection['root_ssh_keys'])
     for path, wanted in selection['expected'].items():
         row = captured['files'][path]
         require(row.get('exists') and row['sha256'] == wanted,
