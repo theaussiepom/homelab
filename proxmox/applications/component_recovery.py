@@ -26,7 +26,8 @@ def record_failure(attempt, error):
     """Called before releasing the existing attempt locks; never logs error values."""
     from component_ansible import CompletedTaskFailure
     operation = getattr(attempt, 'operation', None)
-    if error is not None and enabled() and operation is not None and (operation/'rollback-baseline.json').exists():
+    if (error is not None and enabled() and operation is not None
+            and not getattr(attempt, 'read_only', False) and (operation/'rollback-baseline.json').exists()):
         once(operation/'forward-failure.json', {
             'schema': 'homelab-component-forward-failure-v1',
             'marker_sha256': sha(attempt.hold),
@@ -225,18 +226,6 @@ def resolved(work, operation, marker):
     return result
 
 
-def configured(attempt):
-    """Current-run checks may inspect an owned candidate before final acceptance."""
-    attempt._select_run()
-    record = read_json(attempt.operation/'complete.json', private=True)
-    require(generation.component_success(record, attempt.operation)
-            and record['binding'] == attempt.binding
-            and record['state_sha256'] == sha(attempt.work/'terraform.tfstate')
-            and regular(attempt.hold, private=True) == encoded(attempt.marker),
-            'Verify only the exact configured candidate under its pending hold')
-    return record
-
-
 def phase_controls(attempt, phase, payload):
     """Keep supported installation behavior; record an incomplete rollback scope."""
     if not enabled() or payload is None or phase in ('zabbix-agent', 'pbs-agent'):
@@ -426,17 +415,6 @@ def finish_restore(cfg, operation, proof=None):
     once(recovery/'result.json', {'schema': RESULT, 'status': status, 'failed_operation': str(operation)})
     return {'status': status, 'vmid': old['guest']['vmid']}
 
-
-def order(dependencies, names):
-    require(isinstance(dependencies, dict) and set(names) <= set(dependencies),
-            'Use the actual selected guest dependency graph')
-    pending, done = list(names), []
-    while pending:
-        ready = [name for name in pending if not set(dependencies[name]) & set(pending)]
-        require(bool(ready), 'Recovery dependency graph must be acyclic')
-        for name in ready:
-            pending.remove(name); done.append(name)
-    return list(reversed(done))
 
 
 def reconcile(cfg, operation, selected_path, selected, *, reason, actor_context, expected_controls=None):

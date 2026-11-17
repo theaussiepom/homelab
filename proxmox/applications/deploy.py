@@ -54,15 +54,13 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
         require(encoded(prepared)==encoded(cfg) and selected==site, 'Static component preparation changed')
         return component_inputs.binding(cfg,site)
     with DeploymentAttempt(cfg,None,phases,prepare_inputs=prepare) as attempt:
+        attempt.read_only = deferred
         expected=attempt.binding
         import component_recovery
         complete = attempt.completed(commands.is_ancestor)
         if deferred:
             import component_routed
-            if component_recovery.enabled():
-                component_recovery.configured(attempt)
-            else:
-                require(complete, 'Deferred routes require genuine completion of this exact run and binding')
+            require(complete, 'Deferred routes require genuine completion of this exact run and binding')
             return {'vmid':cfg['guest']['vmid'], **component_routed.run(
                 cfg, site, attempt.work, attempt.operation, expected,
                 **({'executor': route_executor} if route_executor is not None else {}))}

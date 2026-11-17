@@ -106,7 +106,7 @@ class ComponentJobExecutionTests(unittest.TestCase):
         returncode = 0
         for guest in guests:
             job = self.models['guest-' + guest + '.yml']['jobs']['deploy']
-            for call in job['steps'][1:-1]:
+            for call in job['steps'][2:-2]:
                 self.assertNotIn('if', call); self.assertNotIn('continue-on-error', call)
                 selected = self.inputs(call, values)
                 for step in self.action['runs']['steps']:
@@ -143,6 +143,27 @@ class ComponentJobExecutionTests(unittest.TestCase):
             if returncode: break
         records = [json.loads(line) for line in trace.read_text().splitlines()] if trace.exists() else []
         return returncode, records, runner, values
+
+    def test_recovery_commands_bind_only_the_owning_guest_and_own_result(self):
+        work = self.root/'recovery-commands'; work.mkdir()
+        target = work/'framework-source/blueprints/guest_recovery.py'
+        target.parent.mkdir(parents=True)
+        target.write_text("import json,os,sys; print(json.dumps({'args':sys.argv[1:], 'credentials':[k for k in os.environ if k.startswith('HOMELAB_APP_SECRET_') or k in ('PBS_API_TOKEN','PROXMOX_APP_TOKEN','APPLICATION_SSH_KEY')]}))")
+        for guest in self.graph['guest_order']:
+            steps = self.models['guest-'+guest+'.yml']['jobs']['deploy']['steps']
+            for index, mode in [(1, 'pending'), (-2, 'finish')]:
+                call = steps[index]
+                for status in ('success', 'failure'):
+                    env = {k:v for k,v in os.environ.items() if k not in self.known and not k.startswith(PREFIX)}
+                    env.update(HOMELAB_CONFIG_PYTHON=sys.executable)
+                    env.update({k: ('[]' if v == '${{ inputs.disabled }}' else status if v == '${{ job.status }}' else v)
+                                for k,v in call['env'].items()})
+                    result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', call['run']], cwd=work,
+                                            env=env, capture_output=True, text=True, check=True)
+                    row = json.loads(result.stdout)
+                    self.assertEqual(row['credentials'], [])
+                    args = ['--stack', 'stack-source', '--site-root', '.', '--disabled', '[]', '--guest', guest, '--mode', mode]
+                    self.assertEqual(row['args'], args + (['--result', status] if mode == 'finish' else []))
 
     def test_actual_phase_chains_use_unique_private_packets_and_step_only_scalars(self):
         status, records, folder, values = self.exercise(self.graph['guest_order'])

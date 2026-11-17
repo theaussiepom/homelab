@@ -522,12 +522,6 @@ class RecoveryTransactions(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'failure evidence changed'):
             component_current.read(self.work)
 
-    def test_recovery_dependency_order_is_reverse_of_real_startup_edges(self):
-        self.assertEqual(component_recovery.order({'db': [], 'app': ['db'], 'web': ['app']},
-                                                 ['db', 'app', 'web']), ['web', 'app', 'db'])
-        with self.assertRaises(ValueError):
-            component_recovery.order({'a': ['b'], 'b': ['a']}, ['a', 'b'])
-
     def test_manual_reconciliation_creates_distinct_owner_then_fresh_cd_succeeds(self):
         failed = self.fail_after_preparation()
         self.native = 'old'  # The engineer repaired the application/data.
