@@ -94,6 +94,17 @@ def units(app):
 
 
 class CommunityTests(unittest.TestCase):
+    def test_declared_hostname_aliases_are_wired_only_to_the_oidc_gateway(self):
+        app=descriptor('cloudbeaver');aliases={'identity.example.invalid':'198.18.40.33'}
+        with units(app),mock.patch.object(core,'_aliases',return_value=aliases) as selected:
+            result=core._cloudbeaver(app,guest('cloudbeaver'))
+        selected.assert_called_once_with(app)
+        self.assertEqual(result['auth_gateway']['extra_hosts'],aliases)
+        self.assertNotIn('extra_hosts',result['cloudbeaver'])
+        with units(app),mock.patch.object(core,'_aliases',side_effect=ValueError('Invalid declared hostname')):
+            with self.assertRaisesRegex(ValueError,'Invalid declared hostname'):
+                core._cloudbeaver(app,guest('cloudbeaver'))
+
     def test_security_memory_health_and_owned_peer_name(self):
         app=descriptor('cloudbeaver');app['identity']['services']['cloudbeaver']='db_a'
         app['identity']['runtime_directory']='/opt/homelab-app/runtime/db-a'
