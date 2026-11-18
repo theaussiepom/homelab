@@ -100,6 +100,18 @@ class CallerCase(unittest.TestCase):
 
 
 class AnsibleCallerTests(CallerCase):
+    def test_selected_native_oidc_runs_after_start_with_private_input_and_no_secret_arguments(self):
+        from test_pegaprox_oidc import configuration
+        cfg,app=self.case('pegaprox',{'authentication_resolved':configuration()},lifecycle='retained')
+        payload=self.selected_payload()
+        result=ansible.variables(cfg,'selected',payload=payload)
+        self.assertEqual(result['component_pegaprox_oidc']['argv'],[
+            'python3','/opt/homelab-app/pegaprox_oidc.py','--config',
+            app['identity']['runtime_directory']+'/pegaprox-oidc.json',
+            '--compose','/opt/homelab-app/compose-owned.yml','--service','owned-pegaprox'])
+        self.assertTrue({'pegaprox_oidc.py','pegaprox_oidc_client.py','private_io.py'} <=
+                        {row['source'] for row in result['component_helpers']})
+
     def test_native_influx_ansible_refuses_a_missing_database_role(self):
         """The Ansible caller propagates the native frontend's clear refusal."""
         from test_separate_web_listeners import influx

@@ -62,6 +62,10 @@ def runtime_config(plan, guest_id):
         if app['adapter'] == 'cloudbeaver' and 'client_secret' in app.get('authentication_resolved', {}):
             source = app['authentication_resolved']['client_secret']
             selected['input_sources']['client_secret'] = copy.deepcopy(plan.site['secret_sources'][source])
+        if app['adapter'] == 'pegaprox' and 'authentication_resolved' in app:
+            for role in ('client_secret', 'management_token'):
+                source = app['authentication_resolved'][role]
+                selected['input_sources'][role] = copy.deepcopy(plan.site['secret_sources'][source])
         if app['adapter'] == 'mqtt_explorer' and 'credential' in app['settings']['broker']:
             source = app['settings']['broker']['credential']['secret']
             selected['input_sources']['broker_password'] = copy.deepcopy(plan.site['secret_sources'][source])

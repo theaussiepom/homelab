@@ -81,7 +81,9 @@ def run(*args):
         raise
 
 
-def main():
+def main(*, image=IMAGE, after_start=None):
+    previous_image = IMAGE
+    target_image = image
     name = 'pegaprox-fixture-' + uuid.uuid4().hex[:12]
     network = name + '-internal'
     volumes = [name + '-' + suffix for suffix in ('config', 'logs', 'key')]
@@ -89,7 +91,8 @@ def main():
     clients_owned = [name+'-trusted',name+'-untrusted']
     created_volumes = []
     created_network = False
-    outcome = {'image':IMAGE, 'native_verified':False, 'network':'disposable-internal', 'published_ports':[]}
+    outcome = {'image':target_image, 'previous_image':previous_image, 'native_verified':False,
+               'network':'disposable-internal', 'published_ports':[]}
     try:
         # Static client IPs require an explicitly configured subnet on hosted Docker.
         # Select one small synthetic block; Docker refuses any collision without retry.
@@ -101,7 +104,7 @@ def main():
         assert net['Internal'] is True
         assert ipaddress.IPv4Network(net['IPAM']['Config'][0]['Subnet']) == subnet
         backend, proxy, stranger = [str(subnet.network_address + n) for n in (2, 3, 4)]
-        preview = component_service(backend,proxy+'/32',IMAGE)
+        preview = component_service(backend,proxy+'/32',target_image)
         assert preview['ports'] == [backend+':5000:5000/tcp']
         bounded = ['--pull=never', '--platform','linux/amd64', '--network',network, '--read-only',
                    '--cap-drop','ALL', '--security-opt','no-new-privileges',
@@ -112,15 +115,15 @@ def main():
             created_volumes.append(volume)
         run('run','--rm',*bounded,'-v',volumes[2]+':/app/config','--entrypoint','python3',IMAGE,
             '-c',"import base64,os,pathlib; p=pathlib.Path('/app/config/pegaprox-db-key'); p.write_bytes(base64.urlsafe_b64encode(os.urandom(32))); p.chmod(0o600)")
-        def start(environment):
+        def start(environment, selected_image):
             env = [arg for key,value in environment.items() for arg in ('-e', key+'='+value)]
             return run('run','-d','--name',name,*bounded,'--ip',backend,'--restart',preview['restart'],
                        '--stop-timeout','60','--log-opt','max-size=10m','--log-opt','max-file=3',*env,
                        '-v',volumes[0]+':/app/config','-v',volumes[1]+':/app/logs',
-                       '-v',volumes[2]+':/run/secrets:ro',IMAGE)
+                       '-v',volumes[2]+':/run/secrets:ro',selected_image)
         proxy_keys = {'PEGAPROX_BEHIND_PROXY','PEGAPROX_HOST','PEGAPROX_TRUSTED_PROXIES'}
         prior_env = {k:v for k,v in preview['environment'].items() if k not in proxy_keys}
-        old_id = start(prior_env)
+        old_id = start(prior_env,previous_image)
         command = ['docker','exec','-i',name]
         initial = subprocess.run([*command,'python3','-c',SYNTHETIC_SETUP_CODE,'bootstrap'],
                                  input=json.dumps(account),capture_output=True,text=True,timeout=90,check=True)
@@ -132,15 +135,18 @@ def main():
         db_read = "import json; from pegaprox.core import dbcrypto; c=dbcrypto.connect('/app/config/pegaprox.db'); row=c.execute('SELECT value FROM server_settings WHERE key=?',('fixture.restart.marker',)).fetchone(); assert row and json.loads(row[0])=='invented-state'; setting=c.execute('SELECT value FROM server_settings WHERE key=?',('reverse_proxy_enabled',)).fetchone(); assert setting and json.loads(setting[0]) is False; c.close(); print('database-row-passed')"
         run('exec',name,'python3','-c',db_write)
         run('exec',name,'python3','-c',"from pathlib import Path; Path('/app/config/fixture-marker').write_text('invented-state')")
-        # Compose-equivalent replacement: same image/state/policy, only the three env additions.
+        # Compose-equivalent replacement preserves state/policy; an explicit image selects upgrade qualification.
         run('stop','--time','20',name)
         run('rm',name)
-        new_id = start(preview['environment'])
+        new_id = start(preview['environment'],target_image)
         assert new_id != old_id
         pegaprox_health.verify(command)
         current = json.loads(run('inspect',name))[0]
-        assert current['Image'] == old['Image']
-        for field in ('User','Image','Entrypoint','Cmd'):
+        assert old['Config']['Image'] == previous_image
+        assert current['Config']['Image'] == target_image
+        if previous_image == target_image:
+            assert current['Image'] == old['Image']
+        for field in ('User','Entrypoint','Cmd'):
             assert current['Config'][field] == old['Config'][field]
         for field in ('ReadonlyRootfs','CapDrop','SecurityOpt','Memory','NanoCpus','PidsLimit',
                       'RestartPolicy','LogConfig','PortBindings','NetworkMode','Tmpfs'):
@@ -156,9 +162,15 @@ def main():
         assert current['HostConfig']['CapDrop'] == ['ALL']
         assert not current['HostConfig']['PortBindings']
         assert current['Config']['User'] and current['Config']['User'] != 'root'
-        assert set(current['Config']['Env']) - set(old['Config']['Env']) == {
-            key+'='+preview['environment'][key] for key in proxy_keys}
-        assert not (set(old['Config']['Env']) - set(current['Config']['Env']))
+        if previous_image == target_image:
+            assert set(current['Config']['Env']) - set(old['Config']['Env']) == {
+                key+'='+preview['environment'][key] for key in proxy_keys}
+            assert not (set(old['Config']['Env']) - set(current['Config']['Env']))
+        else:
+            # Only image-owned defaults may differ; every authored setting is exact.
+            for key,value in preview['environment'].items():
+                assert key+'='+value in current['Config']['Env']
+                if key not in proxy_keys: assert key+'='+value in old['Config']['Env']
         def retained():
             assert json.loads(run('exec',name,'python3','-c',state)) == before
             assert run('exec',name,'python3','-c',db_read) == 'database-row-passed'
@@ -166,7 +178,7 @@ def main():
         def clients():
             for address,trusted,client_name in ((proxy,True,clients_owned[0]),(stranger,False,clients_owned[1])):
                 result = subprocess.run(['docker','run','--rm','--name',client_name,'-i',*bounded,'--ip',address,
-                                         '--entrypoint','python3',IMAGE,'-c',PROXY_CLIENT_CODE],
+                                         '--entrypoint','python3',target_image,'-c',PROXY_CLIENT_CODE],
                                         input=json.dumps({'backend':backend,'trusted':trusted,'account':account}),
                                         capture_output=True,text=True,timeout=90,check=True)
                 assert result.stdout.strip() == 'proxy-account-cookie-origin-passed'
@@ -182,6 +194,11 @@ def main():
                        retained_account_login=True,trusted_proxy_secure_cookies=True,
                        untrusted_forwarding_ignored=True,foreign_origins_refused=True,
                        passwordless_cd_verification=True)
+        if after_start is not None:
+            after_start(name, account)
+            retained()
+            clients()
+            outcome['native_oidc_settings_api'] = True
     finally:
         subprocess.run(['docker','rm','-f',name,*clients_owned],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30)
         for volume in created_volumes: run('volume','rm',volume)

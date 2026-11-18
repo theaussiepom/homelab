@@ -16,7 +16,51 @@ ALGORITHMS = {'RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512',
               'ES256', 'ES384', 'ES512', 'EdDSA'}
 ENDPOINTS = ('authorization', 'token', 'userinfo', 'jwks')
 AUTH_ADAPTERS = {'cloudbeaver-oidc': 'cloudbeaver',
+                 'pegaprox-oidc': 'pegaprox',
                  'node-red-retained-oidc': 'node_red', 'zabbix-saml': 'zabbix'}
+
+PEGAPROX_FIELDS = ('type', 'provider', 'client_id', 'client_secret', 'management_token',
+                  'display_name', 'user_claim', 'group_mappings', 'enabled', 'allow_private_ip')
+
+
+def _pegaprox(value, provider, app, sources):
+    require(provider['type'] == 'oidc', 'component.authentication')
+    for field in ('client_secret', 'management_token'):
+        reference = value[field]
+        require(identifier(reference) and reference in sources
+                and sources[reference]['type'] in ('file', 'environment'), 'component.authentication')
+    require(value['client_secret'] != value['management_token'], 'component.authentication')
+    for field in ('client_id', 'display_name'):
+        types.text(value[field])
+        require(value[field] == value[field].strip() and len(value[field]) <= 256
+                and not any(ord(c) < 32 or ord(c) == 127 for c in value[field]), 'component.authentication')
+    require(value['user_claim'] in ('preferred_username', 'email', 'upn')
+            and type(value['enabled']) is bool and type(value['allow_private_ip']) is bool,
+            'component.authentication')
+    mappings = value['group_mappings']
+    require(isinstance(mappings, list) and 0 < len(mappings) <= 32, 'component.authentication')
+    seen = set()
+    for row in mappings:
+        closed(row, ('group_id', 'role'))
+        types.text(row['group_id'])
+        group = row['group_id']
+        require(group == group.strip() and len(group) <= 256
+                and not any(ord(c) < 32 or ord(c) == 127 for c in group)
+                and group.casefold() not in seen and row['role'] in ('admin', 'user', 'viewer'),
+                'component.authentication')
+        seen.add(group.casefold())
+    return {'settings': {
+        'oidc_enabled': value['enabled'], 'oidc_provider': 'generic',
+        'oidc_client_id': value['client_id'], 'oidc_authority': provider['issuer'],
+        'oidc_redirect_uri': app['origin_url'] + '/oidc/callback',
+        'oidc_scopes': 'openid profile email', 'oidc_username_claim': value['user_claim'],
+        'oidc_button_text': value['display_name'], 'oidc_default_role': 'viewer',
+        'oidc_auto_create_users': True, 'oidc_group_mappings': copy.deepcopy(mappings),
+        'oidc_admin_group_id': '', 'oidc_user_group_id': '', 'oidc_viewer_group_id': '',
+        'oidc_skip_jwt_verification': False, 'oidc_skip_ssl_verify': False,
+        'oidc_audiences': '', 'oidc_allow_private_ip': value['allow_private_ip']},
+        'oidc_endpoints': copy.deepcopy(provider['endpoints']),
+        'client_secret': value['client_secret'], 'management_token': value['management_token']}
 
 
 def _host(value):
@@ -183,7 +227,8 @@ def authentication(resolver, selected_providers):
             require(requirement is None or value['type'] == requirement['type'], 'component.authentication')
             cloud = value['type'] == 'cloudbeaver-oidc'
             saml = value['type'] == 'zabbix-saml'
-            closed(value, ('type', 'provider', 'default_login') if saml else
+            pega = value['type'] == 'pegaprox-oidc'
+            closed(value, PEGAPROX_FIELDS if pega else ('type', 'provider', 'default_login') if saml else
                    ('type', 'provider', 'client_id', 'client_secret', 'display_name', 'user_claim')
                    if cloud else ('type', 'provider', 'client_id'))
             require(identifier(value['provider']) and value['provider'] in selected_providers,
@@ -191,7 +236,9 @@ def authentication(resolver, selected_providers):
             provider = selected_providers[value['provider']]
             require('origin_url' in app and _https_origin(app['origin_url']) == app['origin_url'],
                     'component.authentication')
-            if saml:
+            if pega:
+                selected = _pegaprox(value, provider, app, resolver.site['secret_sources'])
+            elif saml:
                 require(provider['type'] == 'saml' and value['default_login'] in ('zabbix', 'saml'),
                         'component.authentication')
                 selected = {'public_url': app['origin_url'], 'default_login': value['default_login'],
