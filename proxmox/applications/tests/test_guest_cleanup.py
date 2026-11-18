@@ -221,6 +221,45 @@ class GuestCleanupTests(unittest.TestCase):
         self.assertTrue((active/'tofu').exists())
         self.assertFalse((active/cleanup.FINISHED).exists())
 
+    def test_unversioned_incomplete_history_keeps_all_inputs_and_cleans_current_scratch(self):
+        active = self.complete(); self.scratch(active)
+        canonical = io.read_json(self.work/'ordinary-complete.json')
+        legacy_records = ('plan.json', 'preparation-started.json', 'infrastructure-complete.json')
+        preserved = {}
+        for number, name in zip((2, 3, 900), legacy_records):
+            legacy = self.work/f'ordinary-{number}-1'; legacy.mkdir(mode=0o700)
+            io.write_new(legacy/name, io.encoded({'binding': {'legacy': 'unclassified'}}))
+            # Mixed history retains the supported record as well.
+            io.write_new(legacy/'other-started.json', io.encoded({'binding': canonical['binding']}))
+            self.scratch(legacy)
+            preserved.update({p: p.read_bytes() for p in legacy.rglob('*') if p.is_file()})
+        preserved.update({p: p.read_bytes() for p in self.inputs.rglob('*') if p.is_file()})
+        self.assertEqual(self.clean(), {'status': 'cleaned', 'retired': 0})
+        self.assertTrue((self.work/'ordinary-1-1').is_dir())
+        self.assertTrue((active/cleanup.FINISHED).is_file())
+        self.assertFalse((active/'tofu').exists())
+        self.assertFalse((active/'preparation').exists())
+        for path, raw in preserved.items(): self.assertEqual(path.read_bytes(), raw)
+
+    def test_unversioned_active_incomplete_record_is_not_skipped(self):
+        self.complete()
+        operation = self.work/'ordinary-778-1'; operation.mkdir(mode=0o700)
+        io.write_new(operation/'plan.json', io.encoded({'binding': {}}))
+        self.scratch(operation)
+        with patch.dict(os.environ, GITHUB_RUN_ID='778', GITHUB_RUN_NUMBER='778'):
+            with self.assertRaisesRegex(ValueError, 'unsupported active ordinary'):
+                self.clean('failure')
+        self.assertTrue((operation/'tofu').exists())
+        self.assertFalse((operation/cleanup.FINISHED).exists())
+
+    def test_malformed_versioned_incomplete_record_still_refuses_cleanup(self):
+        active = self.complete(); self.scratch(active)
+        operation = self.work/'ordinary-2-1'; operation.mkdir(mode=0o700)
+        io.write_new(operation/'plan.json', io.encoded({'schema': 'invalid', 'binding': {}}))
+        with self.assertRaisesRegex(ValueError, 'closed component ordinary binding'):
+            self.clean()
+        self.assertTrue((active/'tofu').exists())
+
     def test_unversioned_held_or_own_failure_is_not_skipped(self):
         active = self.fail_job(); self.scratch(active)
         io.write_new(active/'complete.json', io.encoded({'binding': {}}))
