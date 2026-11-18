@@ -14,6 +14,7 @@ from component_input_secrets import ROLES as INPUT_ROLES, SLOTS
 # These are application capabilities, not environment-variable overrides.
 # Existing ordinary input custody owns materialization and runtime filenames.
 ROLES = {key: value for key, value in INPUT_ROLES.items() if key not in ('cloudbeaver', 'mqtt_explorer')}
+ROLES['pegaprox'] = {'database_key'}
 
 
 def action_inputs(resolver, app_id):
@@ -25,6 +26,9 @@ def action_inputs(resolver, app_id):
         auth = app.get('authentication_resolved', {})
         if 'client_secret' in auth:
             selected['client_secret'] = resolver.site['secret_sources'][auth['client_secret']]
+    if app['adapter'] == 'pegaprox' and 'authentication_resolved' in app:
+        for role in ('client_secret', 'management_token'):
+            selected[role] = resolver.site['secret_sources'][app['authentication_resolved'][role]]
     if app['adapter'] == 'mqtt_explorer':
         credential = app.get('settings', {}).get('broker', {}).get('credential')
         if credential is not None:

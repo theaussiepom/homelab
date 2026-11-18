@@ -72,6 +72,8 @@ def runtime_files(app):
     adapter(name)
     result = set(RUNTIME_FILES.get(name, set()))
     settings = app.get('settings', {})
+    if name == 'pegaprox' and 'authentication_resolved' in app:
+        result.update({'pegaprox-oidc.json', 'pegaprox-oidc-applied.json'})
     if name == 'authentik' and 'smtp_password' not in app.get('secret_bindings', {}):
         result.discard('smtp-password')
     if name == 'authentik' and 'allowed_callback_additions' in settings:

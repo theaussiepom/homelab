@@ -166,6 +166,13 @@ def variables(cfg, phase, *, payload=None, previously_owned=False, initialize_ru
     if selected['adapter']=='pegaprox':
         app['pegaprox']={'key_source':str(payload.directory/'pegaprox-db-key'),
             'key_runtime_path':selected['identity']['runtime_directory']+'/pegaprox-db-key'}
+        if 'authentication_resolved' in selected:
+            result['component_helpers'] += [{'source': name, 'destination': '/opt/homelab-app/'+name,
+                'mode': '0700'} for name in ('pegaprox_oidc.py', 'pegaprox_oidc_client.py', 'private_io.py')]
+            result['component_pegaprox_oidc'] = {'argv': ['python3', '/opt/homelab-app/pegaprox_oidc.py',
+                '--config', selected['identity']['runtime_directory']+'/pegaprox-oidc.json',
+                '--compose', '/opt/homelab-app/'+selected['project_file'],
+                '--service', selected['identity']['services']['pegaprox']]}
     if selected['adapter']=='bitwarden':
         environment=bitwarden_runtime.environment_bytes(regular(payload.directory/'bitwarden-environment.json',private=True),
             selected['settings']['runtime'],selected['settings']['settings'])

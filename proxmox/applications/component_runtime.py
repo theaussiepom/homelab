@@ -669,6 +669,9 @@ def _pegaprox(app, guest):
     pegaprox.service_configuration(service, trusted_proxy=proxy,
         mount=lambda name, target: _runtime_mount(app, name, target), ports=ports,
         data_sources={key: row['source'] for key, row in app['storage_paths'].items()})
+    aliases = _aliases(app)
+    if aliases:
+        service['extra_hosts'] = aliases
     return {'pegaprox': service}
 
 
