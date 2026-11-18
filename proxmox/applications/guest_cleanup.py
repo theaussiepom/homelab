@@ -42,6 +42,11 @@ def input_directory(binding, parent, vmid):
     return directory
 
 
+def unversioned(record):
+    return (isinstance(record, dict) and 'schema' not in record
+            and isinstance(record.get('binding'), dict) and 'schema' not in record['binding'])
+
+
 def summary(operation, marker, outcome):
     """Private bounded log tails; no exception values or logs go to Actions output."""
     tails = []
@@ -219,10 +224,15 @@ def locked(cfg, outcome):
             # their referenced inputs even if another operation shares them.
             for path in [*operation.glob('*-started.json'), *operation.glob('infrastructure-complete.json'),
                          *operation.glob('plan.json')]:
-                protected.add(input_directory(read_json(path, private=True)['binding'], parent, attempt.vmid))
+                record = read_json(path, private=True)
+                if unversioned(record):
+                    require(operation != attempt.operation, 'Preserve unsupported active ordinary ownership')
+                    preserve_history = True
+                    candidates.clear()
+                    continue
+                protected.add(input_directory(record['binding'], parent, attempt.vmid))
             continue
-        if (isinstance(marker, dict) and 'schema' not in marker
-                and isinstance(marker.get('binding'), dict) and 'schema' not in marker['binding']):
+        if unversioned(marker):
             # Unversioned history has no supported input-reference contract.
             # Preserve its entire tree and every sealed generation, but do not
             # let it prevent finalizing a separately validated current job.
