@@ -221,6 +221,18 @@ def locked(cfg, outcome):
                          *operation.glob('plan.json')]:
                 protected.add(input_directory(read_json(path, private=True)['binding'], parent, attempt.vmid))
             continue
+        if (isinstance(marker, dict) and 'schema' not in marker
+                and isinstance(marker.get('binding'), dict) and 'schema' not in marker['binding']):
+            # Unversioned history has no supported input-reference contract.
+            # Preserve its entire tree and every sealed generation, but do not
+            # let it prevent finalizing a separately validated current job.
+            require(operation != attempt.operation
+                    and (canonical is None or operation != Path(canonical['operation']))
+                    and (hold is None or hold.get('operation') != str(operation)),
+                    'Preserve unsupported active ordinary ownership')
+            preserve_history = True
+            candidates.clear()
+            continue
         directory = input_directory(marker['binding'], parent, attempt.vmid)
         require(marker['operation'] == str(operation) and marker['workflow'] == attempt.workflow
                 and type(marker['run_number']) is int and marker['run_number'] > 0,
