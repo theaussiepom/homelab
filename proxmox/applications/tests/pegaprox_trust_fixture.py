@@ -114,7 +114,7 @@ def check(name, account):
             pegaprox_health.verify(['docker','exec','-i',name])
             assert run('exec',name,'python3','-c',PROBE) == 'stock-startup-public-roots-provider-ca-and-tls-refusals-passed'
         oidc.check(name, account)
-        print(json.dumps({'native_provider_tls': True, 'untrusted_ca_refused': True,
+        print(json.dumps({'stock_runtime_tls': True, 'untrusted_ca_refused': True,
                           'wrong_hostname_refused': True, 'image_roots_retained': True,
                           'trust_restart_passed': True}))
     finally:
