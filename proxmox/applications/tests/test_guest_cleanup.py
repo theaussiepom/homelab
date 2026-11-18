@@ -192,6 +192,52 @@ class GuestCleanupTests(unittest.TestCase):
         self.assertTrue((self.inputs/'mariadb'/('a'*64)).exists())
         self.assertTrue((legacy/'preparation-started.json').exists())
 
+    def test_unversioned_history_preserves_custody_without_blocking_current_cleanup(self):
+        active = self.complete(); self.scratch(active)
+        old = self.work/'ordinary-1-1'
+        # Both traversal positions matter: an earlier candidate must not retire
+        # inputs after a later legacy record makes its references unknowable.
+        for number in (2, 900):
+            legacy = self.work/f'ordinary-{number}-1'; legacy.mkdir(mode=0o700)
+            io.write_new(legacy/'complete.json', io.encoded({'binding': {'legacy': 'unclassified'}}))
+            self.scratch(legacy)
+        preserved = {p: p.read_bytes() for number in (2, 900)
+                     for p in (self.work/f'ordinary-{number}-1').rglob('*') if p.is_file()}
+        preserved.update({p: p.read_bytes() for p in self.inputs.rglob('*') if p.is_file()})
+        self.assertEqual(self.clean(), {'status': 'cleaned', 'retired': 0})
+        self.assertTrue(old.is_dir())
+        self.assertTrue((active/cleanup.FINISHED).is_file())
+        self.assertFalse((active/'tofu').exists())
+        self.assertFalse((active/'preparation').exists())
+        for path, raw in preserved.items(): self.assertEqual(path.read_bytes(), raw)
+        self.assertTrue(component_generation.component_success(
+            io.read_json(self.work/'ordinary-complete.json'), active))
+
+    def test_unversioned_current_job_is_not_treated_as_historical(self):
+        active = self.complete(); self.scratch(active)
+        cleanup_files.replace(active/'complete.json', {'binding': {}})
+        with self.assertRaisesRegex(ValueError, 'exact canonical and immutable'):
+            self.clean()
+        self.assertTrue((active/'tofu').exists())
+        self.assertFalse((active/cleanup.FINISHED).exists())
+
+    def test_unversioned_held_or_own_failure_is_not_skipped(self):
+        active = self.fail_job(); self.scratch(active)
+        io.write_new(active/'complete.json', io.encoded({'binding': {}}))
+        for run in ('777', '778'):
+            with patch.dict(os.environ, GITHUB_RUN_ID=run, GITHUB_RUN_NUMBER=run):
+                with self.assertRaisesRegex(ValueError, 'unsupported active ordinary'):
+                    self.clean('failure')
+            self.assertTrue((active/'tofu').exists())
+
+    def test_malformed_versioned_history_still_refuses_cleanup(self):
+        active = self.complete(); self.scratch(active)
+        old = self.work/'ordinary-1-1'
+        cleanup_files.replace(old/'complete.json', {'schema': 'invalid', 'binding': {}})
+        with self.assertRaisesRegex(ValueError, 'closed component ordinary binding'):
+            self.clean()
+        self.assertTrue((active/'tofu').exists())
+
     def test_recovery_and_reviewed_checkpoint_records_preserve_all_generations(self):
         active = self.complete(); self.scratch(active)
         old = self.work/'ordinary-1-1'
