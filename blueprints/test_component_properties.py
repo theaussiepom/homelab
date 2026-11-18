@@ -292,5 +292,55 @@ class BindingUnitTests(unittest.TestCase):
         validate.assert_called_once_with('node_red', {})
 
 
+class PegaProviderTrustTests(unittest.TestCase):
+    def selected(self):
+        resolver = fixture()
+        app = resolver.apps['manager']
+        app.update(guest='manager-guest', resolved_connections={
+            'proxmox': connection('https', '198.18.25.10', 8006)})
+        app['resolved_connections']['proxmox']['target']['protocol'] = 'https'
+        app['properties']['trust_proxmox_ca'] = True
+        resolver.guests = {'manager-guest': {'context': 'lab'}}
+        resolver.site['contexts'] = {'lab': {'api_endpoint': {'external': 'provider'},
+                                            'trust': {'ca_file': '/declared/context-ca.pem'}}}
+        resolver.endpoint = lambda ref: {'address': '198.18.25.10', 'port': 8006, 'protocol': 'https'}
+        return resolver, app
+
+    def test_explicit_trust_selects_only_the_matching_guest_context_without_reading_it(self):
+        resolver, app = self.selected()
+        with patch('builtins.open', side_effect=AssertionError('No source I/O')):
+            result = properties._pegaprox(resolver, app, properties.validate('pegaprox', app['properties']))
+        self.assertEqual(result['proxmox_ca_source'], '/declared/context-ca.pem')
+        app['properties']['trust_proxmox_ca'] = False
+        disabled = properties._pegaprox(resolver, app, app['properties'])
+        del result['proxmox_ca_source']
+        self.assertEqual(result, disabled)
+        self.assertEqual(properties.validate('pegaprox', {'trust_proxmox_ca': True}, partial=True),
+                         {'trust_proxmox_ca': True})
+
+    def test_trust_switch_is_boolean_and_requires_its_exact_provider_connection(self):
+        for value in (None, 0, 1, '', 'true', [], {}):
+            with self.subTest(value=value), self.assertRaises(ComponentError):
+                properties.validate('pegaprox', {'trust_proxmox_ca': value}, partial=True)
+        for field, wrong in [('address', '198.18.25.99'), ('port', 443), ('protocol', 'http')]:
+            resolver, app = self.selected()
+            app['resolved_connections']['proxmox']['target'][field] = wrong
+            with self.subTest(field=field), self.assertRaisesRegex(ComponentError,
+                                                                    'component.pegaprox-provider-trust'):
+                properties._pegaprox(resolver, app, app['properties'])
+        resolver, app = self.selected()
+        del app['resolved_connections']['proxmox']
+        with self.assertRaisesRegex(ComponentError, 'component.reference'):
+            properties._pegaprox(resolver, app, app['properties'])
+        resolver, app = self.selected()
+        resolver.endpoint = lambda ref: {'address': '198.18.25.10', 'port': 8006, 'protocol': 'http'}
+        app['resolved_connections']['proxmox']['target']['protocol'] = 'http'
+        with self.assertRaisesRegex(ComponentError, 'component.pegaprox-provider-trust'):
+            properties._pegaprox(resolver, app, app['properties'])
+        resolver, app = self.selected()
+        resolver.site['contexts']['lab']['trust']['ca_file'] = 'relative.pem'
+        with self.assertRaises(ComponentError): properties._pegaprox(resolver, app, app['properties'])
+
+
 if __name__ == '__main__':
     unittest.main()

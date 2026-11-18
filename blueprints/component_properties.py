@@ -36,7 +36,8 @@ def _jdbc(value):
 def validate(adapter, properties, *, partial=False):
     require(isinstance(adapter, str) and adapter in ADAPTERS and type(partial) is bool,
             'component.properties')
-    optional = ('mariadb_jdbc',) if adapter == 'cloudbeaver' else ()
+    optional = {'cloudbeaver': ('mariadb_jdbc',),
+                'pegaprox': ('trust_proxmox_ca',)}.get(adapter, ())
     fields = FIELDS[adapter]
     closed(properties, () if partial else fields, (*fields, *optional) if partial else optional)
     if adapter == 'cloudbeaver':
@@ -75,9 +76,12 @@ def validate(adapter, properties, *, partial=False):
         for field in ('data_uid', 'data_gid'):
             if field in properties:
                 types.integer(properties[field], 1)
-    elif adapter == 'pegaprox' and 'trusted_proxy' in properties:
-        closed(properties['trusted_proxy'], ('app', 'interface'))
-        require(all(identifier(v) for v in properties['trusted_proxy'].values()), 'component.reference')
+    elif adapter == 'pegaprox':
+        if 'trusted_proxy' in properties:
+            closed(properties['trusted_proxy'], ('app', 'interface'))
+            require(all(identifier(v) for v in properties['trusted_proxy'].values()), 'component.reference')
+        if 'trust_proxmox_ca' in properties:
+            require(type(properties['trust_proxmox_ca']) is bool, 'component.properties')
     elif adapter == 'winet' and 'mqtt_prefix' in properties:
         require(isinstance(properties['mqtt_prefix'], str) and
                 re.fullmatch('[a-zA-Z0-9][a-zA-Z0-9/_-]{0,127}', properties['mqtt_prefix']),
@@ -173,7 +177,16 @@ def _pegaprox(resolver, app, value):
     source = ipaddress.IPv4Address(address)
     require(source.is_private and not (source.is_unspecified or source.is_loopback or source.is_link_local
             or source.is_multicast) and address != resolver.role_address(app, 'web_interface'), 'component.properties')
-    return {'trusted_proxy': address + '/32', 'database_key_source': _file(resolver, app, 'database_key')}
+    result = {'trusted_proxy': address + '/32', 'database_key_source': _file(resolver, app, 'database_key')}
+    if value.get('trust_proxmox_ca', False):
+        context = resolver.site['contexts'][resolver.guests[app['guest']]['context']]
+        target = _connection(app, 'proxmox', 'https')['target']
+        expected = resolver.endpoint(context['api_endpoint'])
+        require(all(target[key] == expected[key] for key in ('address', 'port', 'protocol'))
+                and target['protocol'] == 'https', 'component.pegaprox-provider-trust')
+        types.path(context['trust']['ca_file'])
+        result['proxmox_ca_source'] = context['trust']['ca_file']
+    return result
 
 
 def _winet(resolver, app, value):

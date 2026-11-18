@@ -98,6 +98,30 @@ class SelectedPreparationTests(unittest.TestCase):
     def save(self,apps):
         write_new(self.runtime,encoded({'applications':apps}))
 
+    def test_pega_trust_uses_only_the_sealed_context_ca_and_preserves_the_opaque_key(self):
+        from component_pegaprox_fixture import descriptor
+        from test_pegaprox_trust import certificate
+        import pegaprox_trust
+        app = descriptor()
+        key = self.root / 'key'; raw = b'\xff\x80opaque retained key\n'; write_new(key, raw)
+        ca = self.root / 'ca'; public = certificate('Synthetic declared context'); write_new(ca, public)
+        app['input_sources'] = {'database_key': {'type': 'file', 'path': str(key)}}
+        app['settings']['proxmox_ca_source'] = str(ca)
+        reserve(app)
+        self.save({app['id']: app})
+        self.cfg['paths']['ca_file'] = str(self.root / 'different-ca')
+        with self.assertRaisesRegex(ValueError, 'Use this context Proxmox CA'):
+            prepare.prepare(self.cfg, app['id'], {}, attempt=object())
+        self.cfg['paths']['ca_file'] = str(ca)
+        result = prepare.prepare(self.cfg, app['id'], {}, attempt=object())
+        self.assertEqual((result.directory / 'pegaprox-db-key').read_bytes(), raw)
+        self.assertEqual((result.directory / 'pegaprox-proxmox-ca.pem').read_bytes(), public)
+        self.assertEqual((result.directory / 'pegaprox-trust.py').read_bytes(), Path(pegaprox_trust.__file__).read_bytes())
+        rows = json.loads((result.directory / 'runtime-files.json').read_bytes())
+        self.assertEqual(len(rows), 3)
+        self.assertEqual({row['source'] for row in rows}, contract.runtime_files(app))
+        self.assertEqual(prepare.prepare(self.cfg, app['id'], {}, attempt=object()).check(), result.check())
+
     def test_two_same_adapter_inputs_remain_scoped_and_dollars_literal(self):
         apps={}
         for name,value in [('first',b'first-$literal'),('second',b'peer-$value')]:
