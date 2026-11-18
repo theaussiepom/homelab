@@ -401,6 +401,9 @@ def _cloudbeaver(app, guest):
     require(len(ports) == 1, 'Publish only the owned authentication gateway')
     services = {name: _service(app, name, guest) for name in ('cloudbeaver', 'auth_gateway')}
     aliases = _aliases(app)
+    owned = _name(app['identity']['services']['cloudbeaver']).lower()
+    require(all(name.lower() != owned for name in aliases),
+            'Do not shadow the owned Community service name')
     if aliases:
         services['auth_gateway']['extra_hosts'] = aliases
     return community.service_configuration(value, services,
