@@ -186,6 +186,12 @@ def prepare(cfg, app_id, environment=None, *, attempt):
         pass
     elif app['adapter'] in component_private_inputs.ROLES:
         prepared = component_private_inputs.bind(app, values)
+        if app['adapter'] == 'pegaprox' and 'proxmox_ca_source' in app['settings']:
+            import pegaprox_trust
+            source = app['settings']['proxmox_ca_source']
+            require(source == cfg['paths']['ca_file'], 'Use this context Proxmox CA')
+            prepared['files'] += pegaprox_trust.files(regular(Path(source)),
+                                                     Path(pegaprox_trust.__file__).read_bytes())
         install += install_rows(app, prepared['files'], payload)
         if prepared['environment']:
             payload['environment.yml'] = overlay(app, prepared['environment'])

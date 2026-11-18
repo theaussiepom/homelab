@@ -6,7 +6,7 @@ from discovery import PRIVATE_BACKENDS
 
 
 
-def service_configuration(service, *, trusted_proxy, mount, data_sources, ports):
+def service_configuration(service, *, trusted_proxy, mount, data_sources, ports, proxmox_ca=False):
     """Pure PegaProx protocol and storage settings; no key contents are read."""
     service.update(platform='linux/amd64', read_only=True, cap_drop=['ALL'],
         security_opt=['no-new-privileges:true'], tmpfs=['/tmp:rw,nosuid,nodev,size=64m'], ports=ports)
@@ -18,6 +18,10 @@ def service_configuration(service, *, trusted_proxy, mount, data_sources, ports)
         'PEGAPROX_TRUSTED_PROXIES': trusted_proxy, 'PEGAPROX_KEY_FILE': '/run/secrets/pegaprox-db-key',
         'PEGAPROX_SUPERVISED': '1', 'PEGAPROX_SSH_STRICT_HOST_KEYS': '1',
         'PEGAPROX_PW_HASH_CONCURRENCY': '2', 'TZ': 'Etc/UTC'}
+    if proxmox_ca:
+        service['volumes'] += [mount('pegaprox-proxmox-ca.pem', '/run/homelab/proxmox-ca.pem'),
+                               mount('pegaprox-trust.py', '/run/homelab/pegaprox-trust.py')]
+        service['entrypoint'] = ['python3', '/run/homelab/pegaprox-trust.py']
     return service
 
 

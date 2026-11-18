@@ -174,6 +174,8 @@ jobs:
         run: python3 proxmox/applications/tests/pegaprox_runtime_fixture.py
       - name: Qualify native OIDC settings and token verification through the pinned upgrade
         run: python3 proxmox/applications/tests/pegaprox_oidc_fixture.py
+      - name: Verify stock-image provider trust, TLS rejection and retained login
+        run: python3 proxmox/applications/tests/pegaprox_trust_fixture.py
   applications:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     name: Application contracts and runtime components (Docker)
