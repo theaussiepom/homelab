@@ -400,6 +400,12 @@ def _cloudbeaver(app, guest):
     ports = [row.removesuffix('/tcp') for row in _ports(app, 'auth_gateway')]
     require(len(ports) == 1, 'Publish only the owned authentication gateway')
     services = {name: _service(app, name, guest) for name in ('cloudbeaver', 'auth_gateway')}
+    aliases = _aliases(app)
+    owned = _name(app['identity']['services']['cloudbeaver']).lower()
+    require(all(name.lower() != owned for name in aliases),
+            'Do not shadow the owned Community service name')
+    if aliases:
+        services['auth_gateway']['extra_hosts'] = aliases
     return community.service_configuration(value, services,
         mount=lambda name, target: _runtime_mount(app, name, target), workspace=storage['source'],
         server_service=_name(app['identity']['services']['cloudbeaver']), ports=ports)
