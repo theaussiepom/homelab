@@ -9,6 +9,8 @@ from private_io import decode_json, require
 
 LIMIT = 1024 * 1024
 USER = r'hl-[0-9a-f]{32}@pbs'
+MONITOR_USER = 'homelab-zabbix@pbs'
+MONITOR_TOKEN = MONITOR_USER + '!monitoring'
 
 
 class PBS:
@@ -34,7 +36,8 @@ class PBS:
                     r'/admin/datastore/' + re.escape(self.store) + '/namespace',
                     r'/access/(?:users|acl|permissions)'),
             'POST': (r'/admin/datastore/' + re.escape(self.store) + '/namespace',
-                     r'/access/users', r'/access/users/' + USER + '/token/backup'),
+                     r'/access/users', r'/access/users/' + USER + '/token/backup',
+                     r'/access/users/' + re.escape(MONITOR_USER) + '/token/monitoring'),
             'PUT': (r'/access/acl',)}
         require(method in allowed and isinstance(path, str)
                 and any(re.fullmatch(pattern, path) for pattern in allowed[method]),

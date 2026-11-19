@@ -3,11 +3,13 @@ import argparse
 import json
 import os
 from pathlib import Path
+import ssl
 import sys
 
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import compile as compiler
 import component_packet
+import backup_api
 import backup_setup
 from private_io import require, digest, encoded
 
@@ -26,8 +28,17 @@ def descriptor(plan):
                  if key not in ('auth_id', 'backup_id')} ==
                 {key: item for key, item in first.items() if key not in ('auth_id', 'backup_id')}
                 for value in inventories), 'Use one declared PBS management destination')
-    return {'schedule': selected['group'], 'destination': first,
-            'datastore_path': selected['management']['datastore_path']}
+    result = {'schedule': selected['group'], 'destination': first,
+              'datastore_path': selected['management']['datastore_path']}
+    server = plan.resolved.get('monitoring', {}).get('server')
+    pbs = plan.resolved.get('apps', {}).get(server, {}).get('settings', {}).get('pbs')
+    if pbs is not None:
+        require(pbs['address'] == first['server'] and pbs['port'] == first['port']
+                and digest(ssl.PEM_cert_to_DER_cert(pbs['certificate'])) == first['fingerprint'].replace(':', '')
+                and pbs['token_id'] == backup_api.MONITOR_TOKEN,
+                'Bind monitoring provisioning to the same managed PBS endpoint, certificate and audit identity')
+        result['monitoring_token_file'] = pbs['token_file']
+    return result
 
 
 def run(stack, site, disabled, *, environment=os.environ):
@@ -36,7 +47,8 @@ def run(stack, site, disabled, *, environment=os.environ):
     plan = compiler.resolve_plan(stack, compiler.site_path(site), compiler.parse_disabled(disabled), admit=True)
     value = descriptor(plan)
     return backup_setup.install(value['schedule'], destination=value['destination'],
-        datastore_path=value['datastore_path'], token=environment.get('PBS_API_TOKEN', ''))
+        datastore_path=value['datastore_path'], token=environment.get('PBS_API_TOKEN', ''),
+        monitoring_token_file=value.get('monitoring_token_file'))
 
 
 def main():

@@ -9,6 +9,7 @@ import backup_client_transport
 import backup_controller
 import backup_enrollment
 import backup_identity
+import backup_monitoring
 import backup_policy
 import backup_readiness
 import backup_user
@@ -59,8 +60,9 @@ def parameters(value):
             'backup_controller_directories': directories}
 
 
-def install(value, *, destination, datastore_path, token, api_factory=backup_api.PBS, execute=quiet):
-    """One early job owns only the schedule; it neither enrolls nor visits guests."""
+def install(value, *, destination, datastore_path, token, monitoring_token_file=None,
+            api_factory=backup_api.PBS, execute=quiet):
+    """Maintain protected PBS setup without visiting or enrolling guests."""
     backup_controller.schedule(value)
     require(value['schema'] == 'homelab-pbs-schedule-v2', 'Install the guest-readiness schedule')
     deployment_state.bootstrap_closed()
@@ -77,7 +79,10 @@ def install(value, *, destination, datastore_path, token, api_factory=backup_api
                     private_directory(directory); no_markers(directory)
         backup_readiness.legacy_holds(value)
         continuity(value)
-        api_factory(destination, token).datastore(datastore_path)
+        api = api_factory(destination, token)
+        api.datastore(datastore_path)
+        if monitoring_token_file is not None:
+            backup_monitoring.provision(api, destination, monitoring_token_file, api_factory)
         identity = {'schema': 'homelab-pbs-schedule-install-v1', 'schedule': value, 'source_sha256': source_hash()}
         parent = Path(roots[0])/'backup-controller'/'installations'/value['group']['name']
         for folder in (parent.parent.parent, parent.parent, parent):
