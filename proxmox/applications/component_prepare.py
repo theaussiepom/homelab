@@ -20,7 +20,7 @@ import component_ownership
 import dns_records
 from application_contract import runtime_files,SIDECAR_FILES
 import managed_credentials
-from private_io import encoded, read_json, regular, require
+from private_io import digest, encoded, read_json, regular, require
 
 # Further adapters install their fixed owned file generator here. A rendered
 # preview is not permission to execute an incomplete private input path.
@@ -173,7 +173,10 @@ def prepare(cfg, app_id, environment=None, *, attempt):
                     'Supply the dedicated PBS monitoring token secret')
             server['pbs'] = {key: pbs[key] for key in ('server_name', 'port', 'token_id')}
             server['pbs']['token_secret'] = secret.decode('ascii')
-            server['templates'].append(monitoring_templates.prepared(monitoring_templates.PBS_TEMPLATE))
+            template = monitoring_templates.prepared(monitoring_templates.PBS_TEMPLATE)
+            require(digest(encoded(template)) == pbs['template_sha256'],
+                    'Preserve the PBS template compiled into the selected inputs')
+            server['templates'].append(template)
         payload['monitoring-server.json']=encoded(server)
     else:
         payload.update(monitoring)
