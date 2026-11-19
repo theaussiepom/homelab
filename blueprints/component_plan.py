@@ -645,8 +645,8 @@ class Resolver:
             self.apps[app_id]['settings'] = settings
         component_renovate.bind(self)
         canonical_accounts = component_accounts.bind(self, dependencies['accounts'])
-        component_identity.bind(self)
         monitoring = component_monitoring.bind(self, exposure)
+        component_identity.bind(self)
         backup = component_backup.bind(self)
         component_traffic.bind(self, exposure)
         import component_routed_checks
