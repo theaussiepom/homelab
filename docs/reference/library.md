@@ -32,6 +32,13 @@ Select one of the [18 registered adapters](support.md). The display name must be
 
 An app profile may also declare the [backup coverage object](backup.md#application-recovery-declarations). It classifies every storage role as included or excluded and can list native configuration paths. These declarations reuse guest storage bindings rather than repeating their allocations. Every app profile selected on an explicitly [enrolled guest](backup.md#backup-guest) must supply this coverage, with the required root backup selection. Root presence alone neither enrolls nor protects a guest.
 
+`app_profiles.<id>.runtime_dns` optionally selects `context` (the default) or
+`host`. Applications inherit this choice unless they explicitly override it.
+Null, empty and unknown values are rejected. Resolver profiles should select
+`host` to avoid depending on themselves. See [application runtime DNS](contexts.md#application-runtime-dns)
+for reference resolution, generated rules, first-installation prerequisites and
+container recreation during later CD.
+
 ## First installation
 
 Selecting a library provides definitions for your configuration; it does not install a service. A profile determines the required roles and supported adapter behavior. Your site must supply valid instances and the prepared inputs that profile needs. Use the [support matrix](support.md) and [deployment preparation](../guides/prepare-deployment.md) to determine whether first installation is supported.

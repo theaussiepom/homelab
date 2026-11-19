@@ -21,6 +21,7 @@ A context selects a Proxmox LXC provider and the trust, credentials and paths it
 | <a id="context-protected-guests"></a>`protected_guests` | Required integer list | Unique positive VMIDs reserved from use by selected guests |
 | <a id="context-ssh-public-keys"></a>`ssh_public_keys` | Required string list | Unique nonempty strings; deployment admission also requires actual Ed25519 public keys |
 | <a id="context-dns-servers"></a>`dns_servers` | Required nonempty endpoint-reference list | Resolved DNS TCP/UDP port 53 with IPv4 addresses |
+| <a id="context-runtime-dns-servers"></a>`runtime_dns_servers` | Optional nonempty endpoint-reference list | Container DNS and narrow TCP/UDP 53 grants; omitted preserves host DNS inheritance. See [application runtime DNS](#application-runtime-dns). |
 | <a id="context-capabilities"></a>`capabilities ` | Optional named map, {} | Named restricted host capabilities, exact fields below |
 | <a id="context-capability-type"></a>`capabilities.<id>.type ` | Required `serial-device` or `nfs-attachment` | Explicit restricted capability; no discovery |
 | <a id="context-capability-ssh-private-key"></a>`capabilities.<id>.ssh_private_key ` | Required source ID | Protected key used by the selected capability |
@@ -85,3 +86,43 @@ capabilities:
 The [`context` validator](../../blueprints/component_types.py) checks field shapes, and [`context_values`](../../blueprints/component_plan.py) checks API, DNS and credential references. [Reference example tests](../../blueprints/test_component_reference_examples.py) validate the context and capability and reject the missing trust field. They run configuration checks only.
 
 [Reference index](README.md) · [Networks](networks.md) · [Lifecycle](lifecycle.md)
+
+## Application runtime DNS
+
+`contexts.<id>.runtime_dns_servers` selects DNS for Docker application containers,
+separately from the guest OS `dns_servers`. Each entry is an existing app endpoint
+or external endpoint reference resolving to an IPv4 TCP/UDP port 53 endpoint.
+Hostnames, loopback, unspecified, link-local and multicast addresses are rejected.
+The list cannot be null or empty. Duplicate addresses are removed in declaration
+order. Omission preserves the existing container inheritance behavior.
+
+This is an explicit network capability: the compiler emits only TCP/UDP port 53
+ACCEPT rules between each selected application's guest and the named resolvers.
+It derives the guest source address from the connected network or ordinary default
+route, and adds matching ingress rules when the resolver is a managed guest.
+Unmanaged resolver and intervening router/firewall access remains an external
+prerequisite. Other endpoint references still grant no access by themselves.
+
+The shared Compose renderer writes `dns` for every container owned by the selected
+application. Host-networked containers retain their host network mode. Bridge
+containers retain Docker service-name resolution. Guest OS resolvers, package
+installation, Docker daemon image pulls, application identities, credentials and
+volumes do not change. Native applications outside Docker retain OS DNS.
+
+[App profiles](library.md#app-profile) can set `runtime_dns: host` to retain host
+DNS; an [app instance](apps.md#app-runtime-dns) can override the profile with `host`
+or `context`. The default is `context`. Use `host` for resolver infrastructure so
+it does not depend on its own service. The compiler does not add deployment-job
+dependencies: provisioning and image pulls can run before local DNS. Local DNS
+must be available when an application needs name resolution, including downloads
+performed inside its container. Application readiness and live DNS queries are
+separate from source compilation; a source grant does not prove packet transit.
+
+For first installation, prepare at least one selected resolver before application
+startup needs it. For later deployments, changing this selection recreates
+affected containers through normal CD; preserve their data and identities.
+Do not put public resolvers in the runtime list when local zones must stay local.
+
+The complete [relationships example](../examples/relationships/README.md) and
+[`test_component_runtime_dns.py`](../../blueprints/test_component_runtime_dns.py)
+exercise resolution, exceptions, invalid inputs and unchanged host DNS.

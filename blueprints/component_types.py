@@ -96,7 +96,7 @@ def template(value):
 
 def context(value):
     closed(value, ('backend', 'node', 'api_endpoint', 'trust', 'credentials', 'paths',
-                   'protected_guests', 'ssh_public_keys', 'dns_servers'), ('capabilities', 'timezone'))
+                   'protected_guests', 'ssh_public_keys', 'dns_servers'), ('capabilities', 'timezone', 'runtime_dns_servers'))
     require(value['backend'] == 'proxmox-lxc')
     text(value['node'])
     endpoint(value['api_endpoint'])
@@ -116,6 +116,10 @@ def context(value):
     require(isinstance(value['dns_servers'], list) and bool(value['dns_servers']))
     for item in value['dns_servers']:
         endpoint(item)
+    if 'runtime_dns_servers' in value:
+        require(isinstance(value['runtime_dns_servers'], list) and bool(value['runtime_dns_servers']))
+        for item in value['runtime_dns_servers']:
+            endpoint(item)
     for row in named(value.get('capabilities', {})).values():
         closed(row, ('type', 'ssh_private_key', 'known_hosts'))
         require(row['type'] in ('serial-device', 'nfs-attachment') and identifier(row['ssh_private_key']))
@@ -363,7 +367,8 @@ def allocation(value):
 def app(value):
     closed(value, ('profile', 'guest', 'lifecycle', 'interfaces'),
            ('display_name', 'identity', 'storage', 'properties', 'software', 'runtime',
-            'authentication', 'devices', 'origin', 'secrets', 'resources'))
+            'authentication', 'devices', 'origin', 'secrets', 'resources', 'runtime_dns'))
+    require(value.get('runtime_dns', 'context') in ('context', 'host'))
     require(identifier(value['profile']) and identifier(value['guest'])
             and value['lifecycle'] in ('fresh', 'retained'))
     if 'display_name' in value:
@@ -415,7 +420,8 @@ def health(value):
 def profile(value):
     closed(value, ('adapter', 'display_name', 'interfaces'),
            ('listeners', 'endpoints', 'storage', 'software', 'runtime', 'authentication',
-            'connections', 'health', 'monitoring', 'properties', 'devices', 'secrets', 'backup'))
+            'connections', 'health', 'monitoring', 'properties', 'devices', 'secrets', 'backup', 'runtime_dns'))
+    require(value.get('runtime_dns', 'context') in ('context', 'host'))
     owner = adapter(value['adapter'])
     # Import locally: the source validators remain independently callable.
     from component_secrets import requirements

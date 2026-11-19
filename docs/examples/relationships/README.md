@@ -16,6 +16,7 @@ Expected result: `All component guests compile offline`. The real compiler resol
 
 | Source location in site.yaml | Purpose |
 | --- | --- |
+| contexts.lab.runtime_dns_servers | Two container resolvers, independent of guest OS DNS; narrowly generated TCP/UDP 53 access |
 | apps.broker / apps.browser / apps.ingress | Placement and explicit profile roles/identities |
 | connections.broker | Browser role → broker backend, account `client`, hostname `broker` |
 | accounts.client / secret_sources.browser_password | Stable create-once MQTT owner and generated credential identity |
@@ -23,6 +24,8 @@ Expected result: `All component guests compile offline`. The real compiler resol
 | exposures.browser / apps.browser.origin | Owned HTTPS route and origin |
 | policies.middlewares / address_groups | Explicit selected headers and ordered client ranges |
 | guests.resolver.network_policy | Explicit outpost access, independent of readiness/value references |
+
+Container DNS is described in [contexts](../../reference/contexts.md#application-runtime-dns). Both addresses in this example are synthetic; a deployed application requires at least one selected resolver to be reachable.
 
 The individual [connection](../../reference/connections.md), [exposure](../../reference/exposures.md), [policy](../../reference/policies.md) and [identity/account](../../reference/identity-and-secrets.md) pages explain the fields and refusal cases. Copy the whole directory to a disposable physical path before experimenting. The compiler must reject either of these changes: adding `credential` beside `account` on the broker connection, or duplicating the exposure's domain in its aliases.
 

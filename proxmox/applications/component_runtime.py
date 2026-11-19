@@ -96,6 +96,8 @@ def _service(app, service, guest):
             result[key] = copy.deepcopy(settings[key])
     if settings.get('no_new_privileges'):
         result['security_opt'] = ['no-new-privileges:true']
+    if 'runtime_dns_servers' in app:
+        result['dns'] = copy.deepcopy(app['runtime_dns_servers'])
     return result
 
 

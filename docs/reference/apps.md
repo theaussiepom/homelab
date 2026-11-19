@@ -18,6 +18,7 @@ Use only the fields listed below. IDs and scalar values follow the [shared rules
 | <a id="app-properties"></a>`properties` | Optional object, omitted `{}` | Apply profile defaults, then explicit app keys; use only the [adapter's accepted fields](app-properties.md) |
 | <a id="app-software"></a>`software` | Optional unique ID list, omitted `[]` | Appends to profile software; conflicting selections are rejected |
 | <a id="app-runtime"></a>`runtime` | Optional unique ID list, omitted `[]` | Appends to profile runtime; all resulting requirements must still be met |
+| <a id="app-runtime-dns"></a>`runtime_dns` | Optional `context` or `host` | Overrides the profile mode; otherwise defaults to its mode, then `context`. Selects [container DNS](contexts.md#application-runtime-dns); null/empty/unknown values are rejected. |
 | <a id="app-authentication"></a>`authentication` | Optional ID | Named [authentication policy](policies.md#authentication-policies); may be required by profile |
 | <a id="app-devices"></a>`devices` | Optional named map, omitted `{}` | Profile role to [site device](supporting-types.md#devices) ID; one physical owner |
 | <a id="app-origin"></a>`origin` | Optional closed reference | `{exposure: id, domain?: id}` selects an owned [HTTP exposure origin](exposures.md#public-origin) |
