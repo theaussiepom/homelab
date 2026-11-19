@@ -12,11 +12,13 @@ from pathlib import Path
 import selectors
 import signal
 import subprocess
+import sys
 import time
 from types import SimpleNamespace
 import uuid
 
 import backup_group
+import backup_notify
 import backup_policy
 import backup_capture
 import backup_source
@@ -25,7 +27,8 @@ import component_generation
 import component_current
 import deployment_state
 from custody_records import no_markers
-from private_io import encoded, private_directory, private_writer, read_json, regular, require, sha, write_new, sync
+from backup_group import require
+from private_io import encoded, private_directory, private_writer, read_json, regular, sha, write_new, sync
 
 
 def schedule(value):
@@ -187,7 +190,7 @@ def run(path, *, launch=subprocess.Popen, admission=admit):
     os.umask(0o077)
     value = schedule(read_json(path, private=True)); group = value['group']
     deployment_state.bootstrap_closed()
-    peers = {}; holds = {}; completed = False
+    peers = {}; holds = {}
     generation = uuid.uuid4().hex; stamp = int(time.time())
     with ExitStack() as opened:
         scopes = sorted({(row['state_root'], row['vmid']) for row in group['members'].values()})
@@ -208,12 +211,13 @@ def run(path, *, launch=subprocess.Popen, admission=admit):
         operation = attempts/generation; private_directory(operation, create=True)
         write_new(operation/'started.json', encoded({'group': group, 'generation': generation,
             'backup_time': stamp, 'deployment_receipts': {name: proof for name, (_, proof) in admitted.items()}}))
-        budgets = [cfg['app']['backup']['job']['limits']['timeout_seconds'] for cfg, _ in admitted.values()]
-        lease = 3*max(budgets)+180*sum(len(cfg['app']['backup']['job']['capture']['pause'])
-            for cfg, _ in admitted.values())+300
-        require(lease <= 3*86400+180*1024+300, 'Bound the total recovery group interruption budget')
-        deadline = time.monotonic()+lease
+        stage = 'launch-workers'
         try:
+            budgets = [cfg['app']['backup']['job']['limits']['timeout_seconds'] for cfg, _ in admitted.values()]
+            lease = 3*max(budgets)+180*sum(len(cfg['app']['backup']['job']['capture']['pause'])
+                for cfg, _ in admitted.values())+300
+            require(lease <= 3*86400+180*1024+300, 'Bound the total recovery group interruption budget')
+            deadline = time.monotonic()+lease
             for name, (cfg, _) in admitted.items():
                 log = opened.enter_context(private_writer(operation/(name+'.log'), exclusive=True))
                 peers[name] = launch(command(cfg), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log,
@@ -246,6 +250,7 @@ def run(path, *, launch=subprocess.Popen, admission=admit):
                 exchange.transfer({name: {'action': action, 'generation': generation,
                     **({'group': recovery} if action == 'upload' else {})} for name in peers})
             finished = dict(peers); peers.clear()
+            stage = 'complete'
             reap(finished, success=True, deadline=deadline)
             for work, raw in holds.items():
                 require(regular(work/'BACKUP-HOLD.json', private=True) == raw, 'Preserve a foreign backup hold')
@@ -254,12 +259,14 @@ def run(path, *, launch=subprocess.Popen, admission=admit):
                 (work/'BACKUP-HOLD.json').unlink(); sync(work)
             write_new(operation/'complete.json', encoded({'status': 'passed', 'generation': generation,
                 'recovery_set_sha256': sha(operation/'recovery-set.json'), 'restore_verified': False}))
-            completed = True
-        finally:
-            if peers: reap(peers, success=False, deadline=time.monotonic()+180*max(1, len(group['members'])))
-            if not completed:
+        except BaseException as error:
+            error.backup_stage = stage
+            try:
+                if peers: reap(peers, success=False, deadline=time.monotonic()+180*max(1, len(group['members'])))
+            finally:
                 write_new(operation/'failed.json', encoded({'status': 'failed', 'generation': generation,
-                    'window_opened': bool(holds), 'automatic_replay': False}))
+                    'window_opened': bool(holds), 'automatic_replay': False, **backup_group.failure(error, stage)}))
+            raise
     return {'status': 'passed', 'generation': generation, 'restore_verified': False}
 
 
@@ -339,10 +346,19 @@ def main():
         """Abort through the operation cleanup path when the timer is interrupted."""
         raise InterruptedError('Recovery coordinator interrupted')
     signal.signal(signal.SIGTERM, interrupted); signal.signal(signal.SIGINT, interrupted)
-    print(json.dumps(run(args.group)))
+    try:
+        print(json.dumps(run(args.group)))
+    except Exception as error:
+        try:
+            outcome = backup_notify.send(args.group, backup_group.failure(error, 'admission'))
+        except Exception:
+            outcome = 'failed'
+        print(json.dumps({'backup_failure_notification': outcome}), file=sys.stderr)
+        raise
 
 
 if __name__ == '__main__':
     try: main()
-    except Exception:
+    except Exception as error:
+        print(json.dumps(backup_group.failure(error, 'admission')), file=sys.stderr)
         raise SystemExit('Backup refused or failed; inspect protected evidence. No automatic replay.') from None

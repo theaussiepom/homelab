@@ -9,11 +9,25 @@ import time
 from pathlib import PurePosixPath
 import ipaddress
 
-from private_io import digest, encoded, require
+from private_io import digest, encoded
 
 LIMIT = 1024*1024
 STAGES = [('prepared', 'pause'), ('paused', 'capture'), ('captured', 'resume'),
           ('resumed', 'upload'), ('uploaded', 'finish')]
+
+
+def require(condition, reason):
+    """Attach a code-owned reason, without changing the original exception type."""
+    if not condition:
+        error = ValueError(reason)
+        error.backup_reason = reason
+        raise error
+
+
+def failure(error, stage):
+    """Expose only explicit diagnostic fields, never exception arguments or output."""
+    return {'error_type': type(error).__name__, 'stage': getattr(error, 'backup_stage', stage),
+            'reason': getattr(error, 'backup_reason', 'See the protected backup evidence')}
 
 
 def identifier(value):

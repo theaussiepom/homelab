@@ -17,7 +17,8 @@ import sys
 import uuid
 
 import backup_capture
-from private_io import decode_json, encoded, digest, private_directory, private_writer, read_json, regular, require, sync, write_new
+from backup_group import failure, require
+from private_io import decode_json, encoded, digest, private_directory, private_writer, read_json, regular, sync, write_new
 
 CONFIG = Path('/etc/homelab-backup')
 
@@ -198,6 +199,7 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
         'owner': value['owner'], 'status': 'started', 'completed_databases': [],
         'database_associations': {key: app['databases'] for key, app in value['applications'].items()}}
     write_new(operation/'started.json', encoded(receipt))
+    stage = 'preflight'
     try:
         # Validate inputs and repository reachability before any application interruption.
         dest = value['job']['destination']; owner = value['owner']
@@ -237,6 +239,7 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
         if preflight:
             write_new(operation/'ready.json', encoded({**receipt, 'status': 'ready'}))
             return {'status': 'ready', 'generation': generation}
+        stage = 'prepare-window'
         if barrier is not None:
             barrier('prepared', {})
             engine.begin_phase()
@@ -244,6 +247,7 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
         # scheduled attempt may follow a failed preflight, never replay its UUID.
         write_new(root/'PENDING', encoded({'generation': generation}))
         try:
+            stage = 'pause-services'
             # Stop only services explicitly admitted by the job, never an app peer.
             for row in recipes['pause']:
                 engine.run(backup_capture.compose(row, 'ps'), output=operation/(row['app']+'-running.txt'))
@@ -253,6 +257,7 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
                 engine.run(backup_capture.compose(row, 'stop'))
             if barrier is not None:
                 barrier('paused', {})
+            stage = 'capture'
             for row in recipes['databases']:
                 target = payload/row['app']; private_directory(target, create=True)
                 argv, output = backup_capture.database(row, target)
@@ -285,8 +290,11 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
                             'The previously running services did not return')
                 except Exception:
                     failures.append(row['app'])
+            if failures:
+                stage = 'resume-services'
             require(not failures, 'A paused service did not restart; preserve backup and service evidence')
             paused.clear()
+        stage = 'verify-resumed-services'
         if barrier is not None:
             import backup_group
             group = barrier('resumed', {})
@@ -300,11 +308,13 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
         ready(recipes['pause'], operation, engine)
         expected_files = manifest(payload, limits)
         write_new(operation/'manifest.json', encoded(expected_files))
+        stage = 'upload'
         engine.run(['proxmox-backup-client', 'backup', 'recovery.pxar:'+str(payload),
             '--backup-time', str(backup_time),
             '--backup-id', backup_id, '--crypt-mode', 'encrypt', '--keyfile', str(config/'pbs-key'),
             '--master-pubkey-file', str(config/'pbs-recovery-public.pem'),
             *common], environment=env)
+        stage = 'verify-snapshot'
         engine.run(['proxmox-backup-client', 'snapshot', 'list', '--output-format', 'json', *common],
             output=operation/'snapshots.json', environment=env)
         snapshots = read_json(operation/'snapshots.json', private=True)
@@ -314,17 +324,22 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
         readback = operation/'readback'
         stamp = datetime.datetime.fromtimestamp(backup_time, datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         envelope = operation/'rsa-encrypted.key'
+        stage = 'read-recovery-envelope'
         engine.run(['proxmox-backup-client', 'restore', 'host/'+backup_id+'/'+stamp,
             'rsa-encrypted.key', '-', '--keyfile', str(config/'pbs-key'), *common],
             output=envelope, environment=env)
         wrapped = regular(envelope, private=True, limit=512)
         require(len(wrapped) == 512, 'The snapshot is missing its complete RSA-4096 recovery envelope')
+        stage = 'restore-readback'
         engine.run(['proxmox-backup-client', 'restore', 'host/'+backup_id+'/'+stamp,
             'recovery.pxar', str(readback), '--keyfile', str(config/'pbs-key'), *common], environment=env)
+        stage = 'verify-readback'
         require(manifest(readback, limits) == expected_files and manifest(payload, limits) == expected_files,
                 'Encrypted PBS archive readback does not match the complete immutable generation')
         if barrier is not None:
+            stage = 'wait-for-group'
             barrier('uploaded', {'data_manifest_sha256': data_sha})
+        stage = 'complete'
         release_copy(readback, expected_files, limits)
         release_copy(payload, expected_files, limits)
         receipt.update(status='uploaded', backup_time=backup_time, namespace=namespace, finished_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -340,7 +355,8 @@ def run(value, *, root=None, config=CONFIG, engine=None, generation=None, barrie
         (root/'PENDING').unlink(); sync(root)
         return {'status': 'uploaded', 'generation': generation, 'restore_verified': False}
     except Exception as error:
-        receipt.update(status='failed', error_type=type(error).__name__)
+        error.backup_stage = stage
+        receipt.update(status='failed', **failure(error, stage))
         write_new(operation/'failed.json', encoded(receipt))
         raise
 
@@ -418,5 +434,6 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except Exception:
+    except Exception as error:
+        print(json.dumps(failure(error, 'admission')), file=sys.stderr)
         raise SystemExit('Backup failed; inspect protected evidence. No automatic replay.') from None

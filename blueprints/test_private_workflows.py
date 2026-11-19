@@ -235,7 +235,9 @@ class PrivateWorkflowTests(unittest.TestCase):
         self.assertEqual(backup['steps'][-1],before['jobs']['_backup']['steps'][-1])
         self.assertEqual(backup['steps'][0],before['jobs']['_backup']['steps'][0])
         self.assertNotIn('if',backup['steps'][-1]);self.assertNotIn('continue-on-error',backup['steps'][-1])
-        self.assertEqual(backup['steps'][-1]['env'],{'DISABLED':'[]','PBS_API_TOKEN':'${{ secrets.PBS_API_TOKEN }}'})
+        self.assertEqual(backup['steps'][-1]['env'], {'DISABLED': '[]',
+            'PBS_API_TOKEN': '${{ secrets.PBS_API_TOKEN }}',
+            'PBS_FAILURE_WEBHOOK': '${{ secrets.PBS_FAILURE_WEBHOOK }}'})
         self.assertTrue(all('database' not in item and 'web' not in item for item in backup['needs']))
         for guest in ('database','web'):self.assertEqual(after['jobs'][guest],before['jobs'][guest])
         self.assertLess(next(i for i,row in enumerate(backup['steps']) if 'PBS_FIREWALL_SSH_KEY' in row.get('env',{})),len(backup['steps'])-1)

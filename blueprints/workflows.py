@@ -249,26 +249,30 @@ def models(stack, *, site_source, disabled=None):
     action_revision = '@' + framework['revision']
     names = list(dict.fromkeys(name for guest in graph['guests'].values()
                                for name in guest['workflow_secrets']))
-    if 'backup' in graph and 'PBS_API_TOKEN' not in names:
-        names.append('PBS_API_TOKEN')
+    if 'backup' in graph:
+        names.extend(name for name in ('PBS_API_TOKEN', 'PBS_FAILURE_WEBHOOK') if name not in names)
     deploy = {'name': 'Deployment', 'on': workflow_call(names), 'permissions': {'contents': 'read'},
               'jobs': {'selection': selection_job(recipe, graph)}}
     result = {'deploy.yml': deploy}
     if 'backup' in graph:
+        deploy['on']['workflow_call']['secrets']['PBS_FAILURE_WEBHOOK']['required'] = False
         condition = PRIVATE_MAIN + " && !failure() && !cancelled() && needs.selection.result == 'success'"
         backup_name = graph['backup']['name']
         deploy['jobs']['_backup'] = {'name':backup_name,'needs':graph['backup']['needs'],'if':condition,
             'uses':'./.github/workflows/backup.yml','with':arguments(),
-            'secrets':{'PBS_API_TOKEN':'${{ secrets.PBS_API_TOKEN }}'}}
+            'secrets':{'PBS_API_TOKEN':'${{ secrets.PBS_API_TOKEN }}',
+                       'PBS_FAILURE_WEBHOOK':'${{ secrets.PBS_FAILURE_WEBHOOK }}'}}
         job = {'name':backup_name,'if':PRIVATE_MAIN,'environment':'backup','runs-on':'${{ fromJSON(inputs.runner_labels) }}',
             'timeout-minutes':45,'env':copy.deepcopy(recipe['env']),
             'steps':[{'name':'Setup','uses':action_source+'guest-setup'+action_revision},
                 {'name':'Backup setup','env':{'DISABLED':'${{ inputs.disabled }}',
-                    'PBS_API_TOKEN':'${{ secrets.PBS_API_TOKEN }}'},
+                    'PBS_API_TOKEN':'${{ secrets.PBS_API_TOKEN }}',
+                    'PBS_FAILURE_WEBHOOK':'${{ secrets.PBS_FAILURE_WEBHOOK }}'},
                  'run':'"$HOMELAB_CONFIG_PYTHON" framework-source/blueprints/backup_deploy.py --stack stack-source --site-root . --disabled "$DISABLED"'}]}
-        result['backup.yml'] = {'name':backup_name,'on':workflow_call(['PBS_API_TOKEN']),
+        result['backup.yml'] = {'name':backup_name,'on':workflow_call(['PBS_API_TOKEN', 'PBS_FAILURE_WEBHOOK']),
             'permissions':{'contents':'read'},'defaults':copy.deepcopy(defaults),'jobs':{'deploy':job}}
-        result['backup.yml']['on']['workflow_call']['secrets'] = {'PBS_API_TOKEN': {'required': True}}
+        result['backup.yml']['on']['workflow_call']['secrets'] = {'PBS_API_TOKEN': {'required': True},
+                                                                'PBS_FAILURE_WEBHOOK': {'required': False}}
     for guest, metadata in graph['guests'].items():
         owner = guest
         guest_name = label(metadata['name'])

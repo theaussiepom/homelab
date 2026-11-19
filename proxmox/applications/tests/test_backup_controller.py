@@ -87,6 +87,10 @@ class ControllerTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.execute()
         receipts = [json.loads(p.read_text()) for p in (self.state/'backup-groups').glob('*/failed.json')]
         self.assertEqual({r['window_opened'] for r in receipts}, {False, True})
+        self.assertEqual({r['stage'] for r in receipts}, {'prepared', 'captured'})
+        for receipt in receipts:
+            self.assertEqual(receipt['error_type'], 'ValueError')
+            self.assertIn('peer disconnected', receipt['reason'])
 
     def test_lock_contention_prevents_any_peer_launch(self):
         import fcntl
@@ -94,6 +98,23 @@ class ControllerTests(unittest.TestCase):
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
             with patch.object(controller, 'command') as command, self.assertRaises(BlockingIOError): self.execute()
             command.assert_not_called()
+
+    def test_notification_does_not_replace_or_retry_the_original_failure(self):
+        import contextlib
+        error = ValueError('private exception text')
+        for send in (dict(return_value='submitted'), dict(side_effect=OSError('private sender text'))):
+            with patch.object(sys, 'argv', ['controller', '--group', str(self.path)]), \
+                    patch.object(controller.signal, 'signal'), patch('backup_user.execution'), \
+                    patch.object(controller, 'run', side_effect=error) as run, \
+                    patch.object(controller.backup_notify, 'send', **send) as notify, \
+                    contextlib.redirect_stderr(io.StringIO()) as stderr:
+                with self.assertRaises(ValueError) as caught:
+                    controller.main()
+                self.assertIs(caught.exception, error)
+                run.assert_called_once_with(self.path)
+                notify.assert_called_once_with(self.path, backup_group.failure(error, 'admission'))
+                self.assertEqual(json.loads(stderr.getvalue())['backup_failure_notification'],
+                                 send.get('return_value', 'failed'))
 
     def test_units_preserve_utc_pinned_source_actor_and_no_catchup(self):
         result = controller.units(self.value, '/state/framework/'+'b'*64+'/proxmox/applications', 1000, '/home/runner')

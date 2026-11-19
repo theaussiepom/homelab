@@ -28,6 +28,11 @@ def destination():
 
 
 class GroupTests(unittest.TestCase):
+    def test_failure_diagnostics_omit_raw_exception_arguments(self):
+        failure = group.failure(ValueError('synthetic-token'), 'admission')
+        self.assertEqual(failure, {'error_type': 'ValueError', 'stage': 'admission',
+                                   'reason': 'See the protected backup evidence'})
+
     def test_full_membership_and_exact_completed_digests_are_required(self):
         value = scope(); group.configuration(value)
         self.assertEqual(group.member({'name': 'example', 'member': 'example-node-610'})['name'], 'example')
