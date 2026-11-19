@@ -338,6 +338,7 @@ class PlanCompilerWiringReview(unittest.TestCase):
             stack.enter_context(patch.object(plan.component_accounts, 'bind', return_value={}))
             stack.enter_context(patch.object(plan.component_monitoring, 'bind', return_value={'guest': monitoring_guest}))
             stack.enter_context(patch.object(plan.component_backup, 'bind', return_value=None))
+            stack.enter_context(patch('component_runtime_dns.bind'))
             admission = stack.enter_context(patch.object(plan.component_admission, 'admit'))
             for owner in (plan.component_renovate, plan.component_secrets, plan.component_foundations, plan.component_identity, plan.component_traffic):
                 stack.enter_context(patch.object(owner, 'bind'))

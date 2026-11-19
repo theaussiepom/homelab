@@ -25,6 +25,9 @@ contexts:
     ssh_public_keys: []
     dns_servers:
     - external: dns
+    runtime_dns_servers:
+    - external: dns
+    - external: secondary_dns
 secret_sources:
   token:
     type: file
@@ -52,6 +55,10 @@ external_endpoints:
   dns:
     protocol: udp
     address: 198.18.21.53
+    port: 53
+  secondary_dns:
+    protocol: udp
+    address: 198.18.21.54
     port: 53
   outpost:
     protocol: http

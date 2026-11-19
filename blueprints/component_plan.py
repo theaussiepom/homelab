@@ -637,6 +637,8 @@ class Resolver:
         for guest in self.guests.values():
             guest['rules'] = self.policy_values(guest)
         used_images = self.execution_values(images)
+        import component_runtime_dns
+        component_runtime_dns.bind(self)
         require(set(self.site['images']) <= used_images, 'component.image-binding-unused')
         component_foundations.bind(self)
         for app_id, settings in component_properties.bind(self).items():

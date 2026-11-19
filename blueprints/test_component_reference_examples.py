@@ -289,6 +289,10 @@ class ReferenceExamples(unittest.TestCase):
         self.assertEqual(selected['exposures']['browser'],dict(exposure,middlewares=['headers','office_only']))
         plan,packets=self.resolve(selected,library)
         self.assertEqual(plan.resolved['apps']['browser']['origin_url'],'https://browser.example.invalid')
+        # contexts.runtime_dns_servers -> contexts.md and this complete example.
+        for app in ('broker', 'browser', 'ingress'):
+            self.assertEqual(plan.resolved['apps'][app]['runtime_dns_servers'],
+                             ['198.18.21.53', '198.18.21.54'])
         self.assertIn('component-runtime.json',packets['resolver']['files'])
         self.assertEqual(selected['policies']['middlewares']['office_only'],example('policies.md','policy-middleware'))
         for change in ('both-credentials','wrong-role','duplicate-domain','missing-tls'):
