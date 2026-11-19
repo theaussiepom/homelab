@@ -40,6 +40,37 @@ def fixture():
 
 
 class MonitoringTests(unittest.TestCase):
+    def test_pbs_binding_is_central_and_requires_dedicated_file_and_tls_identity(self):
+        resolver, exposures = fixture()
+        app = resolver.apps['zabbix']
+        app['settings'] = {}
+        app['resolved_connections']['pbs'] = {
+            'type': 'https', 'target': {'address': '198.18.20.5', 'port': 8007},
+            'source_address': '198.18.20.10', 'transport': 'pbs',
+            'credential': {'secret': 'pbs_monitoring', 'principal': 'monitor@pbs!zabbix'},
+        }
+        resolver.authentication_values = {'transports': {'pbs': {
+            'server_name': 'pbs.example.test', 'certificate': 'synthetic-public-certificate'}}}
+        resolver.site['secret_sources'] = {'pbs_monitoring': {
+            'type': 'file', 'path': '/example/pbs-monitoring-token'}}
+        monitoring.bind(resolver, exposures)
+        self.assertEqual(app['settings']['pbs'], {
+            'address': '198.18.20.5', 'port': 8007, 'server_name': 'pbs.example.test',
+            'certificate': 'synthetic-public-certificate', 'token_id': 'monitor@pbs!zabbix',
+            'token_file': '/example/pbs-monitoring-token',
+        })
+        self.assertNotIn('pbs', resolver.guests['database']['monitoring'])
+        for fault in ('trust', 'credential', 'route'):
+            invalid = copy.deepcopy(resolver)
+            if fault == 'trust':
+                invalid.authentication_values['transports']['pbs'].pop('server_name')
+            elif fault == 'credential':
+                invalid.site['secret_sources']['pbs_monitoring'] = {'type': 'environment'}
+            else:
+                invalid.apps['zabbix']['resolved_connections']['pbs']['source_address'] = '198.18.20.99'
+            with self.subTest(fault=fault), self.assertRaises(ComponentError):
+                monitoring.bind(invalid, exposures)
+
     def test_web_grant_follows_the_web_endpoint_without_moving_agent_transport(self):
         """Vary both web address and port while preserving the agent endpoint."""
         resolver, exposures = fixture()

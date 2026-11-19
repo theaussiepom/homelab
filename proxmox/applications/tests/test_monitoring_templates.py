@@ -8,6 +8,18 @@ import monitoring_templates as templates
 
 
 class TemplateTrustTests(unittest.TestCase):
+    def test_pbs_polls_one_verified_server_without_redirects_or_guest_filters(self):
+        document = templates.prepared(templates.PBS_TEMPLATE)
+        items = list(templates.http_agents(document))
+        self.assertEqual(len(items), 5)
+        for item in items:
+            self.assertTrue(item['url'].startswith('https://{$PBS.URL.HOST}:'))
+            self.assertEqual((item['verify_peer'], item['verify_host'], item['follow_redirects']),
+                             ('YES', 'YES', 'NO'))
+        failed = next(item for item in items if item['key'] == 'pbs.tasks.failed')
+        self.assertEqual({field['name']: field['value'] for field in failed['query_fields']},
+                         {'errors': 'true', 'limit': '50', 'typefilter': 'backup'})
+
     def test_all_http_items_and_prototypes_require_peer_and_hostname_trust(self):
         document = templates.prepared('template_app_proxmox.yaml')
         templates.check_readback(document)

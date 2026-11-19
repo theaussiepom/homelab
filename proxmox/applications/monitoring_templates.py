@@ -7,6 +7,8 @@ import uuid
 import yaml
 import monitoring
 
+PBS_TEMPLATE = 'template_app_pbs.yaml'
+
 
 def http_agents(value):
     if isinstance(value, dict):
@@ -38,9 +40,13 @@ def check_readback(document):
 
 def prepared(name):
     monitoring.check_templates()
-    if name not in monitoring.VERSIONS['templates']:
-        raise ValueError('Select a pinned official template')
+    if name not in monitoring.VERSIONS['templates'] | monitoring.VERSIONS['optional_templates']:
+        raise ValueError('Select a pinned monitoring template')
     document = yaml.safe_load((monitoring.ROOT / 'templates' / name).read_text())
+    if name == PBS_TEMPLATE:
+        for item in http_agents(document):
+            item['url'] = item['url'].replace('{HOST.CONN}', '{$PBS.URL.HOST}')
+            item['follow_redirects'] = 'NO'
     if name == 'template_app_docker.yaml':
         template = document['zabbix_export']['templates'][0]
         old_name, new_name = template['template'], 'HomeLab Docker by active agent 2'

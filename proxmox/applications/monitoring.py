@@ -60,7 +60,7 @@ def saml_settings(value):
 
 
 def check_templates():
-    for name, expected in VERSIONS["templates"].items():
+    for name, expected in (VERSIONS["templates"] | VERSIONS["optional_templates"]).items():
         require(
             hashlib.sha256((ROOT / "templates" / name).read_bytes()).hexdigest()
             == expected,

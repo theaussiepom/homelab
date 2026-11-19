@@ -31,6 +31,19 @@ Selecting SAML as the default login method changes the entry screen. It does not
 
 PostgreSQL storage managed by monitoring requires the existing native TLS precheck and exact HBA rules. It does not create or replace production database certificates. Establishing an encrypted connection alone does not prove certificate identity checks. Discovering InfluxDB organizations and buckets requires a separately scoped credential; a metrics connection does not supply it.
 
+## Monitor a Proxmox Backup Server
+
+A profile that declares the optional `pbs` HTTPS connection can link the
+community PBS template to one host. Bind the PBS address, its TLS server name
+and public certificate, and the dedicated monitoring token ID and private
+controller file. The file contains only the token secret. Give the identity
+metadata access to PBS status, tasks and datastores without granting restore or
+write access. Use an existing permitted route from the Zabbix guest.
+
+Zabbix discovers datastores and reports recent failed tasks across the server
+without per-guest entries. Nightly capture, readback and group completion are
+verified by the backup flow separately.
+
 ## Worked selection and profile
 
 This is a **site-root fragment**, not an installation recipe:

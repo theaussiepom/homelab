@@ -20,3 +20,10 @@ The four workload templates are also unmodified files from that same upstream co
 - [InfluxDB HTTP](https://github.com/zabbix/zabbix/blob/0d6fa36d0a0df4552d8df07e5b13deb664089047/templates/db/influxdb_http/template_db_influxdb_http.yaml)
 
 All six source files retain Zabbix's AGPLv3 licence and their exact SHA256 pins in `monitoring/versions.json`. Prepared copies change the Proxmox template's HTTP TLS and resource-history settings. The Proxmox availability item is converted from a script to a verified HTTP agent using the existing API endpoint, response headers and status-line extraction without redirects; unsupported or transport errors map to status 520. Its script parameters are removed. Prepared copies also derive a separately named active-only Docker template with deterministic noncolliding UUIDs, and remove organization discovery and its API-token macro from InfluxDB. PostgreSQL/MySQL active templates and the Linux template are passed through unchanged. The vendored source files themselves are never rewritten by preparation.
+
+The optional [Proxmox Backup Server by HTTP template](https://github.com/ismvru/zbx-tmplt-pbs/tree/bd66ac9a9a2887d71adba001e99c2ddf93248b57)
+comes from ismvru and contributors under [AGPLv3](proxmox/applications/monitoring/LICENSE.pbs-template).
+The vendored copy enables TLS certificate and hostname verification and limits
+the failed-task request to 50 backup tasks. Its SHA256 is pinned alongside the
+other monitoring templates. Preparation binds the HTTP target to a host macro
+so the PBS host does not need a Zabbix agent interface.

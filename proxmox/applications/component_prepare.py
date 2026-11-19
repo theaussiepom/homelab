@@ -166,6 +166,14 @@ def prepare(cfg, app_id, environment=None, *, attempt):
         server['owner'].update({key:cfg['guest'][key] for key in ('vmid','hostname')})
         server['templates']=[monitoring_templates.prepared(name)
             for name in monitoring_templates.monitoring.VERSIONS['templates']]
+        if 'pbs' in app['settings']:
+            pbs = app['settings']['pbs']
+            secret = regular(Path(pbs['token_file']), private=True, limit=64).strip()
+            require(re.fullmatch(rb'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', secret) is not None,
+                    'Supply the dedicated PBS monitoring token secret')
+            server['pbs'] = {key: pbs[key] for key in ('server_name', 'port', 'token_id')}
+            server['pbs']['token_secret'] = secret.decode('ascii')
+            server['templates'].append(monitoring_templates.prepared(monitoring_templates.PBS_TEMPLATE))
         payload['monitoring-server.json']=encoded(server)
     else:
         payload.update(monitoring)

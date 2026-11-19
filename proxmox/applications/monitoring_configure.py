@@ -110,6 +110,9 @@ def host(call, name, description, group, templates, **extra):
 
 def configure(call, value, receipt):
     names = {'Proxmox VE by HTTP'}
+    pbs = value.get('pbs')
+    if pbs is not None:
+        names.add('Proxmox Backup Server by HTTP')
     for member in value['members']:
         names.update(PROFILE_TEMPLATES[p] for p in member['profiles'])
     require(not receipt.is_symlink(), 'Refuse a linked monitoring ownership receipt')
@@ -167,6 +170,13 @@ def configure(call, value, receipt):
                  {'macro': '{$PVE.TOKEN.ID}', 'value': proxmox['token_id']},
                  {'macro': '{$PVE.TOKEN.SECRET}', 'value': proxmox['token_secret'], 'type': 1},
                  {'macro': '{$HTTP.TLS.VERIFY}', 'value': 'full'}])
+        if pbs is not None:
+            host(call, pbs['server_name'], marker('pbs', pbs['token_id'], pbs['token_secret']),
+                 group, [identifiers['Proxmox Backup Server by HTTP']], macros=[
+                     {'macro': '{$PBS.URL.HOST}', 'value': pbs['server_name']},
+                     {'macro': '{$PBS.URL.PORT}', 'value': str(pbs['port'])},
+                     {'macro': '{$PBS.TOKEN.ID}', 'value': pbs['token_id']},
+                     {'macro': '{$PBS.TOKEN.SECRET}', 'value': pbs['token_secret'], 'type': 1}])
         if first:
             admins = call('user.get', {'filter': {'username': ['Admin']}, 'output': ['userid']})
             require(len(admins) == 1, 'Expected one owned initial administrator')
