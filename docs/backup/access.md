@@ -66,6 +66,14 @@ Paste the combined value only at the interactive secret prompt. The listing conf
 
 ## What goes where
 
+When the selected Zabbix server monitors the same PBS endpoint, **Configure
+backups** uses the existing management token to maintain a separate
+`homelab-zabbix@pbs!monitoring` credential. It verifies the status and task
+audit grants and inherited datastore metadata access. CD writes the new token
+only to the selected protected controller file and reuses it on later runs.
+The polling container receives the metadata-only credential through its
+managed Zabbix configuration.
+
 | Input | Storage | Consumer |
 | --- | --- | --- |
 | `PBS_API_TOKEN` | Early setup's selected protected Environment and each enrolled guest's protected Environment | Only the controller workflow steps for **Configure backups** setup and each guest's **Configure backup** enrollment; never a guest file or payload input |

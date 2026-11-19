@@ -58,6 +58,19 @@ class BackupDeployTests(unittest.TestCase):
         for key,value in [('GITHUB_EVENT_NAME','pull_request'),('GITHUB_REF','refs/heads/other')]:
             with self.assertRaisesRegex(ValueError,'protected main'):subject.run(self.root,self.root,'[]',environment={**self.env,key:value})
 
+    def test_monitoring_provision_is_bound_to_the_same_pbs_and_verified_pin(self):
+        pbs = {'address': self.destination['server'], 'port': 8007, 'certificate': 'fixture',
+               'token_id': subject.backup_api.MONITOR_TOKEN, 'token_file': '/private/pbs-monitor-token'}
+        self.plan.resolved.update(monitoring={'server': 'monitor'},
+                                  apps={'monitor': {'settings': {'pbs': pbs}}})
+        with (patch.object(subject.component_packet, 'lower_plan', return_value=self.packets),
+              patch.object(subject.ssl, 'PEM_cert_to_DER_cert', return_value=b'fixture'),
+              patch.object(subject, 'digest', side_effect=lambda raw: 'ab' * 32 if raw == b'fixture' else digest(raw))):
+            self.assertEqual(subject.descriptor(self.plan)['monitoring_token_file'], pbs['token_file'])
+            pbs['address'] = '192.0.2.100'
+            with self.assertRaisesRegex(ValueError, 'same managed PBS'):
+                subject.descriptor(self.plan)
+
     def test_cli_result_and_failures_remain_redacted(self):
         args=['backup_deploy','--stack',str(self.root),'--site-root',str(self.root)]
         with patch.object(sys,'argv',args),patch.object(subject,'run',return_value={'status':'configured'}),patch('builtins.print') as output:

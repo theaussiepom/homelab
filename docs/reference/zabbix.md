@@ -40,6 +40,11 @@ controller file. The file contains only the token secret. Give the identity
 metadata access to PBS status, tasks and datastores without granting restore or
 write access. Use an existing permitted route from the Zabbix guest.
 
+For a site that manages this PBS with **Configure backups**, select
+`homelab-zabbix@pbs!monitoring` on the same endpoint and certificate as the
+backup job. Protected CD provisions and verifies the audit credential before
+the monitoring guest configures its template.
+
 Zabbix discovers datastores and reports recent failed tasks across the server
 without per-guest entries. Nightly capture, readback and group completion are
 verified by the backup flow separately.

@@ -42,6 +42,16 @@ class SetupTests(unittest.TestCase):
         return subject.install(self.value,destination=self.inventory['job']['destination'],
             datastore_path='/mnt/recovery',token='management-sentinel',api_factory=self.api_factory,execute=self.execute)
 
+    def test_selected_monitoring_file_is_provisioned_inside_early_backup_setup(self):
+        token_file = str(self.root / 'audit-token')
+        destination = self.inventory['job']['destination']
+        with patch.object(subject.backup_monitoring, 'provision') as provision:
+            subject.install(self.value, destination=destination, datastore_path='/mnt/recovery',
+                            token='management-sentinel', api_factory=self.api_factory,
+                            execute=self.execute, monitoring_token_file=token_file)
+        provision.assert_called_once_with(self.api_factory.return_value, destination,
+                                           token_file, self.api_factory)
+
     def test_first_install_and_repeat_preserve_the_one_schedule_attempt(self):
         note=self.root/'database-network-cutover-notes';write_new(note,b'operator evidence')
         with patch.dict(os.environ,{'PBS_API_TOKEN':'private-management-sentinel','HOMELAB_APP_SECRET_FIXTURE':'private-app-sentinel'}):
