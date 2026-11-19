@@ -211,6 +211,8 @@ def _zabbix(app, secrets, records, public_ca, context):
             'Supply the selected public Proxmox root CA')
     rows = [_row('database-password', password, 1997, 1995),
             _row('proxmox-ca.pem', ca, 1997, 1995)]
+    if 'pbs' in app.get('settings', {}):
+        rows.append(_row('pbs-ca.pem', app['settings']['pbs']['certificate'], 1997, 1995))
     if 'authentication_resolved' in app:
         selected = app['authentication_resolved']; monitoring.saml_settings(selected)
         if selected.get('default_login') == 'saml':

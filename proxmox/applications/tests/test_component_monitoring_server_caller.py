@@ -124,6 +124,23 @@ class MonitoringServerCallerTests(unittest.TestCase):
   self.assertEqual(variables['component_application'],self.app)
   self.assertEqual(variables['component_runtime_directory'],{'directory':self.app['identity']['runtime_directory'],'lifecycle':'retained','previously_owned':True})
   self.assertEqual(variables['network_ready_interfaces'],['eth0']);self.assertEqual(self.cfg,before)
+ def test_pbs_uses_only_the_selected_private_token_and_template(self):
+  token=self.root/'pbs-monitoring-token'
+  self.app['settings']['pbs']={'server_name':'pbs.example.test','port':8007,
+    'address':'198.18.20.5','token_file':str(token),'token_id':'monitor@pbs!zabbix',
+    'certificate':self.monitoring['proxmox-ca.pem'].decode()}
+  self.app['runtime_files']['files']=sorted(application_contract.runtime_files(self.app))
+  self.save_runtime()
+  write_new(token,b'invalid')
+  with self.assertRaisesRegex(ValueError,'dedicated PBS monitoring token'):
+   self.prepare()
+  token.write_bytes(b'01234567-0123-0123-0123-0123456789ab\n')
+  selected,_,templates=self.prepare()
+  self.assertEqual(templates.call_args.args,(monitoring_templates.PBS_TEMPLATE,))
+  server=read_json(selected.directory/'monitoring-server.json',private=True)
+  self.assertEqual(server['pbs'],{'server_name':'pbs.example.test','port':8007,
+    'token_id':'monitor@pbs!zabbix','token_secret':'01234567-0123-0123-0123-0123456789ab'})
+  self.assertEqual((selected.directory/'pbs-ca.pem').read_bytes(),self.monitoring['proxmox-ca.pem'])
  def test_fresh_and_retained_flags_are_explicit_without_inventing_a_receipt_decision(self):
   for lifecycle in ('fresh','retained'):
    with self.subTest(lifecycle=lifecycle),tempfile.TemporaryDirectory(dir=self.root)as temporary:

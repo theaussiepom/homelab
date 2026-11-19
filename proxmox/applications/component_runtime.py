@@ -477,10 +477,16 @@ def _zabbix(app, guest):
     if 'authentication_resolved' in app:
         value['saml'] = app['authentication_resolved']
     services = {name: _service(app, name, guest) for name in ('zabbix_server', 'zabbix_web')}
-    return monitoring.service_configuration(value, services,
+    monitoring.service_configuration(value, services,
         mount=lambda name, target: _runtime_mount(app, name, target), timezone=guest['timezone'],
         server_service=_name(app['identity']['services']['zabbix_server']),
         server_ports=server_ports, web_ports=web_ports)
+    if 'pbs' in settings:
+        pbs = settings['pbs']
+        server = services['zabbix_server']
+        server['extra_hosts'] = {pbs['server_name']: pbs['address']}
+        server['volumes'].append(_runtime_mount(app, 'pbs-ca.pem', '/var/lib/zabbix/ssl/ssl_ca/pbs-ca.pem'))
+    return services
 
 
 def _node_red(app, guest):

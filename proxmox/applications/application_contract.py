@@ -92,6 +92,8 @@ def runtime_files(app):
         result.update(row['filename'] for row in settings.get('route_ca_certificates', {}).values())
     if name == 'zabbix' and app.get('authentication_resolved', {}).get('default_login') == 'saml':
         result.add('saml-login.php')
+    if name == 'zabbix' and 'pbs' in settings:
+        result.add('pbs-ca.pem')
     if name=='mqtt_explorer':
         result.add('mqtt-explorer-profile.json' if 'credential' in settings.get('broker',{})
                    else 'mqtt-explorer-account.json')

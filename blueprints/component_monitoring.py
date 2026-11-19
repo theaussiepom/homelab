@@ -1,6 +1,7 @@
 """Explicit root monitoring expansion over selected component ownership."""
 import copy
 import ipaddress
+import re
 
 from component_errors import at
 from component_sources import closed, identifier, require
@@ -126,6 +127,22 @@ def bind(resolver, exposures):
     api = resolver.endpoint(context['api_endpoint'])
     metadata['proxmox'] = {'hostname': context['node'], 'endpoint': 'https://' + api['address'] + ':8006/',
                            'ca_file': context['trust']['ca_file']}
+    pbs = application['resolved_connections'].get('pbs')
+    if pbs is not None:
+        target = pbs['target']
+        trust = resolver.authentication_values['transports'].get(pbs.get('transport'), {})
+        credential = pbs.get('credential', {})
+        secret = resolver.site['secret_sources'].get(credential.get('secret'), {})
+        require('app' not in target and pbs['type'] == 'https' and
+                {'server_name', 'certificate'} <= set(trust) and secret.get('type') == 'file' and
+                re.fullmatch(r'[A-Za-z0-9._-]+@[A-Za-z0-9._-]+![A-Za-z0-9._-]+',
+                             credential.get('principal', '')) is not None,
+                'component.monitoring-target')
+        types.ip(target['address'])
+        require(pbs['source_address'] == source_address(owning_guest, target['address']),
+                'component.connection-source')
+        application['settings']['pbs'] = {**trust, 'address': target['address'], 'port': target['port'],
+                                          'token_id': credential['principal'], 'token_file': secret['path']}
     require(len({row['hostname'] for row in members}) == len(members), 'component.monitoring-identity')
     for role, kind, port in (('database', 'postgresql', 5432), ('metrics', 'influxdb', 8086)):
         connection = application['resolved_connections'].get(role)

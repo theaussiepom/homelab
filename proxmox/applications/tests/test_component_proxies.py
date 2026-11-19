@@ -209,6 +209,15 @@ class ExplorerTests(unittest.TestCase):
 
 
 class ZabbixTests(unittest.TestCase):
+    def test_pbs_host_and_ca_are_scoped_to_the_polling_container(self):
+        app=descriptor('zabbix')
+        app['settings']['pbs']={'address':'198.18.20.5','server_name':'pbs.example.test'}
+        with units(app):result=core._zabbix(app,guest('zabbix'))
+        self.assertEqual(result['zabbix_server']['extra_hosts'],{'pbs.example.test':'198.18.20.5'})
+        self.assertEqual(result['zabbix_server']['volumes'][-1]['target'],
+                         '/var/lib/zabbix/ssl/ssl_ca/pbs-ca.pem')
+        self.assertNotIn('extra_hosts',result['zabbix_web'])
+
     def test_owned_credential_peer_names_tls_and_default_image_identity(self):
         app=descriptor('zabbix');app['identity']['services']['zabbix_server']='server_a'
         with units(app):result=core._zabbix(app,guest('zabbix'))

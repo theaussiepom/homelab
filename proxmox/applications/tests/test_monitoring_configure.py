@@ -59,6 +59,26 @@ def value():
 
 
 class ConfigureTests(unittest.TestCase):
+    def test_pbs_uses_one_api_host_and_preserves_the_secret_on_repeat(self):
+        with tempfile.TemporaryDirectory() as td:
+            receipt = Path(td) / 'owner.json'
+            api = FakeAPI()
+            selected = value()
+            selected['pbs'] = {'server_name': 'pbs.example.test', 'port': 8007,
+                               'token_id': 'fixture@pbs!monitoring', 'token_secret': 'fixture'}
+            setup.configure(api, selected, receipt)
+            self.assertEqual(len(api.hosts), 6)
+            host = next(params for method, params in api.calls
+                        if method == 'host.create' and params['host'] == 'pbs.example.test')
+            self.assertEqual(host['interfaces'], [])
+            self.assertIn({'macro': '{$PBS.TOKEN.SECRET}', 'value': 'fixture', 'type': 1},
+                          host['macros'])
+            api.calls.clear()
+            setup.configure(api, selected, receipt)
+            self.assertFalse(any(method == 'host.create' for method, _ in api.calls))
+            self.assertFalse(any(method == 'usermacro.update' and params['type'] == 1
+                                 for method, params in api.calls))
+
     def test_first_and_repeat_preserve_keys_and_history_and_reject_unknown_ownership(self):
         with tempfile.TemporaryDirectory() as td:
             receipt=Path(td)/'owner.json';api=FakeAPI();v=value()
