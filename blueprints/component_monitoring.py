@@ -141,8 +141,11 @@ def bind(resolver, exposures):
         types.ip(target['address'])
         require(pbs['source_address'] == source_address(owning_guest, target['address']),
                 'component.connection-source')
+        from monitoring_templates import PBS_TEMPLATE, prepared
+        from private_io import digest, encoded
         application['settings']['pbs'] = {**trust, 'address': target['address'], 'port': target['port'],
-                                          'token_id': credential['principal'], 'token_file': secret['path']}
+                                          'token_id': credential['principal'], 'token_file': secret['path'],
+                                          'template_sha256': digest(encoded(prepared(PBS_TEMPLATE)))}
     require(len({row['hostname'] for row in members}) == len(members), 'component.monitoring-identity')
     for role, kind, port in (('database', 'postgresql', 5432), ('metrics', 'influxdb', 8086)):
         connection = application['resolved_connections'].get(role)

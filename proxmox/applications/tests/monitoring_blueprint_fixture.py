@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import uuid
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import monitoring
@@ -82,13 +83,24 @@ def main(output):
                               'url': 'http://198.18.33.26:8086'}],
                  'proxmox': {'hostname': 'fixture-pve', 'endpoint': 'https://pve:8006/',
                              'token_id': 'fixture@pve!monitoring', 'token_secret': 'synthetic-token'}}
+        pbs_name = 'fixture-pbs.invalid'
+        value['pbs'] = {'server_name': pbs_name, 'port': 8007, 'token_id': 'fixture@pbs!monitoring',
+                        'token_secret': 'synthetic-pbs-token'}
+        name_pbs = monitoring_templates.PBS_TEMPLATE
+        value['templates'].append(yaml.safe_load((monitoring.ROOT/'templates'/name_pbs).read_text()))
         first = monitoring_configure.configure(api, value, root/'owner.json')
+        value['templates'][-1] = monitoring_templates.prepared(name_pbs)
         second = monitoring_configure.configure(api, value, root/'owner.json')
         api.token = api('user.login', {'username': 'Admin', 'password': value['admin_password']})
         hosts = api('host.get', {'output': ['hostid','host','tls_accept','description'],
                                  'selectParentTemplates': ['host']})
         selected = {h['host']: h for h in hosts if h['host'].startswith('fixture-')}
-        assert set(selected) == {m['hostname'] for m in value['members']} | {'fixture-pve'}
+        assert set(selected) == {m['hostname'] for m in value['members']} | {'fixture-pve', pbs_name}
+        last_backup = 'pbs.tasks.failed.last_backup'
+        latest = api('item.get', {'hostids': [selected[pbs_name]['hostid']],
+            'filter': {'key_': [last_backup, last_backup+'_time']}, 'output': ['key_'],
+            'selectPreprocessing': ['params']})
+        assert len(latest) == 2 and all('rows.filter' in row['preprocessing'][0]['params'] for row in latest)
         for member in value['members']:
             row = selected[member['hostname']]
             assert row['tls_accept'] == '2'

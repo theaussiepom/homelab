@@ -20,7 +20,7 @@ import component_payload
 import component_prepare
 import monitoring_inputs
 import monitoring_templates
-from private_io import encoded,read_json,write_new
+from private_io import digest,encoded,read_json,write_new
 
 
 class MonitoringServerCallerTests(unittest.TestCase):
@@ -128,13 +128,17 @@ class MonitoringServerCallerTests(unittest.TestCase):
   token=self.root/'pbs-monitoring-token'
   self.app['settings']['pbs']={'server_name':'pbs.example.test','port':8007,
     'address':'198.18.20.5','token_file':str(token),'token_id':'monitor@pbs!zabbix',
-    'certificate':self.monitoring['proxmox-ca.pem'].decode()}
+    'certificate':self.monitoring['proxmox-ca.pem'].decode(), 'template_sha256':'0'*64}
   self.app['runtime_files']['files']=sorted(application_contract.runtime_files(self.app))
   self.save_runtime()
   write_new(token,b'invalid')
   with self.assertRaisesRegex(ValueError,'dedicated PBS monitoring token'):
    self.prepare()
   token.write_bytes(b'01234567-0123-0123-0123-0123456789ab\n')
+  with self.assertRaisesRegex(ValueError,'PBS template compiled'):
+   self.prepare()
+  self.app['settings']['pbs']['template_sha256']=digest(encoded({'selected_template':monitoring_templates.PBS_TEMPLATE}))
+  self.save_runtime()
   selected,_,templates=self.prepare()
   self.assertEqual(templates.call_args.args,(monitoring_templates.PBS_TEMPLATE,))
   server=read_json(selected.directory/'monitoring-server.json',private=True)

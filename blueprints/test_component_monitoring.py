@@ -54,10 +54,13 @@ class MonitoringTests(unittest.TestCase):
         resolver.site['secret_sources'] = {'pbs_monitoring': {
             'type': 'file', 'path': '/example/pbs-monitoring-token'}}
         monitoring.bind(resolver, exposures)
+        from monitoring_templates import PBS_TEMPLATE, prepared
+        from private_io import digest, encoded
         self.assertEqual(app['settings']['pbs'], {
             'address': '198.18.20.5', 'port': 8007, 'server_name': 'pbs.example.test',
             'certificate': 'synthetic-public-certificate', 'token_id': 'monitor@pbs!zabbix',
             'token_file': '/example/pbs-monitoring-token',
+            'template_sha256': digest(encoded(prepared(PBS_TEMPLATE))),
         })
         self.assertNotIn('pbs', resolver.guests['database']['monitoring'])
         for fault in ('trust', 'credential', 'route'):
