@@ -20,6 +20,18 @@ class TemplateTrustTests(unittest.TestCase):
         self.assertEqual({field['name']: field['value'] for field in failed['query_fields']},
                          {'errors': 'true', 'limit': '50', 'typefilter': 'backup'})
 
+    def test_healthy_empty_tasks_keep_latest_failure_items_supported_without_an_event(self):
+        export = templates.prepared(templates.PBS_TEMPLATE)['zabbix_export']
+        items = {item['key']: item for item in export['templates'][0]['items']}
+        last = 'pbs.tasks.failed.last_backup'
+        for name, empty in ((last, '"{}"'), (last+'_time', '0')):
+            preprocessing = items[name]['preprocessing']
+            self.assertEqual([step['type'] for step in preprocessing], ['JAVASCRIPT', 'DISCARD_UNCHANGED_HEARTBEAT'])
+            self.assertIn('JSON.parse(value).data', preprocessing[0]['parameters'][0])
+            self.assertTrue(preprocessing[0]['parameters'][0].endswith(f': {empty};'))
+        trigger = next(row for row in export['triggers'] if row['name'] == 'PBS: New failed backup task')
+        self.assertIn(f'/{last})<>"{{}}"', trigger['expression'])
+
     def test_all_http_items_and_prototypes_require_peer_and_hostname_trust(self):
         document = templates.prepared('template_app_proxmox.yaml')
         templates.check_readback(document)

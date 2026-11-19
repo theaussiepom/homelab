@@ -10,7 +10,7 @@
     group: root
     mode: '0444'
     follow: false
-  loop: [backup_worker.py, backup_capture.py, backup_policy.py, backup_group.py, private_io.py]
+  loop: [backup_worker.py, backup_capture.py, backup_policy.py, backup_group.py, private_io.py, cleanup_files.py, component_payload.py]
 
 - name: Validate mounted staging before enabling a schedule
   ansible.builtin.command:

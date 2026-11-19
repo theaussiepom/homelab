@@ -6,14 +6,39 @@ import re
 import os
 import select
 import time
+import sys
 from pathlib import PurePosixPath
 import ipaddress
 
-from private_io import digest, encoded, require
+from private_io import digest, encoded
 
 LIMIT = 1024*1024
 STAGES = [('prepared', 'pause'), ('paused', 'capture'), ('captured', 'resume'),
           ('resumed', 'upload'), ('uploaded', 'finish')]
+
+
+def require(condition, reason):
+    """Attach a code-owned reason, without changing the original exception type."""
+    if not condition:
+        error = ValueError(reason)
+        error.backup_reason = reason
+        raise error
+
+
+def failure(error, stage):
+    """Expose only explicit diagnostic fields, never exception arguments or output."""
+    return {'error_type': type(error).__name__, 'stage': getattr(error, 'backup_stage', stage),
+            'reason': getattr(error, 'backup_reason', 'See the protected backup evidence')}
+
+
+def latest_failure(path, generation, error, stage, **details):
+    """Replace the rolling diagnostic while keeping each attempt's custody record."""
+    from cleanup_files import replace
+    diagnostic = {'generation': generation, **failure(error, stage), **details}
+    try:
+        replace(path, diagnostic)
+    except (OSError, ValueError):
+        print(json.dumps({**diagnostic, 'latest_failure_write': 'failed'}), file=sys.stderr)
 
 
 def identifier(value):

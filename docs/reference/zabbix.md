@@ -49,6 +49,9 @@ Zabbix discovers datastores and reports recent failed tasks across the server
 without per-guest entries. Nightly capture, readback and group completion are
 verified by the backup flow separately.
 
+An empty failed-task response reports zero failures. The last-task record and
+timestamp use an empty object and zero while the response has no failed backups.
+
 ## Worked selection and profile
 
 This is a **site-root fragment**, not an installation recipe:
