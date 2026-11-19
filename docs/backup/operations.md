@@ -40,6 +40,7 @@ Expect an active timer with a next scheduled time. After a run, the service must
 | Controller `<state_root>/backup-groups/<generation>/started.json` | The attempted group and ordinary deployment receipt digests. The generation is a 32-character hexadecimal identifier. For a group spanning state roots, use the lexicographically first configured state root. |
 | Same directory, `complete.json` and `recovery-set.json` | Successful whole-group completion and the exact destinations/snapshots for restoration. `restore_verified: false` is intentional until a separate restore drill. |
 | Same directory, `failed.json` | The run failed; retain it and any holds. A successful member is not whole-group success. |
+| Controller `backup-groups/<group>-latest-failure.json` and guest `.homelab-backup/latest-failure.json` | The most recent failure's generation, stage, exception type and safe reason. A subsequent failure replaces this detailed record. |
 | Each guest `<staging-volume-path>/.homelab-backup/<generation>/complete.json` | `status: uploaded`, matching generation, `archive_readback_verified: true`, the recovery public fingerprint and envelope digest. |
 | Same guest directory, `manifest.json` | Digests and sizes for the complete uploaded recovery payload. This is private operational metadata. |
 
@@ -169,5 +170,10 @@ The successful rehearsal must not rely on undocumented or unverified credentials
 Maintain guest coverage and schedules through reviewed site configuration. Keep the existing client keys and stable namespace/backup IDs. Removing a guest from a CD run is not retirement of its backups. Loss of a token secret, a foreign owner or a failed-operation record needs its specific recovery procedure, not generic cleanup.
 
 If a backup fails, establish the failed phase and whether capture, pause, upload or resume already occurred. Preserve the record and restore service continuity through the authorized operation. Retry only after the cause and the supported retry boundary are understood. Consult [backup failure semantics](../reference/backup.md#coordinated-execution-and-failure-behavior) and [framework troubleshooting](../operations/troubleshooting.md).
+
+A failed worker removes its own temporary readback and any empty capture
+directory once its commands have stopped. The worker keeps captured data,
+pending markers and per-attempt receipts. An unexpected staging tree stays in
+place for review. The rolling failure record reports the cleanup outcome.
 
 For server or storage loss, recover the existing datastore and access configuration before resuming writers. Private keys recover encryption, not missing data; offsite replication is what covers loss of all local backup media.

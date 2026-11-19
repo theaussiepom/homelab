@@ -47,6 +47,20 @@ def prepared(name):
         for item in http_agents(document):
             item['url'] = item['url'].replace('{HOST.CONN}', '{$PBS.URL.HOST}')
             item['follow_redirects'] = 'NO'
+        template = document['zabbix_export']['templates'][0]
+        last = 'pbs.tasks.failed.last_backup'
+        outputs = {last: ('JSON.stringify(task)', '"{}"'),
+                   last + '_time': ('task.endtime', '0')}
+        for item in template['items']:
+            if item['key'] in outputs:
+                result, empty = outputs[item['key']]
+                script = ('var rows = JSON.parse(value).data;\n'
+                          'var task = rows.filter(function (row) { return row.worker_type === "backup"; })[0];\n'
+                          f'return task ? {result} : {empty};')
+                item['preprocessing'][:-1] = [{'type': 'JAVASCRIPT', 'parameters': [script]}]
+        trigger = next(row for row in document['zabbix_export']['triggers']
+                       if row['name'] == 'PBS: New failed backup task')
+        trigger['expression'] += f' and last(/{template["template"]}/{last})<>"{{}}"'
     if name == 'template_app_docker.yaml':
         template = document['zabbix_export']['templates'][0]
         old_name, new_name = template['template'], 'HomeLab Docker by active agent 2'

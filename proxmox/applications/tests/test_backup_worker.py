@@ -121,6 +121,37 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'public-key identity'): self.run_worker(engine)
         self.assertEqual(engine.calls, [])
 
+    def test_latest_failure_replaces_previous_details_and_keeps_attempt_records(self):
+        for generation, mode in (('a'*32, 'preflight'), ('b'*32, 'not_running')):
+            with self.assertRaises((RuntimeError, ValueError)):
+                self.run_worker(FakeEngine(mode), generation=generation)
+            latest = json.loads((self.root/'latest-failure.json').read_text())
+            self.assertEqual(latest['generation'], generation)
+            self.assertEqual(latest['stage'], 'preflight')
+            self.assertTrue((self.root/generation/'failed.json').exists())
+            self.assertFalse((self.root/generation/'payload').exists())
+        self.assertEqual(latest['error_type'], 'ValueError')
+        self.assertIn('Every selected service must be running', latest['reason'])
+
+    def test_failed_readback_releases_scratch_and_keeps_capture_and_pending(self):
+        with self.assertRaisesRegex(ValueError, 'readback does not match'):
+            self.run_worker(FakeEngine('corrupt_readback'))
+        attempt = self.root/('a'*32)
+        self.assertFalse((attempt/'readback').exists())
+        self.assertTrue((attempt/'payload'/'inventory.json').is_file())
+        self.assertTrue((self.root/'PENDING').is_file())
+        latest = json.loads((self.root/'latest-failure.json').read_text())
+        self.assertEqual(latest['stage'], 'verify-readback')
+        self.assertEqual(latest['staging_cleanup'], 'complete')
+
+    def test_failed_staging_cleanup_preserves_linked_readback(self):
+        attempt = self.root/'attempt'; attempt.mkdir(mode=0o700)
+        outside = self.tmp/'outside'; outside.write_text('preserve')
+        (attempt/'readback').symlink_to(outside)
+        self.assertEqual(worker.cleanup_failed_staging(attempt), 'retained-for-review')
+        self.assertTrue((attempt/'readback').is_symlink())
+        self.assertEqual(outside.read_text(), 'preserve')
+
     def test_upload_requires_immutable_complete_encrypted_readback_and_keeps_history(self):
         engine = FakeEngine(); result = self.run_worker(engine)
         upload = next(argv for argv, _, _ in engine.calls if argv[:2] == ['proxmox-backup-client', 'backup'])

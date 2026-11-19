@@ -81,12 +81,20 @@ class ControllerTests(unittest.TestCase):
 
     def test_preflight_failure_has_no_window_but_partial_capture_preserves_all_holds(self):
         with self.assertRaises(ValueError): self.execute('prepared')
+        latest = self.state/'backup-groups'/(self.value['group']['name']+'-latest-failure.json')
+        first = json.loads(latest.read_text())
+        self.assertEqual(first['stage'], 'prepared')
         self.assertFalse(list(self.state.glob('*/BACKUP-HOLD.json')))
         with self.assertRaises(ValueError): self.execute('captured')
         self.assertEqual(len(list(self.state.glob('*/BACKUP-HOLD.json'))), 2)
         with self.assertRaises(ValueError): self.execute()
         receipts = [json.loads(p.read_text()) for p in (self.state/'backup-groups').glob('*/failed.json')]
         self.assertEqual({r['window_opened'] for r in receipts}, {False, True})
+        latest = json.loads(latest.read_text())
+        self.assertNotEqual(latest['generation'], first['generation'])
+        self.assertEqual(latest['stage'], 'captured')
+        self.assertEqual(latest['error_type'], 'ValueError')
+        self.assertIn('peer disconnected', latest['reason'])
 
     def test_lock_contention_prevents_any_peer_launch(self):
         import fcntl

@@ -1,5 +1,6 @@
 """Closed protocol, coherent-set membership and bounded real pipe transport."""
 import copy
+import contextlib
 import io
 import json
 import os
@@ -28,6 +29,16 @@ def destination():
 
 
 class GroupTests(unittest.TestCase):
+    def test_unwritable_latest_failure_reports_safe_original_details(self):
+        with (patch('cleanup_files.replace', side_effect=OSError('private write error')),
+              contextlib.redirect_stderr(io.StringIO()) as output):
+            group.latest_failure(Path('/fixture/latest-failure.json'), 'a'*32,
+                                 ValueError('private error argument'), 'capture')
+        diagnostic = json.loads(output.getvalue())
+        self.assertEqual(diagnostic['error_type'], 'ValueError')
+        self.assertEqual(diagnostic['latest_failure_write'], 'failed')
+        self.assertNotIn('private', output.getvalue())
+
     def test_full_membership_and_exact_completed_digests_are_required(self):
         value = scope(); group.configuration(value)
         self.assertEqual(group.member({'name': 'example', 'member': 'example-node-610'})['name'], 'example')

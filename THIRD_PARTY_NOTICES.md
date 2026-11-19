@@ -27,3 +27,5 @@ The vendored copy enables TLS certificate and hostname verification and limits
 the failed-task request to 50 backup tasks. Its SHA256 is pinned alongside the
 other monitoring templates. Preparation binds the HTTP target to a host macro
 so the PBS host does not need a Zabbix agent interface.
+It also gives the last failed task fields neutral values when PBS returns no
+failed backups.
