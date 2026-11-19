@@ -150,7 +150,11 @@ class WorkerTests(unittest.TestCase):
                 engine = FakeEngine(failure)
                 with self.assertRaises((ValueError, RuntimeError)): self.run_worker(engine)
                 self.assertEqual((self.root/'PENDING').exists(), failure not in ('preflight', 'not_running'))
-                self.assertTrue((self.root/('a'*32)/'failed.json').exists())
+                record = json.loads((self.root/('a'*32)/'failed.json').read_text())
+                if failure == 'corrupt_readback':
+                    self.assertEqual(record['error_type'], 'ValueError')
+                    self.assertEqual(record['stage'], 'verify-readback')
+                    self.assertIn('does not match', record['reason'])
                 self.assertFalse((self.root/('a'*32)/'complete.json').exists())
                 if failure not in ('preflight', 'not_running'):
                     self.assertTrue(any(restored for _, _, restored in engine.calls))

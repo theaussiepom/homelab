@@ -9,6 +9,7 @@ import backup_client_transport
 import backup_controller
 import backup_enrollment
 import backup_identity
+import backup_notify
 import backup_policy
 import backup_readiness
 import backup_user
@@ -59,13 +60,16 @@ def parameters(value):
             'backup_controller_directories': directories}
 
 
-def install(value, *, destination, datastore_path, token, api_factory=backup_api.PBS, execute=quiet):
+def install(value, *, destination, datastore_path, token, webhook='', api_factory=backup_api.PBS, execute=quiet):
     """One early job owns only the schedule; it neither enrolls nor visits guests."""
     backup_controller.schedule(value)
     require(value['schema'] == 'homelab-pbs-schedule-v2', 'Install the guest-readiness schedule')
     deployment_state.bootstrap_closed()
     backup_user.verify('homelab-backup-'+value['group']['name'])
     roots = sorted({row['state_root'] for row in value['group']['members'].values()})
+    webhook_path = Path(roots[0])/'backup-controller/schedules'/('homelab-backup-'+value['group']['name']+'.webhook')
+    if webhook:
+        backup_notify.configuration(webhook)
     with ExitStack() as opened:
         for root in roots:
             private_directory(Path(root), create=not Path(root).exists())
@@ -87,18 +91,23 @@ def install(value, *, destination, datastore_path, token, api_factory=backup_api
             require(read_json(operation/'complete.json', private=True) == {'identity': identity},
                     'Preserve the exact completed schedule installation')
             backup_controller.installation(value)
+            if webhook:
+                backup_notify.install(webhook_path, webhook)
             return {'status': 'verified', 'changed': False}
         private_directory(operation, create=True)
         write_new(operation/'started.json', encoded(identity))
         try:
             write_new(operation/'variables.json', encoded(parameters(value)))
             environment = {key: item for key, item in os.environ.items()
-                           if key != 'PBS_API_TOKEN' and not key.startswith('HOMELAB_APP_SECRET_')}
+                           if key not in {'PBS_API_TOKEN', 'PBS_FAILURE_WEBHOOK'}
+                           and not key.startswith('HOMELAB_APP_SECRET_')}
             environment['ANSIBLE_CONFIG'] = str(SOURCE/'ansible/ansible.cfg')
             execute(['ansible-playbook', '-i', 'localhost,', '-c', 'local',
                      str(SOURCE/'ansible/backup-controller.yml'), '--extra-vars', '@'+str(operation/'variables.json')],
                     environment, operation/'controller.log')
             backup_controller.installation(value)
+            if webhook:
+                backup_notify.install(webhook_path, webhook)
             write_new(operation/'complete.json', encoded({'identity': identity}))
         except Exception as error:
             write_new(operation/'failed.json', encoded({'error_type': type(error).__name__, 'automatic_retry': False}))

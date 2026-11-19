@@ -36,7 +36,8 @@ def run(stack, site, disabled, *, environment=os.environ):
     plan = compiler.resolve_plan(stack, compiler.site_path(site), compiler.parse_disabled(disabled), admit=True)
     value = descriptor(plan)
     return backup_setup.install(value['schedule'], destination=value['destination'],
-        datastore_path=value['datastore_path'], token=environment.get('PBS_API_TOKEN', ''))
+        datastore_path=value['datastore_path'], token=environment.get('PBS_API_TOKEN', ''),
+        webhook=environment.get('PBS_FAILURE_WEBHOOK', ''))
 
 
 def main():

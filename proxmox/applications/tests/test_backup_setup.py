@@ -38,9 +38,22 @@ class SetupTests(unittest.TestCase):
                              ('backup_controller.installation',Mock()), ('backup_setup.parameters',Mock(return_value={'finite':'variables'}))]:
             guard=patch(target,mock);guard.start();self.addCleanup(guard.stop)
 
-    def install(self):
+    def install(self, webhook=''):
         return subject.install(self.value,destination=self.inventory['job']['destination'],
-            datastore_path='/mnt/recovery',token='management-sentinel',api_factory=self.api_factory,execute=self.execute)
+            datastore_path='/mnt/recovery',token='management-sentinel',webhook=webhook,
+            api_factory=self.api_factory,execute=self.execute)
+
+    def test_optional_webhook_remains_separate_from_schedule_evidence_and_ansible(self):
+        schedules = self.root/'backup-controller'/'schedules'
+        schedules.mkdir(parents=True, mode=0o700)
+        schedules.parent.chmod(0o700)
+        webhook = json.dumps({'host': 'ha.example.test', 'address': '192.0.2.8', 'webhook_id': 'f'*32})
+        with patch.dict(os.environ, {'PBS_FAILURE_WEBHOOK': webhook}):
+            self.assertEqual(self.install(webhook)['status'], 'configured')
+        self.assertEqual(self.install(webhook)['status'], 'verified')
+        self.execute.assert_called_once()
+        self.assertNotIn('PBS_FAILURE_WEBHOOK', self.execute.call_args.args[1])
+        self.assertEqual(read_json(schedules/'homelab-backup-example.webhook', private=True), json.loads(webhook))
 
     def test_first_install_and_repeat_preserve_the_one_schedule_attempt(self):
         note=self.root/'database-network-cutover-notes';write_new(note,b'operator evidence')

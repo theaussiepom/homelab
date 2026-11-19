@@ -39,9 +39,14 @@ Expect an active timer with a next scheduled time. After a run, the service must
 | Historical `<state_root>/backup-activation/<job-name>/<identity>/` | Retained old group-activation evidence. Success is not new readiness; failure or interruption remains a refusal. Do not edit or remove it. |
 | Controller `<state_root>/backup-groups/<generation>/started.json` | The attempted group and ordinary deployment receipt digests. The generation is a 32-character hexadecimal identifier. For a group spanning state roots, use the lexicographically first configured state root. |
 | Same directory, `complete.json` and `recovery-set.json` | Successful whole-group completion and the exact destinations/snapshots for restoration. `restore_verified: false` is intentional until a separate restore drill. |
-| Same directory, `failed.json` | The run failed; retain it and any holds. A successful member is not whole-group success. |
+| Same directory, `failed.json` and per-member `.log` files | The controller records the stage, exception type and a reason when one is available. Use the member logs to distinguish a worker failure from peers stopping at the coordination barrier. Retain the records and any holds. |
 | Each guest `<staging-volume-path>/.homelab-backup/<generation>/complete.json` | `status: uploaded`, matching generation, `archive_readback_verified: true`, the recovery public fingerprint and envelope digest. |
+| Same guest directory, `failed.json` | The worker's failure stage, exception type and available reason. Before an operation directory exists, the worker reports these details on standard error. |
 | Same guest directory, `manifest.json` | Digests and sizes for the complete uploaded recovery payload. This is private operational metadata. |
+
+For an admission failure before a controller generation exists, check the user
+service journal. Failure summaries use code-owned reasons and omit raw exception
+arguments and command output. Inspect retained private evidence for further detail.
 
 Choose the generation belonging to the observed run; do not select a directory merely because it has the newest modification time. From the controller, use the following read-only check after replacing both synthetic values. It prints only the group identifier and snapshot coordinates needed for the restore procedure:
 
@@ -117,6 +122,24 @@ These tasks do not make the server maintenance-free. Assign responsibility for O
 5. Alert on datastore/staging capacity and credential expiry. Document who responds and where the recovery instructions are stored.
 
 The notification destination should remain usable if the services being protected fail. [PBS notification setup](https://pbs.proxmox.com/docs/notifications.html) explains targets and matchers; your monitoring implementation owns the absence/freshness alarm.
+
+To alert on controller failures through Home Assistant, create a dedicated
+[local-only POST webhook](https://www.home-assistant.io/triggers/webhook/) that
+accepts `homelab.backup.failed` and calls your notification action. In the
+protected GitHub Environment used by **Configure backups**, set the optional
+`PBS_FAILURE_WEBHOOK` secret to a JSON object with `host` (the certificate's
+HTTPS hostname), `address` (the local ingress IPv4 address) and `webhook_id`
+(a secret 32–64 character lowercase hexadecimal identifier). The deployment
+controller needs `/usr/bin/curl` and working TLS trust for that hostname.
+
+The early backup job installs the endpoint in a private controller file beside
+the schedule. A later run with the same secret verifies that file. Omission
+leaves an existing endpoint configured. Changing or retiring it requires a
+separate credential change. Each handled controller failure sends one bounded
+request with the group, event ID, stage and exception type. The service journal
+records whether the request was submitted. Verify the receiving automation's
+action with a separate test event. A successful HTTP response alone does not
+verify delivery, and an unavailable controller cannot send this alert.
 
 ## Full-guest protection
 

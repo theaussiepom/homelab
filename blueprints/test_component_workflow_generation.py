@@ -52,7 +52,7 @@ class WorkflowIntegrationTests(unittest.TestCase):
         resolver.assert_called_once_with(self.stack, self.site, None)
         return result
 
-    def test_backup_management_is_separate_and_receives_only_its_admin_token(self):
+    def test_backup_setup_receives_the_admin_token_and_optional_webhook_separately(self):
         value=graph();value['backup']={'name':'Configure backups','needs':['selection'],
                                      'environment':'backup','workflow_secrets':['PBS_API_TOKEN']}
         result=self.model(value)
@@ -63,9 +63,12 @@ class WorkflowIntegrationTests(unittest.TestCase):
         job=result['backup.yml']['jobs']['deploy']
         self.assertEqual(job['name'],'Configure backups')
         self.assertEqual(job['environment'],'backup');self.assertEqual(job['if'],w.PRIVATE_MAIN)
-        self.assertEqual(set(job['steps'][1]['env']),{'DISABLED','PBS_API_TOKEN'})
+        self.assertEqual(set(job['steps'][1]['env']),{'DISABLED','PBS_API_TOKEN','PBS_FAILURE_WEBHOOK'})
+        self.assertFalse(result['backup.yml']['on']['workflow_call']['secrets']['PBS_FAILURE_WEBHOOK']['required'])
+        self.assertFalse(result['deploy.yml']['on']['workflow_call']['secrets']['PBS_FAILURE_WEBHOOK']['required'])
         for guest in ('store','viewer'):
             self.assertNotIn('PBS_API_TOKEN',json.dumps(result['guest-'+guest+'.yml']))
+            self.assertNotIn('PBS_FAILURE_WEBHOOK',json.dumps(result['guest-'+guest+'.yml']))
         self.assertNotIn('secrets: inherit',json.dumps(result))
 
     def test_backup_only_source_has_no_guest_recovery_or_finalizer(self):
