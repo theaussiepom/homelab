@@ -7,6 +7,7 @@ import sys
 import tempfile
 import subprocess
 from types import SimpleNamespace
+from contextlib import nullcontext
 import unittest
 from unittest.mock import patch
 
@@ -293,6 +294,96 @@ class RecoveryTransactions(unittest.TestCase):
                 reason='Verified engineer repair', actor_context='protected-main-reconciliation',
                 expected_controls=read_json(operation/'controls-before.json', private=True))
         self.assertEqual(result['status'], 'reconciled')
+
+    def test_settled_growth_reconcile_keeps_old_controls_and_allows_the_fresh_run(self):
+        import proxmox_guest
+
+        failed = self.fail_after_preparation()
+        self.native = 'old'
+        immutable = Path(self.owner['operation'])/'complete.json'
+        proof = {'bytes': 5*1024**3, 'inode': 9, 'mode': 0o755, 'uid': 0, 'gid': 0, 'source': 'synthetic'}
+        write_new(failed/'backup-staging-after.json', encoded(proof))
+        held = copy.deepcopy(self.cfg)
+        verified_mounted_proof = dict(proof, inode=15)
+
+        def inspect(cfg, source, work, operation, binding, **kwargs):
+            self.assertEqual(cfg, held)
+            self.assertEqual(kwargs['previous_configuration'], held)
+            self.assertTrue(kwargs['verify_only'])
+            write_bytes(operation/'backup-staging-after.json', encoded(verified_mounted_proof))
+
+        options = {'reason': 'Verified staging', 'actor_context': 'protected-main-reconciliation',
+                   'expected_controls': read_json(failed/'controls-before.json', private=True),
+                   'staging_growth': (held, self.owner['binding'])}
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '104', 'GITHUB_RUN_NUMBER': '13'}):
+            with patch.object(proxmox_guest, 'infrastructure', side_effect=inspect):
+                with self.assertRaisesRegex(ValueError, 'exact expanded staging filesystem'):
+                    component_recovery.reconcile(self.cfg, failed, immutable, self.owner, **options)
+                self.assertTrue((self.work/'ORDINARY-HOLD.json').exists())
+                verified_mounted_proof = proof
+                self.assertEqual(component_recovery.reconcile(self.cfg, failed, immutable, self.owner,
+                    **options)['status'], 'reconciled')
+            state, owner = component_current.read(self.work)
+            self.assertEqual(component_current.epoch(state), (102, 1))
+            self.assertEqual(owner['phase_inputs'], self.owner['phase_inputs'])
+            self.assertFalse((self.work/'ORDINARY-HOLD.json').exists())
+            self.case.all_phases()
+            self.assertTrue((self.work/'ordinary-104-1/complete.json').is_file())
+
+    def test_staging_reconciliation_requires_the_exact_settled_receipts(self):
+        import backup_staging
+
+        failed = self.work/'ordinary-102-1'
+        failed.mkdir(mode=0o700)
+        self.assertFalse(component_recovery.reconcile_staging_growth(self.cfg, failed))
+        growth = failed/'staging-growth'
+        growth.mkdir(mode=0o700)
+        marker = {'operation': str(failed), 'binding': {'vmid': 610}}
+        previous = {'guest': {'vmid': 610}, 'site': {'node': 'test'}, 'app': {'backup': {'job': {
+            'staging': {'path': '/srv/stage', 'size_bytes': 4*1024**3}}}}}
+        previous['guest']['storage_id'] = 'local'
+        held = copy.deepcopy(previous)
+        held['app']['backup']['job']['staging']['size_bytes'] = 5*1024**3
+        volume = 'local:subvol-610-disk-2'
+        task = 'UPID:test:AB:CD:EF:resize:610:synthetic:'
+        receipts = {
+            self.work/'ORDINARY-HOLD.json': marker,
+            failed/'rollback-baseline.json': {'synthetic': True},
+            failed/'forward-failure.json': {'schema': 'homelab-component-forward-failure-v1',
+                'marker_sha256': component_recovery.digest(encoded(marker)), 'command_returned': True},
+            failed/'apply-window.json': {'finished_at_ns': 5, 'plan_sha256': 'mocked'},
+            failed/'plan.json': {'binding': marker['binding'], 'plan_sha256': 'mocked'},
+            failed/'controls-before.json': {'files': {}},
+            growth/'request.json': {'volume': volume, 'previous_size': '4G',
+                                   'request': {'disk': 'mp1', 'size': '5G'}},
+            growth/'task.json': {'upid': task},
+            growth/'result.json': {'upid': task, 'status': 'stopped', 'exitstatus': 'OK'},
+        }
+        for path, value in receipts.items():
+            write_new(path, encoded(value))
+        write_new(failed/'rollback-ready.json', encoded({
+            'baseline_sha256': sha(failed/'rollback-baseline.json'),
+            'controls_sha256': sha(failed/'controls-before.json')}))
+        original = Path(self.owner['operation'])/'complete.json'
+        with patch.object(component_recovery, 'locked', side_effect=lambda cfg: nullcontext(self.work)), \
+                patch.object(component_recovery, 'baseline', return_value={'marker': marker}), \
+                patch.object(component_recovery, 'owner', return_value=(original, self.owner, previous)), \
+                patch.object(component_generation, 'sealed_inputs', return_value=(held, {})), \
+                patch.object(backup_staging, 'original', return_value=False), \
+                patch.object(backup_staging, 'backend_mounts', return_value=[{'path': '/srv/data'},
+                    {'path': '/srv/stage', 'volume': volume}]), patch.object(component_recovery, 'reconcile') as publish:
+            for name, key, value in (('apply-window.json', 'plan_sha256', 'changed'),
+                                     ('forward-failure.json', 'command_returned', False),
+                                     ('staging-growth/result.json', 'exitstatus', 'failed')):
+                path = failed/name
+                write_bytes(path, encoded({**receipts[path], key: value}))
+                with self.assertRaises(ValueError):
+                    component_recovery.reconcile_staging_growth(held, failed)
+                write_bytes(path, encoded(receipts[path]))
+            publish.assert_not_called()
+            self.assertTrue(component_recovery.reconcile_staging_growth(held, failed))
+        publish.assert_called_once()
+        self.assertEqual(publish.call_args.kwargs['staging_growth'], (held, marker['binding']))
 
     def test_partial_failure_rolls_back_without_history_rewrite_and_next_cd_completes(self):
         failed = self.fail_after_preparation()
