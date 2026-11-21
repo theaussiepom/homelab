@@ -90,7 +90,7 @@ def refresh_values(value):
 
 
 def owned_resource_drift(rows, changes, node, vmid, serial_device, *, backup_selection=None,
-                         backup_staging=None, recording_mount=None, resources=None):
+                         backup_staging=None, recording_mount=None, resources=None, staging_growth=None):
     """Retain ownership evidence without vetoing mutable current-to-target updates."""
     if rows is None or rows == []:
         return True
@@ -129,6 +129,8 @@ def owned_resource_drift(rows, changes, node, vmid, serial_device, *, backup_sel
         if address != GUEST_RESOURCE:
             continue
         old, new = refresh_values(before), refresh_values(after)
+        if staging_growth is not None and (old.get('mount_point'), new.get('mount_point')) == staging_growth:
+            old['mount_point'] = new['mount_point']
         if not all(
             declared_backup_drift(old.get(field), new.get(field),
                                  backup_selection, backup_staging, vmid, recording_mount=recording_mount)
@@ -249,7 +251,8 @@ def fresh_mount_unknowns(after, unknown):
 
 
 def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=None,
-               backup_selection=None, backup_staging=None, recording_mount=None, ip_filter_slots=()):
+               backup_selection=None, backup_staging=None, recording_mount=None, ip_filter_slots=(),
+               staging_growth=None):
     """Validate the exact saved plan under an explicit backend custody decision."""
     require(type(existing) is bool, "Select creation or reconciliation explicitly")
     protected = protected_guests
@@ -379,6 +382,7 @@ def check_plan(value, node, vmid, *, existing, protected_guests, serial_device=N
             )
     require(owned_resource_drift(value.get('resource_drift'), rows, node, vmid, serial_device,
                                 backup_selection=backup_selection, backup_staging=backup_staging,
+                                staging_growth=staging_growth,
                                 recording_mount=recording_mount,
                                 resources=resources),
             'Preserve owned resource identities, immutable data and complete refreshed evidence')

@@ -1,12 +1,13 @@
-"""Read-only allocation and mounted-filesystem proof for declared backup staging."""
+"""Allocation and mounted-filesystem proof for declared backup staging."""
 import shlex
 import re
 import hashlib
+import time
 from urllib.parse import quote
 
 from commands import quiet
-from private_io import require, read_json, regular, decode_json
-from plan_policy import GUEST_RESOURCE, prepared_staging_mount
+from private_io import require, read_json, regular, decode_json, encoded, private_directory, write_new
+from plan_policy import GUEST_RESOURCE, prepared_staging_mount, refresh_values
 
 SCRIPT = b'''import os, stat, sys
 path = sys.argv[1]
@@ -131,7 +132,7 @@ def selection(cfg):
             'volume': cfg['guest']['storage_id']}
 
 
-def original(cfg, previous, work):
+def original(cfg, previous, work, *, allow_growth=False):
     """First ownership comes from the genuine prior source/backend, not refresh."""
     require(isinstance(previous, dict), 'Preserve genuine prior staging ownership')
     mounts = backend_mounts(work)
@@ -141,11 +142,74 @@ def original(cfg, previous, work):
     if old_job is None:
         require(not matches, 'An existing mount cannot acquire staging ownership implicitly')
         return True
-    require(old_job['staging'] == cfg['app']['backup']['job']['staging']
-            and previous['guest']['storage_id'] == cfg['guest']['storage_id']
-            and len(matches) == 1 and prepared_staging_mount(matches[0], selected, cfg['guest']['vmid']),
+    require(previous['guest']['storage_id'] == cfg['guest']['storage_id']
+            and len(matches) == 1 and prepared_staging_mount(matches[0], selection(previous), cfg['guest']['vmid']),
             'Preserve the successful staging path, capacity and allocated identity')
-    return False
+    target = cfg['app']['backup']['job']['staging']
+    if old_job['staging'] == target:
+        return False
+    require(allow_growth and target['size_bytes'] > old_job['staging']['size_bytes'],
+            'Existing backup staging can only grow through ordinary CD')
+    old_volumes = previous['guest']['volumes']
+    volumes = {key: (dict(row, size_gib=target['size_bytes']//1024**3)
+                     if row['path'] == selected['path'] else row) for key, row in old_volumes.items()}
+    require(volumes == cfg['guest']['volumes']
+            and previous['guest']['volume_order'] == cfg['guest']['volume_order'],
+            'Grow only the existing backup staging volume in its original slot')
+    return mounts.index(matches[0]), mounts
+
+
+def grow(cfg, previous, growth, operation, api_get, resize):
+    """Resize once with native concurrency protection and prove the same live mount."""
+    slot, mounts = growth
+    row = mounts[slot]
+    size = selection(cfg)['size']
+    target = dict(row, size=size)
+    resized = [*mounts]
+    resized[slot] = target
+    node = cfg['site']['node']
+    vmid = cfg['guest']['vmid']
+    node_path = '/nodes/' + quote(node, safe='')
+    guest_path = f'{node_path}/lxc/{vmid}'
+    config_path = guest_path + '/config?current=1'
+    before = api_get(config_path)
+    _, _, config_digest = native_mount(before, row, slot, mounts)
+    require(isinstance(config_digest, str) and re.fullmatch(r'[0-9a-f]{40}', config_digest),
+            'Require the exact Proxmox configuration digest before growing staging')
+    evidence = operation/'staging-growth'
+    private_directory(evidence, create=True)
+    log = evidence/'infrastructure.log'
+    before_proof = verify(previous, row, slot, log, api_get, first=False, label='before', mounts=mounts)
+    require(api_get(config_path) == before, 'The guest configuration changed before staging growth')
+    disk = f'mp{slot}'
+    request = {'disk': disk, 'size': size, 'digest': config_digest}
+    write_new(evidence/'request.json', encoded({'volume': row['volume'], 'previous_size': row['size'],
+                                                'request': request}))
+    task = resize(guest_path+'/resize', request)
+    parts = task.split(':') if isinstance(task, str) else []
+    require(len(parts) == 9 and parts[:2] == ['UPID', node] and parts[5:7] == ['resize', str(vmid)],
+            'Missing exact staging resize task; preserve the attempt for reconciliation')
+    write_new(evidence/'task.json', encoded({'upid': task}))
+    deadline = time.monotonic() + 120
+    while True:
+        status = api_get(node_path+'/tasks/'+quote(task, safe='')+'/status')
+        if status.get('status') == 'stopped':
+            write_new(evidence/'result.json', encoded(status))
+            require(status.get('exitstatus') == 'OK', 'Staging resize failed; reconcile the saved attempt')
+            break
+        require(status.get('status') == 'running' and time.monotonic() < deadline,
+                'Staging resize outcome uncertain; reconcile the saved attempt')
+        time.sleep(2)
+    after = api_get(config_path)
+    expected = dict(before, digest=after.get('digest'))
+    expected[disk] = before[disk].replace(',size='+row['size'], ',size='+size)
+    require(after == expected, 'Only the declared staging size may change during the resize')
+    proof = verify(cfg, target, slot, log, api_get, first=False, label='after', mounts=resized)
+    require(proof['bytes'] > before_proof['bytes']
+            and proof == dict(before_proof, bytes=proof['bytes']),
+            'Staging grew without preserving its exact mounted filesystem identity')
+    drift = tuple(refresh_values({'mount_point': rows})['mount_point'] for rows in (mounts, resized))
+    return slot, proof, drift
 
 
 def backend_mounts(work):
