@@ -112,17 +112,25 @@ class BackupPlanTests(unittest.TestCase):
         self.assertEqual(seen,['inspect','apply'])
 
     def test_growth_precedes_refresh_and_saved_plan_apply(self):
+        from proxmox_guest import infrastructure
+
+        for recording in (False, True):
+            with self.subTest(recording=recording):
+                self.exercise_infrastructure_growth(recording, infrastructure)
+
+    def exercise_infrastructure_growth(self, recording, infrastructure):
         from unittest.mock import patch
         import backup_staging
         import component_generation
         import deployment_inputs
+        import nfs_attachments
+        import nfs_mounts
         import proxmox_guest as provider
         import test_component_deployment as fixture
         from private_io import encoded, write_new
         from test_backup_mount_reconciliation import mount
         from test_plan import existing_fixture
 
-        infrastructure = provider.infrastructure
         case = fixture.DeploymentIntegrationTests()
         case.setUp()
         self.addCleanup(case.doCleanups)
@@ -139,7 +147,14 @@ class BackupPlanTests(unittest.TestCase):
             folder.mkdir(mode=0o700)
         write_new(work/'terraform.tfstate', b'opaque owned state')
         mounts = [mount(1, backup=True), mount(2)]
-        grown = [mounts[0], dict(mounts[1], size='5G')]
+        before_native = ('data-old', 'stage-old', 'recording-old')
+        after_native = ('data-old', 'stage-grown', 'recording-old')
+        if recording:
+            cfg['guest']['recording_mount'] = {'path': '/srv/recordings', 'slot': 2,
+                'source': '/mnt/approved/recordings', 'filesystem_source': 'fixture:/nvr',
+                'filesystem': 'nfs4', 'filesystem_root': '/'}
+            mounts.append(nfs_mounts.expected(cfg['guest']['recording_mount']))
+        grown = [mounts[0], dict(mounts[1], size='5G'), *mounts[2:]]
         plan = existing_fixture('no-op')
         change = plan['resource_changes'][0]['change']
         for side in ('before', 'after'):
@@ -159,7 +174,7 @@ class BackupPlanTests(unittest.TestCase):
             self.assertEqual(growth, (1, mounts))
             self.assertEqual(read('/fictional'), storage)
             resize('/nodes/pve-lab/lxc/6100/resize', {'disk': 'mp1', 'size': '5G'})
-            return 1, {'inode': 9}, (mounts, grown)
+            return 1, {'inode': 9}, (mounts, grown), after_native[1]
 
         storage = [{'storage': 'local-zfs', 'type': 'zfspool', 'pool': 'example/data'}]
         with patch.object(deployment_inputs, 'binding', return_value={}), patch.object(provider, 'backup'), \
@@ -170,10 +185,16 @@ class BackupPlanTests(unittest.TestCase):
                 patch.object(provider.subprocess, 'check_output', return_value=encoded(plan)), \
                 patch.object(backup_staging, 'original', return_value=(1, mounts)), \
                 patch.object(backup_staging, 'grow', side_effect=grow), \
-                patch.object(backup_staging, 'verify', return_value={'inode': 9}) as verify:
+                patch.object(backup_staging, 'verify', return_value={'inode': 9}) as verify, \
+                patch.object(nfs_attachments, 'attach', return_value=False), \
+                patch.object(nfs_mounts, 'original', return_value=mounts), \
+                patch.object(nfs_mounts, 'verify', side_effect=[(before_native, 'rootfs'),
+                                                                (after_native, 'rootfs')]) as nfs_verify:
             devices.attach.return_value = False
             result = infrastructure(cfg, case.root/'site', work, operation, {}, state_identity={})
         self.assertTrue(result['changed'])
         self.assertEqual(calls, ['init', 'grow', 'plan', 'apply'])
         request.assert_called_once_with(cfg, '/nodes/pve-lab/lxc/6100/resize', resize={'disk': 'mp1', 'size': '5G'})
         self.assertEqual(verify.call_args.kwargs['mounts'], grown)
+        if recording:
+            self.assertEqual([call.args[1] for call in nfs_verify.call_args_list], [mounts, grown])

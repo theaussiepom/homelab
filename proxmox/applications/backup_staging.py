@@ -142,11 +142,13 @@ def original(cfg, previous, work, *, allow_growth=False):
     if old_job is None:
         require(not matches, 'An existing mount cannot acquire staging ownership implicitly')
         return True
-    require(previous['guest']['storage_id'] == cfg['guest']['storage_id']
-            and len(matches) == 1 and prepared_staging_mount(matches[0], selection(previous), cfg['guest']['vmid']),
-            'Preserve the successful staging path, capacity and allocated identity')
+    require(previous['guest']['storage_id'] == cfg['guest']['storage_id'] and len(matches) == 1,
+            'Preserve the successful staging path and storage')
     target = cfg['app']['backup']['job']['staging']
+    row = matches[0]
+    vmid = cfg['guest']['vmid']
     if old_job['staging'] == target:
+        require(prepared_staging_mount(row, selected, vmid), 'Preserve the owned staging allocation')
         return False
     require(allow_growth and target['size_bytes'] > old_job['staging']['size_bytes'],
             'Existing backup staging can only grow through ordinary CD')
@@ -156,7 +158,12 @@ def original(cfg, previous, work, *, allow_growth=False):
     require(volumes == cfg['guest']['volumes']
             and previous['guest']['volume_order'] == cfg['guest']['volume_order'],
             'Grow only the existing backup staging volume in its original slot')
-    return mounts.index(matches[0]), mounts
+    if prepared_staging_mount(row, selected, vmid):
+        # The admitted backend already records the expanded mount after reconciliation.
+        return False
+    require(prepared_staging_mount(row, selection(previous), vmid),
+            'Preserve the original owned staging allocation before growth')
+    return mounts.index(row), mounts
 
 
 def grow(cfg, previous, growth, operation, api_get, resize):
@@ -209,7 +216,7 @@ def grow(cfg, previous, growth, operation, api_get, resize):
             and proof == dict(before_proof, bytes=proof['bytes']),
             'Staging grew without preserving its exact mounted filesystem identity')
     drift = tuple(refresh_values({'mount_point': rows})['mount_point'] for rows in (mounts, resized))
-    return slot, proof, drift
+    return slot, proof, drift, after[disk]
 
 
 def backend_mounts(work):

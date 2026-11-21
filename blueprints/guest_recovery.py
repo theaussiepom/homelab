@@ -73,9 +73,10 @@ def operations(packets, *, pending, environment):
                         state[0]['kind'] == 'ordinary' and state[1]['operation'] == str(operation),
                         'The held operation conflicts with newer accepted current state')
             failure = work/operation.name.replace('ordinary-', 'recovery-', 1)/'result.json'
-            if pending and current.exists(failure):
-                require(read_json(failure, private=True).get('status') != 'recovery_required',
+            if pending and current.exists(failure) and read_json(failure, private=True).get('status') == 'recovery_required':
+                require(held and recovery.reconcile_staging_growth(cfg, operation),
                         'Rollback failed; use Reconcile guest after engineering repair')
+                continue
             value = recovery.baseline(operation, cfg)
             marker = value['marker']
             original_cfg, _ = generation.sealed_inputs(marker['binding'])

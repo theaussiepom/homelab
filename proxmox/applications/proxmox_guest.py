@@ -325,9 +325,13 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
                 and binding(cfg, site) == expected and sha(work/'terraform.tfstate') == original_state,
                 'Grow staging only for the exact admitted owned guest and backend')
         guest_trust(cfg, work, persist=False)
-        slot, proof, staging_growth = backup_staging.grow(cfg, previous_configuration, staging, operation,
+        slot, proof, staging_growth, grown_native_row = backup_staging.grow(cfg, previous_configuration, staging, operation,
             lambda path: api_get(cfg, path), lambda path, fields: api_request(cfg, path, resize=fields))
         staging = (slot, proof, False, staging_growth[1])
+        if recording_mount is not None:
+            rows, rootfs = recording_proof
+            recording_mount = staging_growth[1]
+            recording_proof = (rows[:slot] + (grown_native_row,) + rows[slot+1:], rootfs)
     quiet(
         tofu
         + [

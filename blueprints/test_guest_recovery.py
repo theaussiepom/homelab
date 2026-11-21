@@ -80,6 +80,18 @@ class OrchestrationTests(unittest.TestCase):
             self.run_recovery('pending')
         native.assert_not_called()
 
+    def test_pending_uses_the_settled_growth_verifier_without_retrying_the_failed_writer(self):
+        failed = self.transaction.fail_after_preparation()
+        with patch.object(m.recovery, 'restore', side_effect=ValueError('synthetic')):
+            self.assertEqual(self.run_recovery('finish')['status'], 'recovery_required')
+        self.env.update(GITHUB_RUN_ID='103', GITHUB_RUN_NUMBER='12')
+        with patch.object(m.recovery, 'reconcile_staging_growth', return_value=True) as verify, \
+                patch.object(m.recovery, 'restore') as rollback:
+            outcome = self.run_recovery('pending')
+        self.assertEqual(outcome['status'], 'ready')
+        self.assertEqual(verify.call_args.args[1], failed)
+        rollback.assert_not_called()
+
     def test_reconcile_last_good_and_current_main_keep_distinct_owner_and_scoped_inputs(self):
         operation = self.transaction.fail_after_preparation()
         self.transaction.native = 'old'

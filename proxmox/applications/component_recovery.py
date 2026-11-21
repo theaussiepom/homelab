@@ -417,7 +417,8 @@ def finish_restore(cfg, operation, proof=None):
 
 
 
-def reconcile(cfg, operation, selected_path, selected, *, reason, actor_context, expected_controls=None):
+def reconcile(cfg, operation, selected_path, selected, *, reason, actor_context, expected_controls=None,
+              staging_growth=None):
     """Verify engineer repair; no configuration apply, restart or data operation."""
     import proxmox_guest
     work = operation.parent
@@ -444,12 +445,22 @@ def reconcile(cfg, operation, selected_path, selected, *, reason, actor_context,
     if expected_identity is None:
         expected_identity = read_json(Path(original['operation'])/'infrastructure-complete.json', private=True)['state_identity']
     require(identity == expected_identity, 'Reconciliation preserves backend resource ownership')
-    recovery = work/('recovery-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'])
+    identity_suffix = (os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT']
+                       if staging_growth is None else operation.name.removeprefix('ordinary-'))
+    recovery = work/('recovery-' + identity_suffix)
     private_directory(recovery, create=not recovery.exists())
     inspect = recovery/'infrastructure'; private_directory(inspect, create=not inspect.exists())
-    proxmox_guest.infrastructure(cfg, Path(cfg['deployment']['input_directory'])/'site.json',
-        work, inspect, selected['binding'], state_identity=identity,
-        previous_configuration=original_cfg, recovery=True, verify_only=True)
+    infrastructure, binding = (cfg, selected['binding']) if staging_growth is None else staging_growth
+    proxmox_guest.infrastructure(infrastructure, Path(infrastructure['deployment']['input_directory'])/'site.json',
+        work, inspect, binding, state_identity=identity,
+        previous_configuration=original_cfg if staging_growth is None else infrastructure,
+        recovery=True, verify_only=True)
+    if staging_growth is not None:
+        name = 'backup-staging-after.json'
+        before = read_json(operation/name, private=True)
+        active = read_json(inspect/name, private=True)
+        require(all(active[key] == before[key] for key in ('bytes', 'inode', 'mode', 'uid', 'gid', 'source')),
+                'Preserve the exact expanded staging filesystem since the failed deployment')
     selection = component_restore.descriptor(selected, cfg)
     actual = component_restore.execute(cfg, recovery, selection, mode='capture')
     if expected_controls is None:
@@ -473,3 +484,54 @@ def reconcile(cfg, operation, selected_path, selected, *, reason, actor_context,
              resolved(work, operation, hold), reason=reason)
     release(work, hold)
     return {'status': 'reconciled', 'vmid': cfg['guest']['vmid']}
+
+
+def reconcile_staging_growth(cfg, operation):
+    """Verify a settled resize and intact previous controls before resuming ordinary CD."""
+    import backup_staging
+
+    evidence = operation/'staging-growth'
+    if not current.exists(evidence/'result.json'):
+        return False
+    with locked(cfg) as work:
+        saved = baseline(operation, cfg)
+        marker = saved['marker']
+        require(marker == read_json(work/'ORDINARY-HOLD.json', private=True)
+                and not current.exists(operation/'infrastructure-complete.json')
+                and not list(operation.glob('*-started.json')),
+                'Reconcile only an identified staging growth that stopped before guest phases')
+        failure = read_json(operation/'forward-failure.json', private=True)
+        require(failure == {'schema': 'homelab-component-forward-failure-v1',
+                            'marker_sha256': digest(encoded(marker)), 'command_returned': True},
+                'Require the returned infrastructure failure for this hold')
+        window = read_json(operation/'apply-window.json', private=True)
+        plan = read_json(operation/'plan.json', private=True)
+        require('finished_at_ns' in window and plan['binding'] == marker['binding']
+                and plan['plan_sha256'] == window['plan_sha256'],
+                'Require the exact settled infrastructure plan after staging growth')
+        held, _ = generation.sealed_inputs(marker['binding'])
+        selected_path, selected, previous = owner(saved, work)
+        wanted = backup_staging.selection(held)
+        old = backup_staging.selection(previous)
+        require(held['site'] == cfg['site'] and held['guest'] == cfg['guest']
+                and wanted == backup_staging.selection(cfg) and wanted['size'] != old['size']
+                and backup_staging.original(held, previous, work, allow_growth=True) is False,
+                'Preserve the declared and already recorded staging growth')
+        mounts = backup_staging.backend_mounts(work)
+        slot, row = next((index, item) for index, item in enumerate(mounts) if item['path'] == wanted['path'])
+        request = read_json(evidence/'request.json', private=True)
+        task = read_json(evidence/'task.json', private=True)['upid']
+        result = read_json(evidence/'result.json', private=True)
+        require(request['volume'] == row['volume'] and request['previous_size'] == old['size']
+                and request['request']['disk'] == f'mp{slot}' and request['request']['size'] == wanted['size']
+                and result['upid'] == task and result['status'] == 'stopped' and result['exitstatus'] == 'OK',
+                'Preserve receipt evidence for this exact successful staging task')
+        controls = operation/'controls-before.json'
+        ready = read_json(operation/'rollback-ready.json', private=True)
+        require(ready == {'baseline_sha256': sha(operation/'rollback-baseline.json'), 'controls_sha256': sha(controls)},
+                'Verify the captured last-good managed controls before releasing the hold')
+        reconcile(previous, operation, selected_path, selected,
+                  reason='Verified settled staging growth and intact last-good guest controls',
+                  actor_context='protected-main-reconciliation', expected_controls=read_json(controls, private=True),
+                  staging_growth=(held, marker['binding']))
+    return True

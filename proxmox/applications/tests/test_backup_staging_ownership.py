@@ -98,6 +98,12 @@ class StagingOwnershipTests(unittest.TestCase):
         mounts = [mount(1, backup=True), mount(2)]
         self.backend(mounts)
         self.assertEqual(staging.original(target, previous, self.root, allow_growth=True), (1, mounts))
+        self.backend([mounts[0], dict(mounts[1], size='5G')])
+        self.assertIs(staging.original(target, previous, self.root, allow_growth=True), False)
+        self.backend([mounts[0], dict(mounts[1], size='6G')])
+        with self.assertRaises(ValueError):
+            staging.original(target, previous, self.root, allow_growth=True)
+        self.backend(mounts)
         with self.assertRaises(ValueError):
             staging.original(target, previous, self.root)
         for other_edit in (lambda g: g['volumes']['data'].update(size_gib=9),
@@ -143,7 +149,7 @@ class StagingOwnershipTests(unittest.TestCase):
         with patch.object(staging, 'verify', side_effect=[original_proof, updated]) as verify, \
                 patch.object(staging.time, 'sleep'):
             result = staging.grow(target, previous, (1, mounts), operation, api, resize)
-        self.assertEqual(result, (1, updated, (mounts, expected)))
+        self.assertEqual(result, (1, updated, (mounts, expected), after['mp1']))
         self.assertEqual([call.kwargs['mounts'] for call in verify.call_args_list], [mounts, expected])
         self.assertTrue((operation/'staging-growth/result.json').is_file())
 
