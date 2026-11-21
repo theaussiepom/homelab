@@ -9,7 +9,7 @@ import ssl
 import stat
 import subprocess
 import time
-from urllib.parse import urlparse
+from urllib.parse import quote, urlencode, urlparse
 from urllib.request import (
     Request,
     build_opener,
@@ -50,6 +50,11 @@ class RefuseRedirects(HTTPRedirectHandler):
 
 def api_get(cfg, path):
     """Read only the declared Proxmox endpoint, with its existing CA and token."""
+    return api_request(cfg, path)
+
+
+def api_request(cfg, path, *, resize=None):
+    """Use the trusted Proxmox endpoint for reads and one bound staging resize."""
     endpoint = urlparse(cfg["site"]["api_endpoint"])
     if (
         endpoint.scheme != "https"
@@ -64,12 +69,17 @@ def api_get(cfg, path):
         raise ValueError("Guest discovery requires the trusted Proxmox HTTPS endpoint")
     if not (path.startswith("/nodes/") or path == '/storage?type=zfspool'):
         raise ValueError("Use the selected Proxmox node API")
+    if resize is not None:
+        node = quote(cfg['site']['node'], safe='')
+        require(path == f"/nodes/{node}/lxc/{cfg['guest']['vmid']}/resize",
+                'Resize only the selected guest mount')
     request = Request(
         "https://" + endpoint.netloc + "/api2/json" + path,
         headers={
             "Authorization": "PVEAPIToken="
             + regular(Path(cfg["paths"]["api_token"]), private=True).decode().strip()
         },
+        **({'data': urlencode(resize).encode(), 'method': 'PUT'} if resize is not None else {}),
     )
     context = ssl.create_default_context(cafile=cfg["paths"]["ca_file"])
     opener = build_opener(
@@ -256,10 +266,11 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
         require(existing, 'Create the empty owned guest before selecting its NFS bind')
         recording_mount = nfs_mounts.original(cfg, previous_configuration, work)
     staging = None
+    staging_growth = None
     if 'job' in cfg['app'].get('backup', {}):
         import backup_staging
         backup_staging.storage(api_get(cfg, '/storage?type=zfspool'), cfg['guest']['storage_id'])
-        staging = backup_staging.original(cfg, previous_configuration, work) if existing else True
+        staging = backup_staging.original(cfg, previous_configuration, work, allow_growth=not recovery) if existing else True
     original_state = sha(work / 'terraform.tfstate') if existing else None
     if existing:
         dhcp_admission(cfg)
@@ -309,6 +320,14 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
         environment,
         log,
     )
+    if isinstance(staging, tuple):
+        require(state_identity is not None and cfg['guest']['vmid'] not in cfg['deployment']['protected_guests']
+                and binding(cfg, site) == expected and sha(work/'terraform.tfstate') == original_state,
+                'Grow staging only for the exact admitted owned guest and backend')
+        guest_trust(cfg, work, persist=False)
+        slot, proof, staging_growth = backup_staging.grow(cfg, previous_configuration, staging, operation,
+            lambda path: api_get(cfg, path), lambda path, fields: api_request(cfg, path, resize=fields))
+        staging = (slot, proof, False, staging_growth[1])
     quiet(
         tofu
         + [
@@ -333,6 +352,7 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
         serial_device=cfg["guest"].get("serial_device"),
         protected_guests=cfg['deployment']['protected_guests'],
         ip_filter_slots=ip_filter_slots(cfg['guest']['interfaces']),
+        staging_growth=staging_growth,
         **({'backup_selection': {**{row['path']: row['backup'] for row in cfg['guest'].get('volumes', {}).values()},
              **({cfg['guest']['recording_mount']['path']: False} if recording_mount is not None else {})}}
            if 'backup' in cfg['app'] else {}),
@@ -345,7 +365,7 @@ def infrastructure(cfg, site, work, operation, expected, *, state_identity=None,
     if state_identity is not None:
         from component_generation import plan_identity
         plan_identity(value, state_identity, ip_filter_slots=ip_filter_slots(cfg['guest']['interfaces']))
-    if existing and 'job' in cfg['app'].get('backup', {}):
+    if existing and staging_growth is None and 'job' in cfg['app'].get('backup', {}):
         import backup_staging
         path = cfg['app']['backup']['job']['staging']['path']
         if backup_staging.newly_allocated(value, path):

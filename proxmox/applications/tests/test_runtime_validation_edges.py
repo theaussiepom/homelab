@@ -100,6 +100,27 @@ class ValidationEdges(unittest.TestCase):
                 None, None, 302, "Found", {}, "https://other.invalid"
             )
 
+    def test_proxmox_resize_uses_only_the_selected_guest_https_endpoint(self):
+        from urllib.parse import parse_qs
+
+        with tempfile.TemporaryDirectory() as tmp:
+            token = Path(tmp)/'token'
+            token.write_text('synthetic')
+            token.chmod(0o600)
+            cfg = {'site': {'api_endpoint': 'https://198.18.0.1:8006', 'node': 'fixture'},
+                   'guest': {'vmid': 200}, 'paths': {'api_token': str(token), 'ca_file': '/synthetic/ca'}}
+            fields = {'disk': 'mp1', 'size': '5G', 'digest': 'a'*40}
+            opener = MagicMock()
+            opener.open.return_value.__enter__.return_value = io.StringIO('{"data":"task"}')
+            with patch.object(pve.ssl, 'create_default_context'), patch.object(pve, 'build_opener', return_value=opener):
+                with self.assertRaises(ValueError):
+                    pve.api_request(cfg, '/nodes/fixture/lxc/201/resize', resize=fields)
+                self.assertEqual(pve.api_request(cfg, '/nodes/fixture/lxc/200/resize', resize=fields), 'task')
+            request = opener.open.call_args.args[0]
+            self.assertEqual(request.get_method(), 'PUT')
+            self.assertEqual(request.full_url, 'https://198.18.0.1:8006/api2/json/nodes/fixture/lxc/200/resize')
+            self.assertEqual(parse_qs(request.data.decode()), {key: [value] for key, value in fields.items()})
+
     def test_guest_host_key_lookup_refuses_missing_failed_empty_or_alias_identity(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

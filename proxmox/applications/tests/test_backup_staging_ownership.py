@@ -87,6 +87,79 @@ class StagingOwnershipTests(unittest.TestCase):
             plan['resource_changes'][0]['change']['before']['mount_point'] = rows
             with self.assertRaises(ValueError): staging.stage_row(plan, '/srv/stage')
 
+    def test_growth_changes_only_the_owned_stage_size(self):
+        previous = configuration()
+        previous['guest'].update(volumes={'data': {'path': '/srv/data', 'size_gib': 8, 'backup': True},
+                                          'stage': {'path': '/srv/stage', 'size_gib': 4, 'backup': False}},
+                                 volume_order=['data', 'stage'])
+        target = copy.deepcopy(previous)
+        target['app']['backup']['job']['staging']['size_bytes'] = 5*1024**3
+        target['guest']['volumes']['stage']['size_gib'] = 5
+        mounts = [mount(1, backup=True), mount(2)]
+        self.backend(mounts)
+        self.assertEqual(staging.original(target, previous, self.root, allow_growth=True), (1, mounts))
+        with self.assertRaises(ValueError):
+            staging.original(target, previous, self.root)
+        for other_edit in (lambda g: g['volumes']['data'].update(size_gib=9),
+                           lambda g: g['volume_order'].reverse()):
+            altered = copy.deepcopy(target)
+            other_edit(altered['guest'])
+            with self.assertRaises(ValueError):
+                staging.original(altered, previous, self.root, allow_growth=True)
+
+    def exercise_growth(self, name, *, digest='a'*40, task='UPID:pve-lab:AB:CD:EF:resize:6100:synthetic:',
+                        status=None, concurrent=False, unexpected_mount=False, unexpected_proof=False):
+        previous = configuration()
+        target = copy.deepcopy(previous)
+        target['app']['backup']['job']['staging']['size_bytes'] = 5*1024**3
+        mounts = [mount(1, backup=True), mount(2)]
+        expected = [mounts[0], dict(mounts[1], size='5G')]
+        before = dict(values()[0], digest=digest)
+        after = dict(before, mp1=before['mp1'].replace('size=4G', 'size=5G'), digest='b'*40)
+        if unexpected_mount:
+            after['mp0'] += ',ro=1'
+        statuses = iter([{'status': 'running'}, {'status': 'stopped', 'exitstatus': 'OK'}]
+                        if status is None else [status])
+        resize_called = False
+        def api(path):
+            if '/tasks/' in path:
+                self.assertTrue(path.endswith('/status'))
+                return next(statuses)
+            if resize_called:
+                return after
+            return before if not concurrent else next(configs)
+        configs = iter([before, dict(before, digest='c'*40)])
+        def resize(path, fields):
+            nonlocal resize_called
+            self.assertFalse(resize_called)
+            self.assertEqual(path, '/nodes/pve-lab/lxc/6100/resize')
+            self.assertEqual(fields, {'disk': 'mp1', 'size': '5G', 'digest': 'a'*40})
+            resize_called = True
+            return task
+        original_proof = {'inode': 34, 'bytes': 4*1024**3}
+        updated = dict(original_proof, bytes=5*1024**3, inode=35 if unexpected_proof else 34)
+        operation = self.root/name
+        operation.mkdir(mode=0o700)
+        with patch.object(staging, 'verify', side_effect=[original_proof, updated]) as verify, \
+                patch.object(staging.time, 'sleep'):
+            result = staging.grow(target, previous, (1, mounts), operation, api, resize)
+        self.assertEqual(result, (1, updated, (mounts, expected)))
+        self.assertEqual([call.kwargs['mounts'] for call in verify.call_args_list], [mounts, expected])
+        self.assertTrue((operation/'staging-growth/result.json').is_file())
+
+    def test_resize_keeps_the_mount_and_records_task_settlement(self):
+        self.exercise_growth('success')
+
+    def test_resize_refuses_ambiguous_or_changed_outcomes(self):
+        cases = {'digest': {'digest': 'opaque'}, 'concurrent': {'concurrent': True},
+                 'identity': {'task': 'UPID:pve-lab:AB:CD:EF:resize:6200:synthetic:'},
+                 'task': {'task': None}, 'failed': {'status': {'status': 'stopped', 'exitstatus': 'failed'}},
+                 'unknown': {'status': {}}, 'mount': {'unexpected_mount': True},
+                 'proof': {'unexpected_proof': True}}
+        for name, parameters in cases.items():
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                self.exercise_growth(name, **parameters)
+
     def test_applied_allocation_requires_one_known_owned_subvolume(self):
         """Bind fresh applied state to one exact allocated staging subvolume."""
         cfg = configuration(); self.backend([mount(1), mount(2)])

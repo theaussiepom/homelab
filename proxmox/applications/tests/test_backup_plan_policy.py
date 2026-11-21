@@ -8,6 +8,30 @@ import plan_policy as policy
 
 
 class BackupPlanTests(unittest.TestCase):
+    def test_verified_growth_admits_only_the_observed_refresh(self):
+        from test_plan import existing_fixture
+        from test_backup_mount_reconciliation import mount
+
+        plan = existing_fixture('no-op')
+        change = plan['resource_changes'][0]['change']
+        mounts = [mount(1, backup=True), mount(2)]
+        grown = [mounts[0], dict(mounts[1], size='5G')]
+        for side in ('before', 'after'):
+            change[side]['mount_point'] = copy.deepcopy(grown)
+        drift = copy.deepcopy(plan['resource_changes'][0])
+        drift['change']['actions'] = ['update']
+        drift['change']['before']['mount_point'] = mounts
+        plan['resource_drift'] = [drift]
+        options = {'existing': True, 'protected_guests': [],
+                   'backup_selection': {'/srv/data': True, '/srv/stage': False},
+                   'backup_staging': {'path': '/srv/stage', 'size': '5G', 'volume': 'local-zfs'}}
+        with self.assertRaises(ValueError):
+            policy.check_plan(plan, 'pve-lab', 6100, **options)
+        policy.check_plan(plan, 'pve-lab', 6100, **options, staging_growth=(mounts, grown))
+        drift['change']['before']['mount_point'] = [dict(mounts[0], size='7G'), mounts[1]]
+        with self.assertRaises(ValueError):
+            policy.check_plan(plan, 'pve-lab', 6100, **options, staging_growth=(mounts, grown))
+
     def test_append_only_exact_allocation_and_only_computed_name_unknown(self):
         stage={'path':'/srv/stage','size':'1G','volume':'local'}
         old=[{'path':'/srv/data','size':'8G','volume':'local','backup':True,'replicate':True}]
@@ -86,3 +110,70 @@ class BackupPlanTests(unittest.TestCase):
                         infrastructure(cfg,case.root/'site',work,refused,{})
                     self.assertEqual(inspect.call_count,0)
         self.assertEqual(seen,['inspect','apply'])
+
+    def test_growth_precedes_refresh_and_saved_plan_apply(self):
+        from unittest.mock import patch
+        import backup_staging
+        import component_generation
+        import deployment_inputs
+        import proxmox_guest as provider
+        import test_component_deployment as fixture
+        from private_io import encoded, write_new
+        from test_backup_mount_reconciliation import mount
+        from test_plan import existing_fixture
+
+        infrastructure = provider.infrastructure
+        case = fixture.DeploymentIntegrationTests()
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        cfg = copy.deepcopy(case.cfg)
+        cfg['site']['node'] = 'pve-lab'
+        cfg['guest'].update(vmid=6100, storage_id='local-zfs', volumes={
+            'data': {'path': '/srv/data', 'size_gib': 8, 'backup': True},
+            'stage': {'path': '/srv/stage', 'size_gib': 5, 'backup': False}})
+        cfg['app']['backup'] = {'job': {'staging': {'path': '/srv/stage', 'size_bytes': 5*1024**3}}}
+        cfg['paths']['api_token'] = str(case.root/'token')
+        write_new(case.root/'token', b'synthetic')
+        work, operation = case.root/'provider', case.root/'attempt'
+        for folder in (work, operation):
+            folder.mkdir(mode=0o700)
+        write_new(work/'terraform.tfstate', b'opaque owned state')
+        mounts = [mount(1, backup=True), mount(2)]
+        grown = [mounts[0], dict(mounts[1], size='5G')]
+        plan = existing_fixture('no-op')
+        change = plan['resource_changes'][0]['change']
+        for side in ('before', 'after'):
+            change[side]['mount_point'] = grown
+        drift = copy.deepcopy(plan['resource_changes'][0])
+        drift['change']['before']['mount_point'] = mounts
+        plan['resource_drift'] = [drift]
+        calls = []
+
+        def quiet(argv, env, log):
+            calls.append(argv[2])
+            if 'plan' in argv:
+                write_new(log.parent/'guest.tfplan', b'fictional saved plan')
+
+        def grow(selected, previous, growth, directory, read, resize):
+            calls.append('grow')
+            self.assertEqual(growth, (1, mounts))
+            self.assertEqual(read('/fictional'), storage)
+            resize('/nodes/pve-lab/lxc/6100/resize', {'disk': 'mp1', 'size': '5G'})
+            return 1, {'inode': 9}, (mounts, grown)
+
+        storage = [{'storage': 'local-zfs', 'type': 'zfspool', 'pool': 'example/data'}]
+        with patch.object(deployment_inputs, 'binding', return_value={}), patch.object(provider, 'backup'), \
+                patch.object(provider, 'host_devices') as devices, patch.object(provider, 'dhcp_admission'), \
+                patch.object(provider, 'guest_trust'), patch.object(provider, 'quiet', side_effect=quiet), \
+                patch.object(provider, 'api_get', return_value=storage), patch.object(provider, 'api_request') as request, \
+                patch.object(component_generation, 'plan_identity'), \
+                patch.object(provider.subprocess, 'check_output', return_value=encoded(plan)), \
+                patch.object(backup_staging, 'original', return_value=(1, mounts)), \
+                patch.object(backup_staging, 'grow', side_effect=grow), \
+                patch.object(backup_staging, 'verify', return_value={'inode': 9}) as verify:
+            devices.attach.return_value = False
+            result = infrastructure(cfg, case.root/'site', work, operation, {}, state_identity={})
+        self.assertTrue(result['changed'])
+        self.assertEqual(calls, ['init', 'grow', 'plan', 'apply'])
+        request.assert_called_once_with(cfg, '/nodes/pve-lab/lxc/6100/resize', resize={'disk': 'mp1', 'size': '5G'})
+        self.assertEqual(verify.call_args.kwargs['mounts'], grown)
