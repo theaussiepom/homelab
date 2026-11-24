@@ -47,12 +47,16 @@ class ComponentCallbackTests(unittest.TestCase):
         for role in ('secret_key','postgresql_password'):
             path=fixture.root/(role+'.txt');write_new(path,('synthetic-'+role).encode())
             sources[role]={'type':'file','path':str(path)}
-        roles=contract.ADAPTERS['authentik']['services']
+        containers = {'server':{},'worker':{}}
+        roles=contract.adapter('authentik', containers)['services']
         app={'id':'identity_a','adapter':'authentik','lifecycle':'retained',
              'identity':{'phase':'identity_a','runtime_id':'identity_a',
                 'services':{role:'owned_'+role for role in roles},'runtime_directory':runtime_root},
              'settings':{'allowed_callback_additions':[record]},'secret_bindings':sources,
-             'input_sources':sources,'storage_paths':{},'project_name':'owned-project','project_file':'compose-owned.yml',
+             'input_sources':sources, 'containers': containers,
+             'storage_paths':{'media':{'source':'/srv/data/old/media','kind':'directory'},
+                              'data':{'source':'/srv/data/files','volume_root':'/srv/data','kind':'directory'}},
+             'project_name':'owned-project','project_file':'compose-owned.yml',
              'software_selection':{'images':{role:{'image':'example/'+role+'@sha256:'+'b'*64}for role in roles}}}
         body = 'version: 1\n'
         role = 'oidc_client_1'
@@ -93,6 +97,9 @@ class ComponentCallbackTests(unittest.TestCase):
                                  'sha512':hashlib.sha512(body.encode()).hexdigest()}])
         self.assertEqual((payload.directory/'oidc-console').read_bytes(), b'synthetic-client')
         self.assertEqual((payload.directory/'homelab-oidc-console.yaml').read_text(), body)
+        spec = variables['component_identity_data']
+        self.assertEqual((spec['path'],spec['media'],spec['services']),('/srv/data/files','/srv/data/old/media',
+                                                                         ['owned_server','owned_worker']))
         self.assertNotIn('stack',variables)
 
     def test_helper_preserves_default_command_and_accepts_only_owned_service_identity(self):
