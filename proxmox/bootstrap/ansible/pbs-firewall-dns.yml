@@ -1,0 +1,6 @@
+---
+- name: Check both configured PBS resolvers from the declared Management address
+  ansible.builtin.command:
+    argv: '{{ ["/usr/bin/timeout", "30", "/usr/bin/python3", "-", pbs_firewall_desired.target.address] + pbs_firewall_desired.egress.dns_servers }}'
+    stdin: '{{ lookup("ansible.builtin.file", playbook_dir + "/files/pbs-dns-check.py", rstrip=false) }}'
+  changed_when: false

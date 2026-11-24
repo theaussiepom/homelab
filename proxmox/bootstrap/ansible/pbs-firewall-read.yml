@@ -78,6 +78,12 @@
     argv: [/usr/sbin/nft, --json, list, ruleset]
   changed_when: false
   register: pbs_ruleset
+- name: Verify forwarding is disabled for the endpoint policy
+  ansible.builtin.command:
+    argv: [cat, /proc/sys/net/ipv4/ip_forward, /proc/sys/net/ipv6/conf/all/forwarding]
+  changed_when: false
+  when: pbs_firewall_desired.schema == 'homelab-pbs-firewall-v2'
+  register: pbs_forwarding
 - name: Collect observed values for the pure ownership validator
   ansible.builtin.set_fact:
     pbs_firewall_observed:
@@ -102,3 +108,5 @@
       active: '{{ dict(pbs_service.stdout_lines | map("split", "=", 1))["ActiveState"] }}'
       enabled: '{{ dict(pbs_service.stdout_lines | map("split", "=", 1))["UnitFileState"] }}'
       ruleset: '{{ pbs_ruleset.stdout | from_json }}'
+      forwarding: '{{ pbs_forwarding.stdout_lines | default([]) }}'
+      ssh_connection: '{{ ansible_facts.env.SSH_CONNECTION | default("") }}'

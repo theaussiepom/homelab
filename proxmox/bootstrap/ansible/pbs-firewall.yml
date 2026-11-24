@@ -1,5 +1,5 @@
 ---
-- name: Configure only the declared PBS browser-interface firewall
+- name: Configure the declared PBS host firewall
   hosts: pbs
   become: false
   gather_facts: false
@@ -89,6 +89,12 @@
     - name: Retain the admitted policy and network snapshot
       ansible.builtin.set_fact:
         pbs_firewall_admission: '{{ pbs_admission.stdout | from_json }}'
+    - name: Verify declared Management DNS before endpoint enforcement
+      ansible.builtin.include_tasks: pbs-firewall-dns.yml
+      when: pbs_firewall_desired.schema == 'homelab-pbs-firewall-v2'
+    - name: Try the declared endpoint policy with automatic rollback
+      ansible.builtin.include_tasks: pbs-firewall-trial.yml
+      when: pbs_firewall_desired.schema == 'homelab-pbs-firewall-v2' and pbs_firewall_admission.changed
     - name: Prepare only the owned stock-service override directory
       ansible.builtin.file:
         path: /etc/systemd/system/nftables.service.d
@@ -96,6 +102,7 @@
         owner: root
         group: root
         mode: '0755'
+      when: pbs_firewall_desired.schema == 'homelab-pbs-firewall-v1'
     - name: Remove the stock global-flushing stop action without adding a service
       ansible.builtin.copy:
         content: '{{ pbs_firewall_admission.dropin }}'
@@ -105,6 +112,7 @@
         mode: '0644'
         follow: false
       register: pbs_dropin_changed
+      when: pbs_firewall_desired.schema == 'homelab-pbs-firewall-v1'
     - name: Syntax-check and install only the declared own-table policy
       ansible.builtin.template:
         src: pbs-firewall.nft.j2
@@ -115,16 +123,18 @@
         follow: false
         validate: /usr/sbin/nft --check --file %s
       register: pbs_policy_changed
+      when: pbs_firewall_desired.schema == 'homelab-pbs-firewall-v1'
     - name: Enable persistence and start the existing service without a restart
       ansible.builtin.systemd_service:
         name: nftables.service
         daemon_reload: '{{ pbs_dropin_changed.changed }}'
         enabled: true
         state: started
+      when: pbs_firewall_desired.schema == 'homelab-pbs-firewall-v1'
     - name: Reload only a changed policy on an already-active service
       ansible.builtin.command:
         argv: [systemctl, reload, nftables.service]
-      when: pbs_firewall_admission.active == 'active' and pbs_policy_changed.changed
+      when: pbs_firewall_desired.schema == 'homelab-pbs-firewall-v1' and pbs_firewall_admission.active == 'active' and pbs_policy_changed.changed
       changed_when: true
     - name: Read the actual final policy and persistence state
       ansible.builtin.include_tasks: pbs-firewall-read.yml
@@ -140,3 +150,16 @@
       become: false
       vars: {ansible_connection: local, ansible_become: false}
       changed_when: false
+  post_tasks:
+    - name: Close the local rollback after verifying persistent and kernel state
+      ansible.builtin.command:
+        argv:
+          - /bin/bash
+          - '{{ pbs_trial.path }}/trial'
+          - accept
+          - '{{ pbs_trial.path }}'
+          - '{{ pbs_firewall_admission.previous_sha256 }}'
+          - '{{ pbs_firewall_admission.desired_sha256 }}'
+          - '{{ pbs_firewall_admission.baseline }}'
+      when: pbs_firewall_desired.schema == 'homelab-pbs-firewall-v2' and pbs_firewall_admission.changed
+      changed_when: true
