@@ -139,6 +139,57 @@ def routing(app, plan):
     return result
 
 
+def _private_tls(app, transports, static, dynamic):
+    """Render only named, source-bound TLS relays on the selected management IP."""
+    relays = app['settings']['private_tls_relays']
+    management = foundation.address(app['role_addresses'].get('management_interface'))
+    require(management != app['role_addresses']['frontend_interface'],
+            'Bind private relays separately from the frontend')
+    entrypoints = static['entryPoints']
+    for value in entrypoints.values():
+        value['asDefault'] = True
+    tcp = dynamic['tcp'] = {'routers': {}, 'services': {}, 'middlewares': {}, 'serversTransports': {}}
+    selected_transports = {}
+    ports = set()
+    for key, row in relays.items():
+        name = 'private-' + discovery.name(key)
+        listener = app['listeners'].get(key, {})
+        port = listener.get('port')
+        require(listener.get('actual_bind') == management and type(port) is int
+                and 1 <= port <= 65535 and port not in ports,
+                'Select a distinct declared private relay socket')
+        ports.add(port)
+        host = discovery.hostname(row['hostname'])
+        client = foundation.address(row['client'])
+        backend = foundation.address(row['target_address'])
+        backend_port = row['target_port']
+        require(type(backend_port) is int and 1 <= backend_port <= 65535
+                and backend != management and client != management,
+                'Select a distinct client and backend for the private TLS relay')
+        entrypoints[name] = {'address': f'{management}:{port}'}
+        router = tcp['routers'][name] = {
+            'rule': f'HostSNI(`{host}`)', 'entryPoints': [name], 'service': name,
+            'middlewares': [name], 'tls': {'passthrough': True},
+        }
+        tcp['middlewares'][name] = {'ipAllowList': {'sourceRange': [f'{client}/32']}}
+        server = {'address': f'{backend}:{backend_port}'}
+        service = {'servers': [server]}
+        tcp['services'][name] = {'loadBalancer': service}
+        if 'transport' in row:
+            transport = discovery.name(row['transport'])
+            trust = transports.get(transport, {})
+            require('server_name' in trust and ('ca_file' in trust or 'certificate' in trust),
+                    'Require an explicit TLS trust anchor and server name')
+            server['tls'] = True
+            service['serversTransport'] = transport
+            router['tls'] = {'certResolver': 'letsencrypt'}
+            tcp['serversTransports'][transport] = {'tls': {
+                'serverName': discovery.hostname(trust['server_name']), 'rootCAs': [discovery.ca_path(transport)],
+            }}
+            selected_transports[transport] = trust
+    return selected_transports
+
+
 def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
     require(isinstance(app, dict) and app.get('adapter') in ('authentik', 'traefik')
             and isinstance(secrets, dict) and isinstance(app.get('input_sources'), dict)
@@ -187,24 +238,29 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
         gates = [row['plugin']['cloudflare-source'] for row in shared['middlewares'].values()
                  if 'cloudflare-source' in row.get('plugin', {})]
         require(bool(gates), 'Select an explicit Cloudflare source middleware')
-    expected_ca = {key for key, value in shared['transports'].items()
+    static = foundation.ingress_static(selected, token)
+    dynamic = discovery.shared(shared)
+    trust = shared['transports']
+    if 'private_tls_relays' in settings:
+        trust = {**trust, **_private_tls(app, route_plan['transports'], static, dynamic)}
+    expected_ca = {key for key, value in trust.items()
                    if 'ca_file' in value or 'certificate' in value}
     require(expected_ca == set(route_files) | set(route_certificates),
             'Retain exactly the selected route CA mounts')
-    rows = [_row('traefik.yml', json.dumps(foundation.ingress_static(selected, token), indent=2)+'\n'),
-            _row('shared.yml', json.dumps(discovery.shared(shared), indent=2)+'\n')]
+    rows = [_row('traefik.yml', json.dumps(static, indent=2)+'\n'),
+            _row('shared.yml', json.dumps(dynamic, indent=2)+'\n')]
     for key, row in route_files.items():
         discovery.name(key)
         require(isinstance(row, dict) and set(row) == {'source', 'filename'}
                 and row['filename'] == 'route-'+key+'.pem'
-                and row['source'] == shared['transports'][key]['ca_file'],
+                and row['source'] == trust[key]['ca_file'],
                 'Preserve the selected route trust binding')
         rows.append(_row(row['filename'], _certificate(route_cas[key])))
     for key, row in route_certificates.items():
         discovery.name(key)
         require(isinstance(row, dict) and set(row) == {'certificate', 'filename'}
                 and row['filename'] == 'route-'+key+'.pem'
-                and row['certificate'] == shared['transports'][key].get('certificate'),
+                and row['certificate'] == trust[key].get('certificate'),
                 'Preserve the selected public certificate binding')
         rows.append(_row(row['filename'], discovery.certificate(row['certificate']).encode()))
     rows += [_row('pve-ca.pem', _certificate(public_ca)),

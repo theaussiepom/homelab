@@ -703,10 +703,12 @@ def _traefik(app, guest):
     require(storage['kind'] == 'directory' and storage['read_only'] is False,
             'Keep the selected certificate store writable')
     _mounts(app, {'certs': '/var/traefik/certs'})
+    private_relays = settings.get('private_tls_relays', {})
     require(all(row['service'] == 'traefik' and row['namespace'] == 'host'
-                and row['protocol'] == 'tcp' and row['port'] in (80, 443)
-                for row in app['listeners'].values()) and not _ports(app, 'traefik'),
-            'Keep Traefik on its declared host HTTP and HTTPS listeners')
+                and row['protocol'] == 'tcp'
+                and (row['interface'] == 'management_interface' if key in private_relays else row['port'] in (80, 443))
+                for key, row in app['listeners'].items()) and not _ports(app, 'traefik'),
+            'Keep Traefik on its declared host web and private TLS listeners')
     timeout = settings['acme'].get('propagation_timeout_seconds')
     require(timeout is None or type(timeout) is int and 120 <= timeout <= 2100,
             'Preserve the bounded selected ACME propagation timeout')

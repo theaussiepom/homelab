@@ -50,6 +50,54 @@ def ingress():
     return app,secrets,ca,{'verified':ca},plan
 
 
+class PrivateRelayFiles(unittest.TestCase):
+    def test_private_relay_uses_only_its_named_listener_client_and_backend_trust(self):
+        import component_foundation_files
+
+        app, secrets, ca, route_cas, plan = ingress()
+        app['role_addresses']['management_interface'] = '198.18.25.33'
+        app['listeners'] = {'relayed': {'actual_bind': '198.18.25.33', 'port': 7441}}
+        app['settings']['private_tls_relays'] = {'relayed': {
+            'hostname': 'host.example.invalid', 'client': '198.18.25.12',
+            'target_address': '198.18.25.1', 'target_port': 7441, 'transport': 'stream',
+        }}
+        plan['transports']['stream'] = {'server_name': 'nvr.example.invalid', 'ca_file': '/public/stream.pem'}
+        app['settings']['route_ca_files']['stream'] = {'source': '/public/stream.pem', 'filename': 'route-stream.pem'}
+        route_cas['stream'] = ca
+        rows = component_foundation_files.files(
+            app, secrets=secrets, public_ca=ca, route_cas=route_cas, route_plan=plan)
+        by_name = {row['path']: row['content'] for row in rows}
+        tcp = json.loads(by_name['shared.yml'])['tcp']
+        self.assertEqual(tcp['serversTransports'], {'stream': {'tls': {
+            'serverName': 'nvr.example.invalid', 'rootCAs': ['/etc/ssl/certs/route-stream.pem'],
+        }}})
+        self.assertEqual(tcp['middlewares'], {'private-relayed': {'ipAllowList': {'sourceRange': ['198.18.25.12/32']}}})
+        self.assertEqual(by_name['route-stream.pem'], ca)
+        app['settings']['private_tls_relays']['relayed'].pop('transport')
+        app['settings']['route_ca_files'].pop('stream')
+        route_cas.pop('stream')
+        rows = component_foundation_files.files(
+            app, secrets=secrets, public_ca=ca, route_cas=route_cas, route_plan=plan)
+        by_name = {row['path']: row['content'] for row in rows}
+        tcp = json.loads(by_name['shared.yml'])['tcp']
+        self.assertEqual(tcp['routers']['private-relayed']['tls'], {'passthrough': True})
+        self.assertNotIn('route-stream.pem', by_name)
+
+        app['settings']['private_tls_relays']['relayed']['transport'] = 'stream'
+        cases = (
+            lambda a, p: a['role_addresses'].update(management_interface='198.18.40.33'),
+            lambda a, p: a['listeners'].clear(),
+            lambda a, p: a['settings']['private_tls_relays']['relayed'].update(target_address='198.18.25.33'),
+            lambda a, p: p['transports']['stream'].pop('server_name'),
+        )
+        for mutate in cases:
+            candidate, candidate_plan = copy.deepcopy((app, plan))
+            mutate(candidate, candidate_plan)
+            with self.assertRaises(ValueError):
+                component_foundation_files.files(
+                    candidate, secrets=secrets, public_ca=ca, route_cas=route_cas, route_plan=candidate_plan)
+
+
 class FoundationFilesTests(unittest.TestCase):
     def test_cloudflare_owned_plugin_and_origin_token_are_only_in_private_payload(self):
         app, secrets, ca, cas, plan = ingress()

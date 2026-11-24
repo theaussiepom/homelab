@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 from component_errors import at
 from component_sources import closed, identifier, require
+from component_exposures import host
 import component_types as types
 
 OWNED = {'renovate', 'homeassistant', 'unbound', 'pihole', 'authentik', 'traefik', 'mqtt',
@@ -114,7 +115,7 @@ def validate(adapter, value, *, partial=False):
                     re.fullmatch('[a-zA-Z0-9][a-zA-Z0-9/_-]{0,127}', value['mqtt_base_topic']),
                     'component.property')
     elif adapter == 'traefik':
-        closed(value, (), ('dashboard', 'provider', 'acme'))
+        closed(value, (), ('dashboard', 'provider', 'acme', 'private_tls_relays'))
         require(type(value.get('dashboard', False)) is bool, 'component.property')
         if 'provider' in value:
             row = closed(value['provider'], ('context', 'token_id'), ('discovery',))
@@ -137,6 +138,22 @@ def validate(adapter, value, *, partial=False):
                 types.endpoint(ref)
             if 'propagation_timeout_seconds' in row:
                 types.integer(row['propagation_timeout_seconds'], 120, 2100)
+        if 'private_tls_relays' in value:
+            relays = value['private_tls_relays']
+            require(isinstance(relays, dict) and 1 <= len(relays) <= 16,
+                    'component.private-tls-relays')
+            ports = set()
+            for name, relay in relays.items():
+                with at('private_tls_relays', name):
+                    row = closed(relay, ('domain', 'port', 'client', 'target'), ('transport',))
+                    require(identifier(name) and identifier(row['domain']), 'component.reference')
+                    types.integer(row['port'], 1, 65535)
+                    require(row['port'] not in ports, 'component.private-tls-relays')
+                    ports.add(row['port'])
+                    physical(row['client'])
+                    types.endpoint(row['target'])
+                    if 'transport' in row:
+                        require(identifier(row['transport']), 'component.reference')
     else:
         closed(value)
 
@@ -315,7 +332,33 @@ def bind(resolver):
                 require(all(resolver.policy['tls'][row['tls']]['resolver'] == 'letsencrypt'
                             for row in routes.values()), 'component.tls-resolver-unsupported')
                 transports = getattr(resolver, 'authentication_values', {}).get('transports', {})
-                for key in sorted({row['transport'] for row in routes.values() if 'transport' in row}):
+                selected_transports = {row['transport'] for row in routes.values() if 'transport' in row}
+                if 'private_tls_relays' in props:
+                    values['private_tls_relays'] = {}
+                    for name, relay in props['private_tls_relays'].items():
+                        with at('private_tls_relays', name):
+                            target = resolver.endpoint(relay['target'])
+                            protocols = ('tcp', 'https') if 'transport' in relay else ('https',)
+                            require(target.get('protocol') in protocols, 'component.private-tls-relays')
+                            types.ip(target['address'])
+                            require(relay['domain'] in resolver.site['domains'], 'component.reference')
+                            hostname = host(resolver.site['domains'][relay['domain']])
+                            require('.' in hostname, 'component.hostname')
+                            selected = {
+                                'hostname': hostname,
+                                'client': _address(resolver, relay['client']),
+                                'target_address': target['address'],
+                                'target_port': target['port'],
+                            }
+                            if 'transport' in relay:
+                                key = relay['transport']
+                                trust = transports.get(key, {})
+                                require('server_name' in trust and ('ca_file' in trust or 'certificate' in trust),
+                                        'component.private-tls-relay-trust')
+                                selected['transport'] = key
+                                selected_transports.add(key)
+                            values['private_tls_relays'][name] = selected
+                for key in sorted(selected_transports):
                     require(key in transports, 'component.reference')
                     if 'ca_file' in transports[key]:
                         values['route_ca_files'][key] = {
