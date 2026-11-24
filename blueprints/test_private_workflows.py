@@ -269,6 +269,20 @@ class PrivateWorkflowTests(unittest.TestCase):
             changed=copy.deepcopy(value);mutate(changed)
             with self.subTest(mutation=repr(mutate)),self.assertRaises(ValueError):p.pbs_steps(changed,selected)
 
+        stack = {'repository': 'example/stack', 'revision': '3' * 40}
+        stack_checkout = {'uses': checkout, 'with': {'persist-credentials': False,
+                          'repository': stack['repository'], 'ref': stack['revision'], 'path': 'stack-source'}}
+        value['jobs']['validate']['steps'].insert(2, stack_checkout)
+        self.assertEqual(p.pbs_steps(value, selected, stack), steps)
+        with self.assertRaisesRegex(ValueError, 'same reviewed stack'):
+            p.pbs_steps(value, selected)
+        for changed_options in ({'ref': '4' * 40}, {'repository': 'foreign/stack'}, {'token': 'foreign'}):
+            original = dict(stack_checkout['with'])
+            stack_checkout['with'].update(changed_options)
+            with self.assertRaisesRegex(ValueError, 'same reviewed stack'):
+                p.pbs_steps(value, selected, stack)
+            stack_checkout['with'] = original
+
     def test_pbs_rejects_job_id_collision_without_overwriting(self):
         self.write_pbs(); original = workflows.models
         def collision(*args, **kwargs):

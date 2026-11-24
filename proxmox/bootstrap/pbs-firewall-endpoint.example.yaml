@@ -1,0 +1,26 @@
+schema: homelab-pbs-firewall-v2
+target:
+  address: 198.18.25.3
+  hostname: backup
+apps:
+  interface: ens5
+  mac: '02:00:00:00:40:03'
+  address: 198.18.40.3
+  proxy: 198.18.40.33
+management:
+  interface: ens3
+  mac: '02:00:00:00:25:03'
+  gateway: 198.18.25.1
+  ssh_clients: [198.18.25.11]
+  api_clients: [198.18.25.11, 198.18.10.0/28]
+storage:
+  interface: ens4
+  mac: '02:00:00:00:20:03'
+  address: 198.18.20.3
+  nfs_server: 198.18.20.2
+  api_clients: [198.18.20.21, 198.18.20.22]
+egress:
+  dns_servers: [198.18.40.2, 198.18.40.4]
+  time_servers: [198.18.25.12]
+  public_web: true
+  public_ntp: false

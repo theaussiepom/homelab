@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -163,6 +164,140 @@ class PBSFirewallTests(unittest.TestCase):
             f['config'] = p.render(old)
             f['ruleset'] = {'nftables': p.rules(old)}
             self.refused(p.inspect, config(), f)
+
+    def test_endpoint_first_apply_repeats_and_rejects_the_v1_collision(self):
+        """Use the same declared policy on a clean host and during owned convergence."""
+        c = p.authored_config.read(ROOT / 'pbs-firewall-endpoint.example.yaml')
+        f = observed()
+        f['storage_routes'][0][0]['prefsrc'] = c['storage']['address']
+        f.update(forwarding=['0', '0'], ssh_connection='198.18.25.11 42111 198.18.25.3 22')
+        first = p.inspect(c, f)
+        self.assertTrue(first['changed'])
+        self.assertEqual(first['baseline'], 'clean')
+        trial = {**f, 'ruleset': {'nftables': p.rules(c)}}
+        p.inspect_trial(c, trial, first)
+        self.refused(p.inspect, c, trial)
+        self.refused(p.inspect_trial, c, f, first)
+        self.refused(p.inspect_trial, c, {**trial, 'config': p.render(c)}, first)
+        final = {**observed(True), **{key: f[key] for key in
+                 ('addresses', 'forwarding', 'ssh_connection', 'storage_routes')},
+                 'ruleset': trial['ruleset'], 'config': p.render(c)}
+        self.assertFalse(p.inspect(c, final)['changed'])
+        accepted = p.inspect(c, final, final=True)
+        self.assertFalse(accepted['changed'])
+        self.assertEqual(accepted['baseline'], 'owned')
+        self.assertEqual(p.previous(final['config']), c)
+        self.refused(p.inspect, config(), final)
+        new = deepcopy(c)
+        new['apps']['proxy'] = '198.18.40.34'
+        update = p.inspect(new, final)
+        self.assertTrue(update['changed'])
+        p.inspect_trial(new, {**final, 'ruleset': {'nftables': p.rules(new)}}, update)
+        legacy = observed(True)
+        for key in ('addresses', 'forwarding', 'ssh_connection', 'storage_routes'):
+            legacy[key] = f[key]
+        self.refused(p.inspect, c, legacy)
+        for key, replacement in (
+            ('ssh_connection', '198.18.25.68 42111 198.18.25.3 22'),
+            ('ssh_connection', '198.18.25.11 42111 198.18.20.3 22'),
+            ('forwarding', ['0', '1']),
+            ('storage_routes', [[{'dst': '198.18.20.2', 'dev': 'ens4', 'prefsrc': '198.18.25.3'}]]),
+            ('routes', f['routes'] + [{'dst': 'default', 'dev': 'ens3', 'gateway': 'fe80::1'}]),
+        ):
+            self.refused(p.inspect, c, {**f, key: replacement})
+        for plane, key, value in (
+            ('management', 'ssh_clients', []),
+            ('storage', 'api_clients', ['198.18.20.0/24']),
+            ('storage', 'api_clients', ['198.18.20.21'] * 2),
+            ('storage', 'interface', 'ens3'),
+            ('storage', 'address', c['target']['address']),
+            ('egress', 'dns_servers', [c['target']['address']]),
+            ('egress', 'public_web', 'true'),
+        ):
+            changed = deepcopy(c)
+            changed[plane][key] = value
+            self.refused(p.validate, changed)
+
+    def test_endpoint_policy_limits_both_families_and_only_the_declared_services(self):
+        c = p.authored_config.read(ROOT / 'pbs-firewall-endpoint.example.yaml')
+        chains = p.endpoint_rules(c)
+        incoming = [line for line, _ in chains['input']]
+        outgoing = [line for line, _ in chains['output']]
+        self.assertEqual([line for line in incoming if 'dport 22 ' in line], [
+            'iifname "ens3" ip saddr 198.18.25.11 ip daddr 198.18.25.3 tcp dport 22 ct state { new, established } accept'])
+        self.assertEqual(len([line for line in incoming if 'dport 8007 ' in line]), 5)
+        self.assertTrue(any('ip saddr 198.18.10.0/28 ip daddr 198.18.25.3 tcp dport 8007' in line
+                            for line in incoming))
+        self.assertTrue(any(line.startswith('oifname "ens4" ip saddr 198.18.20.3 ip daddr 198.18.20.2 tcp dport 2049 ') for line in outgoing))
+        self.assertEqual(sum('dport 53 ' in line for line in outgoing), 4)
+        self.assertEqual(sum('dport 123 ' in line for line in outgoing), 1)
+        self.assertEqual(sum('ip daddr != {' in line for line in outgoing), 2)
+        self.assertEqual(chains['forward'], ())
+        self.assertEqual(p.render(c).count('policy drop;'), 3)
+        self.assertNotIn('flush ruleset', p.render(c))
+        c['egress'].update(public_web=False, public_ntp=True, time_servers=[])
+        only_public_ntp = [line for line, _ in p.endpoint_rules(c)['output'] if 'ip daddr != {' in line]
+        self.assertEqual(len(only_public_ntp), 1)
+        self.assertIn('udp dport 123', only_public_ntp[0])
+        c['egress']['public_ntp'] = False
+        self.refused(p.validate, c)
+
+    def test_derive_storage_peers_from_the_real_backup_transport_shape(self):
+        """Only scheduled jobs with an exact bound source and this server are admitted."""
+        server = '198.18.20.3'
+        member = 'guest-300'
+        source = '198.18.20.21'
+        job = {'destination': {'server': server, 'port': 8007, 'backup_id': member},
+               'group': {'name': 'nightly', 'member': member},
+               'transport': {'device': 'eth2', 'address': source}}
+        guest = {'backup': {'job': job}, 'interface_addresses': {'storage': source},
+                 'interfaces': {'storage': {'slot': 2, 'address': {'mode': 'static'}}}}
+        model = {'backup': {'group': {'group': {'name': 'nightly', 'members': {member: {}}}}},
+                 'guests': {'one': guest, 'unenrolled': {'backup': None}}}
+        self.assertEqual(p.enrolled_clients(model, server), [source])
+        for key, value in (('destination', {**job['destination'], 'server': '198.18.20.4'}),
+                           ('transport', {**job['transport'], 'device': 'eth0'}),
+                           ('group', {'name': 'another-group', 'member': member})):
+            different = deepcopy(model)
+            different['guests']['one']['backup']['job'][key] = value
+            self.refused(p.enrolled_clients, different, server)
+        self.refused(p.enrolled_clients, {**model, 'guests': {'one': guest, 'duplicate': guest}}, server)
+        with tempfile.TemporaryDirectory() as temporary:
+            declaration = p.authored_config.read(ROOT / 'pbs-firewall-endpoint.example.yaml')
+            declaration['storage']['api_clients'] = p.ENROLLED_CLIENTS
+            supplied = Path(temporary) / 'policy.yaml'
+            supplied.write_text(yaml.safe_dump(declaration))
+            self.refused(p.load_policy, supplied)
+            self.refused(p.load_policy, supplied, Path(temporary))
+            with patch('compile.site_path'), patch('compile.resolve_plan',
+                                                   return_value=SimpleNamespace(resolved=model)):
+                self.assertEqual(p.load_policy(supplied, temporary, temporary)['storage']['api_clients'], [source])
+            with patch('compile.site_path'), patch('compile.resolve_plan', side_effect=ValueError('foreign')):
+                self.refused(p.load_policy, supplied, temporary, temporary)
+
+    def test_management_sources_resolve_named_roles_without_widening(self):
+        c = p.authored_config.read(ROOT / 'pbs-firewall-endpoint.example.yaml')
+        roles = {'admin_vpn_clients': ['198.18.10.0/28'], 'deployment_runner': ['198.18.25.11/32']}
+        declared = [{'address_group': 'deployment_runner'}, {'address_group': 'admin_vpn_clients'}]
+        self.assertEqual(p.resolve_api_sources({'address_groups': roles}, declared),
+                         c['management']['api_clients'])
+        self.assertEqual(p.resolve_api_sources({'address_groups': roles}, ['198.18.25.11']),
+                         ['198.18.25.11'])
+        for sources in (['198.18.10.0/16'], ['198.18.25.0/28'], ['198.18.10.1/28'],
+                        ['198.18.10.0/28', '198.18.10.9'], ['198.18.25.11/32'], [None]):
+            c['management']['api_clients'] = sources
+            self.refused(p.validate, c)
+        c['management']['api_clients'] = declared
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'policy.yaml'
+            path.write_text(yaml.safe_dump(c))
+            with patch('compile.site_path'), patch('compile.resolve_plan',
+                    return_value=SimpleNamespace(resolved={'address_groups': roles})):
+                emitted = p.load_policy(path, directory, directory)
+                self.assertEqual(emitted['management']['api_clients'], ['198.18.25.11', '198.18.10.0/28'])
+                c['management']['api_clients'] = [{'address_group': 'missing'}]
+                path.write_text(yaml.safe_dump(c))
+                self.refused(p.load_policy, path, directory, directory)
 
     def test_file_kernel_service_and_first_ownership_refusals(self):
         """Foreign or uncertain persistence/rules never authorize replacing the policy."""

@@ -1,6 +1,6 @@
 # PBS interface firewall
 
-This separate host configuration uses `homelab-pbs-firewall-v1`; it is not a guest/app declaration and does not use the PBS backup API token. `proxmox/bootstrap/pbs_firewall.py` validates the explicitly named YAML file with the shared bounded authored loader. Unknown keys, omitted fields, null and empty values are refused. There are no implicit defaults or references to a site/library.
+This separate host configuration has an Apps interface policy (`homelab-pbs-firewall-v1`) and a plane-aware endpoint successor (`homelab-pbs-firewall-v2`). It uses the dedicated host-configuration identity. Backup API credentials retain their separate role. `proxmox/bootstrap/pbs_firewall.py` validates the explicitly named YAML file with the shared bounded authored loader. Unknown keys, omitted fields and null values are refused. Each version declares the policy in full.
 
 ## Complete input and field index
 
@@ -39,6 +39,72 @@ The support floor is Debian 13 with the installed nftables 1.1.3 package and its
 The generated `/etc/nftables.conf` replaces only this table in a single nft batch. It contains no global flush or includes. The [stock Debian service](https://sources.debian.org/src/nftables/1.1.3-1/debian/nftables.service/) loads it at boot and reload; the owned drop-in clears only its global `ExecStop`. CD syntax-checks before copying, loads when changed, enables/starts the stock service without restart, then verifies exact file, loaded unit and rules. Stopping that service leaves its policy in place. A failed or uncertain update stops CD and retains its real logs; there is no automatic rollback, retry, repair or policy-removal branch.
 
 ## Validate and deploy
+
+### Apply the endpoint policy
+
+The [complete fictional endpoint example](../../proxmox/bootstrap/pbs-firewall-endpoint.example.yaml)
+extends the three v1 fields with `management`, `storage` and `egress`. Verify the
+actual dedicated CD SSH source and the complete peer set before choosing a site
+binding. The endpoint version requires the supported Debian/nftables release,
+three distinct Ethernet identities, an IPv4 default route on Management,
+literal NFSv4 storage reached directly from Storage, and disabled IP forwarding.
+The Apps interface can remain disconnected and unaddressed during the first apply.
+Loopback supports both families. Configured remote services use IPv4.
+
+| Path | Presence/type | Meaning and refusal |
+| --- | --- | --- |
+| `schema` | Required string | Exactly `homelab-pbs-firewall-v2` for this variant. |
+| `target`, `apps` | Required mappings | Same fields and validation as v1. Declare the exact Apps proxy from site source. Its scoped rule can be installed before the proxy starts. |
+| `management.interface`, `management.mac` | Required strings | Exact independently observed Ethernet identity for the selected management target address. |
+| `management.gateway` | Required IPv4 host | Gateway for the sole observed default route on the management interface. |
+| `management.ssh_clients` | Required list of 1–16 distinct IPv4 hosts | TCP22 callers to the management address, including the current protected runner source. |
+| `management.api_clients` | Required list resolving to 1–16 IPv4 hosts or disjoint prefixes from /24 to /31 | TCP8007 callers with commissioned API, enrollment or administrator access. Bind existing source roles with `{address_group: name}` and supply the reviewed site and stack checkouts. The compiled policy preserves the exact selected hosts and prefixes. |
+| `storage.interface`, `storage.mac` | Required strings | Exact independently observed storage Ethernet identity. |
+| `storage.address`, `storage.nfs_server` | Required IPv4 hosts | Local client and sole mounted NFS server. The observed direct route uses this interface and source. The server is distinct from the PBS API clients. |
+| `storage.api_clients` | Required list of 1–64 distinct IPv4 hosts, or `enrolled-backup-clients` | TCP8007 callers. The site selector resolves the complete scheduled backup group from the pinned site/library and uses each job's exact static, interface-bound source to this PBS server. All three local SSH/API lists together contain at most 80 entries. |
+| `egress.dns_servers` | Required list of 1–8 distinct IPv4 hosts | Management-source DNS on TCP and UDP 53. |
+| `egress.time_servers` | Required list of 0–8 distinct IPv4 hosts | Management-source UDP123 to declared time servers. Select at least one server when `public_ntp` is false. |
+| `egress.public_web`, `egress.public_ntp` | Required booleans | Explicitly enable Management-source TCP80/TCP443 or UDP123 to public IPv4 respectively. The kernel rule excludes private, shared, link-local, test, multicast and reserved ranges. |
+
+The successor defaults INPUT, OUTPUT and FORWARD to drop. It permits loopback,
+IPv4 stateful replies, each declared service on its bound interface and address,
+and the exact Storage-source NFS transport. Storage SSH, RPC and inter-plane
+forwarding are denied. An ordinary deployment may update allowed peers, while
+changed interface, address, gateway, mount server or trust identity requires a
+separate reviewed handover. An ordinary source update accepts the same endpoint ownership.
+
+The endpoint trial accepts a verified stock starting state or an exact owned
+endpoint policy on disk and in the kernel. Existing v1 Apps rules or another
+owner's policy collide with first ownership. Retire that policy in an approved,
+separately recoverable maintenance step before selecting the endpoint policy.
+Preserve console access and keep Apps isolated during the handover. Applying
+an already matching endpoint policy makes zero changes.
+
+The playbook stages a changed candidate away from the boot file and arms a
+local three-minute rollback before loading it in the kernel. It checks the
+declared resolvers with the Management source, reads the candidate through a
+fresh admitted SSH connection, and opens a source-bound NFS TCP connection.
+It installs the boot file atomically and verifies exact source, kernel and
+persistence before cancelling rollback. First-apply rollback restores the
+original stock service and file and removes only the endpoint table. Later
+rollback restores the prior endpoint policy. Browser login after Traefik
+starts, credential and namespace access, a real backup and restore, and
+future reboot are separate acceptance checks.
+
+Validate the endpoint example without target contact:
+
+```sh
+python3 proxmox/bootstrap/pbs_firewall.py --config proxmox/bootstrap/pbs-firewall-endpoint.example.yaml --check
+```
+
+With the site selector, run the same CLI against the authored policy with
+`--site-root` and `--stack-root` set to the reviewed compatible checkouts.
+`--emit` returns the complete resolved policy as JSON. Pass those reviewed
+bytes to Ansible, whose single-host playbook revalidates them before SSH.
+The full scheduled backup group remains authoritative when an ordinary
+deployment temporarily skips a guest job.
+
+### Use the interface policy for first ownership
 
 From the selected framework checkout, using its locked Python tools:
 
