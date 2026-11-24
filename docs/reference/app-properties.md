@@ -50,11 +50,11 @@ The optional `client_access` list preserves order, defaults to [] and accepts at
 | acme.resolvers | 1–3 endpoint references that resolve to unique IPv4 DNS sockets on port 53 using TCP/UDP |
 | acme.propagation_timeout_seconds | Optional integer 120–2100; omission preserves the adapter default |
 | private_tls_relays | Optional map of 1–16 named relays. Omission leaves the listener set unchanged. |
-| private_tls_relays.<id>.domain | Required site domain reference. The relay accepts this TLS server name. |
-| private_tls_relays.<id>.port | Required TCP listen port from 1 through 65535. Each relay on the app needs a distinct port. |
-| private_tls_relays.<id>.client | Required `{app: id, interface: role}` reference to one physical IPv4 client interface. |
-| private_tls_relays.<id>.target | Required endpoint reference at a distinct IPv4 address. Passthrough requires HTTPS. A relay with a transport accepts TCP or HTTPS. |
-| private_tls_relays.<id>.transport | Optional named TLS transport. With this field, Traefik terminates client TLS and opens a new TLS connection to the target. The transport must declare a server name and either context trust or a public certificate. Without this field, Traefik forwards TLS unchanged. |
+| `private_tls_relays.<id>.domain` | Required site domain reference. The relay accepts this TLS server name. |
+| `private_tls_relays.<id>.port` | Required TCP listen port from 1 through 65535. Each relay on the app needs a distinct port. |
+| `private_tls_relays.<id>.client` | Required `{app: id, interface: role}` reference to one physical IPv4 client interface. |
+| `private_tls_relays.<id>.target` | Required endpoint reference at a distinct IPv4 address. Passthrough requires HTTPS. A relay with a transport accepts TCP or HTTPS. |
+| `private_tls_relays.<id>.transport` | Optional named TLS transport. With this field, Traefik terminates client TLS and opens a new TLS connection to the target. The transport must declare a server name and either context trust or a public certificate. Without this field, Traefik forwards TLS unchanged. |
 
 The current adapter requires the selected `cloudflare_dns_token` and `proxmox_token` roles; a route selecting `cloudflare-source` middleware also requires `cloudflare_origin_token`. Use the canonical [private-role inventory](identity-and-secrets.md#adapter-private-roles) and [Cloudflare boundary requirements](policies.md#cloudflare-source-boundary) when selecting those inputs. It obtains provider trust and the API endpoint from its context, and route-specific CAs from transport policies. You cannot supply those CAs through arbitrary runtime files.
 

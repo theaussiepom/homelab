@@ -73,27 +73,29 @@ class PrivateRelayFiles(unittest.TestCase):
         }}})
         self.assertEqual(tcp['middlewares'], {'private-relayed': {'ipAllowList': {'sourceRange': ['198.18.25.12/32']}}})
         self.assertEqual(by_name['route-stream.pem'], ca)
-        app['settings']['private_tls_relays']['relayed'].pop('transport')
-        app['settings']['route_ca_files'].pop('stream')
-        route_cas.pop('stream')
+        passthrough_app, passthrough_cas = copy.deepcopy((app, route_cas))
+        passthrough_app['settings']['private_tls_relays']['relayed'].pop('transport')
+        passthrough_app['settings']['route_ca_files'].pop('stream')
+        passthrough_cas.pop('stream')
         rows = component_foundation_files.files(
-            app, secrets=secrets, public_ca=ca, route_cas=route_cas, route_plan=plan)
+            passthrough_app, secrets=secrets, public_ca=ca, route_cas=passthrough_cas, route_plan=plan)
         by_name = {row['path']: row['content'] for row in rows}
         tcp = json.loads(by_name['shared.yml'])['tcp']
         self.assertEqual(tcp['routers']['private-relayed']['tls'], {'passthrough': True})
         self.assertNotIn('route-stream.pem', by_name)
 
-        app['settings']['private_tls_relays']['relayed']['transport'] = 'stream'
         cases = (
-            lambda a, p: a['role_addresses'].update(management_interface='198.18.40.33'),
-            lambda a, p: a['listeners'].clear(),
-            lambda a, p: a['settings']['private_tls_relays']['relayed'].update(target_address='198.18.25.33'),
-            lambda a, p: p['transports']['stream'].pop('server_name'),
+            ('separately from the frontend',
+             lambda a, p: a['role_addresses'].update(management_interface='198.18.40.33')),
+            ('distinct declared private relay socket', lambda a, p: a['listeners'].clear()),
+            ('distinct client and backend',
+             lambda a, p: a['settings']['private_tls_relays']['relayed'].update(target_address='198.18.25.33')),
+            ('explicit TLS trust anchor and server name', lambda a, p: p['transports']['stream'].pop('server_name')),
         )
-        for mutate in cases:
+        for message, mutate in cases:
             candidate, candidate_plan = copy.deepcopy((app, plan))
             mutate(candidate, candidate_plan)
-            with self.assertRaises(ValueError):
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
                 component_foundation_files.files(
                     candidate, secrets=secrets, public_ca=ca, route_cas=route_cas, route_plan=candidate_plan)
 
