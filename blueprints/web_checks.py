@@ -29,30 +29,38 @@ def job_results(raw, guests):
 
 def endpoint(row, owner, label, result):
     return {'guest': owner, 'label': label, 'exposure': row['exposure'], 'host': row['host'],
-            'port': row['port'], 'path': row['path'], **result}
+            'port': row['port'], 'path': row['path'], **({'check': row['mode']} if 'mode' in row else {}), **result}
 
 
 def check_owner(owner, metadata, rows, packet, results, global_jobs, executor, execute):
     """One guest retains its existing custody while its endpoints share the pool."""
-    unavailable = {key: results.get(key, 'missing') for key in [*global_jobs, *metadata['needs']]
-                   if results.get(key) != 'success'}
-    if unavailable:
-        return [endpoint(row, owner, metadata['name'], {'status': 'blocked',
-            'cause': 'prerequisite_not_successful', 'prerequisites': unavailable}) for row in rows]
+    needs = metadata.get('row_needs', [metadata['needs']] * len(rows))
+    require(len(needs) == len(rows), 'Account for every check prerequisite')
+    blocked = {}
+    for index, required in enumerate(needs):
+        unavailable = {key: results.get(key, 'missing') for key in [*global_jobs, *required]
+                       if results.get(key) != 'success'}
+        if unavailable:
+            blocked[index] = {'status': 'blocked', 'cause': 'prerequisite_not_successful',
+                              'prerequisites': unavailable}
+    if len(blocked) == len(rows):
+        return [endpoint(row, owner, metadata['name'], blocked[index]) for index, row in enumerate(rows)]
     try:
         try:
-            value = execute('http-checks', packet, route_executor=executor)
+            value = execute('http-checks', packet, route_executor=executor, **({'blocked_routes': blocked} if blocked else {}))
         except routed_checks.VerificationFailure as error:
             value = error.diagnostic
         details = value.get('endpoints')
         require(isinstance(details, list) and len(details) == len(rows)
                 and all(isinstance(item, dict) and item.get('endpoint') == index
                     and item.get('exposure') == rows[index]['exposure']
-                    and item.get('status') in ('passed', 'failed') for index,item in enumerate(details)),
+                    and (item.get('status') in ('passed', 'failed') if index not in blocked else item.get('status') == 'blocked')
+                    for index,item in enumerate(details)),
                 'Account for every admitted endpoint result')
         fields = {'status', 'attempts', 'stage', 'cause', 'http_status'}
-        return [endpoint(row, owner, metadata['name'], {key: value for key,value in result.items() if key in fields})
-                for row,result in zip(rows, details, strict=True)]
+        return [endpoint(row, owner, metadata['name'], blocked.get(index) or
+                         {key: value for key,value in result.items() if key in fields})
+                for index, (row, result) in enumerate(zip(rows, details, strict=True))]
     except Exception as error:
         try:
             diagnostic = deploy.failure_diagnostic(error)
@@ -120,11 +128,11 @@ def main():
         if os.environ.get('GITHUB_STEP_SUMMARY'):
             def cell(text):
                 return html.escape(str(text)[:1024]).replace('|', '&#124;').replace('\n', ' ').replace('\r', ' ')
-            lines = ['## Web endpoints', '', '| Status | Guest | Endpoint | Cause |', '| --- | --- | --- | --- |']
+            lines = ['## Web endpoints', '', '| Status | Guest | Check | Endpoint | Cause |', '| --- | --- | --- | --- | --- |']
             for row in value['endpoints']:
                 target = 'https://' + row['host'] + ':' + str(row['port']) + row['path']
                 lines.append('| ' + ' | '.join(cell(item) for item in
-                    (row['status'], row['guest'], target, row.get('cause', ''))) + ' |')
+                    (row['status'], row['guest'], row.get('check', ''), target, row.get('cause', ''))) + ' |')
             with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
                 summary.write('\n'.join(lines) + '\n')
         print(json.dumps({key: item for key,item in value.items() if key != 'endpoints'}, sort_keys=True))

@@ -7,6 +7,28 @@
     group: root
     mode: '0700'
 
+- name: Qualify the retained Authentik Redis predecessor
+  when:
+    - component_application.adapter == 'authentik'
+    - component_preflight.lifecycle == 'retained'
+    - component_services | length == 2
+    - not ansible_check_mode
+  block:
+    - name: Install the retained Redis ownership check
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../authentik_redis_retirement.py"
+        dest: /usr/local/bin/homelab-authentik-redis-retirement.py
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Retire the verified Redis container before replacing the shared Compose file
+      ansible.builtin.command:
+        argv: [python3, /usr/local/bin/homelab-authentik-redis-retirement.py, "{{ component_compose_file }}"]
+        stdin: "{{ component_preflight | to_json }}"
+      register: component_redis_retirement
+      changed_when: component_redis_retirement.rc == 0 and (component_redis_retirement.stdout | from_json).changed
+
 - name: Check the owned namespace before reconciliation
   ansible.builtin.command:
     argv: [python3, /usr/local/bin/homelab-component-preflight.py, before]
@@ -140,6 +162,18 @@
   changed_when: false
   no_log: true
   when: component_identity_callbacks is defined and not ansible_check_mode
+
+- name: Wait for the Authentik worker to apply the selected registrations
+  ansible.builtin.command:
+    argv:
+      - python3
+      - /opt/homelab-app/identity_blueprints.py
+      - "{{ component_compose_file }}"
+      - "{{ component_identity_blueprints.service }}"
+      - "{{ component_identity_blueprints.manifest }}"
+  register: component_registration_result
+  changed_when: component_registration_result.rc == 0 and (component_registration_result.stdout | from_json).changed
+  when: component_identity_blueprints is defined and not ansible_check_mode
 
 - name: Verify peer continuity
   ansible.builtin.command:

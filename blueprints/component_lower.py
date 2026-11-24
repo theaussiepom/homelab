@@ -59,6 +59,9 @@ def runtime_config(plan, guest_id):
                 **{key:copy.deepcopy(plan.resolved[key]) for key in
                    ('middlewares', 'transports', 'canonical_middlewares')}}
         selected['input_sources'] = copy.deepcopy(app.get('secret_bindings', {}))
+        if app['adapter'] == 'authentik' and 'oidc_blueprints' in app['settings']:
+            from component_input_secrets import blueprint_sources
+            selected['input_sources'].update(copy.deepcopy(blueprint_sources(app, plan.site['secret_sources'])))
         if app['adapter'] == 'cloudbeaver' and 'client_secret' in app.get('authentication_resolved', {}):
             source = app['authentication_resolved']['client_secret']
             selected['input_sources']['client_secret'] = copy.deepcopy(plan.site['secret_sources'][source])
@@ -83,6 +86,9 @@ def runtime_config(plan, guest_id):
             key = binding.get('root_path', binding.get('volume'))
             source = str(PurePosixPath(guest[kind][key]['path']) / binding['subpath'])
             selected['storage_paths'][role] = dict(profile['storage'][role], source=source)
+            if app['adapter'] == 'authentik' and role == 'data' and kind == 'volumes':
+                require(binding['subpath'] != '', 'component.storage-initialization-volume')
+                selected['storage_paths'][role]['volume_root'] = guest['volumes'][key]['path']
             if app['lifecycle'] == 'fresh' and 'initialize' in profile['storage'][role]:
                 require(kind == 'volumes' and binding['subpath'] != '',
                         'component.storage-initialization-volume')

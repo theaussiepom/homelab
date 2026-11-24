@@ -219,7 +219,8 @@ def model(plan):
                                   'needs': ['selection', *(['_backup'] if operational_backup and 'backup' in guests[guest] else []), *dependencies[guest]],
                                   'phases': phases, 'workflow_secrets': secrets}
     owners = {owner: {'name': label(row['name']), 'needs': row['needs'],
-                      'endpoint_count': len(resolved['routed_checks'][owner]['rows'])}
+                      'endpoint_count': len(resolved['routed_checks'][owner]['rows']),
+                      **({'row_needs': row['row_needs']} if 'row_needs' in row else {})}
               for owner,row in resolved.get('deferred_routed_checks', {}).items() if owner in active}
     checks = deferred_job(owners, active, operational_backup)
     if checks is not None:

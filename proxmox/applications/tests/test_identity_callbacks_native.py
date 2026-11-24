@@ -11,7 +11,7 @@ import subprocess
 import sys
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from uuid import UUID
 
 SOURCE=Path(os.environ.get('IDENTITY_CALLBACKS_MODULE',Path(__file__).resolve().parents[1]/'identity_callbacks.py'))
@@ -168,6 +168,32 @@ class CallbackNative(unittest.TestCase):
         for expression in (None,'x'*65537):
             with self.subTest(kind=type(expression).__name__),self.assertRaises(ValueError):
                 c.projection(provider,db.app,[binding],db.groups,[{'pk':uid(7),'name':'Profile','expression':expression}],{})
+
+    def test_new_group_model_preserves_reviewed_parent_cardinality(self):
+        model = MagicMock()
+        for parents in ([], [uid(8)], [uid(8), uid(9)]):
+            model.objects.select_for_update.return_value.filter.return_value.values.return_value = [
+                {'pk':uid(6), 'name':'Database users', 'is_superuser':False}]
+            model.objects.get.return_value.parents.values_list.return_value = parents
+            if len(parents) > 1:
+                with self.assertRaises(ValueError):
+                    c.bound_groups(model, [{'group_id':uid(6)}])
+            else:
+                value = c.bound_groups(model, [{'group_id':uid(6)}, {'group_id':None}])
+                self.assertEqual(value[0]['parent_id'], next(iter(parents), None))
+
+    def test_typed_authorization_redirects_remain_exact_and_idempotent(self):
+        db = Database()
+        db.provider['_redirect_uris'][0]['redirect_uri_type'] = 'authorization'
+        with db.installed():
+            self.assertEqual(c.apply_native([db.record])['changed'], 1)
+            self.assertEqual(c.apply_native([db.record])['changed'], 0)
+        self.assertEqual([entry['redirect_uri_type'] for entry in db.provider['_redirect_uris']],
+                         ['authorization'] * len(db.provider['_redirect_uris']))
+        db.provider['_redirect_uris'][0]['redirect_uri_type'] = 'logout'
+        with db.installed(), self.assertRaises(ValueError):
+            c.apply_native([db.record])
+        self.assertEqual(len(db.saved_fields), 1)
 
     def test_exact_apply_changes_only_redirect_field_in_serializable_transaction(self):
         db=Database();before=copy.deepcopy(db.provider)

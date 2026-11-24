@@ -30,6 +30,16 @@ def resolver(*, guests=True, apps=False):
 
 
 class PlanSourceReferenceReview(unittest.TestCase):
+    def test_authentik_owns_only_the_runtime_roles_selected_by_its_profile(self):
+        r = resolver()
+        profile = r.library['app_profiles']['recursive']
+        profile.update(adapter='authentik', runtime=['identity'])
+        r.library['runtime_profiles']['identity'] = {'containers':{'server':{},'worker':{}}}
+        with patch.object(plan.component_foundations, 'validate'):
+            r.app_values()
+        for app in r.apps.values():
+            self.assertEqual(set(app['identity']['services']), {'server','worker'})
+
     def test_constructor_merges_disjoint_policies_and_refuses_shadowing(self):
         r = resolver(guests=False)
         r.library['policies']['network']['library'] = {'rules': []}

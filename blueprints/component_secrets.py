@@ -9,12 +9,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'proxmox/applicatio
 from component_errors import at
 from component_sources import closed, identifier, named, require
 import component_types as types
-from component_input_secrets import ROLES as INPUT_ROLES, SLOTS
+from component_input_secrets import BLUEPRINT_SECRET_ROLES, ROLES as INPUT_ROLES, SLOTS, blueprint_sources
 
 # These are application capabilities, not environment-variable overrides.
 # Existing ordinary input custody owns materialization and runtime filenames.
 ROLES = {key: value for key, value in INPUT_ROLES.items() if key not in ('cloudbeaver', 'mqtt_explorer')}
 ROLES['pegaprox'] = {'database_key'}
+ROLES['authentik'] = ROLES['authentik'].difference(BLUEPRINT_SECRET_ROLES)
 
 
 def action_inputs(resolver, app_id):
@@ -22,6 +23,8 @@ def action_inputs(resolver, app_id):
     require(app_id in resolver.apps, 'component.reference')
     app = resolver.apps[app_id]
     selected = copy.deepcopy(app.get('secret_bindings', {}))
+    if app['adapter'] == 'authentik':
+        selected.update(blueprint_sources(app, resolver.site['secret_sources']))
     if app['adapter'] == 'cloudbeaver':
         auth = app.get('authentication_resolved', {})
         if 'client_secret' in auth:

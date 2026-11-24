@@ -230,7 +230,7 @@ def authentication(resolver, selected_providers):
             pega = value['type'] == 'pegaprox-oidc'
             closed(value, PEGAPROX_FIELDS if pega else ('type', 'provider', 'default_login') if saml else
                    ('type', 'provider', 'client_id', 'client_secret', 'display_name', 'user_claim')
-                   if cloud else ('type', 'provider', 'client_id'))
+                   if cloud else ('type', 'provider', 'client_id'), ('registration',) if pega else ())
             require(identifier(value['provider']) and value['provider'] in selected_providers,
                     'component.reference')
             provider = selected_providers[value['provider']]

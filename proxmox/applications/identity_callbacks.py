@@ -69,13 +69,20 @@ def policy_projection(value):
 def check(record, provider, application, policy):
     validate([record])
     expected = record['existing_redirects'] + [{'matching_mode': 'strict', 'url': url} for url in record['additions']]
+    redirects = provider.get('_redirect_uris') if isinstance(provider, dict) else None
+    if isinstance(redirects, list) and redirects and all(isinstance(item, dict)
+            and item.get('redirect_uri_type') == 'authorization' for item in redirects):
+        expected = [dict(item, redirect_uri_type='authorization') for item in expected]
+        original = [dict(item, redirect_uri_type='authorization') for item in record['existing_redirects']]
+    else:
+        original = record['existing_redirects']
     need(isinstance(provider, dict) and provider.get('pk') == record['provider_id']
          and provider.get('client_id_sha256') == record['client_id_sha256']
          and application.get('pk') == record['application_id'] and application.get('provider_id') == record['provider_id']
          and canonical({k: v for k, v in provider.items() if k != '_redirect_uris'}) == record['provider_metadata_sha256']
          and canonical(application) == record['application_metadata_sha256']
          and canonical(policy_projection(policy)) == record['policy_metadata_sha256']
-         and provider.get('_redirect_uris') in (record['existing_redirects'], expected))
+         and redirects in (original, expected))
     return copy.deepcopy(expected)
 
 
@@ -102,6 +109,20 @@ def projection(provider, application, bindings, groups, mappings, scopes):
         'policy': {'policy_bindings': policies, 'bound_groups': groups, 'property_mappings': properties}}, default=str))
 
 
+def bound_groups(model, bindings):
+    ids = [row['group_id'] for row in bindings if row['group_id'] is not None]
+    selected = model.objects.select_for_update().filter(pk__in=ids)
+    if not hasattr(model, 'parents'):
+        return list(selected.values('pk', 'name', 'parent_id', 'is_superuser')[:101])
+    groups = list(selected.values('pk', 'name', 'is_superuser')[:101])
+    for group in groups:
+        parents = list(model.objects.get(pk=group['pk']).parents.values_list('pk', flat=True)[:2])
+        # The original reviewed evidence can represent at most one parent.
+        need(len(parents) <= 1)
+        group['parent_id'] = next(iter(parents), None)
+    return groups
+
+
 def apply_native(values):
     """One serializable transaction owns exact rows and changes only _redirect_uris."""
     from django.db import connection, transaction
@@ -121,8 +142,7 @@ def apply_native(values):
                 'pk', 'name', 'slug', 'provider_id', 'policy_engine_mode', 'meta_launch_url').get()
             bindings = list(PolicyBinding.objects.select_for_update().filter(target_id=record['application_id']).values(
                 'pk', 'policy_id', 'group_id', 'user_id', 'order', 'negate', 'enabled', 'timeout')[:101])
-            groups = list(Group.objects.select_for_update().filter(pk__in=[r['group_id'] for r in bindings
-                          if r['group_id'] is not None]).values('pk', 'name', 'parent_id', 'is_superuser')[:101])
+            groups = bound_groups(Group, bindings)
             mapping_ids = list(obj.property_mappings.values_list('pk', flat=True)[:101])
             mappings = list(PropertyMapping.objects.select_for_update().filter(pk__in=mapping_ids).values('pk', 'name', 'expression')[:101])
             scopes = {str(pk): scope for pk, scope in ScopeMapping.objects.select_for_update().filter(pk__in=mapping_ids).values_list('pk', 'scope_name')}

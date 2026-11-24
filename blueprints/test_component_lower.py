@@ -37,6 +37,15 @@ def app(adapter='node_red',*,guest='one',native=False,name='selected'):
 
 
 class LowerComponentTests(unittest.TestCase):
+    def test_identity_receives_only_selected_client_secret_source(self):
+        plan = fixture()
+        identity = app('authentik')
+        identity['settings']['oidc_blueprints'] = {'console':{'secret_role':'oidc_client_1',
+                                                             'secret_source':'oauth'}}
+        plan.resolved['apps'] = {'selected':identity}
+        lowered = lower.runtime_config(plan,'one')['applications']['selected']
+        self.assertEqual(lowered['input_sources'], {'oidc_client_1':plan.site['secret_sources']['oauth']})
+
     def test_recording_mount_is_a_separate_exact_append_after_managed_volumes(self):
         plan=fixture(); guest=plan.resolved['guests']['one']
         value={'source':'/mnt/example/recordings','slot':2,
