@@ -345,6 +345,89 @@ class ReferenceExamples(unittest.TestCase):
         wrong=copy.deepcopy(selected);wrong['external_endpoints']['backend']['protocol']='http'
         expect_component_refusal(lambda:self.resolve(wrong,library),'component.transport',('exposures','backend'))
 
+    def test_private_tls_relays_preserve_web_ingress_and_bind_exact_clients_and_trust(self):
+        import component_foundation_files
+        complete = ROOT / 'docs/examples/backend-transport'
+        library = authored_config.read(ROOT / 'docs/examples/relationships/stack.json')
+        selected = authored_config.read(complete / 'site.yaml')
+        shutil.copyfile(ROOT / 'docs/examples/relationships/images.json', self.config / 'images.json')
+        shutil.copyfile(complete / 'transport.yaml', self.config / 'transport.yaml')
+        pem = authored_config.read(complete / 'transport.yaml')['certificate']
+        profile = library['app_profiles']['ingress']
+        profile['interfaces'].update({
+            role: {'required': False, 'accepts': ['guest-interface']}
+            for role in ('management_interface', 'client_interface')
+        })
+        guest = selected['guests']['edge']
+        for slot, interface in enumerate(('private', 'client'), 1):
+            guest['interfaces'][interface] = {
+                'network': 'primary', 'slot': slot, 'mac': f'02:00:00:20:00:0{slot}',
+                'address': {'mode': 'static', 'value': f'198.18.20.{20 + slot}'},
+                'default_route': False, 'ipv6': 'manual',
+            }
+        ingress = selected['apps']['ingress']
+        ingress['interfaces'].update({
+            'management_interface': {'interface': 'private'},
+            'client_interface': {'interface': 'client'},
+        })
+        client = {'app': 'ingress', 'interface': 'client_interface'}
+        target = {'external': 'backend'}
+        relays = {
+            'private_api': {'port': 443, 'domain': 'backend', 'client': client, 'target': target},
+            'private_stream': {'port': 7441, 'domain': 'backend', 'client': client,
+                               'target': target, 'transport': 'backend'},
+        }
+        ingress['properties']['private_tls_relays'] = relays
+        plan, packets = self.resolve(selected, library)
+        app = plan.resolved['apps']['ingress']
+        self.assertEqual(app['listeners']['private_api']['actual_bind'], '198.18.20.21')
+        self.assertEqual(app['listeners']['private_stream']['port'], 7441)
+        self.assertEqual(app['listeners']['https_listener']['actual_bind'], '198.18.20.10')
+        runtime = json.loads(packets['edge']['files']['component-runtime.json'])['applications']['ingress']
+        provider = {'schema': 'homelab-service-discovery-v1', 'identity': 'fixture@pve!discovery',
+                    'token': 'fixture@pve!discovery=synthetic-source-only-value'}
+        rows = component_foundation_files.files(runtime, secrets={
+            'proxmox_token': json.dumps(provider).encode(), 'cloudflare_dns_token': b'synthetic-source-only-value'},
+            public_ca=pem.encode(), route_cas={}, route_plan=runtime['route_plan'])
+        documents = {row['path']: json.loads(row['content']) for row in rows if row['path'].endswith('.yml')}
+        entrypoints = documents['traefik.yml']['entryPoints']
+        self.assertEqual(entrypoints['websecure'], {'address': '198.18.20.10:443', 'asDefault': True})
+        self.assertEqual(entrypoints['private-private_api'], {'address': '198.18.20.21:443'})
+        self.assertEqual(entrypoints['private-private_stream'], {'address': '198.18.20.21:7441'})
+        tcp = documents['shared.yml']['tcp']
+        self.assertEqual(tcp['routers']['private-private_api']['tls'], {'passthrough': True})
+        self.assertEqual(tcp['routers']['private-private_stream']['tls'], {'certResolver': 'letsencrypt'})
+        self.assertEqual(tcp['routers']['private-private_stream']['rule'], 'HostSNI(`backend.example.invalid`)')
+        self.assertEqual(tcp['middlewares']['private-private_stream'],
+                         {'ipAllowList': {'sourceRange': ['198.18.20.22/32']}})
+        self.assertEqual(tcp['services']['private-private_stream']['loadBalancer'], {
+            'servers': [{'address': '198.18.25.80:8443', 'tls': True}], 'serversTransport': 'backend',
+        })
+        self.assertEqual(tcp['serversTransports']['backend'], {'tls': {
+            'serverName': 'backend.example.invalid', 'rootCAs': ['/etc/ssl/certs/route-backend.pem'],
+        }})
+        self.assertIn('backend', documents['shared.yml']['http']['routers'])
+
+        for fault in ('colliding_id', 'missing_interface', 'same_interface',
+                      'missing_domain', 'wrong_protocol', 'missing_trust'):
+            wrong = copy.deepcopy(selected)
+            changed = wrong['apps']['ingress']
+            rows = changed['properties']['private_tls_relays']
+            if fault == 'colliding_id':
+                rows['https_listener'] = rows.pop('private_api')
+            elif fault == 'missing_interface':
+                changed['interfaces'].pop('management_interface')
+            elif fault == 'same_interface':
+                changed['interfaces']['management_interface'] = changed['interfaces']['frontend_interface']
+            elif fault == 'missing_domain':
+                rows['private_api']['domain'] = 'missing'
+            elif fault == 'wrong_protocol':
+                rows['private_api']['target'] = {'external': 'dns'}
+            else:
+                rows['private_stream']['transport'] = 'missing'
+            with self.subTest(fault=fault), self.assertRaises(ValueError):
+                self.resolve(wrong, library)
+
     def test_all_adapter_property_objects_validate_and_named_invalid_properties_refuse(self):
         values=example('app-properties.md','properties-adapters')
         self.assertEqual(set(values),component_foundations.OWNED | component_properties.ADAPTERS)

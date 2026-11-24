@@ -82,6 +82,19 @@ class FoundationValidatorEdges(unittest.TestCase):
         self.assertNotIn('timeout',identity['smtp']);self.assertNotIn('discovery',ingress['provider'])
         self.assertNotIn('propagation_timeout_seconds',ingress['acme'])
 
+    def test_traefik_private_tls_relay_shapes_are_closed_and_port_bindings_unique(self):
+        relay = {'domain': 'edge', 'port': 443,
+                 'client': {'app': 'client', 'interface': 'management_interface'},
+                 'target': {'external': 'console'}}
+        foundation.validate('traefik', {'private_tls_relays': {'proxy': relay}})
+        foundation.validate('traefik', {'private_tls_relays': {'proxy': dict(relay, transport='anchor')}})
+        invalid = [{}, [], {'proxy': dict(relay, insecure=True)}, {'proxy': dict(relay, port=True)},
+                   {'proxy': relay, 'second': relay}, {'bad name': relay},
+                   {'proxy': dict(relay, transport=False)}, {'proxy': dict(relay, client={'app': 'client'})}]
+        for relays in invalid:
+            with self.subTest(relays=relays), self.assertRaises(ComponentError):
+                foundation.validate('traefik', {'private_tls_relays': relays})
+
     def test_callback_collection_and_provider_uuid_digest_fields_are_closed(self):
         for values in (None,{},[],[callback()]*9,[callback(),callback()]):
             with self.subTest(kind=type(values).__name__),self.assertRaises(ComponentError):foundation._callback_records(values)

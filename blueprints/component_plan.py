@@ -352,8 +352,26 @@ class Resolver:
     def endpoint_values(self):
         for name, app in self.apps.items():
             profile = self.library['app_profiles'][app['profile']]
+            authored_listeners = dict(profile.get('listeners', {}))
+            authored_endpoints = dict(profile.get('endpoints', {}))
+            if app['adapter'] == 'traefik':
+                for relay_id, relay in app['properties'].get('private_tls_relays', {}).items():
+                    require(relay_id not in authored_listeners and relay_id not in authored_endpoints,
+                            'component.private-tls-relays')
+                    role = 'management_interface'
+                    require(role in app['interfaces'] and 'interface' in app['interfaces'][role]
+                            and self.role_address(app, role) != self.role_address(app, 'frontend_interface'),
+                            'component.private-tls-relay-interface')
+                    authored_listeners[relay_id] = {
+                        'service': 'traefik', 'namespace': 'host', 'interface': role,
+                        'bind': 'interface', 'protocol': 'tcp', 'port': relay['port'],
+                    }
+                    authored_endpoints[relay_id] = {
+                        'listener': relay_id, 'protocol': 'tcp' if 'transport' in relay else 'https',
+                        'via': role,
+                    }
             listeners = {}
-            for listener_id, authored in profile.get('listeners', {}).items():
+            for listener_id, authored in authored_listeners.items():
                 listener = copy.deepcopy(authored)
                 if app['adapter'] == 'unbound' and listener.get('publish', {}).get('scope') == 'guest-loopback':
                     listener['publish']['port'] = app['properties'].get('publish_port', 5335)
@@ -381,7 +399,7 @@ class Resolver:
                     result['publication_address'] = address
                 listeners[listener_id] = result
             app['listeners'] = listeners
-            for endpoint_id, endpoint in profile.get('endpoints', {}).items():
+            for endpoint_id, endpoint in authored_endpoints.items():
                 if 'internal' in endpoint:
                     if app['properties'].get('dashboard', False):
                         self.endpoints[('app', name, endpoint_id)] = {'internal': 'dashboard',
