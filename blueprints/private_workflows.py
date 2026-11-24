@@ -130,7 +130,7 @@ def pbs_workflow(site, labels):
     return value
 
 
-def pbs_steps(value, framework):
+def pbs_steps(value, framework, stack_source=None):
     """Combine the existing pure check and native policy stages under shared setup."""
     validation, native = value['jobs']['validate'], value['jobs']['firewall']
     compiler.require(sum(step.get('id') == 'selection' for step in validation['steps']) == 1,
@@ -159,6 +159,12 @@ def pbs_steps(value, framework):
                     compiler.require(options.get('repository') == framework['repository']
                                      and options.get('ref') == framework['revision'],
                                      'Select the same reviewed framework for PBS policy and Backup CD')
+                elif options.get('path') == 'stack-source':
+                    compiler.require(stack_source is not None
+                                     and set(options) == {'path', 'repository', 'ref', 'persist-credentials'}
+                                     and options.get('repository') == stack_source['repository']
+                                     and options.get('ref') == stack_source['revision'],
+                                     'Select the same reviewed stack for PBS policy and Backup CD')
                 else:
                     compiler.require(set(options) <= {'persist-credentials', 'ref'}
                                      and options.get('ref', '${{ github.sha }}') == '${{ github.sha }}',
@@ -239,7 +245,7 @@ def model(stack, site):
         result['jobs'][guest] = job
     if pbs:
         framework = compiler.workflow_selection(stack/'.github/workflows/phase.yml', 'guest-phase.yml')
-        steps = pbs_steps(pbs, framework)
+        steps = pbs_steps(pbs, framework, selected_source)
         if '_backup' not in result['jobs']:
             result['jobs']['_backup'] = {'name': 'Configure backups', 'needs': ['validate', 'selection'],
                 'if': condition + " && !failure() && !cancelled() && needs.validate.result == 'success' && needs.selection.result == 'success'",

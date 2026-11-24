@@ -1,0 +1,140 @@
+#!/bin/bash
+set -euo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+umask 077
+
+action=$1
+state=$2
+previous=$3
+desired=$4
+baseline=$5
+config=/etc/nftables.conf
+unit=homelab-pbs-firewall-rollback
+dropin_dir=/etc/systemd/system/nftables.service.d
+dropin=$dropin_dir/50-homelab-pbs.conf
+table=homelab_pbs_endpoint
+
+[[ $EUID == 0 && $state =~ ^/run/homelab-pbs-firewall\.[a-zA-Z0-9_-]+$ ]]
+[[ $previous =~ ^[0-9a-f]{64}$ && $desired =~ ^[0-9a-f]{64}$ && $previous != "$desired" ]]
+[[ $baseline == clean || $baseline == owned ]]
+[[ ! -L $state && $(stat -c '%u:%g:%a' "$state") == 0:0:700 ]]
+lock_dir=/run/homelab-pbs-firewall-lock
+mkdir -m 0700 -- "$lock_dir" 2>/dev/null || true
+[[ -d $lock_dir && ! -L $lock_dir && $(stat -c '%u:%g:%a' "$lock_dir") == 0:0:700 ]]
+exec 9>>"$lock_dir/lock"
+flock -x -w 20 9
+
+checksum() {
+    local result mode
+    [[ -f $1 && ! -L $1 && $(stat -c '%u:%g:%h' "$1") == 0:0:1 ]] || return 1
+    mode=$(stat -c '%a' "$1") || return 1
+    [[ $mode == "$2" ]] || return 1
+    result=$(sha256sum "$1") || return 1
+    printf '%s\n' "${result%% *}"
+}
+
+publish() {
+    local temporary
+    temporary=$(mktemp "$(dirname "$2")/.homelab-pbs-firewall.XXXXXXXX")
+    if ! install -m "$3" -- "$1" "$temporary" || ! mv -T -- "$temporary" "$2"; then
+        rm -f -- "$temporary"
+        return 1
+    fi
+}
+
+clean_service() {
+    [[ $(systemctl show -p ActiveState --value nftables.service) == inactive ]]
+    [[ $(systemctl show -p UnitFileState --value nftables.service) == disabled ]]
+    [[ ! -e $dropin && ! -L $dropin ]]
+}
+
+install_dropin() {
+    clean_service
+    if [[ -e $dropin_dir || -L $dropin_dir ]]; then
+        [[ -d $dropin_dir && ! -L $dropin_dir && $(stat -c '%u:%g:%a' "$dropin_dir") == 0:0:755 ]]
+    else
+        mkdir -m 0755 -- "$dropin_dir"
+        touch "$state/created-dropin-directory"
+    fi
+    publish "$state/dropin" "$dropin" 0644
+    systemctl daemon-reload
+    [[ -z $(systemctl show -p ExecStop --value nftables.service) ]]
+}
+
+undo_first_apply() {
+    if [[ -e $dropin || -L $dropin ]]; then
+        [[ $(checksum "$dropin" 644) == "$(checksum "$state/dropin" 600)" ]]
+        if [[ $(systemctl show -p ActiveState --value nftables.service) != inactive ]]; then
+            [[ -z $(systemctl show -p ExecStop --value nftables.service) ]]
+            systemctl stop nftables.service
+        fi
+        systemctl disable nftables.service
+        rm -- "$dropin"
+        systemctl daemon-reload
+    fi
+    if [[ -e $state/created-dropin-directory ]]; then rmdir -- "$dropin_dir"; fi
+    # The stock configuration includes a global flush. Remove only our table.
+    printf 'add table inet %s\ndelete table inet %s\n' "$table" "$table" | nft --file -
+    clean_service
+}
+
+case "$action" in
+    apply)
+        prior_mode=$(stat -c '%a' "$config")
+        if [[ $baseline == clean ]]; then
+            [[ $prior_mode == 600 || $prior_mode == 644 || $prior_mode == 755 ]]
+            clean_service
+        else
+            [[ $prior_mode == 600 ]]
+        fi
+        [[ $(checksum "$config" "$prior_mode") == "$previous" ]]
+        [[ $(checksum "$state/desired.nft" 600) == "$desired" && ! -e $state/previous.nft ]]
+        printf '%s\n' "$prior_mode" > "$state/previous.mode"
+        install -m 0600 -- "$config" "$state/previous.nft"
+        if [[ $baseline == owned ]]; then nft --check --file "$state/previous.nft"; fi
+        nft --check --file "$state/desired.nft"
+        systemd-run --unit="$unit" --on-active=180s --timer-property=AccuracySec=1s \
+            --property=TimeoutStartSec=55s /bin/bash "$state/trial" rollback "$state" "$previous" "$desired" "$baseline"
+        systemctl is-active --quiet "$unit.timer"
+        nft --file "$state/desired.nft"
+        ;;
+    persist)
+        systemctl is-active --quiet "$unit.timer"
+        read -r prior_mode < "$state/previous.mode"
+        [[ ! -e $state/rolled-back && $(checksum "$config" "$prior_mode") == "$previous" ]]
+        [[ $(checksum "$state/desired.nft" 600) == "$desired" ]]
+        if [[ $baseline == clean ]]; then install_dropin; fi
+        publish "$state/desired.nft" "$config" 0600
+        if [[ $baseline == clean ]]; then
+            systemctl enable --now nftables.service
+        fi
+        ;;
+    accept)
+        systemctl is-active --quiet "$unit.timer"
+        [[ ! -e $state/rolled-back && $(checksum "$config" 600) == "$desired" ]]
+        systemctl stop "$unit.timer"
+        touch "$state/accepted"
+        ;;
+    rollback)
+        [[ ! -e $state/accepted ]] || exit 0
+        read -r prior_mode < "$state/previous.mode"
+        [[ $prior_mode == 600 || $prior_mode == 644 || $prior_mode == 755 ]]
+        [[ $(checksum "$state/previous.nft" 600) == "$previous" ]]
+        if [[ $(checksum "$config" "$prior_mode" || true) == "$previous" ]]; then
+            current=$previous
+        else
+            current=$(checksum "$config" 600)
+            [[ $current == "$desired" ]]
+        fi
+        if [[ $baseline == clean ]]; then
+            undo_first_apply
+        else
+            nft --file "$state/previous.nft"
+        fi
+        if [[ $current == "$desired" ]]; then publish "$state/previous.nft" "$config" "$prior_mode"; fi
+        touch "$state/rolled-back"
+        ;;
+    *)
+        exit 2
+        ;;
+esac
