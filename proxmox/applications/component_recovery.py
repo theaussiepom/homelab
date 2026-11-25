@@ -418,7 +418,7 @@ def finish_restore(cfg, operation, proof=None):
 
 
 def reconcile(cfg, operation, selected_path, selected, *, reason, actor_context, expected_controls=None,
-              staging_growth=None):
+              staging_growth=None, pending_forward=False):
     """Verify engineer repair; no configuration apply, restart or data operation."""
     import proxmox_guest
     work = operation.parent
@@ -446,10 +446,11 @@ def reconcile(cfg, operation, selected_path, selected, *, reason, actor_context,
         expected_identity = read_json(Path(original['operation'])/'infrastructure-complete.json', private=True)['state_identity']
     require(identity == expected_identity, 'Reconciliation preserves backend resource ownership')
     identity_suffix = (os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT']
-                       if staging_growth is None else operation.name.removeprefix('ordinary-'))
+                       if staging_growth is None and not pending_forward else operation.name.removeprefix('ordinary-'))
     recovery = work/('recovery-' + identity_suffix)
     private_directory(recovery, create=not recovery.exists())
-    inspect = recovery/'infrastructure'; private_directory(inspect, create=not inspect.exists())
+    inspect = attempt_directory(recovery, 'forward-infrastructure') if pending_forward else recovery/'infrastructure'
+    private_directory(inspect, create=not inspect.exists())
     infrastructure, binding = (cfg, selected['binding']) if staging_growth is None else staging_growth
     proxmox_guest.infrastructure(infrastructure, Path(infrastructure['deployment']['input_directory'])/'site.json',
         work, inspect, binding, state_identity=identity,

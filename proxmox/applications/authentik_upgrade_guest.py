@@ -54,9 +54,13 @@ def check(selection, file, image):
                       '--format', '{{.Label "com.docker.compose.service"}}').splitlines()
     require(sorted(services) == sorted(document['services']), 'Preserve unexpected or missing project services')
     roles = selection['roles']
-    hashes = dict(line.split() for line in docker(*compose(project, file), 'config', '--hash', ','.join(roles)).splitlines())
-    require(set(hashes) == set(roles) and all(re.fullmatch('[0-9a-f]{64}', value) for value in hashes.values()),
+    redis = selection['redis']
+    checked = [*roles, redis] if redis in document['services'] else roles
+    hashes = dict(line.split() for line in docker(*compose(project, file), 'config', '--hash', ','.join(checked)).splitlines())
+    require(set(hashes) == set(checked) and all(re.fullmatch('[0-9a-f]{64}', value) for value in hashes.values()),
             'Verify the expected Compose service definitions')
+    if redis in hashes:
+        active(project, redis, document['services'][redis]['image'], hashes[redis])
     worker_id = None
     for role in roles:
         worker_id = active(project, role, image, hashes[role])
@@ -84,6 +88,25 @@ def compose(project, file):
     return ['compose', '--project-directory', str(APP_ROOT), '-p', project, '-f', str(file)]
 
 
+def stage_file(selection, journal, index, document):
+    original = journal/f'stage-{index}.yml'
+    publish(original, document)
+    redis = selection['redis']
+    if redis not in document['services']:
+        return original
+    # Compose --no-deps excludes the Redis dependency from the running role
+    # hashes on older engines. Start and inspect the same explicit projection.
+    services = document['services'].copy()
+    for role in selection['roles']:
+        service = services[role].copy()
+        require(service.pop('depends_on', None) == {redis: {'condition': 'service_healthy'}},
+                'Preserve the declared legacy Authentik Redis dependency')
+        services[role] = service
+    selected = journal/f'stage-{index}-owned.yml'
+    publish(selected, dict(document, services=services))
+    return selected
+
+
 def release_image(journal, index):
     prior = read_json(journal/f'started-{index}.json', private=True)
     if prior['pulled_for_maintenance']:
@@ -95,22 +118,30 @@ def release_image(journal, index):
             pass
 
 
-def run(selection, canonical, *, final=False):
+def run(selection, canonical, *, final=False, resume=False):
     root = canonical.parent
     private_directory(root)
     require(root == APP_ROOT and re.fullmatch(r'[a-z][a-z0-9_-]{0,62}\.ya?ml', canonical.name),
             'Maintain the admitted Authentik project only')
     identity = digest(encoded(selection))
     parent = root/'.authentik-upgrades'
-    private_directory(parent, create=not parent.exists())
+    private_directory(parent, create=not resume and not parent.exists())
     journal = parent/identity
-    private_directory(journal, create=not journal.exists())
+    private_directory(journal, create=not resume and not journal.exists())
     # Existing Compose files are private and carry no runtime secret values for this adapter.
-    require(read_json(canonical, private=True) == selection['final' if final else 'initial'],
+    installed = read_json(canonical, private=True)
+    if resume and installed == selection['final']:
+        return dict(run(selection, canonical, final=True), changed=False, final_installed=True)
+    require(installed == selection['final' if final else 'initial'],
             'Installed Compose differs from the declared maintenance selection')
     project = selection['project']
     refs = selection['images']
     initial = journal/'baseline.json'
+    if resume:
+        require(read_json(journal/'source.yml', private=True) == selection['initial']
+                and read_json(journal/'started-1.json', private=True)['image'] == refs[1]
+                and read_json(initial, private=True)['pending'] == 0,
+                'Resume only the existing started release journal and registration baseline')
     if final:
         baseline = read_json(initial, private=True)
         last = len(selection['stages'])
@@ -130,8 +161,7 @@ def run(selection, canonical, *, final=False):
     rows = list(zip(refs[1:-1], selection['stages'], strict=True))
     completed = 0
     for index, (image, document) in enumerate(rows, 1):
-        stage = journal/f'stage-{index}.yml'
-        publish(stage, document)
+        stage = stage_file(selection, journal, index, document)
         finished = journal/f'completed-{index}.json'
         started = journal/f'started-{index}.json'
         if finished.exists():
@@ -171,8 +201,9 @@ def run(selection, canonical, *, final=False):
 
 def main():
     os.umask(0o077)
-    require(len(sys.argv) == 2 or sys.argv[2:] == ['final'], 'Select a maintenance operation')
-    print(json.dumps(run(json.load(sys.stdin), Path(sys.argv[1]), final=len(sys.argv) == 3)))
+    require(len(sys.argv) == 2 or sys.argv[2:] in (['final'], ['resume']), 'Select a maintenance operation')
+    print(json.dumps(run(json.load(sys.stdin), Path(sys.argv[1]),
+                         final=sys.argv[2:] == ['final'], resume=sys.argv[2:] == ['resume'])))
 
 
 if __name__ == '__main__':

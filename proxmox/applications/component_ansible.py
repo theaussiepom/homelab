@@ -229,7 +229,7 @@ def variables(cfg, phase, *, payload=None, previously_owned=False, initialize_ru
     return result
 
 
-def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, previously_owned=False, initialize_runtime=False, upgrade=None):
+def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, previously_owned=False, initialize_runtime=False, upgrade=None, resume=False):
     require(component_inputs.binding(cfg,site)==expected, 'Static component inputs changed before Ansible')
     if payload is not None:payload.check()
     if payload is not None and phase not in ('preparation',component_guest.AGENT_PHASE,component_guest.BACKUP_PHASE):
@@ -243,6 +243,7 @@ def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, prev
     selected=variables(cfg,phase,payload=payload,previously_owned=previously_owned,initialize_runtime=initialize_runtime)
     if upgrade is not None:
         selected['component_authentik_upgrade'] = upgrade
+        selected['component_authentik_resume'] = resume
     phase_app=selected['component_preparation_app'] if phase=='preparation' else selected['app']
     phase_app['render_dir']=str(phase_work/'rendered')
     write(phase_work/'variables.json',selected)

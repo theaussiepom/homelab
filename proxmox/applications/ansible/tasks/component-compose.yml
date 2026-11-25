@@ -20,7 +20,7 @@
       loop: [authentik_upgrade_guest.py, authentik_redis_retirement.py, private_io.py]
     - name: Advance only the server and worker through the reviewed releases
       ansible.builtin.command:
-        argv: [python3, /opt/homelab-app/authentik_upgrade_guest.py, "{{ component_compose_file }}"]
+        argv: "{{ ['python3', '/opt/homelab-app/authentik_upgrade_guest.py', component_compose_file] + (['resume'] if component_authentik_resume | default(false) else []) }}"
         stdin: "{{ component_authentik_upgrade | to_json }}"
       no_log: true
       register: component_authentik_migration
@@ -170,7 +170,7 @@
 - name: Stop both previous Authentik processes before the final schema upgrade
   ansible.builtin.command:
     argv: "{{ component_compose_argv + ['stop', '--timeout', '60'] + component_services }}"
-  when: component_authentik_upgrade is defined and not ansible_check_mode
+  when: component_authentik_upgrade is defined and not ansible_check_mode and not ((component_authentik_migration.stdout | from_json).final_installed | default(false))
 
 - name: Start only this application's owned services
   ansible.builtin.command:

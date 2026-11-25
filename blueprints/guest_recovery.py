@@ -248,6 +248,9 @@ def run(stack, site, disabled, mode, *, guest=None, result=None, baseline='last_
     require(guest in packets, 'Select one enabled guest for recovery and completion')
     require(result in ('success', 'failure') if mode == 'finish' else result is None,
             'Use only this guest job success or failure result')
+    if mode == 'pending':
+        import authentik_forward
+        authentik_forward.requested(site, guest, packets[guest], configuration(packets[guest]), environment, target)
     rows = operations({guest: packets[guest]}, pending=mode == 'pending', environment=environment)
     passed = mode == 'finish' and result == 'success'
     require(not passed or bool(rows), 'Guest success requires its completed deployment candidate')

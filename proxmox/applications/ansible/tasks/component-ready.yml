@@ -33,7 +33,7 @@
 - name: Prepare the Authentik data directory for the selected storage layout
   ansible.builtin.command:
     argv: [python3, /usr/local/bin/homelab-component-data.py, authentik-data]
-    stdin: "{{ component_identity_data | to_json }}"
+    stdin: "{{ component_identity_data | combine({'verify_existing': component_authentik_resume | default(false)}) | to_json }}"
   register: component_identity_storage
   changed_when: (component_identity_storage.stdout | from_json).initialized | int > 0
   when: component_identity_data is defined and not ansible_check_mode

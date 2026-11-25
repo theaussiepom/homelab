@@ -635,6 +635,21 @@ class RecoveryTransactions(unittest.TestCase):
                 component_recovery.accept(self.cfg, self.work/'ordinary-105-1')
         self.assertEqual(component_current.read(self.work)[0]['kind'], 'ordinary')
 
+    def test_forward_reconciliation_does_not_take_the_new_ordinary_runs_receipt_path(self):
+        failed = self.fail_after_preparation()
+        self.native = 'old'
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '105', 'GITHUB_RUN_NUMBER': '14'}):
+            with component_recovery.locked(self.cfg):
+                component_recovery.reconcile(self.cfg, failed, Path(self.owner['operation'])/'complete.json',
+                    self.owner, reason='Verified forward recovery', actor_context='protected-main-reconciliation',
+                    pending_forward=True)
+            state, _ = component_current.read(self.work)
+            self.assertEqual(Path(state['verification']['path']).parent.name, failed.name.replace('ordinary-', 'recovery-'))
+            self.case.all_phases()
+            with component_recovery.locked(self.cfg):
+                component_recovery.accept(self.cfg, self.work/'ordinary-105-1')
+        self.assertEqual(component_current.read(self.work)[0]['kind'], 'ordinary')
+
     def test_pointer_before_hold_release_interruption_is_metadata_only_on_resume(self):
         failed = self.fail_after_preparation()
         class Interrupted(BaseException): pass
