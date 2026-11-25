@@ -10,6 +10,7 @@ desired=$4
 baseline=$5
 config=/etc/nftables.conf
 unit=homelab-pbs-firewall-rollback
+apply_unit=homelab-pbs-firewall-apply
 dropin_dir=/etc/systemd/system/nftables.service.d
 dropin=$dropin_dir/50-homelab-pbs.conf
 table=homelab_pbs_endpoint
@@ -79,7 +80,16 @@ undo_first_apply() {
 }
 
 case "$action" in
+    schedule)
+        [[ $(checksum "$state/desired.nft" 600) == "$desired" && ! -e $state/previous.nft ]]
+        # The SSH session that schedules a first policy may have no conntrack
+        # entry. Finish that session before installing the default-deny table.
+        systemd-run --collect --unit="$apply_unit" --on-active=8s --timer-property=AccuracySec=1s \
+            --property=TimeoutStartSec=55s /bin/bash "$state/trial" apply "$state" "$previous" "$desired" "$baseline"
+        systemctl is-active --quiet "$apply_unit.timer"
+        ;;
     apply)
+        [[ -z ${SSH_CONNECTION-} ]]
         prior_mode=$(stat -c '%a' "$config")
         if [[ $baseline == clean ]]; then
             [[ $prior_mode == 600 || $prior_mode == 644 || $prior_mode == 755 ]]

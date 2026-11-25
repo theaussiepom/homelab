@@ -21,17 +21,24 @@
     dest: '{{ pbs_trial.path }}/dropin'
     mode: '0600'
   when: pbs_firewall_admission.baseline == 'clean'
-- name: Arm local rollback and try the new kernel policy
+- name: Schedule the kernel trial outside the initiating SSH session
   ansible.builtin.command:
     argv:
       - /bin/bash
       - '{{ pbs_trial.path }}/trial'
-      - apply
+      - schedule
       - '{{ pbs_trial.path }}'
       - '{{ pbs_firewall_admission.previous_sha256 }}'
       - '{{ pbs_firewall_admission.desired_sha256 }}'
       - '{{ pbs_firewall_admission.baseline }}'
   changed_when: true
+- name: Wait locally past the host trial start window
+  ansible.builtin.wait_for:
+    timeout: 12
+  delegate_to: localhost
+  become: false
+  vars: {ansible_connection: local, ansible_become: false}
+  changed_when: false
 - name: Read the trial through fresh SSH with the existing boot policy
   ansible.builtin.include_tasks: pbs-firewall-read.yml
 - name: Confirm trial rules, original boot file and network identity
