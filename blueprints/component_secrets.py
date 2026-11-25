@@ -14,6 +14,7 @@ from component_input_secrets import BLUEPRINT_SECRET_ROLES, ROLES as INPUT_ROLES
 # These are application capabilities, not environment-variable overrides.
 # Existing ordinary input custody owns materialization and runtime filenames.
 ROLES = {key: value for key, value in INPUT_ROLES.items() if key not in ('cloudbeaver', 'mqtt_explorer')}
+ROLES['cloudbeaver'] = {'recovery_password'}
 ROLES['pegaprox'] = {'database_key'}
 ROLES['authentik'] = ROLES['authentik'].difference(BLUEPRINT_SECRET_ROLES)
 

@@ -88,9 +88,9 @@ def context(config=None):
     lifecycle = config.get('lifecycle', 'retained')
     need(lifecycle in ('fresh', 'retained') and 'retained_pgadmin_image' not in config)
     services = config.get('services', {'cloudbeaver': 'cloudbeaver', 'auth_gateway': 'auth_gateway'})
-    need(isinstance(services, dict) and set(services) == {'cloudbeaver', 'auth_gateway'}
+    need(isinstance(services, dict) and set(services) in ({'cloudbeaver', 'auth_gateway'}, {'cloudbeaver'})
          and all(isinstance(value, str) and re.fullmatch('[a-z0-9][a-z0-9_-]{0,127}', value) for value in services.values())
-         and len(set(services.values())) == 2)
+         and len(set(services.values())) == len(services))
     runtime = _path(config.get('runtime_directory', str(RUNTIME)))
     need(runtime == RUNTIME or RUNTIME in runtime.parents)
     custody = _path(config.get('custody_directory', str(CUSTODY)))
@@ -121,7 +121,7 @@ def create(path, value, uid=0, mode=0o600):
 
 def _workspace_receipt(ctx, owner):
     legacy = (ctx.lifecycle == 'retained' and ctx.workspace == WORKSPACE and ctx.custody == CUSTODY
-        and ctx.project == 'homelab-db-tools' and ctx.services == {'cloudbeaver': 'cloudbeaver', 'auth_gateway': 'auth_gateway'}
+        and ctx.project == 'homelab-db-tools' and ctx.services in ({'cloudbeaver': 'cloudbeaver', 'auth_gateway': 'auth_gateway'}, {'cloudbeaver': 'cloudbeaver'})
         and ctx.runtime == RUNTIME and ctx.compose == COMPOSE and ctx.runtime_id == 'cloudbeaver')
     if legacy:
         return owner
@@ -131,11 +131,23 @@ def _workspace_receipt(ctx, owner):
         'runtime_directory': str(ctx.runtime), 'project_file': Path(ctx.compose).name}
 
 
+def matches_workspace_receipt(ctx, owner, receipt):
+    desired = _workspace_receipt(ctx, owner)
+    if receipt == desired:
+        return True
+    if set(ctx.services) != {'cloudbeaver'} or not isinstance(receipt, dict) or 'services' not in desired:
+        return False
+    previous = receipt.get('services', {})
+    return (isinstance(previous, dict) and set(previous) == {'cloudbeaver', 'auth_gateway'}
+            and previous['cloudbeaver'] == ctx.services['cloudbeaver']
+            and receipt == dict(desired, services=previous))
+
+
 def workspace_owner(config):
     ctx = context(config)
     value = private(ctx.custody/'workspace.json')
     owner = value.get('owner') if isinstance(value, dict) and 'schema' in value else value
-    need(value == _workspace_receipt(ctx, owner))
+    need(matches_workspace_receipt(ctx, owner, value))
     return owner
 
 
@@ -151,7 +163,7 @@ def workspace(owner, config=None):
     receipt = ctx.custody / 'workspace.json'
     desired = _workspace_receipt(ctx, owner)
     if receipt.exists() or receipt.is_symlink():
-        need(private(receipt) == desired)
+        need(matches_workspace_receipt(ctx, owner, private(receipt)))
     else:
         need(not ctx.workspace.is_symlink() and (not ctx.workspace.exists() or not any(ctx.workspace.iterdir())))
         ctx.workspace.mkdir(mode=0o700, exist_ok=True)
@@ -358,10 +370,19 @@ def health(config):
     workspace(prepare_owner, config)
     raw = docker(['compose', '-f', ctx.compose, 'ps', '--all', '--format', 'json'])
     containers = json.loads(raw) if raw.lstrip().startswith('[') else [json.loads(line) for line in raw.splitlines()]
-    need(isinstance(containers, list) and len(containers) == 2
+    need(isinstance(containers, list) and len(containers) == len(ctx.services)
          and {r['Service'] for r in containers} == set(ctx.services.values()))
     rows = {r['Service']: json.loads(docker(['inspect', r['ID']]))[0] for r in containers}
-    server, gateway = rows[ctx.services['cloudbeaver']], rows[ctx.services['auth_gateway']]
+    server = rows[ctx.services['cloudbeaver']]
+    gateway = rows.get(ctx.services.get('auth_gateway'))
+    if gateway is None:
+        need(server['HostConfig']['PortBindings'] == {
+            '8978/tcp': [{'HostIp': config['bind_address'], 'HostPort': '8978'}]})
+    else:
+        need(not server['HostConfig']['PortBindings'] and gateway['Config']['User'] == '65532:65532'
+             and gateway['HostConfig']['PortBindings'] == {
+                 '4180/tcp': [{'HostIp': config['bind_address'], 'HostPort': '80'}]}
+             and server['NetworkSettings']['Networks'].keys() == gateway['NetworkSettings']['Networks'].keys())
     need(all(obj['Config'].get('Labels', {}).get('com.docker.compose.project') == ctx.project
              and obj['Config']['Labels'].get('com.docker.compose.service') == name for name, obj in rows.items()))
     driver_health(config, server)
@@ -372,15 +393,11 @@ def health(config):
     need(all(obj['State']['Running'] is True
              and ('Health' not in obj['State'] or obj['State']['Health']['Status'] == 'healthy')
              for obj in rows.values())
-         and server['Config']['User'] == '8978:8978' and gateway['Config']['User'] == '65532:65532'
-         and not server['HostConfig']['PortBindings']
-         and set(gateway['HostConfig']['PortBindings']) == {'4180/tcp'}
-         and gateway['HostConfig']['PortBindings']['4180/tcp'] == [{'HostIp': config['bind_address'], 'HostPort': '80'}]
+         and server['Config']['User'] == '8978:8978'
          and len(server['NetworkSettings']['Networks']) == 1
          and server['HostConfig']['NetworkMode'] not in {'host', 'none', 'bridge', 'default'}
          and any(m['Source'] == str(ctx.workspace) and m['Destination'] == '/opt/cloudbeaver/workspace'
-                 and m['Type'] == 'bind' and m['RW'] is True for m in server['Mounts'])
-         and server['NetworkSettings']['Networks'].keys() == gateway['NetworkSettings']['Networks'].keys())
+                 and m['Type'] == 'bind' and m['RW'] is True for m in server['Mounts']))
     artifact = config.get('mariadb_jdbc')
     extra = [artifact['version'], artifact['sha256'], artifact['image_filename']] if artifact else []
     if any(item['driver'] == 'postgresql' for item in config.get('managed_connections', {}).values()):
@@ -390,7 +407,7 @@ def health(config):
     current = json.loads(raw)['data']['serverConfig']
     need(current['forceHttps'] is True and current['configurationMode'] is False and current['anonymousAccessEnabled'] is False
          and set(current['enabledAuthProviders']) == {'local', 'reverseProxy'})
-    return {'cloudbeaver': 'passed', 'setup': 'closed', 'gateway_only_listener': True,
+    return {'cloudbeaver': 'passed', 'setup': 'closed', ('gateway_only_listener' if gateway else 'ingress_only_listener'): True,
             'database_login': database_health(config)}
 
 

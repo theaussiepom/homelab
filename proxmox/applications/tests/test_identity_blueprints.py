@@ -37,12 +37,16 @@ class WorkerTests(unittest.TestCase):
         self.spec, self.document = fixture()
         self.provider, self.group, self.application, self.binding = (model() for _ in range(4))
         self.instances, self.flows, self.scopes, self.certificate = (model() for _ in range(4))
+        self.outpost, self.proxy, self.base_provider = (model() for _ in range(3))
         self.actor = MagicMock()
         self.files = patch.object(Path, 'read_bytes', autospec=True,
             side_effect=lambda path: self.document if path.suffix == '.yaml' else b'synthetic')
         self.files.start()
         self.addCleanup(self.files.stop)
-        modules = {'authentik.core.models': dict(Application=self.application, Group=self.group),
+        modules = {'authentik.core.models': dict(Application=self.application, Group=self.group, Provider=self.base_provider),
+                   'authentik.outposts.models': dict(Outpost=self.outpost),
+                   'authentik.providers.proxy.models': dict(ProxyProvider=self.proxy),
+                   'django.db': dict(transaction=SimpleNamespace(atomic=contextlib.nullcontext)),
                    'authentik.policies.models': dict(PolicyBinding=self.binding),
                    'authentik.providers.oauth2.models': dict(OAuth2Provider=self.provider, ScopeMapping=self.scopes),
                    'authentik.blueprints.models': dict(BlueprintInstance=self.instances),
@@ -160,6 +164,72 @@ class WorkerTests(unittest.TestCase):
         self.flows.objects.get.side_effect = Missing()
         with patch.object(bp.time,'monotonic',return_value=29),self.assertRaises(TimeoutError):
             bp.apply_registration(self.spec,30)
+
+    def test_forward_native_policy_and_exclusive_host_owner(self):
+        spec = dict(self.spec, origin='https://console.example.invalid')
+        proxy = MagicMock(pk=7, mode='forward_single', external_host=spec['origin'], internal_host='',
+                          cookie_domain='', skip_path_regex='', basic_auth_enabled=False, authentication_flow_id=None,
+                          intercept_header_auth=True, authorization_flow_id=1, invalidation_flow_id=2)
+        proxy.jwt_federation_sources.exists.return_value = proxy.jwt_federation_providers.exists.return_value = False
+        proxy.property_mappings.values_list.return_value = [3,4]
+        proxy.outpost_set.exclude.return_value.exists.return_value = False
+        providers = self.proxy.objects.filter.return_value
+        providers.first.return_value = proxy
+        providers.__or__.return_value.exclude.return_value.exists.return_value = False
+        self.base_provider.objects.filter.return_value.exclude.return_value.exists.return_value = False
+        apps = self.application.objects.filter.return_value
+        apps.first.return_value = SimpleNamespace(provider_id=7, name=spec['app_name'],
+                                                  meta_launch_url=spec['origin']+'/', policy_engine_mode='all')
+        apps.exclude.return_value.exists.return_value = False
+        bindings = self.binding.objects.filter.return_value
+        bindings.count.return_value = bindings.filter.return_value.count.return_value = 1
+        bindings.exclude.return_value.exists.return_value = False
+        def check(adopting=True):
+            return bp.forward_registration(spec, self.group, [1,2], {3,4}, adopting=adopting)
+        self.assertTrue(check())
+        proxy.skip_path_regex = '/unexpected'
+        with self.assertRaises(ValueError): check()
+        self.assertFalse(check(adopting=False))
+        proxy.skip_path_regex = ''
+        for unexpected in (bindings.exclude.return_value, providers.__or__.return_value.exclude.return_value,
+                           self.base_provider.objects.filter.return_value.exclude.return_value, apps.exclude.return_value,
+                           proxy.outpost_set.exclude.return_value):
+            unexpected.exists.return_value = True
+            with self.assertRaises(ValueError): check()
+            unexpected.exists.return_value = False
+        apps.first.return_value = None
+        with self.assertRaises(ValueError): check()
+        providers.first.return_value = None
+        self.assertFalse(check())
+
+    def test_forward_assignment_repeats_waits_and_rechecks_under_lock(self):
+        spec = dict(self.spec, type='forward_single', scope_mappings=['scope'])
+        outpost = MagicMock()
+        self.outpost.objects.get.return_value = outpost
+        self.outpost.objects.select_for_update.return_value.get.return_value = outpost
+        proxy = self.proxy.objects.get.return_value
+        proxy.outpost_set.exclude.return_value.exists.return_value = False
+        exists = outpost.providers.filter.return_value.exists
+        def apply_file(spec, deadline, kind, verify):
+            self.assertEqual(kind,'forward')
+            return not verify()
+        with patch.object(bp,'apply_file',side_effect=apply_file), patch.object(bp,'forward_registration',return_value=True):
+            self.group.objects.get.side_effect = [Missing(), self.group]
+            exists.return_value = True
+            with patch.object(bp.time,'sleep') as sleep, patch.object(bp.time,'monotonic',return_value=1):
+                self.assertFalse(bp.apply_registration(spec,30))
+            sleep.assert_called_once_with(2)
+            self.outpost.objects.select_for_update.assert_not_called()
+            self.group.objects.get.side_effect = None
+            exists.side_effect = [False, True]
+            self.assertFalse(bp.apply_registration(spec,30))
+            outpost.providers.add.assert_not_called()
+            exists.side_effect = [False, False, True]
+            self.assertTrue(bp.apply_registration(spec,30))
+            outpost.providers.add.assert_called_once_with(proxy)
+            self.group.objects.get.side_effect = Missing()
+            with patch.object(bp.time,'monotonic',return_value=29), self.assertRaises(TimeoutError):
+                bp.apply_registration(spec,30)
 
     def test_reconcile_reports_only_app_guest_result_and_hash(self):
         with patch.object(bp,'apply_registration',return_value=True):

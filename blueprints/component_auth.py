@@ -15,7 +15,7 @@ import component_types as types
 ALGORITHMS = {'RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512',
               'ES256', 'ES384', 'ES512', 'EdDSA'}
 ENDPOINTS = ('authorization', 'token', 'userinfo', 'jwks')
-AUTH_ADAPTERS = {'cloudbeaver-oidc': 'cloudbeaver',
+AUTH_ADAPTERS = {'cloudbeaver-oidc': 'cloudbeaver', 'cloudbeaver-forward-auth': 'cloudbeaver',
                  'pegaprox-oidc': 'pegaprox',
                  'node-red-retained-oidc': 'node_red', 'zabbix-saml': 'zabbix'}
 
@@ -225,6 +225,12 @@ def authentication(resolver, selected_providers):
             require(isinstance(value, dict) and value.get('type') in AUTH_ADAPTERS
                     and app['adapter'] == AUTH_ADAPTERS[value['type']], 'component.authentication')
             require(requirement is None or value['type'] == requirement['type'], 'component.authentication')
+            if value['type'] == 'cloudbeaver-forward-auth':
+                closed(value, ('type',))
+                require(set(app.get('secrets', {})) == {'recovery_password'} and
+                        'forward_auth' in app and app.get('origin', {}).get('exposure'), 'component.authentication')
+                result[key] = {'type': 'forward-auth'}
+                continue
             cloud = value['type'] == 'cloudbeaver-oidc'
             saml = value['type'] == 'zabbix-saml'
             pega = value['type'] == 'pegaprox-oidc'

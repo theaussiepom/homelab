@@ -150,7 +150,7 @@ def variables(cfg, phase, *, payload=None, previously_owned=False, initialize_ru
         hooks=component_app_hooks.descriptors(selected,compose_file='/opt/homelab-app/'+selected['project_file'])
         result['component_helpers']=hooks.pop('helpers')
         result.update(hooks)
-    if selected['adapter'] == 'authentik' and 'oidc_blueprints' in selected['settings']:
+    if selected['adapter'] == 'authentik' and ('oidc_blueprints' in selected['settings'] or 'forward_blueprints' in selected['settings']):
         result['component_helpers'].append({'source': 'identity_blueprints.py',
             'destination': '/opt/homelab-app/identity_blueprints.py', 'mode': '0700'})
         result['component_identity_blueprints'] = {'service': selected['identity']['services']['worker'],
@@ -169,6 +169,11 @@ def variables(cfg, phase, *, payload=None, previously_owned=False, initialize_ru
         if selected['adapter']=='cloudbeaver':
             public=read_json(payload.directory/'cloudbeaver-public.json',private=True)
             result['component_jdbc']=public.get('mariadb_jdbc',{})
+            retirement = payload.directory / 'gateway-retirement.json'
+            if retirement.exists():
+                require(previously_owned and selected.get('authentication_resolved') == {'type': 'forward-auth'},
+                        'Retire only a previously owned CloudBeaver gateway')
+                result['component_gateway_retirement'] = read_json(retirement, private=True)
         else:
             result['component_proxy_lifecycle']['profile']=selected['identity']['runtime_directory']+'/'+(
                 'mqtt-explorer-account.json' if 'managed_credential' in selected['settings']['broker']

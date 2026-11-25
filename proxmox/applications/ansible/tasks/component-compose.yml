@@ -48,6 +48,25 @@
       register: component_redis_retirement
       changed_when: component_redis_retirement.rc == 0 and (component_redis_retirement.stdout | from_json).changed
 
+- name: Retire the previous CloudBeaver gateway
+  when: component_gateway_retirement is defined and not ansible_check_mode
+  block:
+    - name: Install the gateway ownership verifier
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../cloudbeaver_gateway_retirement.py"
+        dest: /usr/local/bin/homelab-cloudbeaver-gateway-retirement.py
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Remove the verified gateway and its two configuration files
+      ansible.builtin.command:
+        argv: [python3, /usr/local/bin/homelab-cloudbeaver-gateway-retirement.py, "{{ component_compose_file }}"]
+        stdin: "{{ component_gateway_retirement | to_json }}"
+      register: component_gateway_result
+      changed_when: (component_gateway_result.stdout | from_json).changed
+      no_log: true
+
 - name: Check the owned namespace before reconciliation
   ansible.builtin.command:
     argv: [python3, /usr/local/bin/homelab-component-preflight.py, before]

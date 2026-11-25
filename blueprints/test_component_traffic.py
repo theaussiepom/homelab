@@ -41,6 +41,24 @@ def composition():
 
 
 class TrafficMatcherTests(unittest.TestCase):
+    def test_backend_accepts_the_ingress_source_only_even_on_another_nic(self):
+        target = dict(app='console', guest='backend', address='198.18.21.11', port=8978, protocol='http')
+        approved = rule(direction='in', port='8978', interface='net0')
+        def guest(address, rules):
+            return {'context':'lab','rules':rules,'provider_interfaces':[{'ipv4':address+'/24','gateway':'198.18.21.1'}]}
+        guests = {'ingress':guest('198.18.21.10',[dict(approved,direction='out')]),
+                  'backend':guest(target['address'],[approved, dict(approved, port='5432')])}
+        resolver = SimpleNamespace(guests=guests, site={'guests':{k:{} for k in guests},'contexts':{'lab':{'dns_servers':[]}}},
+            apps={'proxy':{'guest':'ingress','resolved_connections':{}},
+                  'console':{'guest':'backend','resolved_connections':{},'authentication_resolved':{'type':'forward-auth'}}})
+        exposure = SimpleNamespace(routes={'proxy':{'console':{'target':target}}})
+        traffic.bind(resolver, exposure)
+        for source in ('198.18.21.12/32','198.18.21.0/24',None):
+            guests['backend']['rules'].append(dict(approved, source=source, interface='net1', port='8970:8990'))
+            with self.subTest(source=source), self.assertRaisesRegex(ComponentError, 'traffic-ingress'):
+                traffic.bind(resolver, exposure)
+            guests['backend']['rules'].pop()
+
     def test_hostname_route_projects_only_the_unique_default_source_and_explicit_egress(self):
         guest={'context':'lab','provider_interfaces':[{'ipv4':'198.18.21.10/24','gateway':'198.18.21.1'}],
                'rules':[rule(port='443',destination='0.0.0.0/0')]}

@@ -146,7 +146,7 @@ class OwnedRuntimeBranches(unittest.TestCase):
                 roles['data'] = '/data'
             app = {'adapter':'authentik','secret_bindings':{'secret_key':{},'postgresql_password':{}}, 'properties':{},
                    'settings':{'database':{'host':'db','user':'identity','name':'identity'},
-                               'oidc_blueprints':{'console':{}}},
+                               'oidc_blueprints':{'console':{}}, 'forward_blueprints':{'reports':{}}},
                    'identity':{'services':{'server':'server','worker':'worker'},
                                'runtime_directory':'/opt/homelab-app/runtime'},
                    'containers':{'server':{},'worker':{}},
@@ -162,6 +162,8 @@ class OwnedRuntimeBranches(unittest.TestCase):
                     self.assertNotIn('depends_on', service)
                     self.assertIn('/srv/example/media:'+roles['media'], service['volumes'])
                     self.assertEqual(any('homelab-oidc-console.yaml' in str(v) for v in service['volumes']),
+                                     name == 'worker')
+                    self.assertEqual(any('homelab-forward-reports.yaml' in str(v) for v in service['volumes']),
                                      name == 'worker')
                 app['software_selection']['images']['worker']['image']='wrong'
                 with self.assertRaisesRegex(ValueError,'matching tagged'):

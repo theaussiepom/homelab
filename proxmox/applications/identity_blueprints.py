@@ -61,20 +61,91 @@ def verify_registration(spec, secret, references, *, adopting=False):
     return matches
 
 
+def forward_registration(spec, group, flows, scopes, *, adopting):
+    from authentik.core.models import Application, Provider
+    from authentik.policies.models import PolicyBinding
+    from authentik.providers.proxy.models import ProxyProvider
+
+    proxy = ProxyProvider.objects.filter(name=spec['provider_name']).first()
+    app = Application.objects.filter(slug=spec['slug']).first()
+    origin = spec['origin']
+    same_host = ProxyProvider.objects.filter(external_host__iexact=origin) | ProxyProvider.objects.filter(
+        external_host__istartswith=origin + '/')
+    require(not same_host.exclude(pk=proxy.pk if proxy else None).exists())
+    require(not Provider.objects.filter(name=spec['provider_name']).exclude(pk=proxy.pk if proxy else None).exists())
+    if proxy:
+        require(not Application.objects.filter(provider=proxy).exclude(slug=spec['slug']).exists())
+        require(not proxy.outpost_set.exclude(managed='goauthentik.io/outposts/embedded', type='proxy').exists())
+    if app:
+        require(proxy is not None and app.provider_id == proxy.pk)
+        bindings = PolicyBinding.objects.filter(target=app)
+        require(bindings.count() <= 1 and not bindings.exclude(group=group, policy=None, user=None).exists())
+    if not (app and proxy):
+        require(not adopting or (app is None and proxy is None))
+        return False
+    matches = (app.name == spec['app_name'] and app.meta_launch_url == origin + '/'
+               and app.policy_engine_mode == 'all'
+               and bindings.filter(order=0, enabled=True, negate=False, failure_result=False).count() == 1
+               and proxy.mode == 'forward_single' and proxy.external_host == origin
+               and not any((proxy.internal_host, proxy.skip_path_regex, proxy.cookie_domain, proxy.basic_auth_enabled))
+               and proxy.authentication_flow_id is None and not proxy.jwt_federation_sources.exists()
+               and not proxy.jwt_federation_providers.exists()
+               and proxy.intercept_header_auth and proxy.authorization_flow_id == flows[0]
+               and proxy.invalidation_flow_id == flows[1] and set(proxy.property_mappings.values_list('pk', flat=True)) == scopes)
+    require(not adopting or matches)
+    return matches
+
+
+def apply_forward_registration(spec, deadline):
+    from authentik.core.models import Group
+    from authentik.flows.models import Flow
+    from authentik.outposts.models import Outpost
+    from authentik.providers.oauth2.models import ScopeMapping
+    from authentik.providers.proxy.models import ProxyProvider
+    from django.core.exceptions import ObjectDoesNotExist
+    from django.db import transaction
+
+    # These are existing site objects. The blueprint never creates the group or alters its members.
+    while True:
+        try:
+            group = Group.objects.get(name=spec['admission_group'])
+            outpost = Outpost.objects.get(managed='goauthentik.io/outposts/embedded', type='proxy')
+            flows = [Flow.objects.get(slug=spec[key]).pk for key in ('authorization_flow', 'invalidation_flow')]
+            scopes = {ScopeMapping.objects.get(managed=scope).pk for scope in spec['scope_mappings']}
+            break
+        except ObjectDoesNotExist:
+            if time.monotonic() + 2 >= deadline:
+                raise TimeoutError('Identity registration dependency unavailable') from None
+            time.sleep(2)
+
+    def verify(*, adopting=False):
+        return forward_registration(spec, group, flows, scopes, adopting=adopting)
+
+    changed = apply_file(spec, deadline, 'forward', verify)
+    proxy = ProxyProvider.objects.get(name=spec['provider_name'])
+    if outpost.providers.filter(pk=proxy.pk).exists():
+        return changed
+    # The native outpost serializer replaces its provider list. Add just this verified edge.
+    with transaction.atomic():
+        outpost = Outpost.objects.select_for_update().get(pk=outpost.pk)
+        proxy = ProxyProvider.objects.get(name=spec['provider_name'])
+        require(verify() and not proxy.outpost_set.exclude(pk=outpost.pk).exists())
+        if outpost.providers.filter(pk=proxy.pk).exists():
+            return changed
+        outpost.providers.add(proxy)
+        require(outpost.providers.filter(pk=proxy.pk).exists())
+        return True
+
+
 def apply_registration(spec, deadline):
-    from authentik.blueprints.models import BlueprintInstance
-    from authentik.blueprints.v1.tasks import apply_blueprint
+    if spec.get('type') == 'forward_single':
+        return apply_forward_registration(spec, deadline)
     from authentik.crypto.models import CertificateKeyPair
     from authentik.flows.models import Flow
-    from authentik.lib.config import CONFIG
     from authentik.providers.oauth2.models import ScopeMapping
 
     slug = spec['slug']
     require(re.fullmatch('[a-z0-9]+(?:-[a-z0-9]+)*', slug) and len(slug) <= 63)
-    name = 'homelab-oidc-' + slug
-    path = 'custom/' + name + '.yaml'
-    contents = (Path(CONFIG.get('blueprints_dir')) / path).read_bytes()
-    require(hashlib.sha512(contents).hexdigest() == spec['sha512'])
     secret = Path('/run/secrets/oidc-' + slug).read_bytes()
     require(0 < len(secret) <= 255 and all(33 <= byte <= 126 for byte in secret))
     from django.core.exceptions import ObjectDoesNotExist
@@ -90,11 +161,26 @@ def apply_registration(spec, deadline):
             if time.monotonic() + 2 >= deadline:
                 raise TimeoutError('Identity registration dependency unavailable') from None
             time.sleep(2)
+    def verify(*, adopting=False):
+        return verify_registration(spec, secret, references, adopting=adopting)
+    return apply_file(spec, deadline, 'oidc', verify)
+
+
+def apply_file(spec, deadline, kind, verify):
+    from authentik.blueprints.models import BlueprintInstance
+    from authentik.blueprints.v1.tasks import apply_blueprint
+    from authentik.lib.config import CONFIG
+
+    slug = spec['slug']
+    require(re.fullmatch('[a-z0-9]+(?:-[a-z0-9]+)*', slug) and len(slug) <= 63)
+    name = 'homelab-' + kind + '-' + slug
+    path = 'custom/' + name + '.yaml'
+    contents = (Path(CONFIG.get('blueprints_dir')) / path).read_bytes()
+    require(hashlib.sha512(contents).hexdigest() == spec['sha512'])
     existing = BlueprintInstance.objects.filter(path=path)
     require(existing.count() <= 1 and not existing.exclude(name=name).exists())
     previous_instance = existing.first()
-    matches = verify_registration(spec, secret, references,
-                                  adopting=not (previous_instance and previous_instance.last_applied_hash))
+    matches = verify(adopting=not (previous_instance and previous_instance.last_applied_hash))
     instance, _ = BlueprintInstance.objects.get_or_create(name=name, defaults={'path': path})
     require(instance.enabled and instance.path == path and not instance.context and not instance.content)
     if matches and instance.status == 'successful' and instance.last_applied_hash == spec['sha512']:
@@ -106,7 +192,7 @@ def apply_registration(spec, deadline):
         if instance.last_applied != previous:
             require(instance.status not in ('error', 'warning', 'orphaned'))
             if instance.status == 'successful' and instance.last_applied_hash == spec['sha512']:
-                require(verify_registration(spec, secret, references))
+                require(verify())
                 return True
         time.sleep(2)
     raise TimeoutError('Identity blueprint worker timed out')

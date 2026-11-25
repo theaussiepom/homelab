@@ -139,7 +139,17 @@ def bind(resolver,exposures):
         for key,row in routes.items():
             with at('exposures',key):
                 if not row['target'].get('internal'):
-                    connection(guest,row['target'])
+                    target = row['target']
+                    connection(guest,target)
+                    if apps.get(target.get('app'), {}).get('authentication_resolved') == {'type': 'forward-auth'}:
+                        trusted = source_address(guests[guest], target['address'])
+                        backend = guests[target['guest']]
+                        for rule in backend['rules']:
+                            source = ipaddress.ip_network(rule.get('source') or '0.0.0.0/0', strict=False)
+                            flow = Flow(str(source.network_address), target['address'], 'tcp', target['port'])
+                            # The guest can receive traffic for a local address on another NIC.
+                            if permits([rule], 'in', flow, rule.get('interface')):
+                                require(source == ipaddress.ip_network(trusted), 'component.traffic-ingress')
                 for name in row.get('middlewares',[]):
                     middleware=exposures.middlewares[name]
                     if middleware['type']=='forward-auth':

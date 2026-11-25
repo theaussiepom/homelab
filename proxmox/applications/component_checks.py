@@ -254,11 +254,15 @@ def _traefik(app, compose_file):
 
 
 def _cloudbeaver(app, compose_file):
-    origin,host,address,_=_public(app)
-    return [_row('CloudBeaver and authentication gateway',['python3','/opt/homelab-app/cloudbeaver-runtime.py',
-        'health','--config',_runtime_file(app,'cloudbeaver-public.json')],'"cloudbeaver": "passed"'),
-        _row('CloudBeaver HTTPS sign-in redirect',_curl(retry=1200,budget=2250)+['--resolve',host+':443:'+address,
-        '--output','/dev/null','--write-out','%{http_code}',origin+'/'],'302')]
+    direct = app.get('authentication_resolved') == {'type': 'forward-auth'}
+    checks = [_row('CloudBeaver' if direct else 'CloudBeaver and authentication gateway',
+        ['python3', '/opt/homelab-app/cloudbeaver-runtime.py', 'health', '--config',
+         _runtime_file(app, 'cloudbeaver-public.json')], '"cloudbeaver": "passed"')]
+    if not direct:
+        origin,host,address,_=_public(app)
+        checks.append(_row('CloudBeaver HTTPS sign-in redirect',_curl(retry=1200,budget=2250)+['--resolve',host+':443:'+address,
+            '--output','/dev/null','--write-out','%{http_code}',origin+'/'],'302'))
+    return checks
 
 
 def _bitwarden(app, compose_file):

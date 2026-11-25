@@ -20,10 +20,29 @@ Use only the fields listed below. IDs and scalar values follow the [shared rules
 | <a id="app-runtime"></a>`runtime` | Optional unique ID list, omitted `[]` | Appends to profile runtime; all resulting requirements must still be met |
 | <a id="app-runtime-dns"></a>`runtime_dns` | Optional `context` or `host` | Overrides the profile mode; otherwise defaults to its mode, then `context`. Selects [container DNS](contexts.md#application-runtime-dns); null/empty/unknown values are rejected. |
 | <a id="app-authentication"></a>`authentication` | Optional ID | Named [authentication policy](policies.md#authentication-policies); may be required by profile |
+| <a id="app-forward-auth"></a>`forward_auth` | Optional object | Declare one native Authentik proxy provider and access binding for this app's canonical HTTPS exposure. [Forward authentication](#authentik-forward-authentication) |
 | <a id="app-devices"></a>`devices` | Optional named map, omitted `{}` | Profile role to [site device](supporting-types.md#devices) ID; one physical owner |
 | <a id="app-origin"></a>`origin` | Optional closed reference | `{exposure: id, domain?: id}` selects an owned [HTTP exposure origin](exposures.md#public-origin) |
 | <a id="app-secrets"></a>`secrets` | Optional named map, omitted `{}` | Maps a declared private role to a [secret-source ID](identity-and-secrets.md#secret-sources); adapter requirements for files still apply |
 | <a id="app-resources"></a>`resources` | Optional closed object | Exactly `containers`, a nonempty service-role allocation map; [allocation rules](#allocations) |
+
+## Authentik forward authentication
+
+Identity reconciles a single-application proxy provider for the HTTPS host in the app's canonical exposure. The existing embedded outpost must belong to the Authentik installation selected by the route's forward authentication middleware. The worker and server must use the same pinned image from 2026.8.6 or later.
+
+| Field under `forward_auth` | Required value |
+| --- | --- |
+| `middleware` | ID of the route's forward-auth middleware |
+| `slug` | Unique app slug of up to 63 lowercase letters, digits and single hyphens |
+| `provider_name` | Unique Authentik provider name |
+| `admission_group` | Name of one existing group allowed into the application |
+| `outpost` | `embedded` |
+| `authorization_flow` | Slug of the existing provider authorization flow |
+| `invalidation_flow` | Slug of the existing provider invalidation flow |
+
+All values are nonempty strings of at most 150 characters. On first adoption, the native provider, app and binding must match the declaration or be available for creation. The worker checks the file hash, admission binding and provider settings, then adds the verified provider to the outpost. A repeat checks the membership even when the blueprint hash already matches. This declaration references the group's existing members. Removing the declaration leaves the registered objects in Authentik.
+
+The CloudBeaver forward-auth profile requires a separate `secrets.recovery_password` reference. On a retained installation that previously used the dedicated OAuth gateway, supply the recovery password already installed for the same recovery administrator. Protected deployment compares the selected credential with the previous successful configuration before removing the gateway. An ordinary repeat verifies the dedicated secret against its existing material proof.
 
 ## Interface roles
 

@@ -25,7 +25,7 @@ ROLES = {
     'traefik': {'cloudflare_dns_token', 'proxmox_token', 'cloudflare_origin_token'},
     'zabbix': {'database_password'}, 'node_red': {'api_token'},
     'bitwarden': {'runtime_environment'}, 'pegaprox': {'database_key', 'client_secret', 'management_token'},
-    'winet': {'options'}, 'mqtt': {'probe'}, 'cloudbeaver': {'client_secret'},
+    'winet': {'options'}, 'mqtt': {'probe'}, 'cloudbeaver': {'client_secret', 'recovery_password'},
     'mqtt_explorer': {'broker_password'},
 }
 SLOTS = {adapter: {role: adapter + '_' + role for role in roles} for adapter, roles in ROLES.items()}

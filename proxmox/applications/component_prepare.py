@@ -132,6 +132,33 @@ def dns_document(cfg, app, attempt):
     return dns_records.document(app['settings']['dns_records'], previous)
 
 
+def cloudbeaver_retirement(attempt, app):
+    """Derive the gateway and file identities from the last successful installation."""
+    success, cfg, apps = component_generation.previous(attempt)
+    old = apps[app['id']]
+    before = component_ownership.identity(cfg, old)
+    after = component_ownership.identity(attempt.cfg, app)
+    binding = success['binding']
+    payload = component_payload.AppPayload.load(Path(binding['app_inputs_directory']) / app['id'],
+                                                success['phase_inputs'][old['identity']['phase']])
+    hashes = json.loads(payload.manifest)['files']
+    if old.get('authentication_resolved') == {'type': 'forward-auth'}:
+        require(before == after, 'Preserve the existing CloudBeaver installation owner')
+        if (binding['input_identity'] == attempt.cfg['deployment']['input_identity']
+                and 'gateway-retirement.json' in hashes):
+            return read_json(payload.directory / 'gateway-retirement.json', private=True)
+        return None
+    require(component_ownership.replaces_cloudbeaver_gateway(old, app, before, after),
+            'Retire only the previous gateway of the same retained CloudBeaver installation')
+    directory = Path(cfg['deployment']['input_directory'])
+    old_compose = directory / old['project_file']
+    return {'project': before['project'], 'gateway': before['services']['auth_gateway'],
+            'runtime': before['runtime_directory'], 'image': old['software_selection']['images']['auth_gateway']['image'],
+            'previous_compose_sha256': binding['input_hashes'][str(old_compose)],
+            'next_compose_sha256': digest(regular(Path(attempt.cfg['deployment']['input_directory']) / app['project_file'], private=True)),
+            'files': {name: hashes[name] for name in ('oauth2.cfg', 'oauth2-alpha.json')}}
+
+
 def prepare(cfg, app_id, environment=None, *, attempt):
     runtime = read_json(Path(cfg['deployment']['runtime_file']), private=True)
     require(app_id in runtime['applications'], 'Select this guest owned application')
@@ -219,6 +246,10 @@ def prepare(cfg, app_id, environment=None, *, attempt):
             route_plan=app['route_plan'])
         install += install_rows(app,rows,payload)
     elif app['adapter'] in ('cloudbeaver','mqtt_explorer'):
+        if app.get('authentication_resolved') == {'type': 'forward-auth'} and app['lifecycle'] == 'retained':
+            retirement = cloudbeaver_retirement(attempt, app)
+            if retirement:
+                payload['gateway-retirement.json'] = encoded(retirement)
         records = account_records(cfg, app, payload)
         install += install_rows(app, component_proxy_files.files(app, secrets=values,
                                 records=records, public_ca=None), payload)

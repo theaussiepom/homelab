@@ -55,6 +55,9 @@ class Exposures:
                     require(endpoint.get('protocol') in ('http', 'https') and 'address' in endpoint,
                             'component.authentication')
                     self.middlewares[name] = dict(value, target=copy.deepcopy(endpoint))
+                elif value.get('type') == 'cloudbeaver-headers':
+                    closed(value, ('type',))
+                    self.middlewares[name] = dict(value)
                 elif value.get('type') == 'default-headers':
                     closed(value, ('type',))
                     self.middlewares[name] = copy.deepcopy(value)

@@ -232,7 +232,7 @@ class Resolver:
             require(value['guest'] in self.guests and value['profile'] in self.library['app_profiles'])
             profile = self.library['app_profiles'][value['profile']]
             owner = adapter(profile['adapter'])
-            if profile['adapter'] == 'authentik':
+            if profile['adapter'] in ('authentik', 'cloudbeaver'):
                 refs = profile.get('runtime', []) + value.get('runtime', [])
                 containers = {role for ref in refs for role in
                               self.library['runtime_profiles'].get(ref, {}).get('containers', {})}

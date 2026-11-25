@@ -52,6 +52,16 @@ def prior(attempt, app):
     return namespaces(attempt, app)[0]
 
 
+def replaces_cloudbeaver_gateway(old_app, app, before, current):
+    return (old_app['adapter'] == app['adapter'] == 'cloudbeaver'
+            and old_app.get('authentication_resolved', {}).get('version') == 1
+            and app.get('authentication_resolved') == {'type': 'forward-auth'}
+            and old_app['project_file'] == app['project_file']
+            and set(before['services']) == {'cloudbeaver', 'auth_gateway'}
+            and current['services'] == {'cloudbeaver': before['services']['cloudbeaver']}
+            and dict(before, services=current['services']) == current)
+
+
 def namespaces(attempt, app):
     """A fresh declaration cannot adopt an existing foreign namespace.
 
@@ -103,7 +113,7 @@ def namespaces(attempt, app):
                 'Require the selected Authentik release transition')
         authentik_upgrade.transition(before, current)
         return True, before['runtime_directory'] is not None
-    require(before == current,
+    require(before == current or replaces_cloudbeaver_gateway(old_app, app, before, current),
             'App storage or runtime ownership changed; no automatic relocation or adoption')
     renovate.preserve_storage(old_app, app)
     return True, before['runtime_directory'] is not None
