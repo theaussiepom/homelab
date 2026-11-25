@@ -1,7 +1,5 @@
 """Finite private-role continuity units and real protected input proof reads."""
 import copy
-import hashlib
-import json
 from pathlib import Path
 import sys
 import tempfile
@@ -77,7 +75,7 @@ class PrivateContinuityUnits(unittest.TestCase):
         with patch.object(continuity.component_generation,'component_success',return_value=True), \
              patch.object(continuity.component_generation,'previous',return_value=(None,self.attempt.cfg,None)):
             def check(material=password):
-                continuity.verify(self.attempt, current, proof(current, {'recovery_password':material}))
+                continuity.verify(self.attempt, current, proof(current, {'recovery_password':material}), recovery_password=material)
             check()
             with self.assertRaisesRegex(ValueError,'installed recovery password'):
                 check(b'new-credential')
@@ -86,15 +84,15 @@ class PrivateContinuityUnits(unittest.TestCase):
                     check()
             with patch.dict(current['settings'], recovery_admin='different'), self.assertRaisesRegex(ValueError,'recovery owner'):
                 check()
-            recovery = proof(current, {'recovery_password':password})['roles']['recovery_password']
-            for raw in (b'', auto + auto, b'CB_ADMIN_PASSWORD=invalid\n'):
-                (payload.directory / 'cloudbeaver.auto.conf').write_bytes(raw)
-                with self.assertRaisesRegex(ValueError,'sealed CloudBeaver'):
-                    continuity.verify_cloudbeaver_recovery(self.attempt, previous, current, payload, recovery)
-                manifest = json.loads(payload.manifest)
-                manifest['files']['cloudbeaver.auto.conf'] = hashlib.sha256(raw).hexdigest()
-                with patch.object(payload,'manifest',json.dumps(manifest)), self.assertRaisesRegex(ValueError,'installed recovery password'):
-                    continuity.verify_cloudbeaver_recovery(self.attempt, previous, current, payload, recovery)
+            (payload.directory / 'cloudbeaver.auto.conf').write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError,'sealed CloudBeaver'):
+                continuity.verify_cloudbeaver_recovery(self.attempt, previous, current, payload, password)
+            for index, raw in enumerate((b'', auto + auto, b'CB_ADMIN_PASSWORD=invalid\n')):
+                location = self.root / str(index)
+                location.mkdir(mode=0o700)
+                malformed = component_payload.prepare(location, 'b'*64, current['id'], {'cloudbeaver.auto.conf':raw})
+                with self.assertRaisesRegex(ValueError,'installed recovery password'):
+                    continuity.verify_cloudbeaver_recovery(self.attempt, previous, current, malformed, password)
 
     def test_changed_material_and_remove_then_readd_cannot_erase_previous_role(self):
         self.previous()

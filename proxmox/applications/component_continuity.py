@@ -42,7 +42,7 @@ def validate(app, value):
     return value['roles']
 
 
-def verify(attempt, app, current):
+def verify(attempt, app, current, *, recovery_password=None):
     """Refuse drift before this app publishes inputs or creates credential records."""
     validate(app, current)
     receipt_path = attempt.receipt
@@ -66,7 +66,7 @@ def verify(attempt, app, current):
         require(False,'Private continuity requires a genuine prior component success')
     if (app['adapter'] == 'cloudbeaver' and set(old) == {'client_secret'}
             and set(current['roles']) == {'recovery_password'}):
-        verify_cloudbeaver_recovery(attempt, old_app, app, selected, current['roles']['recovery_password'])
+        verify_cloudbeaver_recovery(attempt, old_app, app, selected, recovery_password)
         return
     require(set(old) <= set(current['roles']),
             'An ordinary update cannot remove a sealed private role or erase its continuity')
@@ -91,5 +91,5 @@ def verify_cloudbeaver_recovery(attempt, old_app, app, payload, recovery):
     prefix = b'CB_ADMIN_PASSWORD='
     passwords = [line[len(prefix):] for line in raw.split(b'\n') if line.startswith(prefix)]
     require(len(passwords) == 1 and re.fullmatch(rb'[A-Za-z0-9_-]{43}=aA1!', passwords[0])
-            and hmac.compare_digest(hashlib.sha256(passwords[0]).hexdigest(), recovery['material_sha256']),
+            and isinstance(recovery, bytes) and hmac.compare_digest(passwords[0], recovery),
             'The dedicated CloudBeaver recovery input must match the installed recovery password')

@@ -170,7 +170,7 @@ def prepare(cfg, app_id, environment=None, *, attempt):
     if app['adapter']=='zabbix':
         require(not values,'Select the root-owned monitoring server credential capability')
     material=component_continuity.document(app,component_private_material.project(app,values))
-    component_continuity.verify(attempt,app,material)
+    component_continuity.verify(attempt, app, material, recovery_password=values.get('recovery_password'))
     payload, install = {component_continuity.FILE:encoded(material)}, []
     selected_monitoring=cfg['app'].get('monitoring',{})
     for key,leaf in (('storage_password_file','monitoring-storage-password'),('server_file','monitoring-server.json')):
