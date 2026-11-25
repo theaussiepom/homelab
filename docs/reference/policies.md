@@ -191,6 +191,7 @@ and [testing guide](../contributing/testing.md) before publication.
 | --- | --- | --- |
 | default-headers | None | Fixed adapter-owned response headers |
 | forward-auth | endpoint | HTTP/HTTPS endpoint reference to the existing authentication service |
+| cloudbeaver-headers | None | Follows forward-auth on the CloudBeaver route. Clears client-supplied CloudBeaver identity and role headers and sets `X-Team` to `user`. The app reads the verified `X-authentik-username` supplied by forward-auth. |
 | ip-allow-list | ranges | Nonempty ordered IPv4/CIDR, `{network: id}` or `{address_group: id}` list; final maximum 4096 values |
 | cloudflare-source | local_allowlist, origin_header | Socket-peer Cloudflare gate with a named internal allowlist and retained origin secret; see below |
 | canonical-home-redirect | app | Existing app with canonical origin; only a separate alias route with exactly canonical middleware list plus this final middleware |

@@ -270,6 +270,9 @@ def _authentik(app, guest):
                 filename = 'homelab-oidc-' + slug + '.yaml'
                 service['volumes'].extend([_runtime_mount(app, filename, '/blueprints/custom/' + filename),
                                            _runtime_mount(app, 'oidc-' + slug, '/run/secrets/oidc-' + slug)])
+            for slug in sorted(app['settings'].get('forward_blueprints', {})):
+                filename = 'homelab-forward-' + slug + '.yaml'
+                service['volumes'].append(_runtime_mount(app, filename, '/blueprints/custom/' + filename))
         if name == 'server':
             service['ports'] = [port.removesuffix('/tcp') for port in _ports(app, name)]
         result[name] = service
@@ -397,9 +400,11 @@ def _music_assistant(app, guest):
 
 
 def _cloudbeaver(app, guest):
-    require(isinstance(app.get('authentication_resolved'), dict)
-            and app['authentication_resolved'].get('version') == 1,
-            'Bind the selected CloudBeaver OIDC authentication capability')
+    auth = app.get('authentication_resolved', {})
+    direct = auth == {'type': 'forward-auth'}
+    require(direct or auth.get('version') == 1, 'Bind the selected Community sign-in method')
+    required = {'cloudbeaver'} if direct else {'cloudbeaver', 'auth_gateway'}
+    require(set(app['containers']) == required, 'Select the matching Community service roles')
     value = app['settings']
     require(len(value.get('connections', {})) + len(value.get('managed_connections', {})) > 0,
             'Select at least one explicit Community datasource')
@@ -416,12 +421,19 @@ def _cloudbeaver(app, guest):
                 'Retain the Community process identities and privilege boundary')
     require(type(value['heap_mib']) is int
             and app['containers']['cloudbeaver']['memory_mib'] >= value['heap_mib'] + 512
-            and app['containers']['auth_gateway']['memory_mib'] >= 128,
+            and (direct or app['containers']['auth_gateway']['memory_mib'] >= 128),
             'Reserve JVM native and gateway memory')
     require(all(row['service'] in {'cloudbeaver', 'auth_gateway'} and row['protocol'] == 'tcp'
                 and row['namespace'] == 'app-network'
                 and row['port'] == {'cloudbeaver': 8978, 'auth_gateway': 4180}[row['service']]
                 for row in app['listeners'].values()), 'Keep the Community and gateway internal listeners')
+    if direct:
+        require(value['auth_headers'] == {'user': 'X-authentik-username', 'team': 'X-Team'} and not _aliases(app),
+                'Use verified forward-auth identity and fixed Community team headers')
+        ports = [row.removesuffix('/tcp') for row in _ports(app, 'cloudbeaver')]
+        require(ports == [value['bind_address'] + ':8978:8978'], 'Publish only the selected private Community port')
+        return community.service_configuration(value, {'cloudbeaver': _service(app, 'cloudbeaver', guest)},
+            mount=lambda name, target: _runtime_mount(app, name, target), workspace=storage['source'], ports=ports)
     require(not _ports(app, 'cloudbeaver'), 'Do not publish the Community backend')
     ports = [row.removesuffix('/tcp') for row in _ports(app, 'auth_gateway')]
     require(len(ports) == 1, 'Publish only the owned authentication gateway')

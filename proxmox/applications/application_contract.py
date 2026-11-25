@@ -82,8 +82,13 @@ def runtime_files(app):
         result.add('identity-blueprints.json')
         for slug in settings['oidc_blueprints']:
             result.update({'oidc-' + slug, 'homelab-oidc-' + slug + '.yaml'})
+    if name == 'authentik' and settings.get('forward_blueprints'):
+        result.add('identity-blueprints.json')
+        result.update('homelab-forward-' + slug + '.yaml' for slug in settings['forward_blueprints'])
     if name == 'authentik' and 'allowed_callback_additions' in settings:
         result.add('identity-callbacks.json')
+    if name == 'cloudbeaver' and app.get('authentication_resolved', {}).get('type') == 'forward-auth':
+        result.difference_update(('oauth2-alpha.json', 'oauth2.cfg'))
     if name == 'cloudbeaver' and settings.get('managed_connections'):
         result.update({'cloudbeaver-admin-connections.json', 'CloudBeaverDatabaseHealth.java'})
         artifact = settings.get('mariadb_jdbc')
@@ -109,6 +114,8 @@ def adapter(name, containers=None):
     if not isinstance(name, str) or name not in ADAPTERS:
         raise ValueError('Select a supported independent application adapter')
     contract = ADAPTERS[name]
+    if name == 'cloudbeaver' and containers is not None and set(containers) == {'cloudbeaver'}:
+        return dict(contract, services=('cloudbeaver',))
     if name == 'authentik' and containers is not None and set(containers) == {'server', 'worker'}:
         return dict(contract, services=('server', 'worker'))
     return contract

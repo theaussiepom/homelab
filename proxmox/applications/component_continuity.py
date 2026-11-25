@@ -3,6 +3,9 @@
 Only a selected app phase calls this module. Public configuration and evolving
 provider permission metadata are outside its credential material comparison.
 """
+import hashlib
+import hmac
+import json
 import re
 from pathlib import Path
 
@@ -10,7 +13,8 @@ import component_input_secrets
 import component_payload
 import component_generation
 import component_current
-from private_io import read_json, require
+import component_ownership
+from private_io import read_json, regular, require
 
 SCHEMA = 'homelab-component-private-material-v1'
 FILE = 'private-material.json'
@@ -38,7 +42,7 @@ def validate(app, value):
     return value['roles']
 
 
-def verify(attempt, app, current):
+def verify(attempt, app, current, *, recovery_password=None):
     """Refuse drift before this app publishes inputs or creates credential records."""
     validate(app, current)
     receipt_path = attempt.receipt
@@ -60,8 +64,32 @@ def verify(attempt, app, current):
         old = validate(old_app, read_json(selected.directory / FILE, private=True))
     else:
         require(False,'Private continuity requires a genuine prior component success')
+    if (app['adapter'] == 'cloudbeaver' and set(old) == {'client_secret'}
+            and set(current['roles']) == {'recovery_password'}):
+        verify_cloudbeaver_recovery(attempt, old_app, app, selected, recovery_password)
+        return
     require(set(old) <= set(current['roles']),
             'An ordinary update cannot remove a sealed private role or erase its continuity')
     require(all(row['material_sha256'] == current['roles'][role]['material_sha256']
                 for role, row in old.items()),
             'Private role material changed; ordinary deployment cannot rotate credentials')
+
+
+def verify_cloudbeaver_recovery(attempt, old_app, app, payload, recovery):
+    """Bind the dedicated input to the password in this installation's sealed gateway generation."""
+    _, prior_cfg, _ = component_generation.previous(attempt)
+    before = component_ownership.identity(prior_cfg, old_app)
+    after = component_ownership.identity(attempt.cfg, app)
+    require(app['lifecycle'] == 'retained' and
+            component_ownership.replaces_cloudbeaver_gateway(old_app, app, before, after)
+            and old_app['settings']['recovery_admin'] == app['settings']['recovery_admin'],
+            'Preserve the retained CloudBeaver recovery owner')
+    filename = 'cloudbeaver.auto.conf'
+    raw = regular(payload.directory / filename, private=True)
+    require(hashlib.sha256(raw).hexdigest() == json.loads(payload.manifest)['files'].get(filename),
+            'Preserve the sealed CloudBeaver recovery configuration')
+    prefix = b'CB_ADMIN_PASSWORD='
+    passwords = [line[len(prefix):] for line in raw.split(b'\n') if line.startswith(prefix)]
+    require(len(passwords) == 1 and re.fullmatch(rb'[A-Za-z0-9_-]{43}=aA1!', passwords[0])
+            and isinstance(recovery, bytes) and hmac.compare_digest(passwords[0], recovery),
+            'The dedicated CloudBeaver recovery input must match the installed recovery password')

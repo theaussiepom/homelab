@@ -10,6 +10,10 @@ from component_sources import closed, require
 from identity_callbacks import canonical
 from component_input_secrets import BLUEPRINT_SECRET_ROLES
 
+FORWARD_SCOPE_MAPPINGS = ('goauthentik.io/providers/proxy/scope-proxy',
+                         *('goauthentik.io/providers/oauth2/scope-' + scope
+                           for scope in ('openid', 'email', 'profile', 'entitlements')))
+
 
 @dataclass(frozen=True)
 class Reference:
@@ -32,6 +36,31 @@ BlueprintDumper.add_representer(Reference, represent_reference)
 
 def find(model, field, value):
     return Reference('!Find', [model, [field, value]])
+
+
+def render_forward_auth(spec):
+    """Manage one proxy registration. The admission group and outpost are existing objects."""
+    provider = {'model': 'authentik_providers_proxy.proxyprovider', 'id': 'provider',
+                'identifiers': {'name': spec['provider_name']}, 'attrs': {
+                    'mode': 'forward_single', 'external_host': spec['origin'],
+                    'internal_host': '', 'skip_path_regex': '', 'cookie_domain': '',
+                    'basic_auth_enabled': False, 'intercept_header_auth': True, 'authentication_flow': None,
+                    'jwt_federation_providers': [], 'jwt_federation_sources': [],
+                    'authorization_flow': find('authentik_flows.flow', 'slug', spec['authorization_flow']),
+                    'invalidation_flow': find('authentik_flows.flow', 'slug', spec['invalidation_flow']),
+                    'property_mappings': [find('authentik_providers_oauth2.scopemapping', 'managed', scope)
+                                          for scope in spec['scope_mappings']]}}
+    app = {'model': 'authentik_core.application', 'id': 'application',
+           'identifiers': {'slug': spec['slug']}, 'attrs': {'name': spec['app_name'],
+               'provider': Reference('!KeyOf', 'provider'), 'policy_engine_mode': 'all',
+               'meta_launch_url': spec['origin'] + '/'}}
+    binding = {'model': 'authentik_policies.policybinding',
+               'identifiers': {'target': Reference('!KeyOf', 'application'),
+                               'group': find('authentik_core.group', 'name', spec['admission_group'])},
+               'attrs': {'order': 0, 'enabled': True, 'negate': False, 'failure_result': False}}
+    return yaml.dump({'version': 1, 'metadata': {'name': 'homelab-forward-' + spec['slug'],
+                      'labels': {'blueprints.goauthentik.io/instantiate': 'false'}},
+                      'entries': [provider, app, binding]}, Dumper=BlueprintDumper, sort_keys=False)
 
 
 def registration(source, app, owner, app_id):
@@ -81,6 +110,63 @@ def render(spec):
             'entries': [group, provider, application, binding]}, Dumper=BlueprintDumper, sort_keys=False)
 
 
+def require_worker(owner):
+    images = owner['software_selection']['images']
+    worker = images['worker']['image']
+    version = re.fullmatch(r'[^@]+:(\d+)\.(\d+)\.(\d+)@sha256:[0-9a-f]{64}', worker)
+    require(worker == images['server']['image'] and version and
+            tuple(map(int, version.groups())) >= (2026, 8, 6), 'component.image-binding')
+
+
+def bind_forward(resolver, exposures, app):
+    source = closed(app['forward_auth'], ('middleware', 'slug', 'provider_name', 'admission_group',
+                    'outpost', 'authorization_flow', 'invalidation_flow'))
+    require(all(isinstance(v, str) and 0 < len(v) <= 150 and v.strip() == v
+                and not any(ord(c) < 32 or ord(c) == 127 for c in v) for v in source.values()),
+            'component.authentication')
+    slug = source['slug']
+    require(re.fullmatch('[a-z0-9]+(?:-[a-z0-9]+)*', slug) and len(slug) <= 63
+            and source['outpost'] == 'embedded', 'component.authentication')
+    middleware = exposures.middlewares.get(source['middleware'], {})
+    owner = middleware.get('target', {}).get('app')
+    require(middleware.get('type') == 'forward-auth' and owner in resolver.apps
+            and resolver.apps[owner]['adapter'] == 'authentik', 'component.authentication')
+    require_worker(resolver.apps[owner])
+    selected = exposures.resolved.get(app.get('origin', {}).get('exposure'), {})
+    require(selected.get('type') == 'http' and selected['target'].get('app') == app['id']
+            and selected.get('middlewares', []).count(source['middleware']) == 1
+            and len(selected['hosts']) == 1 and app.get('origin_url') == 'https://' + selected['hosts'][0],
+            'component.authentication')
+    if app.get('authentication_resolved', {}).get('type') == 'forward-auth':
+        declared = source['middleware']
+        require(app['settings']['auth_headers'] == {'user': 'X-authentik-username', 'team': 'X-Team'},
+                'component.authentication')
+        network = set(app['identity']['networks'].values())
+        for peer in resolver.apps.values():
+            if (peer['id'] != app['id'] and peer['guest'] == app['guest']
+                    and peer['identity'].get('project') == app['identity']['project']):
+                require(network.isdisjoint(peer['identity']['networks'].values()), 'component.authentication')
+        target = selected['target']
+        routes = [row for row in exposures.resolved.values()
+                  if row['target'].get('app') == app['id'] or
+                  (row['type'] == 'http' and row['target'].get('address') == target['address']
+                   and row['target'].get('port') == target['port'])]
+        for route in routes:
+            chain = route.get('middlewares', [])
+            require(route is selected and len(chain) >= 2 and chain[-2] == declared
+                    and exposures.middlewares[chain[-1]]['type'] == 'cloudbeaver-headers',
+                    'component.authentication')
+    settings = resolver.apps[owner]['settings']
+    registrations = settings.setdefault('forward_blueprints', {})
+    spec = {**source, 'app': app['id'], 'guest': app['guest'], 'type': 'forward_single',
+            'origin': app['origin_url'], 'app_name': app['display_name'], 'scope_mappings': list(FORWARD_SCOPE_MAPPINGS)}
+    other = settings.get('oidc_blueprints', {})
+    require(not any(item['slug'] == slug or item['provider_name'] == spec['provider_name']
+                    or item.get('origin') == spec['origin'] for item in (*registrations.values(), *other.values())),
+            'component.authentication')
+    registrations[slug] = {**spec, 'blueprint': render_forward_auth(spec)}
+
+
 def bind(resolver, exposures):
     owned = {}
     for app_id, app in sorted(resolver.apps.items()):
@@ -96,11 +182,7 @@ def bind(resolver, exposures):
             owner = exposures.resolved[reference]['target'].get('app')
             require(owner in resolver.apps and resolver.apps[owner]['adapter'] == 'authentik',
                     'component.authentication')
-            images = resolver.apps[owner]['software_selection']['images']
-            worker = images['worker']['image']
-            version = re.fullmatch(r'[^@]+:(\d+)\.(\d+)\.(\d+)@sha256:[0-9a-f]{64}', worker)
-            require(worker == images['server']['image'] and version
-                    and tuple(map(int, version.groups())) >= (2026, 8, 6), 'component.image-binding')
+            require_worker(resolver.apps[owner])
             spec = registration(policy['registration'], app, owner, app_id)
             settings = resolver.apps[owner]['settings']
             configs = settings.setdefault('oidc_blueprints', {})
@@ -114,3 +196,7 @@ def bind(resolver, exposures):
                     'component.authentication')
             require(len(configs) < len(BLUEPRINT_SECRET_ROLES), 'component.secret-role')
             configs[slug] = {**spec, 'secret_role': BLUEPRINT_SECRET_ROLES[len(configs)], 'blueprint': render(spec)}
+    for app_id, app in sorted(resolver.apps.items()):
+        if 'forward_auth' in app:
+            with at('apps', app_id, 'forward_auth'):
+                bind_forward(resolver, exposures, app)

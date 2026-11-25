@@ -65,7 +65,7 @@ def connection_document(value):
 
 
 def configuration(value):
-    """The Community server trusts headers only on its unpublished Compose bridge."""
+    """Configure Community to use the identity and team headers supplied by its trusted proxy."""
     result = {'server': {'serverPort': 8978, 'forceHttps': True, 'serverName': value['server_name'], 'contentRoot': 'web',
             'driversLocation': 'drivers', 'rootURI': '/', 'serviceURI': '/api/',
             'database': {'driver': 'h2_embedded_v2', 'url': 'jdbc:h2:${workspace}/.data/cb.h2v2.dat',
@@ -150,6 +150,10 @@ def service_configuration(value, services, *, mount, workspace=WORKSPACE,
             for item in value.get('managed_connections', {}).values()) else []) + ([artifact['version'], artifact['sha256'], artifact['image_filename']]
             if jdbc(value) is not None else []),
         'start_period': '60s', 'interval': '10s', 'timeout': '8s', 'retries': 18}
+    if 'auth_gateway' not in services:
+        require(len(ports or []) == 1, 'Publish one private ingress-only Community listener')
+        server['ports'] = ports
+        return services
     proxy = services['auth_gateway']
     proxy['user'] = '65532:65532'
     proxy['read_only'] = True

@@ -200,6 +200,22 @@ class CloudRuntimeComponentTests(unittest.TestCase):
         value=self.config();self.seed_fresh(value)
         def change(rows):rows[value['services']['cloudbeaver']]['Config']['Labels']['com.docker.compose.project']='foreign'
         with patch.object(self.r,'docker',side_effect=self.healthy(value,change)),self.assertRaises(ValueError):self.r.health(value)
+
+    def test_forward_auth_uses_only_private_binding_and_preserves_workspace_owner(self):
+        value = self.config()
+        self.seed_fresh(value)
+        previous = self.r._workspace_receipt(self.r.context(value), self.owner)
+        del value['services']['auth_gateway']
+        ctx = self.r.context(value)
+        self.assertTrue(self.r.matches_workspace_receipt(ctx, self.owner, previous))
+        self.assertFalse(self.r.matches_workspace_receipt(ctx, self.owner, dict(previous, project='foreign')))
+        def binding(rows):
+            rows[value['services']['cloudbeaver']]['HostConfig']['PortBindings'] = {
+                '8978/tcp': [{'HostIp': value['bind_address'], 'HostPort': '8978'}]}
+        with patch.object(self.r, 'docker', side_effect=self.healthy(value, binding)):
+            self.assertTrue(self.r.health(value)['ingress_only_listener'])
+        with patch.object(self.r, 'docker', side_effect=self.healthy(value)), self.assertRaises(ValueError):
+            self.r.health(value)
     def test_managed_only_first_seed_preserves_custom_metadata_grants_and_exact_file_bytes(self):
         value=self.config();self.seed_fresh(value);ctx=self.r.context(value);directory=ctx.workspace/'GlobalConfiguration/.dbeaver';permissions=directory/'data-sources-permissions.json'
         permissions.chmod(0o600);permissions.write_text(json.dumps({'custom':['custom-user']}));custom=directory/'data-sources.json';self.r.create(custom,{'connections':{'custom':{'application':'owned'}}},uid=8978);custom_before=custom.read_bytes()

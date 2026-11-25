@@ -28,7 +28,8 @@ def _context(app):
             'Select a supported proxy file component')
     identity = app.get('identity', {})
     names = identity.get('services', {})
-    require(isinstance(names, dict) and set(names) == set(SERVICES[app['adapter']])
+    roles = ('cloudbeaver',) if app.get('authentication_resolved') == {'type': 'forward-auth'} else SERVICES[app['adapter']]
+    require(isinstance(names, dict) and set(names) == set(roles)
             and all(isinstance(value, str) and re.fullmatch('[a-z0-9][a-z0-9_-]{0,127}', value)
                     for value in names.values()) and len(set(names.values())) == len(names), 'Bind only this app owned service identities')
     directory = identity.get('runtime_directory')
@@ -74,7 +75,7 @@ def _row(path, content, uid, gid=None, mode='0400'):
 
 
 def _dynamic(public, names, directory, *, project=None):
-    if any(key != value for key, value in names.items()):
+    if set(names) == {'cloudbeaver'} or any(key != value for key, value in names.items()):
         public['services'] = copy.deepcopy(names)
     if directory != RUNTIME:
         public['runtime_directory'] = directory
@@ -86,18 +87,26 @@ def _cloudbeaver(app, secrets, records, public_ca, context):
     names, directory, project = context
     value = copy.deepcopy(app['settings'])
     managed = database_admin.connections(value)
-    _inputs(secrets, records, {'client_secret'}, {row['credential_id'] for row in managed.values()}, public_ca)
-    _text(secrets['client_secret'])
+    gateway = 'auth_gateway' in names
+    role = 'client_secret' if gateway else 'recovery_password'
+    _inputs(secrets, records, {role}, {row['credential_id'] for row in managed.values()}, public_ca)
+    credential = _text(secrets[role])
     selected = app.get('authentication_resolved')
-    require(isinstance(selected, dict) and selected.get('version') == 1,
-            'Bind the resolved Community authentication capability')
-    alpha, options = community.gateway(value, selected, secrets['client_secret'],
-                                       server_service=names['cloudbeaver'])
+    gateway_rows = []
+    if gateway:
+        require(isinstance(selected, dict) and selected.get('version') == 1,
+                'Bind the resolved Community authentication capability')
+        alpha, options = community.gateway(value, selected, secrets['client_secret'],
+                                           server_service=names['cloudbeaver'])
+        gateway_rows = [('oauth2-alpha.json', json.dumps(alpha), 65532), ('oauth2.cfg', options, 65532)]
+        password = base64.urlsafe_b64encode(community.derive(secrets[role], 'local-recovery')).decode() + 'aA1!'
+    else:
+        require(re.fullmatch(r'[\x21-\x5b\x5d-\x7e]{32,255}', credential), 'Supply a single printable recovery password without property escapes')
+        password = credential
     encoded_name = value['server_name'].encode('utf-16-be').hex()
     properties_name = ''.join('\\u' + encoded_name[i:i+4] for i in range(0, len(encoded_name), 4))
     auto = ('CB_SERVER_NAME=' + properties_name + '\nCB_ADMIN_NAME=' + value['recovery_admin']
-            + '\nCB_ADMIN_PASSWORD=' + base64.urlsafe_b64encode(
-                community.derive(secrets['client_secret'], 'local-recovery')).decode() + 'aA1!\n')
+            + '\nCB_ADMIN_PASSWORD=' + password + '\n')
     public = dict(value, workspace=app['storage_paths']['workspace']['source'], project=project)
     _dynamic(public, names, directory)
     for field,default in (('lifecycle','retained'),('project_file','compose.yml')):
@@ -110,7 +119,7 @@ def _cloudbeaver(app, secrets, records, public_ca, context):
             ('cloudbeaver.auto.conf', auto, 8978),
             ('cloudbeaver-connections.json', json.dumps(community.connection_document(value)), 8978),
             ('cloudbeaver-permissions.json', json.dumps({key: ['user'] for key in value['connections']}), 8978),
-            ('oauth2-alpha.json', json.dumps(alpha), 65532), ('oauth2.cfg', options, 65532),
+            *gateway_rows,
             ('cloudbeaver-public.json', json.dumps(public), 0)]
     if managed:
         public['cloudbeaver_image'] = app['software_selection']['images']['cloudbeaver']['image']

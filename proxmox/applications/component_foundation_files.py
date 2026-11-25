@@ -75,6 +75,12 @@ def routing(app, plan):
             require(set(row) == {'type'}, 'Preserve the fixed header middleware')
             if key != 'security-headers':
                 middleware[key] = copy.deepcopy(discovery.DEFAULT_MIDDLEWARES['security-headers'])
+        elif kind == 'cloudbeaver-headers':
+            from cloudbeaver import HEADERS
+            require(set(row) == {'type'}, 'Use the fixed Community identity header policy')
+            headers = dict.fromkeys(HEADERS, '')
+            headers['X-Team'] = 'user'
+            middleware[key] = {'headers': {'customRequestHeaders': headers}}
         elif kind == 'ip-allow-list':
             require(set(row) == {'type', 'ranges'} and isinstance(row['ranges'], list)
                     and bool(row['ranges']), 'Preserve resolved client ranges')
@@ -132,6 +138,8 @@ def routing(app, plan):
             # Ordinary managed routes stay in their guest Notes. Only their
             # unauthenticated outpost callback belongs to the file provider.
             callbacks[key] = discovery.callback_fields(selected)
+            callbacks[key]['middlewares'] = [name for name in selected['middlewares']
+                                             if plan['middlewares'][name]['type'] != 'cloudbeaver-headers']
     require(used_transports <= set(plan['transports']), 'Select resolved backend trust')
     transports = {key: copy.deepcopy(value) for key, value in plan['transports'].items() if key in used_transports}
     result = {'routes': routes, 'middlewares': middleware, 'transports': transports,
@@ -205,7 +213,8 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
         for raw in secrets.values():
             _scalar(raw)
         rows = [_row(AUTH_FILES[key], value, 1000) for key, value in secrets.items() if key not in client_roles]
-        if registrations:
+        forward = app.get('settings', {}).get('forward_blueprints', {})
+        if registrations or forward:
             manifest = []
             for slug, spec in sorted(registrations.items()):
                 raw = secrets[spec['secret_role']]
@@ -216,6 +225,11 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
                              _row('homelab-oidc-' + slug + '.yaml', body, 1000)])
                 manifest.append({**{key: value for key, value in spec.items()
                                     if key not in ('blueprint', 'secret_source', 'secret_role')},
+                                 'sha512': hashlib.sha512(body).hexdigest()})
+            for slug, spec in sorted(forward.items()):
+                body = spec['blueprint'].encode()
+                rows.append(_row('homelab-forward-' + slug + '.yaml', body, 1000))
+                manifest.append({**{key: value for key, value in spec.items() if key != 'blueprint'},
                                  'sha512': hashlib.sha512(body).hexdigest()})
             rows.append({'path': 'identity-blueprints.json', 'content': json.dumps(manifest),
                          'uid': 0, 'gid': 0, 'mode': '0600'})
