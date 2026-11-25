@@ -85,6 +85,7 @@ Use the [canonical backup syntax and field reference](../reference/backup.md#syn
 | `backup.profile` | Compatible library's registered PBS client profile |
 | `backup.management.credential` | Environment secret-source reference for `PBS_API_TOKEN` |
 | `backup.management.datastore_path` | Expected path of the existing datastore verified during [server setup](server.md#create-and-verify-the-datastore-once); a comparison value, not a request to create storage |
+| `backup.management.endpoint` | Optional named HTTPS endpoint for controller setup and enrollment. Both PBS addresses use the certificate fingerprint in the worker destination. |
 | `backup.recovery_public_key.source` | Site-relative verified public PEM |
 | `backup.job.destination` | One declared PBS HTTPS endpoint, datastore, namespace and actual certificate fingerprint |
 | `backup.job.schedule` | Your permitted backup interval and jitter; use the reference's UTC semantics |

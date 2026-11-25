@@ -127,7 +127,7 @@ def enroll(cfg, environment, *, api_factory=backup_api.PBS, fetch=backup_client_
     backup_readiness.legacy_holds(schedule)
     backup_controller.installation(schedule)
     management = read_json(directory/'backup-management.json', private=True)
-    backup_policy.exact(management, ('schema', 'credential', 'datastore_path'))
+    backup_policy.exact(management, ('schema', 'credential', 'datastore_path'), ('endpoint',))
     backup_policy.exact(management['credential'], ('type', 'name'), ('workflow_secret', 'source_id'))
     require(management['schema'] == 'homelab-pbs-management-v1'
             and management['credential']['type'] == 'environment'
@@ -136,7 +136,8 @@ def enroll(cfg, environment, *, api_factory=backup_api.PBS, fetch=backup_client_
             'Bind the declared PBS management input')
     selected = backup_identity.binding(job['destination'], cfg['app']['backup']['owner'],
                                       job['group']['name'], cfg['paths']['state_root'])
-    api = api_factory(job['destination'], environment.get('PBS_API_TOKEN', ''))
+    destination = backup_api.management_destination(job['destination'], management)
+    api = api_factory(destination, environment.get('PBS_API_TOKEN', ''))
     api.datastore(management['datastore_path'])
     # Namespace parents and the ACL digest are shared by parallel guest jobs.
     # Use the group's existing controller state scope, including other contexts;

@@ -81,6 +81,30 @@ class BackupDocumentation(unittest.TestCase):
         self.assertNotIn('needs',private['jobs']['selection'])
         self.assertNotIn('inputs.',json.dumps(private['jobs']['_backup']))
 
+    def test_named_management_endpoint_changes_only_the_protected_api_destination(self):
+        import backup_deploy
+
+        before = self.plan()
+        original = backup_deploy.descriptor(before)
+        old_files = component_packet.lower_plan(before)['resolver']['files']
+        self.site['external_endpoints']['pbs-admin'] = {
+            'protocol': 'https', 'address': '192.0.2.51', 'port': 8443,
+        }
+        self.site['backup']['management']['endpoint'] = {'external': 'pbs-admin'}
+        after = self.plan()
+        selected = backup_deploy.descriptor(after)
+        endpoint = {'server': '192.0.2.51', 'port': 8443}
+        self.assertEqual(selected, {
+            **original, 'destination': {**original['destination'], **endpoint},
+        })
+        new_files = component_packet.lower_plan(after)['resolver']['files']
+        self.assertEqual(json.loads(new_files['backup-management.json']), {
+            **json.loads(old_files['backup-management.json']), 'endpoint': endpoint,
+        })
+        self.assertEqual(json.loads(new_files['site.json'])['app']['backup'],
+                         json.loads(old_files['site.json'])['app']['backup'])
+        self.assertEqual(new_files['backup-group.json'], old_files['backup-group.json'])
+
     def test_documented_public_key_handoff_stages_normally_and_preserves_compiled_identity(self):
         """Compile the documented PEM-in-.pub handoff after real Git and private-path checks."""
         page = (ROOT/'docs/reference/backup.md').read_text()
