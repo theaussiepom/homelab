@@ -204,7 +204,7 @@ def identity_data(value):
         with directory(value['path']) as descriptor:
             require(current[0] or not os.listdir(descriptor))
     except FileNotFoundError:
-        require(not current[0])
+        require(not current[0] and not value.get('verify_existing', False))
         return initialize({'directories':[row],'previously_owned':False})
     return initialize({'directories':[row],'previously_owned':True})
 

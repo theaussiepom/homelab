@@ -58,3 +58,11 @@ Existing deployment records remain immutable. A pending guest can honour its ent
 Source tests use real private receipt transactions, local file controls and native fakes to exercise failure, rollback, reconciliation, tampering and future-run admission. A local Ansible integration also runs the production capture, restore and verification playbook against disposable files, including preservation of literal program templates. Passing these tests does not prove recovery on a live guest. A disposable protected-CD failure/rollback exercise and subsequent successful deployment are required to establish native adoption; application data and device acceptance remain separate checks.
 
 [Deployment](deployment.md) · [Lifecycle](../reference/lifecycle.md)
+
+## Resume a held Authentik schema upgrade
+
+Use forward recovery when a retained Authentik release chain has started an intermediate image and the normal checkpoint cannot acknowledge it. Verify the running server and worker, migration state and registrations. Inspect the original journal and the failure receipt. Obtain operator approval for the exact guest, failed operation and hold digest before selecting the recovery in the private site's protected main branch.
+
+Place `authentik-forward.json` at the root of the private site. It takes three fields. `guest` selects the dedicated Authentik guest. `operation` is the failed `ordinary-<run>-<attempt>` directory name. `hold_sha256` is the SHA-256 digest of the original hold bytes. Keep the compiled guest and the reviewed release chain identical to the failed selection. An approved framework correction may change the deployment implementation.
+
+The ordinary guest job takes its existing lock and verifies the prior owner, settled infrastructure, original app payload and schema-transition marker. For legacy stages, the release hook checks Redis health, image and service hash separately before accepting the two application containers started with `--no-deps`. It resumes from the guest's existing journal and compares the registration fingerprint and migrations at every checkpoint. The guest job applies the declared monitoring and backup configurations, verifies the current installation, and only then releases the matching hold. The normal deployment and final web checks follow. A stale approval cannot release a later hold.

@@ -46,6 +46,10 @@ def render(value):
     services = {name:{'command':role, 'image':app['software_selection']['images'].get(role,{}).get('image')}
                 for role,name in app['identity']['services'].items()}
     services['peer'] = {'command':'external'}
+    if legacy := app['identity']['services'].get('redis'):
+        services[legacy]['image'] = 'redis@sha256:'+'9'*64
+        for role in ('server', 'worker'):
+            services[app['identity']['services'][role]]['depends_on'] = {legacy: {'condition': 'service_healthy'}}
     return {'auth':{'services':services, 'media':app['storage_paths']['media']['target']}}
 
 
@@ -202,18 +206,19 @@ class GuestTests(unittest.TestCase):
             return '\n'.join(self.cache)
         if args[0] == 'ps':
             if '--no-trunc' in args:
-                return 'a'*64
+                return ('d' if args[-1].endswith('=cache') else 'a')*64
             if '--quiet' in args:
                 return ''
             return '\n'.join(self.current['services'])
         if args[0]=='inspect':
             if '.RestartCount' in args[-2]:
                 return '2026-01-01T00:00:00Z 0'
-            return self.image+' running healthy '+'b'*64
+            image = self.plan['initial']['services']['cache']['image'] if args[-1] == 'd'*64 else self.image
+            return image+' running healthy '+'b'*64
         if args[0]=='exec':
             return 'log line\nAK_UPGRADE='+json.dumps(dict(pending=0,applications=1,registration_hash=self.registration))
         if '--hash' in args:
-            return '\n'.join(role+' '+'b'*64 for role in self.plan['roles'])
+            return '\n'.join(role+' '+'b'*64 for role in args[-1].split(','))
         if 'up' in args:
             self.start_count += 1
             if self.fail:
@@ -249,8 +254,20 @@ class GuestTests(unittest.TestCase):
             guest.run(self.plan,self.canonical)
         self.assertEqual(self.start_count,1)
         self.current,self.image=self.plan['stages'][0],REFS[1]
-        self.assertTrue(guest.run(self.plan,self.canonical)['changed'])
+        self.assertTrue(guest.run(self.plan,self.canonical,resume=True)['changed'])
         self.assertEqual(self.start_count,6)
+        self.final()
+        self.assertTrue(guest.run(self.plan,self.canonical,resume=True)['final_installed'])
+        self.assertEqual(self.start_count,6)
+
+    def test_resume_cannot_initialize_or_normalize_a_foreign_legacy_dependency(self):
+        with self.assertRaises(FileNotFoundError):
+            guest.run(self.plan, self.canonical, resume=True)
+        self.assertFalse(self.journal.exists())
+        self.plan['stages'][0]['services']['jobs']['depends_on'] = {'other': {'condition': 'service_started'}}
+        with self.assertRaisesRegex(ValueError, 'Redis dependency'):
+            guest.run(self.plan, self.canonical)
+        self.assertEqual(self.start_count, 0)
 
     def test_changed_registration_foreign_services_and_evidence_refused(self):
         self.current=copy.deepcopy(self.current)
@@ -287,13 +304,13 @@ class GuestTests(unittest.TestCase):
     def test_cli_returns_only_the_completion_report(self):
         self.addCleanup(os.umask, os.umask(0o077))
         argv = ['maint',str(self.canonical)]
-        for final in (False, True):
+        for mode in ([], ['resume'], ['final']):
             output = io.StringIO()
-            with patch.object(sys,'argv',argv + (['final'] if final else [])), \
+            with patch.object(sys,'argv',argv + mode), \
                  patch.object(sys,'stdin',io.StringIO(json.dumps(self.plan))), \
                  patch.object(guest,'run',return_value={'completed':6}) as execute, contextlib.redirect_stdout(output):
                 guest.main()
-            execute.assert_called_once_with(self.plan, self.canonical, final=final)
+            execute.assert_called_once_with(self.plan, self.canonical, final=mode == ['final'], resume=mode == ['resume'])
             self.assertEqual(json.loads(output.getvalue()), {'completed':6})
 
     def test_cli_rejects_an_invalid_operation(self):

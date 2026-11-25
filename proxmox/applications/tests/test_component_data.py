@@ -36,6 +36,9 @@ class DataTests(unittest.TestCase):
         with patch.object(Path,'lstat',return_value=SimpleNamespace(st_mode=0o100600,st_uid=os.geteuid(),st_size=120)), \
              patch.object(Path,'read_bytes',side_effect=lambda:json.dumps({'name':'identity','services':previous}).encode()), \
              patch.object(data,'initialize') as initialize:
+            with self.assertRaises(ValueError):
+                data.identity_data(dict(value, verify_existing=True))
+            initialize.assert_not_called()
             data.identity_data(value)
             self.assertFalse(initialize.call_args.args[0]['previously_owned'])
             selected.mkdir(mode=0o700)
