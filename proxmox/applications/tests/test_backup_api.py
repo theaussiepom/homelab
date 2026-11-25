@@ -38,6 +38,16 @@ class TransportTests(unittest.TestCase):
     def api(self, connection):
         return backup_api.PBS(self.destination, self.token, connect=lambda *a, **k: connection)
 
+    def test_management_route_preserves_the_pin_and_repository_identity(self):
+        self.assertEqual(backup_api.management_destination(self.destination, {}), self.destination)
+        endpoint = {'server': '192.0.2.51', 'port': 8443}
+        selected = backup_api.management_destination(self.destination, {'endpoint': endpoint})
+        self.assertEqual(selected, {**self.destination, **endpoint})
+        self.assertEqual(self.destination['server'], '192.0.2.50')
+        for invalid in (None, {'server': '192.0.2.51'}, {**endpoint, 'fingerprint': 'foreign'}):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, 'exactly'):
+                backup_api.management_destination(self.destination, {'endpoint': invalid})
+
     def test_pin_is_checked_before_any_authentication_header(self):
         connection = Connection(); self.destination['fingerprint'] = ':'.join(['00']*32)
         with self.assertRaisesRegex(ValueError, 'certificate identity'): self.api(connection).users()

@@ -50,7 +50,16 @@ class SetupTests(unittest.TestCase):
                             token='management-sentinel', api_factory=self.api_factory,
                             execute=self.execute, monitoring_token_file=token_file)
         provision.assert_called_once_with(self.api_factory.return_value, destination,
-                                           token_file, self.api_factory)
+                                           token_file, self.api_factory, api_destination=destination)
+
+        admin = {**destination, 'server': '192.0.2.51'}
+        with patch.object(subject.backup_monitoring, 'provision') as provision:
+            subject.install(self.value, destination=admin, datastore_path='/mnt/recovery',
+                            token='management-sentinel', api_factory=self.api_factory, execute=self.execute,
+                            monitoring_token_file=token_file, monitoring_destination=destination)
+        self.api_factory.assert_called_with(admin, 'management-sentinel')
+        provision.assert_called_once_with(self.api_factory.return_value, destination,
+                                           token_file, self.api_factory, api_destination=admin)
 
     def test_first_install_and_repeat_preserve_the_one_schedule_attempt(self):
         note=self.root/'database-network-cutover-notes';write_new(note,b'operator evidence')
@@ -136,20 +145,29 @@ class SetupTests(unittest.TestCase):
         self.value['coverage'][self.member]=digest(encoded(self.inventory))
         directory=self.root/'inputs';directory.mkdir(mode=0o700)
         write_new(directory/'backup-group.json',encoded(self.value))
-        write_new(directory/'backup-management.json',encoded({'schema':'homelab-pbs-management-v1',
-            'credential':{'type':'environment','name':'PBS_API_TOKEN'},'datastore_path':'/mnt/recovery'}))
+        management = {'schema': 'homelab-pbs-management-v1',
+                      'credential': {'type': 'environment', 'name': 'PBS_API_TOKEN'},
+                      'datastore_path': '/mnt/recovery'}
+        management_file = directory/'backup-management.json'
+        write_new(management_file, encoded(management))
         cfg={'deployment':{'input_directory':str(directory)},'paths':{'state_root':str(self.root)},'app':{'backup':self.inventory}}
         api=API();api.datastore=Mock();factory=Mock(return_value=api);fetch=Mock(return_value=b'synthetic-native-key')
         environment={'PBS_API_TOKEN':'management-sentinel'}
         first=subject.enroll(cfg,environment,api_factory=factory,fetch=fetch)
         self.assertEqual(first,selected);self.assertTrue(fetch.call_args.kwargs['create'])
+        factory.assert_called_with(job['destination'], 'management-sentinel')
         files={p.name:(p.stat().st_ino,p.read_bytes()) for p in Path(selected['directory']).iterdir()}
         writes=[call for call in api.calls if call[0]!='GET']
+        admin = {'server': '192.0.2.51', 'port': 8007}
+        management_file.write_bytes(encoded(dict(management, endpoint=admin)))
+        worker_before = copy.deepcopy(job['destination'])
         subject.enroll(cfg,environment,api_factory=factory,fetch=fetch)
         self.assertFalse(fetch.call_args.kwargs['create']);self.assertEqual(writes,[call for call in api.calls if call[0]!='GET'])
         self.assertEqual(files,{p.name:(p.stat().st_ino,p.read_bytes()) for p in Path(selected['directory']).iterdir()})
         self.assertTrue(all(b'management-sentinel' not in raw for _,raw in files.values()))
-        factory.assert_called_with(job['destination'],'management-sentinel');api.datastore.assert_called_with('/mnt/recovery')
+        factory.assert_called_with({**worker_before, **admin}, 'management-sentinel')
+        self.assertEqual(job['destination'], worker_before)
+        api.datastore.assert_called_with('/mnt/recovery')
         invalid=copy.deepcopy(cfg);invalid['app']['backup']['job']['limits']['max_files']+=1
         with self.assertRaisesRegex(ValueError,'exact coverage'):subject.enroll(invalid,environment,api_factory=factory,fetch=fetch)
 

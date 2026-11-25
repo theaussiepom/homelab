@@ -2,6 +2,7 @@
 import copy
 from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock
 
 import component_backup_management as subject
 from component_errors import ComponentError
@@ -39,6 +40,21 @@ class ManagementTests(unittest.TestCase):
         self.resolver.site['secret_sources'].clear()
         with self.assertRaisesRegex(ComponentError, 'backup-management-credential'):
             subject.bind(self.resolver, self.value)
+
+    def test_resolve_only_a_named_https_management_endpoint(self):
+        reference = {'external': 'backup-admin'}
+        self.resolver.endpoint = Mock(return_value={
+            'protocol': 'https', 'address': '192.0.2.51', 'port': 8007})
+        result = subject.bind(self.resolver, dict(self.value, endpoint=reference))
+        self.resolver.endpoint.assert_called_once_with(reference)
+        self.assertEqual(result['endpoint'], {'server': '192.0.2.51', 'port': 8007})
+        self.resolver.endpoint.return_value['protocol'] = 'http'
+        with self.assertRaisesRegex(ComponentError, 'backup-management-endpoint'):
+            subject.bind(self.resolver, dict(self.value, endpoint=reference))
+        for invalid in (None, {'external': '../admin'}, {'address': '192.0.2.51'},
+                        {'external': 'backup-admin', 'port': 8007}):
+            with self.subTest(invalid=invalid), self.assertRaises(ComponentError):
+                subject.source(dict(self.value, endpoint=invalid))
 
 
 if __name__ == '__main__': unittest.main()

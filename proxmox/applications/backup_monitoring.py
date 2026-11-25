@@ -31,7 +31,9 @@ def verify(api, monitor):
                         for path, privileges in rights.items()), 'PBS monitoring access must be audit only')
 
 
-def provision(api, destination, token_file, api_factory):
+def provision(api, destination, token_file, api_factory, *, api_destination=None):
+    """Verify through the controller route and retain the monitoring destination in custody."""
+    api_destination = api_destination or destination
     token = Path(token_file)
     private_directory(token.parent)
     pending = token.with_name(token.name + '.pending.json')
@@ -43,7 +45,7 @@ def provision(api, destination, token_file, api_factory):
         secret = regular(token, private=True, limit=64)
         require(read_json(complete, private=True) == {'owner': owner, 'sha256': digest(secret)},
                 'Preserve the existing PBS monitoring credential')
-        verify(api, api_factory(destination, MONITOR_TOKEN + ':' + secret.decode('ascii')))
+        verify(api, api_factory(api_destination, MONITOR_TOKEN + ':' + secret.decode('ascii')))
         return
 
     acl = api.request('GET', '/access/acl')['data']
@@ -67,7 +69,7 @@ def provision(api, destination, token_file, api_factory):
                     'Bind the current PBS ACL generation')
             api.request('PUT', '/access/acl', {'path': path, 'role': role, 'auth-id': auth_id,
                         'propagate': int(propagate), 'digest': current})
-    verify(api, api_factory(destination, MONITOR_TOKEN + ':' + value['value']))
+    verify(api, api_factory(api_destination, MONITOR_TOKEN + ':' + value['value']))
     write_new(complete, encoded({'owner': owner, 'sha256': digest(secret)}))
     pending.unlink()
     sync(token.parent)
