@@ -7,6 +7,25 @@
     group: root
     mode: '0700'
 
+- name: Apply the declared intermediate Authentik releases
+  when: component_authentik_upgrade is defined and not ansible_check_mode
+  block:
+    - name: Install the owned maintenance helpers
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../{{ item }}"
+        dest: "/opt/homelab-app/{{ item }}"
+        owner: root
+        group: root
+        mode: '0700'
+      loop: [authentik_upgrade_guest.py, authentik_redis_retirement.py, private_io.py]
+    - name: Advance only the server and worker through the reviewed releases
+      ansible.builtin.command:
+        argv: [python3, /opt/homelab-app/authentik_upgrade_guest.py, "{{ component_compose_file }}"]
+        stdin: "{{ component_authentik_upgrade | to_json }}"
+      no_log: true
+      register: component_authentik_migration
+      changed_when: (component_authentik_migration.stdout | from_json).changed
+
 - name: Qualify the retained Authentik Redis predecessor
   when:
     - component_application.adapter == 'authentik'
@@ -142,11 +161,30 @@
   changed_when: false
   no_log: true
 
+- name: Prepare the final Authentik image before stopping the previous release
+  ansible.builtin.command:
+    argv: "{{ component_compose_argv + ['pull'] + component_services }}"
+  changed_when: false
+  when: component_authentik_upgrade is defined and not ansible_check_mode
+
+- name: Stop both previous Authentik processes before the final schema upgrade
+  ansible.builtin.command:
+    argv: "{{ component_compose_argv + ['stop', '--timeout', '60'] + component_services }}"
+  when: component_authentik_upgrade is defined and not ansible_check_mode
+
 - name: Start only this application's owned services
   ansible.builtin.command:
     argv: "{{ component_compose_argv + ['up', '-d', '--wait', '--wait-timeout', '180', '--remove-orphans=false', '--no-deps'] + (['--force-recreate'] if component_runtime_install.changed | default(false) or component_environment_install.changed | default(false) or component_driver_install.changed | default(false) else []) + component_services }}"
   register: component_start
   changed_when: "'Started' in component_start.stderr or 'Created' in component_start.stderr or 'Recreated' in component_start.stderr"
+  no_log: true
+
+- name: Verify the final Authentik image and database registrations
+  when: component_authentik_upgrade is defined and not ansible_check_mode
+  ansible.builtin.command:
+    argv: [python3, /opt/homelab-app/authentik_upgrade_guest.py, "{{ component_compose_file }}", final]
+    stdin: "{{ component_authentik_upgrade | to_json }}"
+  changed_when: false
   no_log: true
 
 - name: Configure monitoring before publishing its listener
