@@ -12,7 +12,7 @@ import component_discovery
 import component_app_hooks
 import component_ssh
 import bitwarden_runtime
-from application_contract import ordered_services
+from application_contract import initializes_authentik_data, ordered_services
 import proxmox_guest
 from commands import quiet
 from private_io import private_directory, read_json, regular, require, write
@@ -133,8 +133,7 @@ def variables(cfg, phase, *, payload=None, previously_owned=False, initialize_ru
          **{key:row['initialize'][key] for key in ('uid','gid','mode')}}
         for row in selected['storage_paths'].values() if selected['lifecycle']=='fresh' and 'initialize' in row]}
     storage = selected['storage_paths']
-    if (selected['adapter'] == 'authentik' and selected['lifecycle'] == 'retained'
-            and 'volume_root' in storage.get('data', {})):
+    if initializes_authentik_data(selected):
         result['component_identity_data'] = {'root':storage['data']['volume_root'], 'path':storage['data']['source'],
             'media':storage['media']['source'], 'compose':'/opt/homelab-app/'+selected['project_file'],
             'project':selected['project_name'], 'services':ordered_services(selected), 'previously_owned':previously_owned}

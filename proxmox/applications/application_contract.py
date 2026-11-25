@@ -114,6 +114,12 @@ def adapter(name, containers=None):
     return contract
 
 
+def initializes_authentik_data(app):
+    """The retained Authentik adapter owns initialization only on a declared volume."""
+    return (app['adapter'] == 'authentik' and app['lifecycle'] == 'retained'
+            and 'volume_root' in app['storage_paths'].get('data', {}))
+
+
 def ordered_services(app):
     """Resolve runtime names in explicit owned-role order, including after JSON."""
     roles=adapter(app['adapter'], app.get('containers'))['services']
