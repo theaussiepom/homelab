@@ -67,6 +67,24 @@ class MonitoringProvisionTests(unittest.TestCase):
             self.provision()
         self.api.request.assert_not_called()
 
+    def test_management_transport_preserves_existing_monitoring_custody(self):
+        self.provision()
+        receipt = self.token_file.with_name(self.token_file.name + '.owner.json')
+        original = receipt.read_bytes()
+        token_inode = self.token_file.stat().st_ino
+        admin = {**self.destination, 'server': '192.0.2.51'}
+        self.api.request.reset_mock()
+        self.factory.reset_mock()
+
+        subject.provision(self.api, self.destination, self.token_file, self.factory,
+                          api_destination=admin)
+
+        self.api.request.assert_not_called()
+        self.factory.assert_called_once_with(admin, subject.MONITOR_TOKEN + ':' + self.secret)
+        self.assertEqual(receipt.read_bytes(), original)
+        self.assertEqual(self.token_file.stat().st_ino, token_inode)
+        self.assertEqual(self.token_file.read_text(), self.secret)
+
     def test_invalid_acl_generation_stops_before_any_grant(self):
         self.api.request.side_effect = lambda method, path, data=None: (
             {'data': [], 'digest': 'bad'} if method == 'GET' else self.request(method, path, data))

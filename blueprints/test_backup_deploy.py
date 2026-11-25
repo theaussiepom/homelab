@@ -72,6 +72,7 @@ class BackupDeployTests(unittest.TestCase):
             self.assertEqual(value['monitoring_token_file'], pbs['token_file'])
             worker = self.coverage['one']['job']['destination']
             self.assertEqual(value['destination'], {**worker, **admin})
+            self.assertEqual(value['monitoring_destination'], worker)
             self.assertEqual(worker['server'], pbs['address'])
             pbs['address'] = '192.0.2.100'
             with self.assertRaisesRegex(ValueError, 'same managed PBS'):

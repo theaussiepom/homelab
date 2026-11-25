@@ -60,7 +60,7 @@ def parameters(value):
             'backup_controller_directories': directories}
 
 
-def install(value, *, destination, datastore_path, token, monitoring_token_file=None,
+def install(value, *, destination, datastore_path, token, monitoring_token_file=None, monitoring_destination=None,
             api_factory=backup_api.PBS, execute=quiet):
     """Maintain protected PBS setup without visiting or enrolling guests."""
     backup_controller.schedule(value)
@@ -82,7 +82,8 @@ def install(value, *, destination, datastore_path, token, monitoring_token_file=
         api = api_factory(destination, token)
         api.datastore(datastore_path)
         if monitoring_token_file is not None:
-            backup_monitoring.provision(api, destination, monitoring_token_file, api_factory)
+            backup_monitoring.provision(api, monitoring_destination or destination,
+                                        monitoring_token_file, api_factory, api_destination=destination)
         identity = {'schema': 'homelab-pbs-schedule-install-v1', 'schedule': value, 'source_sha256': source_hash()}
         parent = Path(roots[0])/'backup-controller'/'installations'/value['group']['name']
         for folder in (parent.parent.parent, parent.parent, parent):

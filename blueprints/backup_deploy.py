@@ -27,7 +27,7 @@ def descriptor(plan):
     require(all({key: item for key, item in value['job']['destination'].items()
                  if key not in ('auth_id', 'backup_id')} ==
                 {key: item for key, item in first.items() if key not in ('auth_id', 'backup_id')}
-                for value in inventories), 'Use one declared PBS management destination')
+                for value in inventories), 'Use one declared PBS worker destination')
     management = selected['management']
     result = {'schedule': selected['group'],
               'destination': backup_api.management_destination(first, management),
@@ -40,6 +40,7 @@ def descriptor(plan):
                 and pbs['token_id'] == backup_api.MONITOR_TOKEN,
                 'Bind monitoring provisioning to the same managed PBS endpoint, certificate and audit identity')
         result['monitoring_token_file'] = pbs['token_file']
+        result['monitoring_destination'] = first
     return result
 
 
@@ -50,7 +51,8 @@ def run(stack, site, disabled, *, environment=os.environ):
     value = descriptor(plan)
     return backup_setup.install(value['schedule'], destination=value['destination'],
         datastore_path=value['datastore_path'], token=environment.get('PBS_API_TOKEN', ''),
-        monitoring_token_file=value.get('monitoring_token_file'))
+        monitoring_token_file=value.get('monitoring_token_file'),
+        monitoring_destination=value.get('monitoring_destination'))
 
 
 def main():
