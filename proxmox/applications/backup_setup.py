@@ -60,7 +60,7 @@ def parameters(value):
             'backup_controller_directories': directories}
 
 
-def install(value, *, destination, datastore_path, token, monitoring_token_file=None,
+def install(value, *, destination, datastore_path, token, monitoring_token_file=None, monitoring_destination=None,
             api_factory=backup_api.PBS, execute=quiet):
     """Maintain protected PBS setup without visiting or enrolling guests."""
     backup_controller.schedule(value)
@@ -82,7 +82,8 @@ def install(value, *, destination, datastore_path, token, monitoring_token_file=
         api = api_factory(destination, token)
         api.datastore(datastore_path)
         if monitoring_token_file is not None:
-            backup_monitoring.provision(api, destination, monitoring_token_file, api_factory)
+            backup_monitoring.provision(api, monitoring_destination or destination,
+                                        monitoring_token_file, api_factory, api_destination=destination)
         identity = {'schema': 'homelab-pbs-schedule-install-v1', 'schedule': value, 'source_sha256': source_hash()}
         parent = Path(roots[0])/'backup-controller'/'installations'/value['group']['name']
         for folder in (parent.parent.parent, parent.parent, parent):
@@ -127,7 +128,7 @@ def enroll(cfg, environment, *, api_factory=backup_api.PBS, fetch=backup_client_
     backup_readiness.legacy_holds(schedule)
     backup_controller.installation(schedule)
     management = read_json(directory/'backup-management.json', private=True)
-    backup_policy.exact(management, ('schema', 'credential', 'datastore_path'))
+    backup_policy.exact(management, ('schema', 'credential', 'datastore_path'), ('endpoint',))
     backup_policy.exact(management['credential'], ('type', 'name'), ('workflow_secret', 'source_id'))
     require(management['schema'] == 'homelab-pbs-management-v1'
             and management['credential']['type'] == 'environment'
@@ -136,7 +137,8 @@ def enroll(cfg, environment, *, api_factory=backup_api.PBS, fetch=backup_client_
             'Bind the declared PBS management input')
     selected = backup_identity.binding(job['destination'], cfg['app']['backup']['owner'],
                                       job['group']['name'], cfg['paths']['state_root'])
-    api = api_factory(job['destination'], environment.get('PBS_API_TOKEN', ''))
+    destination = backup_api.management_destination(job['destination'], management)
+    api = api_factory(destination, environment.get('PBS_API_TOKEN', ''))
     api.datastore(management['datastore_path'])
     # Namespace parents and the ACL digest are shared by parallel guest jobs.
     # Use the group's existing controller state scope, including other contexts;

@@ -24,6 +24,7 @@ import component_secrets
 import component_foundations
 import component_properties
 import component_identity
+import image_update_hooks
 import component_traffic
 import component_monitoring
 import component_admission
@@ -72,6 +73,19 @@ class Resolver:
                                   ('backup_profiles', component_backup.profile)):
             for name, value in self.library[collection].items():
                 checked(check, value, collection, name)
+        for name, profile in self.library['app_profiles'].items():
+            software = self.library['software']
+            uses_images = any(software.get(ref, {}).get('images') for ref in profile.get('software', []))
+            if uses_images or 'image_update' in profile:
+                with at('app_profiles', name, 'image_update'):
+                    try:
+                        image_update_hooks.check(name, profile['adapter'], profile.get('image_update', 'standard'))
+                    except ValueError:
+                        require(False, 'component.image-update')
+                    require(uses_images, 'component.image-update')
+                    if profile.get('image_update') == 'release-series':
+                        from authentik_releases import plugin
+                        plugin(self.library_sources.document(f'apps/{name}/image-update.yaml'))
         for collection, check in (('contexts', types.context), ('networks', types.network),
                                   ('guests', types.guest), ('apps', types.app)):
             for name, value in self.site[collection].items():
@@ -595,6 +609,11 @@ class Resolver:
                 containers, additions, native, app_reserve, minimums = runtime_values(profile.get('runtime', []) + app.get('runtime', []), guest)
                 reserve = max(reserve, app_reserve)
                 selected = software_values(profile.get('software', []) + app.get('software', []) + additions)
+                if profile.get('image_update') == 'release-series' and 'upgrade_path' in app.get('properties', {}):
+                    target = app['properties']['upgrade_path'][-1]
+                    with at('apps', app['id'], 'properties', 'upgrade_path'):
+                        require(selected['images'] == {'server': {'image': target}, 'worker': {'image': target}},
+                                'component.image-update')
                 owner = adapter(app['adapter'], containers)
                 require(bool(owner['native']) == (native is not None), 'component.native-budget')
                 if native is not None:

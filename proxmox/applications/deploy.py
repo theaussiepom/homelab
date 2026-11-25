@@ -97,8 +97,8 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
                     payload=component_prepare.prepare(cfg,app_id,environment,attempt=attempt)
             ready=attempt.begin_phase(phase,payload=payload)
             component_recovery.phase_controls(attempt, phase, payload)
-            import authentik_upgrade
-            maintenance = authentik_upgrade.phase_options(attempt, phase, app)
+            import image_update_hooks
+            maintenance = image_update_hooks.phase_options(attempt, phase, app)
             result=component_ansible.run_phase(cfg,site,attempt.work,attempt.operation,expected,phase,
                 payload=payload,previously_owned=previously_owned, **maintenance,
                 **({'initialize_runtime':True} if initialize_runtime else {}))

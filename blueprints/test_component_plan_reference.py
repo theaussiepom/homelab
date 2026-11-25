@@ -242,6 +242,27 @@ class PlanRuntimeReview(unittest.TestCase):
         r.library['software']['dns'] = {'images': {'unbound': 'image'}, 'packages': ['resolver-tools=1']}
         return r, {'image': {'image': 'example/unbound@sha256:' + 'a' * 64}}
 
+    def test_release_series_must_end_at_the_catalogue_pin_for_both_roles(self):
+        r, images = self.runtime()
+        profile = r.library['app_profiles']['recursive']
+        profile['image_update'] = 'release-series'
+        app = r.apps['recursive_a']
+        app['adapter'] = 'authentik'
+        app['properties']['upgrade_path'] = ['reviewed source', 'reviewed target']
+        with self.assertRaisesRegex(ValueError, 'image-update'):
+            r.execution_values(images)
+        r.library['software']['dns']['images'] = {'server':'image','worker':'image'}
+        container = r.library['runtime_profiles']['base']['containers'].pop('unbound')
+        r.library['runtime_profiles']['base']['containers'] = dict.fromkeys(('server','worker'),container)
+        r.library['runtime_profiles']['base'].pop('minimums')
+        r.guests['resolver']['resources']['memory_mib'] = 1024
+        with self.assertRaisesRegex(ValueError, 'image-update'):
+            r.execution_values(images)
+        images['image']['image'] = 'reviewed target'
+        r.execution_values(images)
+        self.assertEqual(app['software_selection']['images'],
+                         {'server':{'image':'reviewed target'},'worker':{'image':'reviewed target'}})
+
     def test_runtime_merges_equal_limits_and_minimums_but_refuses_conflicting_security_or_budget(self):
         r, images = self.runtime(); r.library['app_profiles']['recursive']['runtime'] += ['same']
         r.library['runtime_profiles']['same'] = copy.deepcopy(r.library['runtime_profiles']['base'])

@@ -97,7 +97,9 @@ def namespaces(attempt, app):
         path = app['properties']['upgrade_path']
         authentik_upgrade.validate(path)
         require(old_app['adapter'] == 'authentik' and app['lifecycle'] == 'retained'
-                and authentik_upgrade.images(old_app) == path[0] and authentik_upgrade.images(app) == path[-1],
+                and authentik_upgrade.images(old_app) == path[0] and authentik_upgrade.images(app) == path[-1]
+                and authentik_upgrade.version(path[0])[:2] < (2025, 10)
+                and authentik_upgrade.version(path[-1])[:2] >= (2025, 12),
                 'Require the selected Authentik release transition')
         authentik_upgrade.transition(before, current)
         return True, before['runtime_directory'] is not None

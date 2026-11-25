@@ -420,7 +420,7 @@ def health(value):
 def profile(value):
     closed(value, ('adapter', 'display_name', 'interfaces'),
            ('listeners', 'endpoints', 'storage', 'software', 'runtime', 'authentication',
-            'connections', 'health', 'monitoring', 'properties', 'devices', 'secrets', 'backup', 'runtime_dns'))
+            'connections', 'health', 'monitoring', 'properties', 'devices', 'secrets', 'backup', 'runtime_dns', 'image_update'))
     require(value.get('runtime_dns', 'context') in ('context', 'host'))
     owner = adapter(value['adapter'])
     # Import locally: the source validators remain independently callable.

@@ -80,6 +80,8 @@ def runtime_config(plan, guest_id):
             require(bool(adapter(app['adapter'])['native']), 'component.runtime-incomplete')
         selected['storage_paths'] = {}
         profile = plan.library['app_profiles'][app['profile']]
+        if app.get('software_selection', {}).get('images'):
+            selected['image_update'] = profile.get('image_update', 'standard')
         for role, binding in app.get('storage', {}).items():
             require('asset' not in binding, 'component.runtime-incomplete')
             kind = 'root_paths' if 'root_path' in binding else 'volumes'
