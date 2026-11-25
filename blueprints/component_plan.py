@@ -611,8 +611,9 @@ class Resolver:
                 selected = software_values(profile.get('software', []) + app.get('software', []) + additions)
                 if profile.get('image_update') == 'release-series' and 'upgrade_path' in app.get('properties', {}):
                     target = app['properties']['upgrade_path'][-1]
-                    require(set(selected['images']) == {'server', 'worker'}, 'component.image-update')
-                    selected['images'] = {role: {'image': target} for role in selected['images']}
+                    with at('apps', app['id'], 'properties', 'upgrade_path'):
+                        require(selected['images'] == {'server': {'image': target}, 'worker': {'image': target}},
+                                'component.image-update')
                 owner = adapter(app['adapter'], containers)
                 require(bool(owner['native']) == (native is not None), 'component.native-budget')
                 if native is not None:

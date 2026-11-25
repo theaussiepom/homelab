@@ -242,7 +242,7 @@ class PlanRuntimeReview(unittest.TestCase):
         r.library['software']['dns'] = {'images': {'unbound': 'image'}, 'packages': ['resolver-tools=1']}
         return r, {'image': {'image': 'example/unbound@sha256:' + 'a' * 64}}
 
-    def test_release_series_selects_both_roles_from_the_reviewed_target(self):
+    def test_release_series_must_end_at_the_catalogue_pin_for_both_roles(self):
         r, images = self.runtime()
         profile = r.library['app_profiles']['recursive']
         profile['image_update'] = 'release-series'
@@ -256,6 +256,9 @@ class PlanRuntimeReview(unittest.TestCase):
         r.library['runtime_profiles']['base']['containers'] = dict.fromkeys(('server','worker'),container)
         r.library['runtime_profiles']['base'].pop('minimums')
         r.guests['resolver']['resources']['memory_mib'] = 1024
+        with self.assertRaisesRegex(ValueError, 'image-update'):
+            r.execution_values(images)
+        images['image']['image'] = 'reviewed target'
         r.execution_values(images)
         self.assertEqual(app['software_selection']['images'],
                          {'server':{'image':'reviewed target'},'worker':{'image':'reviewed target'}})

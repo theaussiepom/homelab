@@ -39,16 +39,16 @@ def validate(path):
 
 
 def select(source, published, resolve_digest, *, through=None):
-    """Select the latest published patch of each series, including the source series."""
+    """Select each series up to the exact reviewed target tag and digest."""
     start = version(source)
-    ceiling = version(through)[:2] if through else None
+    ceiling = version(through) if through is not None else None
     latest = {}
     for tag in published:
         match = TAG.fullmatch(tag)
         if match:
             value = tuple(map(int, match.groups()))
             family = value[:2]
-            if family >= start[:2] and (ceiling is None or family <= ceiling):
+            if family >= start[:2] and (ceiling is None or value <= ceiling):
                 latest[family] = max(value, latest.get(family, value))
     if start[:2] not in latest or latest[start[:2]] < start:
         raise ValueError('The upstream release inventory does not cover the accepted source')
@@ -59,6 +59,8 @@ def select(source, published, resolve_digest, *, through=None):
         version(pin)
         if pin != source:
             path.append(pin)
+    if through is not None and path[-1] != through:
+        raise ValueError('Published Authentik images do not match the selected target tag and digest')
     if len(path) > 1:
         validate(path)
     return path

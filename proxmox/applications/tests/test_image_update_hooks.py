@@ -24,6 +24,11 @@ class ReleaseTests(unittest.TestCase):
         expected = [source,pin('2026.12.3'),pin('2027.3.10'),pin('2027.7.2')]
         self.assertEqual(releases.select(source,tags,digest), expected)
         self.assertEqual(releases.select(source,tags,digest,through=expected[-2]),expected[:-1])
+        exact = pin('2027.3.9')
+        self.assertEqual(releases.select(source,tags,digest,through=exact), [*expected[:2], exact])
+        for unavailable in [pin('2027.3.11'), pin('2027.3.9','b'), pin('2026.8.20')]:
+            with self.assertRaises(ValueError):
+                releases.select(source,tags,digest,through=unavailable)
         for absent in [[],['2026.12.0']]:
             with self.assertRaises(ValueError):
                 releases.select(source,absent,digest)
