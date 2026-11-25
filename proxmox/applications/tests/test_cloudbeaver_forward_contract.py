@@ -68,10 +68,12 @@ class ForwardContractTests(unittest.TestCase):
                                            **{name:raw.decode() for name,raw in artifacts.items()}}
                 write_bytes(fixture.path,encoded(fixture.packet))
                 admitted,_ = component_inputs.prepare(fixture.path,fixture.inputs,create=True)
-                with patch.object(component_prepare.component_continuity,'verify'), \
+                with patch.object(component_prepare.component_continuity,'verify') as continuity, \
                      patch.object(component_prepare,'cloudbeaver_retirement',return_value=retirement):
                     payload = component_prepare.prepare(admitted,app['id'],
                         {'HOMELAB_APP_SECRET_CLOUDBEAVER_RECOVERY_PASSWORD':'synthetic-input-for-configuration-unit-test'},attempt=object())
+                self.assertEqual(continuity.call_args.kwargs,
+                                 {'recovery_password':b'synthetic-input-for-configuration-unit-test'})
                 variables = component_ansible.variables(admitted,app['id'],payload=payload,previously_owned=True)
                 self.assertEqual(variables.get('component_gateway_retirement'),retirement)
                 self.assertEqual(variables['component_services'],['cloudbeaver'])
