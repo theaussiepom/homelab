@@ -28,8 +28,10 @@ def descriptor(plan):
                  if key not in ('auth_id', 'backup_id')} ==
                 {key: item for key, item in first.items() if key not in ('auth_id', 'backup_id')}
                 for value in inventories), 'Use one declared PBS management destination')
-    result = {'schedule': selected['group'], 'destination': first,
-              'datastore_path': selected['management']['datastore_path']}
+    management = selected['management']
+    result = {'schedule': selected['group'],
+              'destination': backup_api.management_destination(first, management),
+              'datastore_path': management['datastore_path']}
     server = plan.resolved.get('monitoring', {}).get('server')
     pbs = plan.resolved.get('apps', {}).get(server, {}).get('settings', {}).get('pbs')
     if pbs is not None:

@@ -61,12 +61,18 @@ class BackupDeployTests(unittest.TestCase):
     def test_monitoring_provision_is_bound_to_the_same_pbs_and_verified_pin(self):
         pbs = {'address': self.destination['server'], 'port': 8007, 'certificate': 'fixture',
                'token_id': subject.backup_api.MONITOR_TOKEN, 'token_file': '/private/pbs-monitor-token'}
+        admin = {'server': '192.0.2.51', 'port': 8007}
+        self.plan.resolved['backup']['management']['endpoint'] = admin
         self.plan.resolved.update(monitoring={'server': 'monitor'},
                                   apps={'monitor': {'settings': {'pbs': pbs}}})
         with (patch.object(subject.component_packet, 'lower_plan', return_value=self.packets),
               patch.object(subject.ssl, 'PEM_cert_to_DER_cert', return_value=b'fixture'),
               patch.object(subject, 'digest', side_effect=lambda raw: 'ab' * 32 if raw == b'fixture' else digest(raw))):
-            self.assertEqual(subject.descriptor(self.plan)['monitoring_token_file'], pbs['token_file'])
+            value = subject.descriptor(self.plan)
+            self.assertEqual(value['monitoring_token_file'], pbs['token_file'])
+            worker = self.coverage['one']['job']['destination']
+            self.assertEqual(value['destination'], {**worker, **admin})
+            self.assertEqual(worker['server'], pbs['address'])
             pbs['address'] = '192.0.2.100'
             with self.assertRaisesRegex(ValueError, 'same managed PBS'):
                 subject.descriptor(self.plan)

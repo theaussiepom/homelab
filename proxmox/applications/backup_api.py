@@ -13,6 +13,16 @@ MONITOR_USER = 'homelab-zabbix@pbs'
 MONITOR_TOKEN = MONITOR_USER + '!monitoring'
 
 
+def management_destination(destination, management):
+    """Select the controller transport while retaining the datastore and TLS pin."""
+    if 'endpoint' not in management:
+        return destination
+    endpoint = management['endpoint']
+    require(isinstance(endpoint, dict) and set(endpoint) == {'server', 'port'},
+            'Bind exactly the managed PBS endpoint address and port')
+    return {**destination, **endpoint}
+
+
 class PBS:
     def __init__(self, destination, token, *, connect=http.client.HTTPSConnection):
         require(isinstance(destination.get('server'), str)
