@@ -70,7 +70,14 @@ def validate(adapter, value, *, partial=False):
         if 'connection_name' in value:
             _line(value['connection_name'], 100)
     elif adapter == 'authentik':
-        closed(value, () if partial else ('database',), ('database', 'smtp', 'callbacks') if partial else ('smtp', 'callbacks'))
+        closed(value, () if partial else ('database',), ('database', 'smtp', 'callbacks', 'upgrade_path') if partial else ('smtp', 'callbacks', 'upgrade_path'))
+        if 'upgrade_path' in value:
+            import authentik_upgrade
+            with at('upgrade_path'):
+                try:
+                    authentik_upgrade.validate(value['upgrade_path'])
+                except ValueError:
+                    require(False, 'component.property')
         if 'database' in value:
             _database(value['database'])
         if 'smtp' in value:

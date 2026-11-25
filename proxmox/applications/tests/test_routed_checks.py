@@ -25,6 +25,46 @@ def row():
 
 
 class RoutedRuntimeTests(unittest.TestCase):
+    def test_native_oidc_metadata_and_signin_are_independent_of_page_success(self):
+        from urllib.parse import urlencode
+        page = row()
+        provider = 'https://login.example.invalid'
+        login = dict(page, mode='oidc', contains='', path='/api/auth/oidc/login', auth_origins=[provider])
+        data = {'issuer': provider + '/o/app/', 'callback': page['route_origins'][0] + '/oidc/callback',
+                'client_id': 'example', 'signing_algorithms': ['RS256'],
+                'resolver_address': '198.18.21.53', 'ingress_address': '198.18.21.80',
+                **{key: provider + '/' + key for key in m.OIDC_ENDPOINTS}}
+        login['oidc'] = data
+        m.validate([page, login])
+        self.assertRaises(ValueError, m.validate, [page, login, login])
+        self.assertRaises(ValueError, m.validate, [dict(login, oidc=dict(data, token_url='https://foreign.invalid/token'))])
+        metadata = {'issuer': data['issuer'], 'id_token_signing_alg_values_supported': ['RS256'],
+                    **{field: data[key] for key, field in m.OIDC_ENDPOINTS.items()}}
+        query = urlencode({'client_id':'example', 'redirect_uri':data['callback'], 'state':'private'})
+        redirect = data['authorization_url'] + '?' + query
+        def run(document, location):
+            with patch.object(m, 'fetch', side_effect=[(200, None, document), (302, location, '')]) as fetch:
+                m.check(login, 123)
+            self.assertEqual(fetch.call_args_list[0].args[0]['ingress_address'], data['ingress_address'])
+            self.assertEqual(fetch.call_args_list[0].args[1], data['issuer'] + '.well-known/openid-configuration')
+            self.assertEqual(fetch.call_args_list[1].args[1], page['route_origins'][0] + login['path'])
+        run(json.dumps(metadata), redirect)
+        cases = [('bad', redirect, 'invalid_document'),
+                 (json.dumps(dict(metadata, issuer='wrong')), redirect, 'issuer_mismatch'),
+                 (json.dumps(dict(metadata, token_endpoint='wrong')), redirect, 'endpoint_mismatch'),
+                 (json.dumps(dict(metadata, id_token_signing_alg_values_supported=[])), redirect, 'signing_algorithm_mismatch'),
+                 (json.dumps(metadata), '/', 'authorization_endpoint_mismatch'),
+                 (json.dumps(metadata), redirect + '&client_id=example', 'client_id_mismatch'),
+                 (json.dumps(metadata), redirect.replace('client_id=example', 'client_id=wrong'), 'client_id_mismatch'),
+                 (json.dumps(metadata), redirect.replace('redirect_uri=', 'other='), 'callback_mismatch'),
+                 (json.dumps(metadata), redirect + '&redirect_uri=wrong', 'callback_mismatch'),
+                 (json.dumps(metadata), redirect + '&broken', 'invalid_redirect')]
+        for document, location, cause in cases:
+            with self.subTest(cause=cause), self.assertRaises(m.RouteFailure) as caught:
+                run(document, location)
+            self.assertEqual(caught.exception.details['cause'], cause)
+            self.assertNotIn('private', str(caught.exception.details))
+
     def test_parallel_real_pool_overlap_finite_per_worker_budget_and_failed_probe_isolation(self):
         rows=[row() for _ in range(3)]
         rows[1].update(host='alias.example.invalid',route_origins=['https://alias.example.invalid'])
@@ -65,6 +105,19 @@ class RoutedRuntimeTests(unittest.TestCase):
         response.read.assert_called_once_with(m.BODY_INSPECTION_LIMIT+1)
         self.assertEqual(stream.tell(),min(len(payload),m.BODY_INSPECTION_LIMIT+1))
         client.return_value.close.assert_called_once();connect.return_value.close.assert_called_once()
+
+    def test_oidc_response_size_is_bounded_before_parsing(self):
+        selected = dict(row(), mode='oidc')
+        address = selected['route_origins'][0] + '/'
+        context = MagicMock(check_hostname=True,verify_mode=ssl.CERT_REQUIRED)
+        with patch.object(m.dns_records,'probe'), patch.object(m.socket,'create_connection'), \
+             patch.object(m.ssl,'create_default_context',return_value=context), \
+             patch.object(m.http.client,'HTTPSConnection') as client, patch.object(m.time,'monotonic',return_value=1):
+            response = client.return_value.getresponse.return_value
+            response.read.return_value = b'x' * (m.BODY_INSPECTION_LIMIT + 1)
+            with self.assertRaises(m.RouteFailure) as caught:
+                m.fetch(selected, address, 100)
+            self.assertEqual(caught.exception.details['cause'], 'response_too_large')
 
     def test_marker_must_exist_within_bounded_prefix_even_for_large_200_responses(self):
         marker=b'Expected service';budget=m.BODY_INSPECTION_LIMIT

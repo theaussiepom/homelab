@@ -29,6 +29,8 @@ Authentik additionally accepts:
 - `smtp`: `host` and `from` are required, each a single nonempty line of at most 253 characters. `port` is required and must be 1–65535. The required `use_tls` and `use_ssl` fields must be Booleans and cannot both be true. `username` is required and must be a single line of at most 256 characters; it may be empty. Optional `timeout` must be an integer from 1 through 300.
 - `callbacks: {evidence: id}`: selects existing identity-callbacks evidence that identifies the provider and application metadata and the exact callback additions. It does not provision an IdP generally.
 
+An optional Authentik `properties.upgrade_path` on a retained installation selects a single protected maintenance run. Supply one tagged and digest-pinned official GHCR server image for each series in order: 2025.4, 2025.6, 2025.8, 2025.10, 2025.12, 2026.2, 2026.5 and 2026.8. The first pin must match the accepted deployment and the last must match both selected roles. The Identity phase checks service health, outstanding migrations and registration continuity between releases. A database migration interruption requires reconciliation using a matching database recovery point. After acceptance the property may be removed. Normal repeat deployments and patch updates within the target series skip the sequence.
+
 Zabbix accepts no other properties. Configuration checks allow a selected `database_password` role when root monitoring is absent, but ordinary deployment does not support that configuration. App preparation currently requires the credential owned by root monitoring and its exact monitoring files, with no selected scalar password. Root monitoring generates and owns the credential, and rejects a duplicate selected role.
 
 ## PostgreSQL

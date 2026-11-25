@@ -120,6 +120,8 @@ class OwnedRuntimeBranches(unittest.TestCase):
         app={'secret_bindings':{'secret_key':{},'postgresql_password':{}},'properties':{},
              'settings':{'database':{'host':'198.18.31.10','user':'identity_user','name':'identity_db'}},
              'identity':{'services':{'redis':'owned-redis','server':'owned-server','worker':'owned-worker'}},
+             'software_selection':{'images':{role:{'image':'registry.example.invalid/identity:2025.2.1@sha256:'+'a'*64}
+                                               for role in ('server','worker')}},
              'containers':{'server':{},'worker':{},'redis':{}},
              'storage_paths':{key:{'source':'/srv/example/'+key} for key in ('media','templates','certs','redis')}}
         def mount(a,name,target):return {'source':'owned-runtime/'+name,'target':target}
@@ -136,6 +138,34 @@ class OwnedRuntimeBranches(unittest.TestCase):
         invalid=copy.deepcopy(app);invalid['secret_bindings'].pop('secret_key')
         with patch.object(runtime,'_service') as service,self.assertRaises(ValueError):runtime._authentik(invalid,{})
         service.assert_not_called()
+
+    def test_authentik_database_only_releases_render_matching_storage_and_worker_only_blueprints(self):
+        for tag, data_root in [('2025.10.4', False), ('2026.8.6', True)]:
+            roles = {'media':'/data/media' if data_root else '/media', 'templates':'/templates', 'certs':'/certs'}
+            if data_root:
+                roles['data'] = '/data'
+            app = {'adapter':'authentik','secret_bindings':{'secret_key':{},'postgresql_password':{}}, 'properties':{},
+                   'settings':{'database':{'host':'db','user':'identity','name':'identity'},
+                               'oidc_blueprints':{'console':{}}},
+                   'identity':{'services':{'server':'server','worker':'worker'},
+                               'runtime_directory':'/opt/homelab-app/runtime'},
+                   'containers':{'server':{},'worker':{}},
+                   'software_selection':{'images':{role:{'image':'example/identity:'+tag+'@sha256:'+'a'*64}
+                                                   for role in ('server','worker')}},
+                   'storage_paths':{k:{'source':'/srv/example/'+k,'target':v,'read_only':False}
+                                    for k,v in roles.items()}, 'listeners':{}}
+            with patch.object(runtime,'_service',side_effect=lambda *args:{'environment':{},'volumes':[]}):
+                rows = runtime._authentik(app,{})
+                self.assertEqual(set(rows), {'server','worker'})
+                for name, service in rows.items():
+                    self.assertNotIn('AUTHENTIK_REDIS__HOST', service['environment'])
+                    self.assertNotIn('depends_on', service)
+                    self.assertIn('/srv/example/media:'+roles['media'], service['volumes'])
+                    self.assertEqual(any('homelab-oidc-console.yaml' in str(v) for v in service['volumes']),
+                                     name == 'worker')
+                app['software_selection']['images']['worker']['image']='wrong'
+                with self.assertRaisesRegex(ValueError,'matching tagged'):
+                    runtime._authentik(app,{})
 
     def test_winet_with_no_named_endpoint_does_not_invent_host_alias(self):
         item=app_fixtures.case('winet');app=item['app']

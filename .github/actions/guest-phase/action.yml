@@ -17,6 +17,30 @@ inputs:
   PROXMOX_APP_TOKEN:
     description: Existing scoped credential
     required: true
+  authentik_oidc_client_1:
+    description: Existing scoped credential
+    required: false
+  authentik_oidc_client_2:
+    description: Existing scoped credential
+    required: false
+  authentik_oidc_client_3:
+    description: Existing scoped credential
+    required: false
+  authentik_oidc_client_4:
+    description: Existing scoped credential
+    required: false
+  authentik_oidc_client_5:
+    description: Existing scoped credential
+    required: false
+  authentik_oidc_client_6:
+    description: Existing scoped credential
+    required: false
+  authentik_oidc_client_7:
+    description: Existing scoped credential
+    required: false
+  authentik_oidc_client_8:
+    description: Existing scoped credential
+    required: false
   authentik_postgresql_password:
     description: Existing scoped credential
     required: false
@@ -134,6 +158,22 @@ runs:
       HOMELAB_APP_SECRET_RENOVATE_GITHUB_APP_KEY: ${{ inputs.renovate_github_app_key
         }}
       HOMELAB_APP_SECRET_RENOVATE_LICENSE_KEY: ${{ inputs.renovate_license_key }}
+      HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_1: ${{ inputs.authentik_oidc_client_1
+        }}
+      HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_2: ${{ inputs.authentik_oidc_client_2
+        }}
+      HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_3: ${{ inputs.authentik_oidc_client_3
+        }}
+      HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_4: ${{ inputs.authentik_oidc_client_4
+        }}
+      HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_5: ${{ inputs.authentik_oidc_client_5
+        }}
+      HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_6: ${{ inputs.authentik_oidc_client_6
+        }}
+      HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_7: ${{ inputs.authentik_oidc_client_7
+        }}
+      HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_8: ${{ inputs.authentik_oidc_client_8
+        }}
       HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD: ${{ inputs.authentik_postgresql_password
         }}
       HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY: ${{ inputs.authentik_secret_key }}
@@ -162,7 +202,11 @@ runs:
         }}
     run: "if [ -z \"${PBS_API_TOKEN:-}\" ]; then unset PBS_API_TOKEN; fi\n# Elide\
       \ only absent optional action defaults; preserve every supplied value.\nfor\
-      \ app_secret_slot in HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY\
+      \ app_secret_slot in HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_1 HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_2\
+      \ HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_3 HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_4\
+      \ HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_5 HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_6\
+      \ HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_7 HOMELAB_APP_SECRET_AUTHENTIK_OIDC_CLIENT_8\
+      \ HOMELAB_APP_SECRET_AUTHENTIK_POSTGRESQL_PASSWORD HOMELAB_APP_SECRET_AUTHENTIK_SECRET_KEY\
       \ HOMELAB_APP_SECRET_AUTHENTIK_SMTP_PASSWORD HOMELAB_APP_SECRET_BITWARDEN_RUNTIME_ENVIRONMENT\
       \ HOMELAB_APP_SECRET_CLOUDBEAVER_CLIENT_SECRET HOMELAB_APP_SECRET_MQTT_EXPLORER_BROKER_PASSWORD\
       \ HOMELAB_APP_SECRET_MQTT_PROBE HOMELAB_APP_SECRET_NODE_RED_API_TOKEN HOMELAB_APP_SECRET_PEGAPROX_CLIENT_SECRET\

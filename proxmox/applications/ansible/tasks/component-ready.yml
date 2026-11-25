@@ -19,7 +19,7 @@
     owner: root
     group: root
     mode: '0700'
-  when: component_fresh_directories is defined and component_fresh_directories.directories | length > 0
+  when: component_identity_data is defined or (component_fresh_directories is defined and component_fresh_directories.directories | length > 0)
 
 - name: Prepare only selected fresh-owned directories
   ansible.builtin.command:
@@ -29,6 +29,14 @@
   changed_when: (component_directory_prepare.stdout | from_json).initialized | int > 0
   no_log: true
   when: component_fresh_directories is defined and component_fresh_directories.directories | length > 0
+
+- name: Prepare the Authentik data directory for the selected storage layout
+  ansible.builtin.command:
+    argv: [python3, /usr/local/bin/homelab-component-data.py, authentik-data]
+    stdin: "{{ component_identity_data | to_json }}"
+  register: component_identity_storage
+  changed_when: (component_identity_storage.stdout | from_json).initialized | int > 0
+  when: component_identity_data is defined and not ansible_check_mode
 
 - name: Inspect the selected application paths
   ansible.builtin.stat:

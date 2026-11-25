@@ -12,6 +12,8 @@ import pegaprox_oidc_client as client
 
 def files(app, values):
     configuration = {key: app['authentication_resolved'][key] for key in ('settings', 'oidc_endpoints')}
+    if 'discovery_check' in app['authentication_resolved']:
+        configuration['discovery_check'] = app['authentication_resolved']['discovery_check']
     for role in ('client_secret', 'management_token'):
         configuration[role] = values[role].decode('utf-8')
     client.validate(configuration)

@@ -39,6 +39,10 @@ Authentication redirect checks request `text/html`, matching a browser login ent
 
 ## First installation and later deployments
 
+For a native PegaProx client, select `oidc: true` on the canonical exposure's page check. The guest must select deferred checks and the issuer must reference a managed HTTPS exposure. The compiler derives the public client ID, callback, issuer, endpoints and allowed signing algorithms from the app's authentication binding. Disabling the client omits the sign-in probe. On first installation and subsequent deployments, the guest saves and reads back its local settings even if the issuer is offline.
+
+The existing final job reports the page and native sign-in separately. The sign-in probe verifies the issuer's discovery document through its declared DNS and ingress, then requests the app's login route. It checks the authorization endpoint and exactly one matching client ID and callback in the redirect. No browser session, password, MFA or token exchange is involved.
+
 Use the [complete synthetic configuration](../examples/route-checks/README.md) to inspect the accepted source and packet. Both installation and later deployments use the same declaration. The selected source must already permit the DNS/HTTPS paths and middleware source; compilation refuses absent guest grants and does not widen access. Controller egress, physical routing, DNS service readiness, public certificates and actual responses still require target evidence.
 
 Inline checks execute through the existing admitted Ansible transport after local phases, before the ordinary success is recorded. Their failure preserves the ordinary hold and evidence. Local app, socket, integration, monitoring and backup checks remain. Only CloudBeaver's former direct HTTPS redirect check and Music Assistant's former direct HTTPS `/info` check are superseded when those apps have configured routed verification.

@@ -5,6 +5,7 @@ The owning caller verifies discovery custody before supplying the token record.
 """
 import copy
 import json
+import hashlib
 import re
 from pathlib import Path
 
@@ -196,12 +197,28 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
             and set(secrets) == set(app['input_sources']),
             'Supply exactly the selected foundation input roles')
     if app['adapter'] == 'authentik':
-        require({'secret_key', 'postgresql_password'} <= set(secrets) <= set(AUTH_FILES)
+        registrations = app.get('settings', {}).get('oidc_blueprints', {})
+        client_roles = {spec['secret_role'] for spec in registrations.values()}
+        require(client_roles <= set(secrets) and {'secret_key', 'postgresql_password'} <= set(secrets) - client_roles <= set(AUTH_FILES)
                 and public_ca is None and route_cas is None and route_plan is None,
                 'Supply only this Authentik selected scalar roles')
         for raw in secrets.values():
             _scalar(raw)
-        rows = [_row(AUTH_FILES[key], value, 1000) for key, value in secrets.items()]
+        rows = [_row(AUTH_FILES[key], value, 1000) for key, value in secrets.items() if key not in client_roles]
+        if registrations:
+            manifest = []
+            for slug, spec in sorted(registrations.items()):
+                raw = secrets[spec['secret_role']]
+                require(0 < len(raw) <= 255 and all(33 <= byte <= 126 for byte in raw),
+                        'Supply the exact printable OIDC client secret')
+                body = spec['blueprint'].encode()
+                rows.extend([_row('oidc-' + slug, raw, 1000),
+                             _row('homelab-oidc-' + slug + '.yaml', body, 1000)])
+                manifest.append({**{key: value for key, value in spec.items()
+                                    if key not in ('blueprint', 'secret_source', 'secret_role')},
+                                 'sha512': hashlib.sha512(body).hexdigest()})
+            rows.append({'path': 'identity-blueprints.json', 'content': json.dumps(manifest),
+                         'uid': 0, 'gid': 0, 'mode': '0600'})
         callbacks = app.get('settings', {}).get('allowed_callback_additions')
         if callbacks is not None:
             identity_callbacks.validate(callbacks)

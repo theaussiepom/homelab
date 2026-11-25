@@ -1,5 +1,6 @@
 """Selected callback bytes reach the retained guard through the component caller."""
 import copy
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -46,13 +47,24 @@ class ComponentCallbackTests(unittest.TestCase):
         for role in ('secret_key','postgresql_password'):
             path=fixture.root/(role+'.txt');write_new(path,('synthetic-'+role).encode())
             sources[role]={'type':'file','path':str(path)}
-        roles=contract.ADAPTERS['authentik']['services']
+        containers = {'server':{},'worker':{}}
+        roles=contract.adapter('authentik', containers)['services']
         app={'id':'identity_a','adapter':'authentik','lifecycle':'retained',
              'identity':{'phase':'identity_a','runtime_id':'identity_a',
                 'services':{role:'owned_'+role for role in roles},'runtime_directory':runtime_root},
              'settings':{'allowed_callback_additions':[record]},'secret_bindings':sources,
-             'input_sources':sources,'storage_paths':{},'project_name':'owned-project','project_file':'compose-owned.yml',
+             'input_sources':sources, 'containers': containers,
+             'storage_paths':{'media':{'source':'/srv/data/old/media','kind':'directory'},
+                              'data':{'source':'/srv/data/files','volume_root':'/srv/data','kind':'directory'}},
+             'project_name':'owned-project','project_file':'compose-owned.yml',
              'software_selection':{'images':{role:{'image':'example/'+role+'@sha256:'+'b'*64}for role in roles}}}
+        body = 'version: 1\n'
+        role = 'oidc_client_1'
+        app['settings']['oidc_blueprints'] = {'console':{'slug':'console','app':'console','guest':'office',
+            'blueprint':body,'secret_role':role,'secret_source':'console_secret'}}
+        client_file = fixture.root/'console.txt'
+        write_new(client_file, b'synthetic-client')
+        app['input_sources'] = {**sources,role:{'type':'file','path':str(client_file)}}
         app['runtime_files']={'app':app['id'],'directory':runtime_root,'files':sorted(contract.runtime_files(app))}
         runtime={'schema':component_runtime.SCHEMA,'guest':{'id':'example'},'applications':{app['id']:app}}
         with patch.object(component_runtime,'compositions',return_value={'owned-project':{
@@ -78,6 +90,16 @@ class ComponentCallbackTests(unittest.TestCase):
                        'mode':'0700'},variables['component_helpers'])
         row=next(row for row in variables['component_runtime_files']if row['source']=='identity-callbacks.json')
         self.assertEqual(row['destination'],runtime_root+'/identity-callbacks.json')
+        self.assertEqual(variables['component_identity_blueprints'], {
+            'service':'owned_worker', 'manifest':runtime_root+'/identity-blueprints.json'})
+        proof = json.loads((payload.directory/'identity-blueprints.json').read_text())
+        self.assertEqual(proof,[{'slug':'console','app':'console','guest':'office',
+                                 'sha512':hashlib.sha512(body.encode()).hexdigest()}])
+        self.assertEqual((payload.directory/'oidc-console').read_bytes(), b'synthetic-client')
+        self.assertEqual((payload.directory/'homelab-oidc-console.yaml').read_text(), body)
+        spec = variables['component_identity_data']
+        self.assertEqual((spec['path'],spec['media'],spec['services']),('/srv/data/files','/srv/data/old/media',
+                                                                         ['owned_server','owned_worker']))
         self.assertNotIn('stack',variables)
 
     def test_helper_preserves_default_command_and_accepts_only_owned_service_identity(self):

@@ -1,5 +1,7 @@
 """Real scratch storage; only mount identity/root prefix/numeric ownership are adapted."""
 import copy
+import json
+from types import SimpleNamespace
 import importlib.util
 import os
 from pathlib import Path
@@ -23,6 +25,33 @@ class DataTests(unittest.TestCase):
                         patch.object(data,'ROOT_PATTERN',re.escape(str(self.volume))),
                         patch.object(data,'mount',return_value=True)):
             context.start();self.addCleanup(context.stop)
+
+    def test_modern_identity_files_require_matching_retained_media_and_do_not_recreate_lost_data(self):
+        selected = self.volume/'files'
+        media = self.volume/'media'
+        value = {'root':str(self.volume), 'path':str(selected), 'media':str(media),
+                 'compose':'/opt/homelab-app/compose-id.yml','project':'identity',
+                 'services':['a','b'],'previously_owned':True}
+        previous = {key:{'command':role,'volumes':[str(media)+':/media']} for key,role in [('a','server'),('b','worker')]}
+        with patch.object(Path,'lstat',return_value=SimpleNamespace(st_mode=0o100600,st_uid=os.geteuid(),st_size=120)), \
+             patch.object(Path,'read_bytes',side_effect=lambda:json.dumps({'name':'identity','services':previous}).encode()), \
+             patch.object(data,'initialize') as initialize:
+            data.identity_data(value)
+            self.assertFalse(initialize.call_args.args[0]['previously_owned'])
+            selected.mkdir(mode=0o700)
+            data.identity_data(value)
+            self.assertTrue(initialize.call_args.args[0]['previously_owned'])
+            (selected/'unclaimed').touch()
+            with self.assertRaises(ValueError):
+                data.identity_data(value)
+            for row in previous.values():
+                row['volumes'] = [str(selected)+':/data', str(media)+':/data/media']
+            data.identity_data(value)
+            self.assertTrue(initialize.call_args.args[0]['previously_owned'])
+            (selected/'unclaimed').unlink()
+            selected.rmdir()
+            with self.assertRaises(ValueError):
+                data.identity_data(value)
 
     def call(self,*,owned=False,row=None):
         return data.initialize({'directories':[self.row if row is None else row],'previously_owned':owned})

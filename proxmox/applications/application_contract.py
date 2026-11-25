@@ -78,6 +78,10 @@ def runtime_files(app):
         result.update({'pegaprox-proxmox-ca.pem', 'pegaprox-trust.py'})
     if name == 'authentik' and 'smtp_password' not in app.get('secret_bindings', {}):
         result.discard('smtp-password')
+    if name == 'authentik' and 'oidc_blueprints' in settings:
+        result.add('identity-blueprints.json')
+        for slug in settings['oidc_blueprints']:
+            result.update({'oidc-' + slug, 'homelab-oidc-' + slug + '.yaml'})
     if name == 'authentik' and 'allowed_callback_additions' in settings:
         result.add('identity-callbacks.json')
     if name == 'cloudbeaver' and settings.get('managed_connections'):
@@ -100,16 +104,19 @@ def runtime_files(app):
     return result
 
 
-def adapter(name):
+def adapter(name, containers=None):
     """Return only a supported independent adapter, without a fallback bundle."""
     if not isinstance(name, str) or name not in ADAPTERS:
         raise ValueError('Select a supported independent application adapter')
-    return ADAPTERS[name]
+    contract = ADAPTERS[name]
+    if name == 'authentik' and containers is not None and set(containers) == {'server', 'worker'}:
+        return dict(contract, services=('server', 'worker'))
+    return contract
 
 
 def ordered_services(app):
     """Resolve runtime names in explicit owned-role order, including after JSON."""
-    roles=adapter(app['adapter'])['services']
+    roles=adapter(app['adapter'], app.get('containers'))['services']
     names=app['identity']['services']
     if not (isinstance(names,dict) and set(names)==set(roles)
             and all(isinstance(name,str) and re.fullmatch('[a-z0-9][a-z0-9_-]{0,127}',name)

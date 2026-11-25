@@ -218,6 +218,11 @@ class Resolver:
             require(value['guest'] in self.guests and value['profile'] in self.library['app_profiles'])
             profile = self.library['app_profiles'][value['profile']]
             owner = adapter(profile['adapter'])
+            if profile['adapter'] == 'authentik':
+                refs = profile.get('runtime', []) + value.get('runtime', [])
+                containers = {role for ref in refs for role in
+                              self.library['runtime_profiles'].get(ref, {}).get('containers', {})}
+                owner = adapter(profile['adapter'], containers)
             app = copy.deepcopy(value)
             app['id'] = name
             app['adapter'] = profile['adapter']
@@ -590,7 +595,7 @@ class Resolver:
                 containers, additions, native, app_reserve, minimums = runtime_values(profile.get('runtime', []) + app.get('runtime', []), guest)
                 reserve = max(reserve, app_reserve)
                 selected = software_values(profile.get('software', []) + app.get('software', []) + additions)
-                owner = adapter(app['adapter'])
+                owner = adapter(app['adapter'], containers)
                 require(bool(owner['native']) == (native is not None), 'component.native-budget')
                 if native is not None:
                     total += native['memory_mib']
@@ -661,6 +666,8 @@ class Resolver:
         component_foundations.bind(self)
         for app_id, settings in component_properties.bind(self).items():
             self.apps[app_id]['settings'] = settings
+        import component_authentik_blueprints
+        component_authentik_blueprints.bind(self, exposure)
         component_renovate.bind(self)
         canonical_accounts = component_accounts.bind(self, dependencies['accounts'])
         monitoring = component_monitoring.bind(self, exposure)

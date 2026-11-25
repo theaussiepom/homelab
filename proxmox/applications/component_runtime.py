@@ -214,8 +214,20 @@ def _authentik(app, guest):
         'AUTHENTIK_POSTGRESQL__HOST': settings['host'],
         'AUTHENTIK_POSTGRESQL__USER': settings['user'],
         'AUTHENTIK_POSTGRESQL__NAME': settings['name'],
-        'AUTHENTIK_POSTGRESQL__PASSWORD': 'file:///run/secrets/postgresql-password',
-        'AUTHENTIK_REDIS__HOST': app['identity']['services']['redis']}
+        'AUTHENTIK_POSTGRESQL__PASSWORD': 'file:///run/secrets/postgresql-password'}
+    services = app['identity']['services']
+    legacy = 'redis' in services
+    data_root = 'data' in app.get('storage_paths', {})
+    if legacy:
+        env['AUTHENTIK_REDIS__HOST'] = services['redis']
+    images = app['software_selection']['images']
+    server = images['server']['image']
+    tag = re.fullmatch(r'[^@]+:(\d+)\.(\d+)\.(\d+)@sha256:[0-9a-f]{64}', server)
+    if tag or not legacy:
+        require(tag and images['worker']['image'] == server, 'Select matching tagged Authentik images')
+        version = tuple(map(int, tag.groups()))
+        require(legacy == (version < (2025, 10, 0)) and data_root == (version >= (2025, 12, 0)),
+                'Bind the Authentik runtime and storage layout for the selected release')
     smtp = app['properties'].get('smtp')
     if smtp:
         keys = {'host': 'HOST', 'port': 'PORT', 'use_tls': 'USE_TLS', 'use_ssl': 'USE_SSL',
@@ -225,11 +237,17 @@ def _authentik(app, guest):
     if 'smtp_password' in app['secret_bindings']:
         env['AUTHENTIK_EMAIL__PASSWORD'] = 'file:///run/secrets/smtp-password'
     result = {}
-    allowed = {'media': '/media', 'templates': '/templates', 'certs': '/certs', 'redis': '/data'}
+    allowed = {'media': '/data/media' if data_root else '/media', 'templates': '/templates', 'certs': '/certs'}
+    if data_root:
+        allowed['data'] = '/data'
+    if legacy:
+        allowed['redis'] = '/data'
     require(set(app.get('storage_paths', {})) == set(allowed), 'Bind Authentik persistent storage roles')
-    for name in ('server', 'worker', 'redis'):
+    for name in (('server', 'worker', 'redis') if legacy else ('server', 'worker')):
         service = _service(app, name, guest)
         roles = ('redis',) if name == 'redis' else ('media', 'templates', 'certs') if name == 'worker' else ('media', 'templates')
+        if data_root:
+            roles = ('data', *roles)
         selected = dict(app, storage_paths={key: app['storage_paths'][key] for key in roles})
         service['volumes'] = _mounts(selected, {key: allowed[key] for key in roles})
         if name == 'redis':
@@ -241,11 +259,17 @@ def _authentik(app, guest):
             require(service['user'] in ('1000', '1000:1000'), 'Retain Authentik application UID/GID')
             service['command'] = name
             service['environment'].update({key: value.replace('$', '$$') for key, value in env.items()})
-            service['depends_on'] = {app['identity']['services']['redis']: {'condition': 'service_healthy'}}
+            if legacy:
+                service['depends_on'] = {services['redis']: {'condition': 'service_healthy'}}
             names = {'secret_key': 'authentik-secret-key', 'postgresql_password': 'postgresql-password',
                      'smtp_password': 'smtp-password'}
             service['volumes'] += [_runtime_mount(app, names[key], '/run/secrets/' + names[key])
                                    for key in app['secret_bindings']]
+        if name == 'worker':
+            for slug in sorted(app['settings'].get('oidc_blueprints', {})):
+                filename = 'homelab-oidc-' + slug + '.yaml'
+                service['volumes'].extend([_runtime_mount(app, filename, '/blueprints/custom/' + filename),
+                                           _runtime_mount(app, 'oidc-' + slug, '/run/secrets/oidc-' + slug)])
         if name == 'server':
             service['ports'] = [port.removesuffix('/tcp') for port in _ports(app, name)]
         result[name] = service

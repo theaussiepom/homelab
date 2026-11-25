@@ -92,6 +92,15 @@ def namespaces(attempt, app):
                     'directory': current['runtime_directory'], 'files': sorted(files), 'directory_mounts': []},
                 'A first runtime namespace must contain only this adapter owned leaves')
         current['runtime_directory'] = None
+    if before != current and app['adapter'] == 'authentik' and 'upgrade_path' in app.get('properties', {}):
+        import authentik_upgrade
+        path = app['properties']['upgrade_path']
+        authentik_upgrade.validate(path)
+        require(old_app['adapter'] == 'authentik' and app['lifecycle'] == 'retained'
+                and authentik_upgrade.images(old_app) == path[0] and authentik_upgrade.images(app) == path[-1],
+                'Require the selected Authentik release transition')
+        authentik_upgrade.transition(before, current)
+        return True, before['runtime_directory'] is not None
     require(before == current,
             'App storage or runtime ownership changed; no automatic relocation or adoption')
     renovate.preserve_storage(old_app, app)

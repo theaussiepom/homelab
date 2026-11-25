@@ -2,6 +2,8 @@
 import copy
 import ipaddress
 
+from urllib.parse import urlsplit
+
 from component_errors import at
 from component_sources import closed, identifier, require
 import component_addresses
@@ -17,7 +19,9 @@ def check_definition(value):
     require(isinstance(value, dict) and value.get('type') in ('page', 'auth-redirect'),
             'component.route-check')
     closed(value, ('type', 'contains') if value['type'] == 'page' else ('type', 'provider'),
-           ('path', 'provider') if value['type'] == 'page' else ('path',))
+           ('path', 'provider', 'oidc') if value['type'] == 'page' else ('path',))
+    if 'oidc' in value:
+        require(value['oidc'] is True, 'component.route-check')
     if 'contains' in value:
         types.text(value['contains'])
         require(len(value['contains']) <= 256 and not any(ord(c) < 32 for c in value['contains']),
@@ -70,6 +74,42 @@ def _flow(resolver, owner, selected, source, target, protocol):
                 component_traffic.nic(guest, target['address'])), 'component.traffic-ingress')
 
 
+def oidc_check(resolver, exposures, owner, route, settings, row):
+    """Compile the public sign-in contract from the same binding as the native client."""
+    app = resolver.apps[route['target']['app']]
+    require(settings['mode'] == 'deferred' and app['adapter'] == 'pegaprox'
+            and 'authentication_resolved' in app, 'component.route-check-oidc')
+    auth = app['authentication_resolved']
+    client = auth['settings']
+    if not client['oidc_enabled']:
+        return None, set()
+    definition = resolver.policy['authentication'][app['authentication']]
+    reference = resolver.site['identity_providers'][definition['provider']]['origin']
+    require('exposure' in reference, 'component.route-check-provider')
+    provider = exposures.resolved[reference['exposure']]
+    require(provider['type'] == 'http' and 'guest' in provider['target']
+            and 'resolver' in provider, 'component.route-check-provider')
+    ingress = provider['ingress_target']
+    dns = [target for target in resolver.endpoints.values() if target.get('app') == provider['resolver']
+           and target.get('protocol') == 'udp' and target.get('port') == 53]
+    require(len(dns) == 1, 'component.route-check-resolver')
+    source = row['source_address']
+    _flow(resolver, owner, settings, source, ingress, 'tcp')
+    _flow(resolver, owner, settings, source, dns[0], 'udp')
+    for key in provider.get('middlewares', []):
+        middleware = exposures.middlewares[key]
+        if middleware['type'] in ('ip-allow-list', 'cloudflare-source'):
+            require(any(ipaddress.IPv4Address(source) in ipaddress.ip_network(value)
+                        for value in middleware['ranges']), 'component.route-check-source')
+    auth['discovery_check'] = 'deferred'
+    return {**row, 'mode': 'oidc', 'path': '/api/auth/oidc/login', 'contains': '',
+            'auth_origins': [component_auth._origin(reference, exposures)],
+            'oidc': {'issuer': client['oidc_authority'], 'client_id': client['oidc_client_id'],
+                     'callback': client['oidc_redirect_uri'], **auth['oidc_endpoints'],
+                     'resolver_address': dns[0]['address'], 'ingress_address': ingress['address']}}, {
+                         provider['target']['guest'], ingress['guest'], dns[0]['guest']}
+
+
 def bind(resolver, exposures, dependencies):
     """No route grants, name-based guest cases or implicit deferral decisions."""
     selected = {key: value['route_checks'] for key, value in resolver.guests.items()
@@ -89,6 +129,7 @@ def bind(resolver, exposures, dependencies):
                       and row['target'].get('guest') == owner}
             require(bool(routes), 'component.route-check-owner')
             rows, prerequisites = [], {owner}
+            row_needs = []
             for name, route in routes.items():
                 with at('exposures', name):
                     ingress = route['ingress_target']
@@ -144,12 +185,26 @@ def bind(resolver, exposures, dependencies):
                             'ingress_address': ingress['address'], 'mode': check['type'],
                             'contains': check.get('contains', ''), 'route_origins': route_origins,
                             'auth_origins': origins})
+                        row_needs.append(sorted({owner, *required}))
+                    if 'oidc' in check:
+                        # The native callback belongs to the canonical app origin, including on multi-alias routes.
+                        app = resolver.apps[route['target']['app']]
+                        require(app.get('origin', {}).get('exposure') == name, 'component.route-check-oidc')
+                        primary = next(row for row in rows if row['exposure'] == name
+                                       and row['host'] == urlsplit(app['origin_url']).hostname)
+                        oidc, needed = oidc_check(resolver, exposures, owner, route, settings, primary)
+                        if oidc:
+                            rows.append(oidc)
+                            prerequisites.update(needed)
+                            row_needs.append(sorted({owner, *required, *needed}))
             routed_checks.validate(rows)
             result[owner] = {'mode': settings['mode'], 'rows': rows}
             if settings['mode'] == 'inline':
                 graph[owner] = list(dict.fromkeys([*graph[owner], *sorted(prerequisites - {owner})]))
             if settings['mode'] == 'deferred':
                 deferred[owner] = {'name': settings['name'], 'needs': sorted(prerequisites)}
+                if any(row['mode'] == 'oidc' for row in rows):
+                    deferred[owner]['row_needs'] = row_needs
     require(all(row['target'].get('guest') in selected for row in exposures.resolved.values()
                 if 'check' in row), 'component.route-check-owner')
     component_connections._acyclic(graph)

@@ -80,6 +80,16 @@ class Reconciliation(unittest.TestCase):
             self.assertTrue(client.reconcile(api.value)['changed'])
         self.assertFalse(any('well-known' in c.args[0] for c in call.call_args_list))
 
+    def test_final_check_selection_applies_locally_with_issuer_offline(self):
+        api = SettingsAPI()
+        api.value['discovery_check'] = 'deferred'
+        def local(url, **kwargs):
+            self.assertTrue(url.startswith('http://127.0.0.1:5000/'))
+            return api.request(url, **kwargs)
+        with patch.object(client, 'request', side_effect=local):
+            self.assertEqual(client.reconcile(api.value), {'changed': True})
+            self.assertEqual(client.reconcile(api.value, applied=True), {'changed': False})
+
     def test_untrusted_discovery_refuses_before_settings_write(self):
         for key,value in [('issuer','https://foreign.invalid/'), ('token_endpoint','https://foreign.invalid/'),
                           ('id_token_signing_alg_values_supported',['HS256'])]:
@@ -160,6 +170,9 @@ class ProtectedHost(unittest.TestCase):
         rows=component_private_inputs.bind(app,values)['files']
         self.assertEqual(rows[0]['content'],values['database_key'])
         self.assertEqual(json.loads(rows[1]['content']),config)
+        app['authentication_resolved']['discovery_check'] = 'deferred'
+        deferred = component_private_inputs.bind(app,values)['files']
+        self.assertEqual(json.loads(deferred[1]['content']),dict(config,discovery_check='deferred'))
         app['runtime_files']={'app':app['id'],'directory':app['identity']['runtime_directory'],
                               'files':sorted(application_contract.runtime_files(app))}
         payload={};installed=component_prepare.install_rows(app,rows,payload)

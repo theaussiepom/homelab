@@ -132,6 +132,12 @@ def variables(cfg, phase, *, payload=None, previously_owned=False, initialize_ru
         {'root':row['volume_root'],'path':row['source'],
          **{key:row['initialize'][key] for key in ('uid','gid','mode')}}
         for row in selected['storage_paths'].values() if selected['lifecycle']=='fresh' and 'initialize' in row]}
+    storage = selected['storage_paths']
+    if (selected['adapter'] == 'authentik' and selected['lifecycle'] == 'retained'
+            and 'volume_root' in storage.get('data', {})):
+        result['component_identity_data'] = {'root':storage['data']['volume_root'], 'path':storage['data']['source'],
+            'media':storage['media']['source'], 'compose':'/opt/homelab-app/'+selected['project_file'],
+            'project':selected['project_name'], 'services':ordered_services(selected), 'previously_owned':previously_owned}
     result['component_payload_directory']=str(payload.directory)
     result['component_runtime_files']=read_json(payload.directory/'runtime-files.json',private=True)
     if 'runtime_directory' in selected['identity']:
@@ -145,6 +151,11 @@ def variables(cfg, phase, *, payload=None, previously_owned=False, initialize_ru
         hooks=component_app_hooks.descriptors(selected,compose_file='/opt/homelab-app/'+selected['project_file'])
         result['component_helpers']=hooks.pop('helpers')
         result.update(hooks)
+    if selected['adapter'] == 'authentik' and 'oidc_blueprints' in selected['settings']:
+        result['component_helpers'].append({'source': 'identity_blueprints.py',
+            'destination': '/opt/homelab-app/identity_blueprints.py', 'mode': '0700'})
+        result['component_identity_blueprints'] = {'service': selected['identity']['services']['worker'],
+            'manifest': selected['identity']['runtime_directory'] + '/identity-blueprints.json'}
     if selected['adapter']=='authentik' and 'allowed_callback_additions' in selected['settings']:
         result['component_helpers'].append({'source':'identity_callbacks.py',
             'destination':'/opt/homelab-app/identity_callbacks.py','mode':'0700'})
@@ -219,7 +230,7 @@ def variables(cfg, phase, *, payload=None, previously_owned=False, initialize_ru
     return result
 
 
-def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, previously_owned=False, initialize_runtime=False):
+def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, previously_owned=False, initialize_runtime=False, upgrade=None):
     require(component_inputs.binding(cfg,site)==expected, 'Static component inputs changed before Ansible')
     if payload is not None:payload.check()
     if payload is not None and phase not in ('preparation',component_guest.AGENT_PHASE,component_guest.BACKUP_PHASE):
@@ -231,6 +242,8 @@ def run_phase(cfg, site, work, operation, expected, phase, *, payload=None, prev
     phase_work=operation/phase
     private_directory(phase_work,create=True)
     selected=variables(cfg,phase,payload=payload,previously_owned=previously_owned,initialize_runtime=initialize_runtime)
+    if upgrade is not None:
+        selected['component_authentik_upgrade'] = upgrade
     phase_app=selected['component_preparation_app'] if phase=='preparation' else selected['app']
     phase_app['render_dir']=str(phase_work/'rendered')
     write(phase_work/'variables.json',selected)

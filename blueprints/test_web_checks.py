@@ -32,10 +32,10 @@ class WebChecksTests(unittest.TestCase):
         self.graph['backup']={}
         self.execute_calls=[]
 
-    def execute(self,phase,packet,*,route_executor):
+    def execute(self,phase,packet,*,route_executor,blocked_routes=None):
         self.assertEqual(phase,'http-checks')
         owner=json.loads(packet.read_text())['owner'];self.execute_calls.append(owner)
-        result=m.routed_checks.parallel(self.rows[owner],route_executor)
+        result=m.routed_checks.parallel(self.rows[owner],route_executor,blocked=blocked_routes)
         if result['status']=='failed':raise m.routed_checks.VerificationFailure(result)
         return result
 
@@ -48,6 +48,19 @@ class WebChecksTests(unittest.TestCase):
                          execute=kwargs.pop('execute',self.execute),**kwargs)
             guard.assert_called_once()
             return result
+
+    def test_failed_identity_still_probes_ordinary_page_in_same_guest(self):
+        self.plan.resolved['guests']['identity'] = {}
+        self.results['identity'] = 'failure'
+        common = ['a', 'dns', 'ingress']
+        self.graph['checks']['owners']['a'].update(needs=[*common, 'identity'],
+                                                  row_needs=[common, [*common, 'identity']])
+        with patch.object(m.routed_checks,'probe',return_value={'status':'passed','attempts':1}) as probe:
+            result = self.run_checks()
+        self.assertEqual(result['counts'], {'passed':2, 'failed':0, 'blocked':1})
+        self.assertEqual(probe.call_count, 2)
+        self.assertEqual(result['endpoints'][0]['status'], 'passed')
+        self.assertEqual(result['endpoints'][1]['prerequisites'], {'identity':'failure'})
 
     def test_real_owner_and_endpoint_pools_overlap_and_keep_aliases_on_failure(self):
         barrier=threading.Barrier(3)

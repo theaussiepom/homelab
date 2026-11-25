@@ -28,7 +28,7 @@ def failure_diagnostic(error):
     return {'error_type': kind.__name__ if known else 'Exception', 'source': source}
 
 
-def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), environment=None, route_executor=None):
+def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), environment=None, route_executor=None, blocked_routes=None):
     """The same attempt/ToFu/Ansible engines, selected by real component phases."""
     import component_guest
     import component_inputs
@@ -44,6 +44,7 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
         return {'status':'not_selected','vmid':cfg['guest']['vmid'],
                 'changed':False,'target_contacted':False}
     deferred = phase == 'http-checks'
+    require(blocked_routes is None or deferred and route_executor is not None, 'Block only final web probes')
     require(route_executor is None or deferred, 'A route executor cannot change deployment phases')
     require(phase == 'infrastructure' or phase in phases or deferred and
             cfg['app'].get('route_checks', {}).get('mode') == 'deferred', 'Select this component guest phase')
@@ -63,7 +64,8 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
             require(complete, 'Deferred routes require genuine completion of this exact run and binding')
             return {'vmid':cfg['guest']['vmid'], **component_routed.run(
                 cfg, site, attempt.work, attempt.operation, expected,
-                **({'executor': route_executor} if route_executor is not None else {}))}
+                **({'executor': route_executor} if route_executor is not None else {}),
+                **({'blocked': blocked_routes} if blocked_routes else {}))}
         if complete:
             return {'status':'passed','vmid':cfg['guest']['vmid'],'changed':False,'target_contacted':False}
         if phase == 'infrastructure':
@@ -80,6 +82,7 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
             payload=None
             previously_owned=False
             initialize_runtime=False
+            app = None
             if phase != 'preparation':
                 if phase == component_guest.BACKUP_PHASE:
                     payload = component_prepare.prepare_backup(cfg, environment)
@@ -94,8 +97,10 @@ def run(phase, packet, *, inputs=Path("/var/lib/homelab-inputs/ordinary"), envir
                     payload=component_prepare.prepare(cfg,app_id,environment,attempt=attempt)
             ready=attempt.begin_phase(phase,payload=payload)
             component_recovery.phase_controls(attempt, phase, payload)
+            import authentik_upgrade
+            maintenance = authentik_upgrade.phase_options(attempt, phase, app)
             result=component_ansible.run_phase(cfg,site,attempt.work,attempt.operation,expected,phase,
-                payload=payload,previously_owned=previously_owned,
+                payload=payload,previously_owned=previously_owned, **maintenance,
                 **({'initialize_runtime':True} if initialize_runtime else {}))
             if phase == phases[-1] and cfg['app'].get('route_checks', {}).get('mode') == 'inline':
                 import component_routed

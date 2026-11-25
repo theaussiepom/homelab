@@ -38,8 +38,9 @@ def https(value):
 
 
 def validate(value):
-    need(isinstance(value, dict) and set(value) ==
+    need(isinstance(value, dict) and set(value) - {'discovery_check'} ==
          {'settings', 'oidc_endpoints', 'client_secret', 'management_token'})
+    need(value.get('discovery_check', 'local') in ('local', 'deferred'))
     settings = value['settings']
     need(isinstance(settings, dict) and set(settings) == set(FIXED) | VARIABLE)
     need(all(type(settings[k]) is type(v) and settings[k] == v for k, v in FIXED.items()))
@@ -98,7 +99,7 @@ def request(url, *, token=None, data=None, public=False):
 def reconcile(value, *, applied=False):
     validate(value)
     settings = value['settings']
-    if settings['oidc_enabled']:
+    if settings['oidc_enabled'] and value.get('discovery_check') != 'deferred':
         discovery = request(settings['oidc_authority'].rstrip('/') + '/.well-known/openid-configuration')
         need(discovery.get('issuer') == settings['oidc_authority'])
         need(all(discovery.get(field) == value['oidc_endpoints'][key] for key, field in ENDPOINTS.items()))

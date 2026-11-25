@@ -33,7 +33,7 @@ def configuration(cfg):
     return selected
 
 
-def run(cfg, site, work, operation, expected, *, executor=None, historical=False):
+def run(cfg, site, work, operation, expected, *, executor=None, historical=False, blocked=None):
     selected = configuration(cfg)
     require(executor is None or selected['mode'] == 'deferred', 'Parallel checks run only on the controller')
     def bound():
@@ -54,7 +54,7 @@ def run(cfg, site, work, operation, expected, *, executor=None, historical=False
     environment = {key:value for key,value in os.environ.items()
                    if key != 'PBS_API_TOKEN' and not key.startswith(component_input_secrets.PREFIX)}
     if executor is not None:
-        result = routed_checks.parallel(selected['rows'], executor)
+        result = routed_checks.parallel(selected['rows'], executor, **({'blocked': blocked} if blocked else {}))
         write_new(directory/'checks.log', encoded(result))
         require(bound(), 'Route inputs changed during checks')
         if result['status'] != 'passed':

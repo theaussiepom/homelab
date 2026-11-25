@@ -3,7 +3,7 @@
 from contextlib import contextmanager
 import json
 import os
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import re
 import stat
 import sys
@@ -176,11 +176,45 @@ def runtime(value):
     return {'initialized':created,'verified':1}
 
 
+def identity_data(value):
+    """Introduce the modern file volume only from the proved old media layout."""
+    require(value['previously_owned'] is True and len(value['services']) == 2)
+    row = {key:value[key] for key in ('root','path')}
+    row.update(uid=1000,gid=1000,mode='0700')
+    root, selected = specification(row)
+    media = path(value['media'])
+    require(root in media.parents and media != selected and selected not in media.parents and media not in selected.parents)
+    compose = Path(value['compose'])
+    require(compose.parent == Path('/opt/homelab-app') and re.fullmatch('[a-z][a-z0-9_-]{0,62}\\.ya?ml', compose.name))
+    info = compose.lstat()
+    require(stat.S_ISREG(info.st_mode) and info.st_uid == ROOT_UID and not info.st_mode & 0o022 and info.st_size <= 1024*1024)
+    old = json.loads(compose.read_bytes())
+    require(old['name'] == value['project'])
+    current = []
+    for service, role in zip(value['services'], ('server','worker'), strict=True):
+        previous = old['services'][service]
+        require(previous['command'] == role)
+        mounts = [item.split(':')[:2] for item in previous['volumes'] if isinstance(item,str)]
+        state = [item for item in mounts if item[1] in ('/data','/data/media','/media')]
+        modern = [[str(selected),'/data'],[str(media),'/data/media']]
+        require(state == [[str(media),'/media']] or sorted(state) == sorted(modern))
+        current.append(sorted(state) == sorted(modern))
+    require(current[0] == current[1])
+    try:
+        with directory(value['path']) as descriptor:
+            require(current[0] or not os.listdir(descriptor))
+    except FileNotFoundError:
+        require(not current[0])
+        return initialize({'directories':[row],'previously_owned':False})
+    return initialize({'directories':[row],'previously_owned':True})
+
+
 if __name__=='__main__':
     try:
         raw=sys.stdin.buffer.read(1024*1024+1);require(len(raw)<=1024*1024)
-        operation=runtime if sys.argv[1:]==['runtime'] else initialize
-        require(sys.argv[1:] in ([],['runtime']))
+        operations={():initialize,('runtime',):runtime,('authentik-data',):identity_data}
+        require(tuple(sys.argv[1:]) in operations)
+        operation=operations[tuple(sys.argv[1:])]
         print(json.dumps(operation(json.loads(raw)),sort_keys=True))
     except Exception:
         raise SystemExit('Component storage preparation held; preserve existing data.') from None

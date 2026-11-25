@@ -42,13 +42,40 @@ Every field below is required; omission, null and unknown keys are rejected. The
 
 Both private scalars must be nonempty UTF-8, at most 64 KiB, with no surrounding whitespace or control characters; the masked value `********` is not a client secret. Runtime validation also rejects using the same value for both credentials. The database key remains opaque bytes under its existing parity guard.
 
+### Optional Authentik registration
+
+`registration` makes the Authentik guest the owner of the confidential client, application and group admission binding. Omit it to keep an externally managed registration. The provider origin must reference the exposure of the selected Authentik app. Select matching server and worker images tagged 2026.8.6 or newer for this integration. Configure the client's secret source in both protected environments. Only PegaProx receives the separate management token.
+
+| Field in `registration` | Meaning |
+| --- | --- |
+| `slug` | Stable application identifier matching the provider's per-application issuer path. |
+| `provider_name` | Display name of the OAuth2 provider keyed by the existing client ID. |
+| `admission_group` | Group allowed into the application. Existing members are preserved. A new group starts empty. |
+| `signing_key` | Name of an existing Authentik certificate and key pair. |
+| `authentication_flow`, `authorization_flow`, `invalidation_flow` | Slugs of existing Authentik flows used by the provider. |
+
+The following value belongs under the native client's authentication policy. The application display name and strict callback come from the app. Each selected registration has a separate scalar secret input, up to eight per Identity app in the reusable workflow.
+
+```yaml
+registration:
+  slug: management-ui
+  provider_name: Management console
+  admission_group: Console users
+  signing_key: authentik Self-signed Certificate
+  authentication_flow: default-authentication-flow
+  authorization_flow: default-provider-authorization-implicit-consent
+  invalidation_flow: default-provider-invalidation-flow
+```
+
+CI generates native YAML with a secret-file reference. The worker reads the mounted file, applies the blueprint through its native task and checks the SHA-512 hash and registration state. On first adoption the existing client, application, access binding, scopes, key, flows and credential must match the declaration. An unexpected binding refuses the import. Reapplying a matching registration preserves the native identifiers. A failed or timed-out worker causes the Identity phase to fail. Removing its declaration leaves existing Authentik objects in the database. Select the canonical exposure's deferred OIDC check to verify the client after the guest jobs finish. [Routed checks](routed-checks.md)
+
 ## Resolution and deployment
 
-The callback is always the app's HTTPS origin plus `/oidc/callback`. The native provider is `generic`, scopes are `openid profile email`, additional audiences are empty, and TLS/JWT skip switches are always false. Legacy built-in group mappings are cleared in favour of the declared list. Local login remains available. This capability does not add an automatic redirect, a forward-auth middleware, users, clusters or an IdP application.
+The callback is always the app's HTTPS origin plus `/oidc/callback`. The native provider is `generic`, scopes are `openid profile email`, additional audiences are empty, and TLS/JWT skip switches are always false. Legacy built-in group mappings are cleared in favour of the declared list. Local login remains available. The native sign-in button starts the flow. The optional registration controls the Authentik application.
 
 An optional HTTPS connection can supply an explicit hostname-to-endpoint alias through the existing connection component. Network policy and routing must permit that connection. A hostname reference alone creates neither a firewall allowance nor a deployment dependency.
 
-The adapter materializes `pegaprox-oidc.json` as root-owned mode 0600 in the app's reserved runtime directory. It includes the two credentials and is not mounted into the service. The installed helper sends it on stdin to a fixed client inside the selected Compose service. Credentials never enter command arguments or public output. API requests use only `http://127.0.0.1:5000`; discovery uses verified HTTPS, without redirects or proxy environment settings. Responses are bounded to 1 MiB and individual requests to 20 seconds.
+The adapter materializes `pegaprox-oidc.json` as root-owned mode 0600 in the app's reserved runtime directory. It includes the two credentials and is not mounted into the service. The installed helper sends it on stdin to a fixed client inside the selected Compose service. Credentials never enter command arguments or public output. The settings helper uses the loopback API on `http://127.0.0.1:5000`. Selecting the deferred OIDC check sends discovery to the final web job. Other declarations retain the existing verified HTTPS preflight. Responses are bounded to 1 MiB and individual requests to 20 seconds.
 
 Only differing declared OIDC settings are posted. PegaProx masks the client secret on reads, so the adapter reserves a separate root-owned `pegaprox-oidc-applied.json` success record containing a configuration fingerprint and selected service identity. It writes this atomically only after API readback and the public initialized/login state agree. A failed request leaves the prior record intact. Repeating the same successfully applied input does not rewrite the secret. The record is not copied from the controller or overwritten during runtime-file installation.
 
