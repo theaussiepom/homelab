@@ -80,10 +80,13 @@ separately recoverable maintenance step before selecting the endpoint policy.
 Preserve console access and keep Apps isolated during the handover. Applying
 an already matching endpoint policy makes zero changes.
 
-The playbook stages a changed candidate away from the boot file and arms a
-local three-minute rollback before loading it in the kernel. It checks the
-declared resolvers with the Management source, reads the candidate through a
-fresh admitted SSH connection, and opens a source-bound NFS TCP connection.
+The playbook stages a changed candidate away from the boot file and schedules
+its kernel load in a local systemd service. The scheduling SSH session can
+return before first enforcement changes how the kernel tracks connections.
+The service arms a local three-minute rollback before loading the candidate.
+The controller waits locally for the scheduled start, reads the candidate
+through a fresh admitted SSH connection, checks the declared Management
+resolvers and opens a source-bound NFS TCP connection.
 It installs the boot file atomically and verifies exact source, kernel and
 persistence before cancelling rollback. First-apply rollback restores the
 original stock service and file and removes only the endpoint table. Later
