@@ -67,7 +67,7 @@ registration:
   invalidation_flow: default-provider-invalidation-flow
 ```
 
-CI generates native YAML with a secret-file reference. The worker reads the mounted file, applies the blueprint through its native task and checks the SHA-512 hash and registration state. On first adoption the existing client, application, access binding, scopes, key, flows and credential must match the declaration. An unexpected binding refuses the import. Reapplying a matching registration preserves the native identifiers. A failed or timed-out worker causes the Identity phase to fail. Removing its declaration leaves existing Authentik objects in the database. Select the canonical exposure's deferred OIDC check to verify the client after the guest jobs finish. [Routed checks](routed-checks.md)
+CI generates native YAML with a secret-file reference. The worker reads the mounted file, applies the blueprint through its native task and checks the SHA-512 hash and registration state. On first adoption the existing client, application, access binding, scopes, key, flows and credential must match the declaration. For an upgraded provider whose stored callback omits the URI type, the worker also checks that Authentik resolves it to the single declared strict authorization callback. An unexpected binding refuses the import. Reapplying a matching registration preserves the native identifiers. A failed or timed-out worker causes the Identity phase to fail. Removing its declaration leaves existing Authentik objects in the database. Select the canonical exposure's deferred OIDC check to verify the client after the guest jobs finish. [Routed checks](routed-checks.md)
 
 ## Resolution and deployment
 

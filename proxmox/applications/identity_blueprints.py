@@ -13,6 +13,18 @@ def require(value):
         raise ValueError('Identity blueprint verification failed')
 
 
+def strict_callback(provider, url):
+    strict = {'matching_mode': 'strict', 'url': url}
+    if provider._redirect_uris == [dict(strict, redirect_uri_type='authorization')]:
+        return True
+    # Upgraded providers may still store the two-field record. Require the
+    # installed Authentik model to resolve it to the same authorization URI.
+    if provider._redirect_uris != [strict]:
+        return False
+    return [(entry.matching_mode, entry.url, entry.redirect_uri_type) for entry in provider.redirect_uris] == [
+        ('strict', url, 'authorization')]
+
+
 def verify_registration(spec, secret, references, *, adopting=False):
     from authentik.core.models import Application, Group
     from authentik.policies.models import PolicyBinding
@@ -39,7 +51,7 @@ def verify_registration(spec, secret, references, *, adopting=False):
                                           order=0, enabled=True, negate=False, failure_result=False)
     matches = (app.provider_id == provider.pk and app.name == spec['app_name'] and app.policy_engine_mode == 'all'
             and app.meta_launch_url == spec['launch_url'] and binding.count() == 1
-            and provider._redirect_uris == [{'matching_mode': 'strict', 'redirect_uri_type': 'authorization', 'url': spec['callback']}]
+            and strict_callback(provider, spec['callback'])
             and provider.name == spec['provider_name'] and provider.client_type == 'confidential'
             and provider.sub_mode == 'hashed_user_id' and provider.issuer_mode == 'per_provider'
             and provider.include_claims_in_id_token and hmac.compare_digest(provider.client_secret.encode(), secret)
