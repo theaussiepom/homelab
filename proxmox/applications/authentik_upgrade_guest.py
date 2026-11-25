@@ -167,11 +167,15 @@ def run(selection, canonical, *, final=False):
     return {'completed':len(rows), 'changed':completed < len(rows), 'last_release':refs[-2]}
 
 
+def main():
+    os.umask(0o077)
+    require(len(sys.argv) == 2 or sys.argv[2:] == ['final'], 'Select a maintenance operation')
+    print(json.dumps(run(json.load(sys.stdin), Path(sys.argv[1]), final=len(sys.argv) == 3)))
+
+
 if __name__ == '__main__':
     try:
-        os.umask(0o077)
-        require(len(sys.argv) == 2 or sys.argv[2:] == ['final'], 'Select a maintenance operation')
-        print(json.dumps(run(json.load(sys.stdin), Path(sys.argv[1]), final=len(sys.argv) == 3)))
+        main()
     except Exception as error:
         # The journal identifies the stage; omit raw Docker/worker output.
         sys.exit('Authentik maintenance stopped: '+(str(error) if type(error) is ValueError else type(error).__name__))

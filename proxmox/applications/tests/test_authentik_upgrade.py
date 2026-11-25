@@ -1,5 +1,7 @@
 """Production ordering, native ownership, schema checkpoints, and interrupted maintenance."""
 import copy
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -281,6 +283,18 @@ class GuestTests(unittest.TestCase):
             self.assertEqual(command.call_count,1)
 
     original_docker = staticmethod(guest.docker)
+
+    def test_cli_returns_only_the_completion_report(self):
+        self.addCleanup(os.umask, os.umask(0o077))
+        argv = ['maint',str(self.canonical)]
+        for final in (False, True):
+            output = io.StringIO()
+            with patch.object(sys,'argv',argv + (['final'] if final else [])), \
+                 patch.object(sys,'stdin',io.StringIO(json.dumps(self.plan))), \
+                 patch.object(guest,'run',return_value={'completed':6}) as execute, contextlib.redirect_stdout(output):
+                guest.main()
+            execute.assert_called_once_with(self.plan, self.canonical, final=final)
+            self.assertEqual(json.loads(output.getvalue()), {'completed':6})
 
     def test_cli_rejects_an_invalid_operation(self):
         self.addCleanup(os.umask, os.umask(0o077))
