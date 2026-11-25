@@ -66,6 +66,21 @@ def observed(owned=False):
 
 class PBSFirewallTests(unittest.TestCase):
     """Exercise shape, ownership, policy ordering and standard Ansible wiring."""
+    def test_endpoint_trial_schedules_the_apply_before_fresh_ssh(self):
+        """Do not load first enforcement inside the pre-policy SSH connection."""
+        ansible = ROOT / 'ansible'
+        tasks = yaml.safe_load((ansible / 'pbs-firewall-trial.yml').read_text())
+        launch = next(index for index, task in enumerate(tasks)
+                      if 'schedule' in task.get('ansible.builtin.command', {}).get('argv', []))
+        self.assertEqual(tasks[launch + 1]['delegate_to'], 'localhost')
+        self.assertEqual(tasks[launch + 2]['ansible.builtin.include_tasks'], 'pbs-firewall-read.yml')
+        script = (ansible / 'files/pbs-firewall-trial').read_text()
+        scheduling = script.split('    schedule)\n', 1)[1].split('    apply)\n', 1)[0]
+        delay = int(re.search(r'--on-active=(\d+)s', scheduling).group(1))
+        accuracy = int(re.search(r'AccuracySec=(\d+)s', scheduling).group(1))
+        self.assertGreater(tasks[launch + 1]['ansible.builtin.wait_for']['timeout'], delay + accuracy)
+        self.assertNotIn('nft --file', scheduling)
+
     def refused(self, fn, *args):
         """Require the sanitized contract refusal, rather than an incidental exception."""
         with self.assertRaisesRegex(ValueError, '^' + p.ERROR + '$'):
