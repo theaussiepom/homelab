@@ -33,6 +33,8 @@ Image-backed stack profiles default to `image_update: standard`. The compiler wr
 
 For Authentik, `properties.upgrade_path` records the accepted image, the latest stable patch of each intervening release series and the exact target from the stack image catalogue. Include an available patch or digest update to the source series on the way to a later series. Each entry identifies an official GHCR image by tag and digest. The first pin must match the accepted deployment. The final pin must match the catalogue image for both server and worker, or compilation fails. An unchanged image needs no maintenance stage. A new installation uses the catalogue image directly.
 
+Guest preparation checks the existing storage paths. When retained Authentik binds its `data` role to a volume, the Identity phase verifies the previous Compose layout before creating the new directory. It then checks all application paths before starting the upgrade. A `root_path` binding requires an existing directory during guest preparation.
+
 The Identity phase checks the running images, container health, migrations and existing registrations at each checkpoint. An interrupted schema upgrade requires reconciliation with the matching database recovery point. The final web check retains its normal place after the guest jobs.
 
 Zabbix accepts no other properties. Configuration checks allow a selected `database_password` role when root monitoring is absent, but ordinary deployment does not support that configuration. App preparation currently requires the credential owned by root monitoring and its exact monitoring files, with no selected scalar password. Root monitoring generates and owns the credential, and rejects a duplicate selected role.

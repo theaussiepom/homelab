@@ -98,6 +98,7 @@ class ComponentCallbackTests(unittest.TestCase):
         self.assertEqual((payload.directory/'oidc-console').read_bytes(), b'synthetic-client')
         self.assertEqual((payload.directory/'homelab-oidc-console.yaml').read_text(), body)
         spec = variables['component_identity_data']
+        self.assertIn({'path': spec['path'], 'type': 'directory'}, variables['app']['required_paths'])
         self.assertEqual((spec['path'],spec['media'],spec['services']),('/srv/data/files','/srv/data/old/media',
                                                                          ['owned_server','owned_worker']))
         self.assertNotIn('stack',variables)

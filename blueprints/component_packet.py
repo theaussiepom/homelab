@@ -9,7 +9,7 @@ import component_runtime
 import component_routes
 import component_native
 import managed_credentials
-from component_adapters import adapter,ordered_services
+from component_adapters import adapter, initializes_authentik_data, ordered_services
 from component_lower import provider_config, runtime_config
 from component_sources import require
 from component_errors import ComponentError
@@ -41,6 +41,16 @@ def _credential(plan, context, role):
     selected = plan.site['secret_sources'][context['credentials'][role]]
     require(selected['type'] == 'file', 'component.context-file-credential')
     return selected['path']
+
+
+def preparation_paths(app):
+    """Select storage that must already exist before application phases run."""
+    for role, row in app['storage_paths'].items():
+        if app['lifecycle'] == 'fresh' and 'initialize' in row:
+            continue
+        if role == 'data' and initializes_authentik_data(app):
+            continue
+        yield row
 
 
 def lower_guest(plan, guest_id, *, inputs=INPUTS):
@@ -81,9 +91,7 @@ def lower_guest(plan, guest_id, *, inputs=INPUTS):
             'runtime_id': app['identity']['runtime_id'],
             **({'project': app['project_name'], 'compose_file': app['project_file'],
                 'services': ordered_services(app)} if compose else {})}
-        for row in app['storage_paths'].values():
-            if app['lifecycle'] == 'fresh' and 'initialize' in row:
-                continue
+        for row in preparation_paths(app):
             expected = {'path': row['source'], 'type': row['kind']}
             require(row['source'] not in required or required[row['source']] == expected,
                     'component.storage-conflict')

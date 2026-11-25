@@ -16,6 +16,18 @@ from test_component_plan import library, site
 
 class PacketIntegrationTests(unittest.TestCase):
 
+    def test_only_the_retained_authentik_volume_data_role_is_deferred(self):
+        data = {'kind': 'directory', 'source': '/srv/example/files', 'volume_root': '/srv/example'}
+        media = {'kind': 'directory', 'source': '/srv/example/media'}
+        app = {'adapter': 'authentik', 'lifecycle': 'retained', 'storage_paths': {'media': media, 'data': data}}
+        self.assertEqual(list(component_packet.preparation_paths(app)), [media])
+        for adapter, lifecycle in [('authentik', 'fresh'), ('postgresql', 'retained')]:
+            with self.subTest(adapter=adapter, lifecycle=lifecycle):
+                self.assertEqual(list(component_packet.preparation_paths(dict(app, adapter=adapter, lifecycle=lifecycle))),
+                                 [media, data])
+        del data['volume_root']
+        self.assertEqual(list(component_packet.preparation_paths(app)), [media, data])
+
     def test_generated_renovate_policy_changes_namespace_preserving_sealed_payload_and_other_guests(self):
         import component_payload, renovate
         # Packet integration receives a conforming app descriptor; the real
