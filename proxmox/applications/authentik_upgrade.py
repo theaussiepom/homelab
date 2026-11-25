@@ -1,21 +1,12 @@
 """Compile the supported retained Authentik release sequence from sealed site inputs."""
 import copy
 from pathlib import Path
-import re
+
+from authentik_releases import validate, version
 
 import component_runtime
 import component_recovery
 from private_io import read_json, require
-
-FAMILIES = ('2025.4', '2025.6', '2025.8', '2025.10', '2025.12', '2026.2', '2026.5', '2026.8')
-IMAGE = re.compile(r'ghcr\.io/goauthentik/server:([0-9]{4}\.[1-9][0-9]?)\.(?:0|[1-9][0-9]*)@sha256:[0-9a-f]{64}')
-
-
-def validate(images):
-    require(isinstance(images, list) and len(images) == len(FAMILIES), 'Select one image per Authentik release series')
-    for family, image in zip(FAMILIES, images, strict=True):
-        match = IMAGE.fullmatch(image) if isinstance(image, str) else None
-        require(match and match[1] == family, 'Use consecutive Authentik series and immutable official images')
 
 
 def images(app):
@@ -43,18 +34,19 @@ def transition(old, new):
 def plan(previous, current, app_id):
     """Render every stage with the same component renderer used in ordinary CD."""
     new = current['applications'][app_id]
-    path = new['properties']['upgrade_path']
-    validate(path)
-    require(new['adapter'] == 'authentik' and new['lifecycle'] == 'retained',
-            'Bind the ordered upgrade to the selected retained target')
-    old = previous['applications'][app_id]
-    old_ref, new_ref = images(old), images(new)
-    old_tag, new_tag = IMAGE.fullmatch(old_ref), IMAGE.fullmatch(new_ref)
-    if old_tag and new_tag and old_tag[1] == new_tag[1] == FAMILIES[-1]:
+    old = previous['applications'].get(app_id)
+    if old is None:
+        require(new['lifecycle'] == 'fresh', 'Require an accepted Authentik deployment')
         return None
+    old_ref, new_ref = images(old), images(new)
+    if old_ref == new_ref:
+        return None
+    path = new['properties'].get('upgrade_path')
+    validate(path)
+    require(new['adapter'] == old['adapter'] == 'authentik' and new['lifecycle'] == old['lifecycle'],
+            'Bind the ordered upgrade to the accepted application')
     require(new_ref == path[-1], 'Bind the reviewed target image to the maintenance path')
     require(old['adapter'] == 'authentik' and images(old) == path[0], 'Require the accepted Authentik source image')
-    require(not new['settings'].get('oidc_blueprints'), 'Adopt blueprints after the server upgrade')
     for field in ('settings', 'secrets', 'input_sources', 'secret_bindings'):
         require(new.get(field) == old.get(field), 'Preserve Authentik settings and credentials during maintenance')
     project = new['project_name']
@@ -68,17 +60,18 @@ def plan(previous, current, app_id):
     new_peers = {k:v for k,v in final['services'].items() if k not in owned}
     require(old_peers == new_peers, 'Preserve all shared project peers')
     release_documents = []
-    for family, ref in zip(FAMILIES[1:-1], path[1:-1], strict=True):
-        runtime = copy.deepcopy(previous if family in ('2025.6', '2025.8') else current)
+    for ref in path[1:-1]:
+        family = version(ref)[:2]
+        runtime = copy.deepcopy(previous if family < (2025, 10) else current)
         app = runtime['applications'][app_id]
-        if family == '2025.10':
+        if family == (2025, 10) and 'data' in app['storage_paths']:
             del app['storage_paths']['data']
             app['storage_paths']['media']['target'] = '/media'
         for role in ('server', 'worker'):
             app['software_selection']['images'][role] = {'image': ref}
         release_documents.append(component_runtime.compositions(runtime)[project])
     return dict(initial=initial, final=final, stages=release_documents, images=path, project=project,
-                roles=[services['server'], services['worker']], redis=old['identity']['services']['redis'],
+                roles=[services['server'], services['worker']], redis=old['identity']['services'].get('redis'),
                 peers=sorted(new_peers))
 
 
@@ -90,7 +83,7 @@ def prepare(attempt, app_id):
 
 
 def phase_options(attempt, phase, app):
-    if app is None or app['adapter'] != 'authentik' or 'upgrade_path' not in app.get('properties', {}):
+    if attempt.previous_configuration is None and app['lifecycle'] == 'fresh':
         return {}
     selection = prepare(attempt, app['id'])
     if selection is None:

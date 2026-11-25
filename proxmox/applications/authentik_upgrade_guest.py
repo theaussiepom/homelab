@@ -1,4 +1,4 @@
-"""Run the six sealed intermediate Compose selections under the owning CD phase."""
+"""Run the sealed intermediate Compose selections under the owning CD phase."""
 import json
 import os
 from pathlib import Path
@@ -114,11 +114,13 @@ def run(selection, canonical, *, final=False):
     if final:
         baseline = read_json(initial, private=True)
         last = len(selection['stages'])
-        require(read_json(journal/f'completed-{last}.json', private=True) == {'image':refs[-2], 'readback':baseline},
+        if last:
+            require(read_json(journal/f'completed-{last}.json', private=True) == {'image':refs[-2], 'readback':baseline},
                 'Require the last intermediate release receipt before accepting the final target')
         require(check(selection, canonical, refs[-1]) == baseline, 'Final Authentik registration readback changed')
         publish(journal/'final.json', {'image':refs[-1], 'readback':baseline})
-        release_image(journal, last)
+        if last:
+            release_image(journal, last)
         return {'completed':last + 1, 'last_release':refs[-1]}
     if not initial.exists():
         publish(initial, check(selection, canonical, refs[0]))

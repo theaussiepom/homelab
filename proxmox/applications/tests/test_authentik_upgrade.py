@@ -25,7 +25,7 @@ from component_errors import ComponentError
 from private_io import encoded, read_json, write_new
 
 REFS = [f'ghcr.io/goauthentik/server:{family}.1@sha256:' + str(i)*64
-        for i, family in enumerate(upgrade.FAMILIES, 1)]
+        for i, family in enumerate(('2025.4','2025.6','2025.8','2025.10','2025.12','2026.2','2026.5','2026.8'), 1)]
 
 
 def runtime(legacy):
@@ -52,7 +52,7 @@ def render(value):
 class PlanTests(unittest.TestCase):
     def test_release_selection(self):
         component_foundations.validate('authentik', {'upgrade_path':REFS}, partial=True)
-        for path in (None, REFS[:-1], [None]+REFS[1:], [REFS[1]]+REFS[1:], [REFS[0][:-1]]+REFS[1:]):
+        for path in (None, REFS[:2]+REFS[3:], [None]+REFS[1:], [REFS[1]]+REFS[1:], [REFS[0][:-1]]+REFS[1:]):
             with self.subTest(path=path), self.assertRaises(ComponentError):
                 component_foundations.validate('authentik', {'upgrade_path':path}, partial=True)
 
@@ -68,7 +68,10 @@ class PlanTests(unittest.TestCase):
             patched = copy.deepcopy(new)
             for row in patched['applications']['id']['software_selection']['images'].values():
                 row['image'] = REFS[-1].replace('.1@','.2@')
-            self.assertIsNone(upgrade.plan(new,patched,'id'))
+            with self.assertRaisesRegex(ValueError, 'reviewed target'):
+                upgrade.plan(new,patched,'id')
+            patched['applications']['id']['properties']['upgrade_path'] = [REFS[-1],row['image']]
+            self.assertEqual(upgrade.plan(new,patched,'id')['stages'], [])
             for key, value in [('lifecycle','fresh'), ('project_file','other.yml'), ('secret_bindings',{}),
                                ('settings',{'oidc_blueprints':{'pilot':True}})]:
                 candidate = copy.deepcopy(new)
@@ -101,10 +104,7 @@ class PlanTests(unittest.TestCase):
         app = runtime(False)['applications']['id']
         app['id'] = 'id'
         with tempfile.TemporaryDirectory() as tmp:
-            attempt = SimpleNamespace(operation=Path(tmp))
-            self.assertEqual(upgrade.phase_options(attempt,'preparation',None),{})
-            self.assertEqual(upgrade.phase_options(attempt,'other',{'adapter':'other'}),{})
-            self.assertEqual(upgrade.phase_options(attempt,'auth',{'adapter':'authentik'}),{})
+            attempt = SimpleNamespace(operation=Path(tmp), previous_configuration={})
             with patch.object(upgrade,'prepare',return_value=None):
                 self.assertEqual(upgrade.phase_options(attempt,'auth',app),{})
             selection = {'images':REFS}
@@ -149,7 +149,7 @@ class DeploymentCallerTests(unittest.TestCase):
                 self.assertEqual(values['component_authentik_upgrade'], selection)
                 phases.append(log.parent.name)
             return self.case.ansible(argv,environment,log)
-        with patch.object(component_ansible,'quiet',side_effect=inspect), patch.object(upgrade,'phase_options',
+        with patch.object(component_ansible,'quiet',side_effect=inspect), patch('image_update_hooks.phase_options',
                 side_effect=lambda attempt,phase,app: {'upgrade':selection} if app else {}):
             self.case.all_phases()
         self.assertEqual(phases, [self.case.cfg['deployment']['phases'][-1]])

@@ -96,6 +96,28 @@ class PlanTests(unittest.TestCase):
         path.write_text(json.dumps(site() if selected is None else selected))
         return component_plan.resolve(self.stack, path)
 
+    def test_authentik_hook_requires_its_profile_and_stack_local_policy(self):
+        spec = library()
+        spec['software'] = {'images': {'images': {'server': 'server', 'worker': 'server'}}}
+        source = self.stack/'images.json'
+        source.write_text(json.dumps({'server': {'repository': 'example/server', 'tag': '1',
+                                                  'digest': 'sha256:'+'a'*64}}))
+        profile = {'adapter': 'authentik', 'display_name': 'Identity', 'interfaces': {},
+                   'software': ['images'], 'image_update': 'release-series'}
+        spec['app_profiles']['authentik'] = profile
+        leaf = self.stack/'apps/authentik/image-update.yaml'
+        leaf.parent.mkdir(parents=True)
+        leaf.write_text(json.dumps({'owner': 'authentik', 'upstream': 'goauthentik/authentik',
+                                    'image': 'ghcr.io/goauthentik/server', 'roles': ['server','worker']}))
+        self.assertIn('apps/authentik/image-update.yaml', self.resolve(spec).pins['library'])
+        del profile['image_update']
+        with self.assertRaisesRegex(ValueError, 'image-update'):
+            self.resolve(spec)
+        profile['image_update'] = 'release-series'
+        spec['app_profiles']['alternate'] = profile
+        with self.assertRaisesRegex(ValueError, 'image-update'):
+            self.resolve(spec)
+
     def test_effective_static_route_and_secondary_gateway_omission(self):
         plan = self.resolve()
         guest = plan.resolved['guests']['resolver']
