@@ -50,7 +50,16 @@ class SetupTests(unittest.TestCase):
                             token='management-sentinel', api_factory=self.api_factory,
                             execute=self.execute, monitoring_token_file=token_file)
         provision.assert_called_once_with(self.api_factory.return_value, destination,
-                                           token_file, self.api_factory)
+                                           token_file, self.api_factory, api_destination=destination)
+
+        admin = {**destination, 'server': '192.0.2.51'}
+        with patch.object(subject.backup_monitoring, 'provision') as provision:
+            subject.install(self.value, destination=admin, datastore_path='/mnt/recovery',
+                            token='management-sentinel', api_factory=self.api_factory, execute=self.execute,
+                            monitoring_token_file=token_file, monitoring_destination=destination)
+        self.api_factory.assert_called_with(admin, 'management-sentinel')
+        provision.assert_called_once_with(self.api_factory.return_value, destination,
+                                           token_file, self.api_factory, api_destination=admin)
 
     def test_first_install_and_repeat_preserve_the_one_schedule_attempt(self):
         note=self.root/'database-network-cutover-notes';write_new(note,b'operator evidence')

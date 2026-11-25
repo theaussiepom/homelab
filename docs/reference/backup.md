@@ -53,7 +53,7 @@ These root objects accompany `job`; neither belongs inside an individual client.
 | <a id="backup-recovery-public-key"></a>`backup.recovery_public_key` | Closed source object | Required with `job` | The shared RSA recovery public key; never a client key or private PEM. |
 | <a id="backup-recovery-public-key-source"></a>`backup.recovery_public_key.source` | Confined site-relative file path | Required | A PEM-encoded RSA-4096 public key; use a repository destination such as `assets/backup/pbs-recovery-public.pub` under the normal ignore/private-path rules. The `.pub` suffix does not change the PEM encoding to SSH format. Absolute paths, symlinks/escapes and private-key content are rejected. Its validated bytes are included in the deployment packet. |
 
-Both paths use the declared datastore and certificate fingerprint. When the management endpoint is set, the controller sends its protected API calls there. The worker endpoint continues to carry backup traffic. Define the management credential in the site's [secret sources](identity-and-secrets.md#secret-sources):
+Both paths use the declared datastore and certificate fingerprint. When the management endpoint is set, the controller sends its protected API calls there, including its verification of the monitoring credential. Backup workers and Zabbix keep their declared endpoints and existing credential ownership. Define the management credential in the site's [secret sources](identity-and-secrets.md#secret-sources):
 
 ```yaml
 secret_sources:
