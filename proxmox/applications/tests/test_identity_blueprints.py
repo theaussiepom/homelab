@@ -60,6 +60,23 @@ class WorkerTests(unittest.TestCase):
         self.instances.objects.filter.return_value.exclude.return_value.exists.return_value = False
         self.instances.objects.get_or_create.return_value = self.instance, False
 
+    def test_only_one_effective_strict_authorization_callback_is_admitted(self):
+        url = self.spec['callback']
+        legacy = {'matching_mode': 'strict', 'url': url}
+        explicit = dict(legacy, redirect_uri_type='authorization')
+        native = SimpleNamespace(**explicit)
+        provider = SimpleNamespace(_redirect_uris=[legacy], redirect_uris=[native])
+        self.assertTrue(bp.strict_callback(provider, url))
+        native.redirect_uri_type = 'logout'
+        self.assertFalse(bp.strict_callback(provider, url))
+        native.redirect_uri_type = 'authorization'
+        for stored in ([], [legacy, explicit], [dict(explicit, redirect_uri_type='logout')],
+                       [dict(legacy, matching_mode='regex')], [dict(legacy, url=url+'/other')],
+                       [dict(legacy, unknown=True)]):
+            with self.subTest(stored=stored):
+                provider._redirect_uris = stored
+                self.assertFalse(bp.strict_callback(provider, url))
+
     def test_refuse_foreign_grants_and_check_native_readback(self):
         query = self.provider.objects.filter.return_value
         query.count.return_value = 1
