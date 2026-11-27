@@ -2,10 +2,11 @@ mock_provider "proxmox" {}
 
 variables {
   policy = {
-    schema       = "homelab-host-firewall-v1"
-    endpoint     = "https://pve.example.invalid:8006/"
-    node         = "pve"
-    host_address = "198.18.25.10"
+    schema        = "homelab-host-firewall-v1"
+    endpoint      = "https://pve.example.invalid:8006/"
+    node          = "pve"
+    host_address  = "198.18.25.10"
+    local_network = "host-only"
     allowances = [
       { source = "198.18.25.11/32", port = 8006, comment = "Existing API" },
       { source = "192.0.2.0/24", port = 22, comment = "Reviewed management SSH" }
@@ -23,6 +24,14 @@ variables {
 
 run "desired_policy" {
   command = plan
+  assert {
+    condition = (proxmox_virtual_environment_firewall_alias.local_network.name == "local_network" &&
+      proxmox_virtual_environment_firewall_alias.local_network.cidr == "198.18.25.10/32" &&
+      proxmox_virtual_environment_firewall_alias.local_network.node_name == null &&
+      proxmox_virtual_environment_firewall_alias.local_network.container_id == null &&
+    proxmox_virtual_environment_firewall_alias.local_network.vm_id == null)
+    error_message = "The standalone management alias must select one host with cluster scope."
+  }
   assert {
     condition = (proxmox_virtual_environment_firewall_rules.host.node_name == "pve" &&
       proxmox_virtual_environment_firewall_rules.host.container_id == null &&
@@ -63,10 +72,11 @@ run "additional_address_preserves_management_policy" {
   command = plan
   variables {
     policy = {
-      schema       = "homelab-host-firewall-v1"
-      endpoint     = "https://pve.example.invalid:8006/"
-      node         = "pve"
-      host_address = "198.18.25.10"
+      schema        = "homelab-host-firewall-v1"
+      endpoint      = "https://pve.example.invalid:8006/"
+      node          = "pve"
+      host_address  = "198.18.25.10"
+      local_network = "host-only"
       allowances = [
         { source = "198.18.25.11/32", port = 8006, comment = "Existing API" },
         { source = "192.0.2.0/24", port = 22, comment = "Reviewed management SSH" },

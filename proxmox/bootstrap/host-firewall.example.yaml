@@ -2,6 +2,7 @@ schema: homelab-host-firewall-v1
 endpoint: https://pve.example.invalid:8006/
 node: pve
 host_address: 198.18.25.10
+local_network: host-only
 allowances:
   - source: 198.18.25.11/32
     port: 8006
