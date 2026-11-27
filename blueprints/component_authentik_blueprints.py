@@ -6,7 +6,8 @@ from urllib.parse import urlsplit
 import yaml
 
 from component_errors import at
-from component_sources import closed, require
+from component_sources import closed, identifier, require
+from routed_checks import OIDC_CALLBACKS
 from identity_callbacks import canonical
 from component_input_secrets import BLUEPRINT_SECRET_ROLES
 
@@ -63,14 +64,51 @@ def render_forward_auth(spec):
                       'entries': [provider, app, binding]}, Dumper=BlueprintDumper, sort_keys=False)
 
 
+def retained_node_red_registration(source, app, owner, resolver, exposures):
+    """Adopt one existing client and only callbacks on explicitly selected aliases of this route."""
+    require(app['lifecycle'] == 'retained', 'component.lifecycle')
+    fields = ('slug', 'provider_name', 'admission_group', 'signing_key', 'authentication_flow',
+              'authorization_flow', 'invalidation_flow', 'policy_engine_mode', 'launch_url',
+              'callback_aliases', 'client_secret', 'secret_slot')
+    closed(source, fields)
+    for name in ('provider_name', 'admission_group', 'signing_key', 'authorization_flow', 'invalidation_flow'):
+        label(source[name])
+    if source['authentication_flow'] is not None:
+        label(source['authentication_flow'])
+    client = app['authentication_resolved']
+    require(source['slug'] == client['provider_slug'] and re.fullmatch('[a-z0-9]+(?:-[a-z0-9]+)*', source['slug'])
+            and source['policy_engine_mode'] in ('any', 'all')
+            and source['launch_url'] in ('', app['origin_url'] + '/'), 'component.authentication')
+    secret = source['client_secret']
+    require(identifier(secret) and secret in resolver.site['secret_sources'] and
+            resolver.site['secret_sources'][secret]['type'] in ('file', 'environment'), 'component.secret-source')
+    aliases = source['callback_aliases']
+    route = exposures.resolved[app['origin']['exposure']]
+    require(isinstance(aliases, list) and all(identifier(item) and item in route.get('aliases', [])
+            for item in aliases) and len(set(aliases)) == len(aliases), 'component.authentication')
+    path = OIDC_CALLBACKS['/auth/strategy']
+    additional = ['https://' + exposures.domains[item] + path for item in aliases]
+    callback = app['origin_url'] + path
+    require(callback not in additional and len(set(additional)) == len(additional), 'component.authentication')
+    spec = {key: source[key] for key in fields if key not in ('client_secret', 'secret_slot', 'callback_aliases')}
+    return {**spec, 'app': app['id'], 'guest': app['guest'], 'identity': owner,
+            'app_name': app['display_name'], 'client_id': client['client_id'], 'callback': callback,
+            'additional_callbacks': additional, 'secret_source': secret, 'retained': True}
+
+
+def label(value):
+    require(isinstance(value, str) and 0 < len(value) <= 150 and value == value.strip()
+            and not any(ord(c) < 32 or ord(c) == 127 for c in value), 'component.authentication')
+
+
 def registration(source, app, owner, app_id):
     closed(source, ('slug', 'provider_name', 'admission_group', 'signing_key',
-                    'authentication_flow', 'authorization_flow', 'invalidation_flow'))
+                    'authentication_flow', 'authorization_flow', 'invalidation_flow'), ('secret_slot',))
+    source = {key: value for key, value in source.items() if key != 'secret_slot'}
     require(isinstance(source['slug'], str) and re.fullmatch('[a-z0-9]+(?:-[a-z0-9]+)*', source['slug'])
             and len(source['slug']) <= 63, 'component.authentication')
     for value in source.values():
-        require(isinstance(value, str) and 0 < len(value) <= 150 and value == value.strip()
-                and not any(ord(c) < 32 or ord(c) == 127 for c in value), 'component.authentication')
+        label(value)
     client = app['authentication_resolved']
     settings = client['settings']
     slug = source['slug']
@@ -92,22 +130,28 @@ def render(spec):
                     'client_secret': Reference('!File', '/run/secrets/oidc-' + slug),
                     'issuer_mode': 'per_provider', 'sub_mode': 'hashed_user_id',
                     'signing_key': find('authentik_crypto.certificatekeypair', 'name', spec['signing_key']),
-                    'redirect_uris': [{'matching_mode': 'strict', 'redirect_uri_type': 'authorization', 'url': spec['callback']}],
+                    'redirect_uris': [{'matching_mode': 'strict', 'redirect_uri_type': 'authorization', 'url': url}
+                                      for url in [*spec.get('additional_callbacks', []), spec['callback']]],
                     'include_claims_in_id_token': True,
                     'property_mappings': [find('authentik_providers_oauth2.scopemapping', 'managed',
                          'goauthentik.io/providers/oauth2/scope-' + scope) for scope in ('openid', 'profile', 'email')],
-                    **{key: find('authentik_flows.flow', 'slug', spec[key])
+                    **{key: find('authentik_flows.flow', 'slug', spec[key]) if spec[key] is not None else None
                        for key in ('authentication_flow', 'authorization_flow', 'invalidation_flow')}}}
     application = {'model': 'authentik_core.application', 'id': 'application',
                    'identifiers': {'slug': slug}, 'attrs': {'name': spec['app_name'],
-                       'provider': Reference('!KeyOf', 'provider'), 'policy_engine_mode': 'all',
+                       'provider': Reference('!KeyOf', 'provider'), 'policy_engine_mode': spec.get('policy_engine_mode', 'all'),
                        'meta_launch_url': spec['launch_url']}}
     binding = {'model': 'authentik_policies.policybinding', 'identifiers': {
                    'target': Reference('!KeyOf', 'application'), 'group': Reference('!KeyOf', 'admission-group')},
                'attrs': {'order': 0, 'enabled': True, 'negate': False, 'failure_result': False}}
+    entries = [provider, application, binding]
+    if spec.get('retained'):
+        binding['identifiers']['group'] = find('authentik_core.group', 'name', spec['admission_group'])
+    else:
+        entries.insert(0, group)
     return yaml.dump({'version': 1, 'metadata': {'name': 'homelab-oidc-' + slug,
             'labels': {'blueprints.goauthentik.io/instantiate': 'false'}},
-            'entries': [group, provider, application, binding]}, Dumper=BlueprintDumper, sort_keys=False)
+            'entries': entries}, Dumper=BlueprintDumper, sort_keys=False)
 
 
 def require_worker(owner):
@@ -183,7 +227,12 @@ def bind(resolver, exposures):
             require(owner in resolver.apps and resolver.apps[owner]['adapter'] == 'authentik',
                     'component.authentication')
             require_worker(resolver.apps[owner])
-            spec = registration(policy['registration'], app, owner, app_id)
+            source = policy['registration']
+            if app['adapter'] == 'node_red':
+                require(provider['type'] == 'oidc', 'component.authentication')
+                spec = retained_node_red_registration(source, app, owner, resolver, exposures)
+            else:
+                spec = registration(source, app, owner, app_id)
             settings = resolver.apps[owner]['settings']
             configs = settings.setdefault('oidc_blueprints', {})
             slug = spec['slug']
@@ -195,7 +244,15 @@ def bind(resolver, exposures):
             require(all(row['client_id_sha256'] != client_hash for row in settings.get('allowed_callback_additions', [])),
                     'component.authentication')
             require(len(configs) < len(BLUEPRINT_SECRET_ROLES), 'component.secret-role')
-            configs[slug] = {**spec, 'secret_role': BLUEPRINT_SECRET_ROLES[len(configs)], 'blueprint': render(spec)}
+            occupied = {row['secret_role'] for row in configs.values()}
+            if 'secret_slot' in source:
+                slot = source['secret_slot']
+                require(type(slot) is int and 1 <= slot <= len(BLUEPRINT_SECRET_ROLES), 'component.secret-role')
+                role = BLUEPRINT_SECRET_ROLES[slot - 1]
+                require(role not in occupied, 'component.secret-role')
+            else:
+                role = next(role for role in BLUEPRINT_SECRET_ROLES if role not in occupied)
+            configs[slug] = {**spec, 'secret_role': role, 'blueprint': render(spec)}
     for app_id, app in sorted(resolver.apps.items()):
         if 'forward_auth' in app:
             with at('apps', app_id, 'forward_auth'):

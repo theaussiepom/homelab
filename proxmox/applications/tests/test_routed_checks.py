@@ -49,6 +49,17 @@ class RoutedRuntimeTests(unittest.TestCase):
             self.assertEqual(fetch.call_args_list[0].args[1], data['issuer'] + '.well-known/openid-configuration')
             self.assertEqual(fetch.call_args_list[1].args[1], page['route_origins'][0] + login['path'])
         run(json.dumps(metadata), redirect)
+        editor = dict(login, path='/auth/strategy')
+        with self.assertRaises(ValueError):
+            m.validate([editor])
+        editor_callback = page['route_origins'][0] + '/auth/strategy/callback/'
+        editor['oidc'] = dict(data, callback=editor_callback)
+        m.validate([editor])
+        editor_query = urlencode({'client_id': data['client_id'], 'redirect_uri': editor_callback})
+        with patch.object(m, 'fetch', side_effect=[(200, None, json.dumps(metadata)),
+                (302, data['authorization_url'] + '?' + editor_query, '')]) as fetch:
+            m.check(editor, 123)
+        self.assertEqual(fetch.call_args_list[1].args[1], page['route_origins'][0] + '/auth/strategy')
         cases = [('bad', redirect, 'invalid_document'),
                  (json.dumps(dict(metadata, issuer='wrong')), redirect, 'issuer_mismatch'),
                  (json.dumps(dict(metadata, token_endpoint='wrong')), redirect, 'endpoint_mismatch'),

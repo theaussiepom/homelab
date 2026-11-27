@@ -77,14 +77,26 @@ def _flow(resolver, owner, selected, source, target, protocol):
 def oidc_check(resolver, exposures, owner, route, settings, row):
     """Compile the public sign-in contract from the same binding as the native client."""
     app = resolver.apps[route['target']['app']]
-    require(settings['mode'] == 'deferred' and app['adapter'] == 'pegaprox'
+    require(settings['mode'] == 'deferred' and app['adapter'] in ('pegaprox', 'node_red')
             and 'authentication_resolved' in app, 'component.route-check-oidc')
     auth = app['authentication_resolved']
-    client = auth['settings']
-    if not client['oidc_enabled']:
-        return None, set()
     definition = resolver.policy['authentication'][app['authentication']]
-    reference = resolver.site['identity_providers'][definition['provider']]['origin']
+    source_provider = resolver.site['identity_providers'][definition['provider']]
+    if app['adapter'] == 'node_red':
+        require(source_provider.get('type') == 'oidc', 'component.route-check-oidc')
+        selected = component_auth.oidc_provider(source_provider, exposures)
+        login = '/auth/strategy'
+        contract = dict(issuer=selected['issuer'], client_id=auth['client_id'],
+                        callback=app['origin_url'] + routed_checks.OIDC_CALLBACKS[login], **selected['endpoints'])
+    else:
+        client = auth['settings']
+        if not client['oidc_enabled']:
+            return None, set()
+        login = '/api/auth/oidc/login'
+        contract = dict(issuer=client['oidc_authority'], client_id=client['oidc_client_id'],
+                        callback=client['oidc_redirect_uri'], **auth['oidc_endpoints'])
+        auth['discovery_check'] = 'deferred'
+    reference = source_provider['origin']
     require('exposure' in reference, 'component.route-check-provider')
     provider = exposures.resolved[reference['exposure']]
     require(provider['type'] == 'http' and 'guest' in provider['target']
@@ -101,11 +113,9 @@ def oidc_check(resolver, exposures, owner, route, settings, row):
         if middleware['type'] in ('ip-allow-list', 'cloudflare-source'):
             require(any(ipaddress.IPv4Address(source) in ipaddress.ip_network(value)
                         for value in middleware['ranges']), 'component.route-check-source')
-    auth['discovery_check'] = 'deferred'
-    return {**row, 'mode': 'oidc', 'path': '/api/auth/oidc/login', 'contains': '',
+    return {**row, 'mode': 'oidc', 'path': login, 'contains': '',
             'auth_origins': [component_auth._origin(reference, exposures)],
-            'oidc': {'issuer': client['oidc_authority'], 'client_id': client['oidc_client_id'],
-                     'callback': client['oidc_redirect_uri'], **auth['oidc_endpoints'],
+            'oidc': {**contract,
                      'resolver_address': dns[0]['address'], 'ingress_address': ingress['address']}}, {
                          provider['target']['guest'], ingress['guest'], dns[0]['guest']}
 

@@ -129,24 +129,28 @@ def certificate(value, code='component.authentication'):
     return value
 
 
+def oidc_provider(value, exposures):
+    closed(value, ('type', 'origin', 'issuer_path', 'endpoints', 'signing_algorithms'))
+    origin = _origin(value['origin'], exposures)
+    closed(value['endpoints'], ENDPOINTS)
+    issuer = origin + _relative_path(value['issuer_path'])
+    urls = {name + '_url': origin + _relative_path(value['endpoints'][name])
+            for name in ENDPOINTS}
+    algorithms = value['signing_algorithms']
+    require(isinstance(algorithms, list) and bool(algorithms)
+            and all(isinstance(row, str) and row in ALGORITHMS for row in algorithms)
+            and len(set(algorithms)) == len(algorithms), 'component.authentication')
+    return {'type': 'oidc', 'origin': origin, 'issuer': issuer,
+            'endpoints': dict(urls, signing_algorithms=list(algorithms))}
+
+
 def providers(resolver, exposures):
     result = {}
     for key, value in resolver.site['identity_providers'].items():
         with at('identity_providers', key):
             require(isinstance(value, dict), 'component.authentication')
             if value.get('type') == 'oidc':
-                closed(value, ('type', 'origin', 'issuer_path', 'endpoints', 'signing_algorithms'))
-                origin = _origin(value['origin'], exposures)
-                closed(value['endpoints'], ENDPOINTS)
-                issuer = origin + _relative_path(value['issuer_path'])
-                urls = {name + '_url': origin + _relative_path(value['endpoints'][name])
-                        for name in ENDPOINTS}
-                algorithms = value['signing_algorithms']
-                require(isinstance(algorithms, list) and bool(algorithms)
-                        and all(isinstance(row, str) and row in ALGORITHMS for row in algorithms)
-                        and len(set(algorithms)) == len(algorithms), 'component.authentication')
-                result[key] = {'type': 'oidc', 'origin': origin, 'issuer': issuer,
-                               'endpoints': dict(urls, signing_algorithms=list(algorithms))}
+                result[key] = oidc_provider(value, exposures)
             elif value.get('type') == 'retained-node-red-oidc':
                 closed(value, ('type', 'origin', 'provider_slug'))
                 require(isinstance(value['provider_slug'], str) and
@@ -191,12 +195,22 @@ def transports(resolver, exposures):
 
 def _node_red(provider, selected, app):
     """Retain the existing settings wrapper; never provision a second secret."""
-    require(provider['type'] == 'retained-node-red-oidc' and urlsplit(provider['origin']).port is None
+    require(provider['type'] in ('retained-node-red-oidc', 'oidc') and urlsplit(provider['origin']).port is None
             and urlsplit(app['origin_url']).port is None, 'component.authentication')
     require(re.fullmatch(r'[A-Za-z0-9_-]{1,256}', selected['client_id']) is not None,
             'component.authentication')
+    if provider['type'] == 'oidc':
+        issuer = re.fullmatch(r'/application/o/([a-z0-9][a-z0-9-]{0,62})/', urlsplit(provider['issuer']).path)
+        require(issuer, 'component.authentication')
+        paths = {'authorization': '/application/o/authorize/', 'token': '/application/o/token/',
+                 'userinfo': '/application/o/userinfo/', 'jwks': issuer.group(0) + 'jwks/'}
+        require(all(provider['endpoints'][name + '_url'] == provider['origin'] + path
+                    for name, path in paths.items()), 'component.authentication')
+        slug = issuer.group(1)
+    else:
+        slug = provider['provider_slug']
     return {'identity_url': provider['origin'], 'node_red_url': app['origin_url'],
-            'client_id': selected['client_id'], 'provider_slug': provider['provider_slug']}
+            'client_id': selected['client_id'], 'provider_slug': slug}
 
 
 def authentication(resolver, selected_providers):
@@ -236,7 +250,8 @@ def authentication(resolver, selected_providers):
             pega = value['type'] == 'pegaprox-oidc'
             closed(value, PEGAPROX_FIELDS if pega else ('type', 'provider', 'default_login') if saml else
                    ('type', 'provider', 'client_id', 'client_secret', 'display_name', 'user_claim')
-                   if cloud else ('type', 'provider', 'client_id'), ('registration',) if pega else ())
+                   if cloud else ('type', 'provider', 'client_id'),
+                   ('registration',) if value['type'] in ('pegaprox-oidc', 'node-red-retained-oidc') else ())
             require(identifier(value['provider']) and value['provider'] in selected_providers,
                     'component.reference')
             provider = selected_providers[value['provider']]
@@ -250,12 +265,11 @@ def authentication(resolver, selected_providers):
                 selected = {'public_url': app['origin_url'], 'default_login': value['default_login'],
                             'idp_signing_certificate': provider['signing_certificate']}
             else:
-                require(provider['type'] == ('oidc' if cloud else 'retained-node-red-oidc'),
-                        'component.authentication')
                 types.text(value['client_id'])
                 require(len(value['client_id']) <= 256 and
                         not any(c in value['client_id'] for c in '\r\n'), 'component.authentication')
                 if cloud:
+                    require(provider['type'] == 'oidc', 'component.authentication')
                     secret = value['client_secret']
                     require(identifier(secret) and secret in resolver.site['secret_sources']
                             and resolver.site['secret_sources'][secret]['type'] in ('file', 'environment'),

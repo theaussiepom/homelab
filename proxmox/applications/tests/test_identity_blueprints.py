@@ -81,6 +81,21 @@ class WorkerTests(unittest.TestCase):
                 provider._redirect_uris = stored
                 self.assertFalse(bp.strict_callback(provider, url))
 
+    def test_adopt_only_the_declared_strict_alias_and_primary_callbacks(self):
+        primary = self.spec['callback']
+        alias = 'https://alias.example.invalid/auth/strategy/callback/'
+        rows = [dict(matching_mode='strict', url=url) for url in (alias, primary)]
+        native = [SimpleNamespace(**row, redirect_uri_type='authorization') for row in rows]
+        provider = SimpleNamespace(_redirect_uris=rows, redirect_uris=native)
+        self.assertTrue(bp.strict_callback(provider, primary, [alias]))
+        for stored in (rows[::-1], rows[:1], rows + [rows[0]]):
+            with self.subTest(stored=stored):
+                provider._redirect_uris = stored
+                self.assertFalse(bp.strict_callback(provider, primary, [alias]))
+        provider._redirect_uris = rows
+        native[0].redirect_uri_type = 'logout'
+        self.assertFalse(bp.strict_callback(provider, primary, [alias]))
+
     def test_refuse_foreign_grants_and_check_native_readback(self):
         query = self.provider.objects.filter.return_value
         query.count.return_value = 1
@@ -120,6 +135,8 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             bp.verify_registration(self.spec, b'synthetic', refs, adopting=True)
         apps.first.return_value = None
+        with self.assertRaises(ValueError):
+            bp.verify_registration(dict(self.spec, retained=True), b'synthetic', refs, adopting=True)
         self.assertFalse(bp.verify_registration(self.spec, b'synthetic', refs))
 
     def test_successful_hash_repeat_and_native_readback_after_queue(self):
