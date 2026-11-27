@@ -215,7 +215,7 @@ For first installation, preserve provider/ACME connectivity and provision the re
 | cloudbeaver-oidc | provider, client_id, client_secret, display_name, user_claim | OIDC provider; secret-source ID; claim sub/preferred_username/email |
 | [pegaprox-oidc](pegaprox-oidc.md) | provider, client_id, client_secret, management_token, display_name, user_claim, enabled, allow_private_ip, group_mappings | Native confidential OIDC, separate management credential, fixed viewer fallback and verified TLS/JWT settings |
 | node-red-retained-oidc | provider, client_id | Existing editor strategy on standard HTTPS. A declared OIDC provider also supports optional Identity adoption through [registration](identity-and-secrets.md#existing-node-red-oidc-strategy). |
-| zabbix-saml | provider, default_login | SAML provider; default_login zabbix or saml |
+| zabbix-saml | provider, default_login | SAML provider and default login (`zabbix` or `saml`). Optional [registration](identity-and-secrets.md#adopt-an-existing-zabbix-saml-application) adopts an existing Authentik provider. |
 
 Client IDs must be nonempty text of at most 256 characters with no CR/LF; the Cloud display name has the same limits. Each policy applies only to its matching adapter and an HTTPS origin belonging to that app. A profile may require a particular authentication type. See [providers and secret sources](identity-and-secrets.md) for the nested fields.
 

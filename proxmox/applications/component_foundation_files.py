@@ -214,7 +214,8 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
             _scalar(raw)
         rows = [_row(AUTH_FILES[key], value, 1000) for key, value in secrets.items() if key not in client_roles]
         forward = app.get('settings', {}).get('forward_blueprints', {})
-        if registrations or forward:
+        saml = app.get('settings', {}).get('saml_blueprints', {})
+        if registrations or forward or saml:
             manifest = []
             for slug, spec in sorted(registrations.items()):
                 raw = secrets[spec['secret_role']]
@@ -226,11 +227,12 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
                 manifest.append({**{key: value for key, value in spec.items()
                                     if key not in ('blueprint', 'secret_source', 'secret_role')},
                                  'sha512': hashlib.sha512(body).hexdigest()})
-            for slug, spec in sorted(forward.items()):
-                body = spec['blueprint'].encode()
-                rows.append(_row('homelab-forward-' + slug + '.yaml', body, 1000))
-                manifest.append({**{key: value for key, value in spec.items() if key != 'blueprint'},
-                                 'sha512': hashlib.sha512(body).hexdigest()})
+            for kind, specs in (('forward', forward), ('saml', saml)):
+                for slug, spec in sorted(specs.items()):
+                    body = spec['blueprint'].encode()
+                    rows.append(_row('homelab-' + kind + '-' + slug + '.yaml', body, 1000))
+                    manifest.append({**{key: value for key, value in spec.items() if key != 'blueprint'},
+                                     'sha512': hashlib.sha512(body).hexdigest()})
             rows.append({'path': 'identity-blueprints.json', 'content': json.dumps(manifest),
                          'uid': 0, 'gid': 0, 'mode': '0600'})
         callbacks = app.get('settings', {}).get('allowed_callback_additions')

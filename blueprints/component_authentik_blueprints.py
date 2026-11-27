@@ -1,5 +1,7 @@
 """Resolve app-owned registration intent into native Authentik v1 blueprints."""
+import hashlib
 import re
+import ssl
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -211,6 +213,68 @@ def bind_forward(resolver, exposures, app):
     registrations[slug] = {**spec, 'blueprint': render_forward_auth(spec)}
 
 
+def bind_saml(source, app, owner, settings):
+    """Adopt the existing confidential IdP key by reference to the SP's pinned public certificate."""
+    required = ('slug', 'application_name', 'provider_name', 'issuer', 'signing_key', 'admission_group',
+                'authentication_flow', 'authorization_flow', 'invalidation_flow', 'policy_engine_mode',
+                'session_minutes', 'attribute_mappings')
+    closed(source, required)
+    require(app['lifecycle'] == 'retained', 'component.lifecycle')
+    for name in ('application_name', 'provider_name', 'issuer', 'signing_key', 'admission_group',
+                 'authorization_flow', 'invalidation_flow'):
+        label(source[name])
+    if source['authentication_flow'] is not None:
+        label(source['authentication_flow'])
+    slug = source['slug']
+    require(isinstance(slug, str) and re.fullmatch('[a-z0-9]+(?:-[a-z0-9]+)*', slug) and len(slug) <= 63,
+            'component.authentication')
+    require(source['policy_engine_mode'] in ('all', 'any') and type(source['session_minutes']) is int
+            and 0 < source['session_minutes'] <= 525600, 'component.authentication')
+    mappings = source['attribute_mappings']
+    supported = ('email', 'groups', 'name', 'upn', 'uid', 'username', 'ms-windowsaccountname')
+    require(isinstance(mappings, list) and all(item in supported for item in mappings)
+            and len(set(mappings)) == len(mappings) and {'username', 'groups'} <= set(mappings),
+            'component.authentication')
+    certificate = app['authentication_resolved']['idp_signing_certificate'].strip()
+    fingerprint = hashlib.sha256(ssl.PEM_cert_to_DER_cert(certificate)).hexdigest()
+    origin = app['origin_url']
+    attributes = {
+        'acs_url': origin + '/index_sso.php?acs', 'audience': origin + '/', 'issuer_override': source['issuer'],
+        'sp_binding': 'post', 'sign_assertion': True, 'sign_response': False,
+        'digest_algorithm': 'http://www.w3.org/2001/04/xmlenc#sha256',
+        'signature_algorithm': 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+        'session_valid_not_on_or_after': 'minutes=' + str(source['session_minutes']),
+        'assertion_valid_not_before': 'minutes=-5', 'assertion_valid_not_on_or_after': 'minutes=5',
+        'default_name_id_policy': 'urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified',
+        'default_relay_state': '', 'sls_url': '', 'sls_binding': 'redirect', 'logout_method': 'frontchannel_iframe',
+        'sign_logout_request': False, 'sign_logout_response': False,
+    }
+    flows = {key: source[key] for key in ('authentication_flow', 'authorization_flow', 'invalidation_flow')}
+    references = {key: find('authentik_flows.flow', 'slug', val) if val else None for key, val in flows.items()}
+    mapping_ids = ['goauthentik.io/providers/saml/' + name for name in sorted(mappings)]
+    provider = {'model': 'authentik_providers_saml.samlprovider', 'id': 'provider',
+                'identifiers': {'name': source['provider_name']}, 'attrs': {
+                    **attributes, **references, 'signing_kp': find('authentik_crypto.certificatekeypair', 'name', source['signing_key']),
+                    'property_mappings': [find('authentik_providers_saml.samlpropertymapping', 'managed', key) for key in mapping_ids]}}
+    application = {'model': 'authentik_core.application', 'id': 'application', 'identifiers': {'slug': slug},
+                   'attrs': {'name': source['application_name'], 'provider': Reference('!KeyOf', 'provider'),
+                             'policy_engine_mode': source['policy_engine_mode'], 'meta_launch_url': ''}}
+    binding = {'model': 'authentik_policies.policybinding', 'identifiers': {
+        'target': Reference('!KeyOf', 'application'), 'group': find('authentik_core.group', 'name', source['admission_group'])},
+        'attrs': {'order': 0, 'enabled': True, 'negate': False, 'failure_result': False}}
+    spec = {key: source[key] for key in ('slug', 'application_name', 'provider_name', 'signing_key', 'admission_group',
+                                         'policy_engine_mode')}
+    spec.update(type='saml', app=app['id'], guest=app['guest'], identity=owner, attributes=attributes,
+                flows=flows, mappings=mapping_ids, certificate_sha256=fingerprint)
+    spec['blueprint'] = yaml.dump({'version': 1, 'metadata': {'name': 'homelab-saml-' + slug,
+        'labels': {'blueprints.goauthentik.io/instantiate': 'false'}}, 'entries': [provider, application, binding]},
+        Dumper=BlueprintDumper, sort_keys=False)
+    current = settings.setdefault('saml_blueprints', {})
+    require(slug not in current and all(old['provider_name'] != spec['provider_name'] and
+            old['attributes']['acs_url'] != attributes['acs_url'] for old in current.values()), 'component.authentication')
+    current[slug] = spec
+
+
 def bind(resolver, exposures):
     owned = {}
     for app_id, app in sorted(resolver.apps.items()):
@@ -221,13 +285,17 @@ def bind(resolver, exposures):
             continue
         with at('apps', app_id, 'authentication'):
             provider = resolver.site['identity_providers'][policy['provider']]
-            reference = provider['origin'].get('exposure')
+            reference = provider.get('origin', {}).get('exposure')
             require(reference in exposures.resolved, 'component.route-check-provider')
             owner = exposures.resolved[reference]['target'].get('app')
             require(owner in resolver.apps and resolver.apps[owner]['adapter'] == 'authentik',
                     'component.authentication')
             require_worker(resolver.apps[owner])
             source = policy['registration']
+            if app['adapter'] == 'zabbix':
+                require(provider['type'] == 'saml', 'component.authentication')
+                bind_saml(source, app, owner, resolver.apps[owner]['settings'])
+                continue
             if app['adapter'] == 'node_red':
                 require(provider['type'] == 'oidc', 'component.authentication')
                 spec = retained_node_red_registration(source, app, owner, resolver, exposures)
@@ -257,3 +325,9 @@ def bind(resolver, exposures):
         if 'forward_auth' in app:
             with at('apps', app_id, 'forward_auth'):
                 bind_forward(resolver, exposures, app)
+    for owner in resolver.apps.values():
+        settings = owner.get('settings', {})
+        for slug, saml in settings.get('saml_blueprints', {}).items():
+            others = (*settings.get('oidc_blueprints', {}).values(), *settings.get('forward_blueprints', {}).values())
+            require(all(other['slug'] != slug and other['provider_name'] != saml['provider_name'] for other in others),
+                    'component.authentication')
