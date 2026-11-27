@@ -40,7 +40,7 @@ class NativeSamlTests(unittest.TestCase):
         self.models['Group'].objects.get.return_value.pk = 4
         self.binding = self.models['PolicyBinding'].objects.get.return_value
         self.binding.configure_mock(group_id=4, policy_id=None, user_id=None, order=0, enabled=True, negate=False, failure_result=False)
-        self.models['CertificateKeyPair'].objects.only.return_value.get.return_value = SimpleNamespace(pk=3, certificate_data=self.cert)
+        self.models['CertificateKeyPair'].objects.only.return_value.get.return_value = SimpleNamespace(pk=3, certificate_data='\n' + self.cert)
         for name in ('Application', 'SAMLProvider', 'Provider'):
             self.models[name].objects.filter.return_value.exclude.return_value.exists.return_value = False
 

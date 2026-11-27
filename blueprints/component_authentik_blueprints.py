@@ -235,7 +235,8 @@ def bind_saml(source, app, owner, settings):
     require(isinstance(mappings, list) and all(item in supported for item in mappings)
             and len(set(mappings)) == len(mappings) and {'username', 'groups'} <= set(mappings),
             'component.authentication')
-    fingerprint = hashlib.sha256(ssl.PEM_cert_to_DER_cert(app['authentication_resolved']['idp_signing_certificate'])).hexdigest()
+    certificate = app['authentication_resolved']['idp_signing_certificate'].strip()
+    fingerprint = hashlib.sha256(ssl.PEM_cert_to_DER_cert(certificate)).hexdigest()
     origin = app['origin_url']
     attributes = {
         'acs_url': origin + '/index_sso.php?acs', 'audience': origin + '/', 'issuer_override': source['issuer'],

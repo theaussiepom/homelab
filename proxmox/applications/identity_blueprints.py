@@ -156,7 +156,8 @@ def apply_saml_registration(spec, deadline):
         provider = SAMLProvider.objects.get(name=spec['provider_name'])
         group = Group.objects.get(name=spec['admission_group'])
         key = CertificateKeyPair.objects.only('pk', 'certificate_data').get(name=spec['signing_key'])
-        require(hashlib.sha256(ssl.PEM_cert_to_DER_cert(key.certificate_data)).hexdigest() == spec['certificate_sha256'])
+        certificate = ssl.PEM_cert_to_DER_cert(key.certificate_data.strip())
+        require(hashlib.sha256(certificate).hexdigest() == spec['certificate_sha256'])
         require(app.provider_id == provider.pk and provider.signing_kp_id == key.pk
                 and not Provider.objects.filter(name=spec['provider_name']).exclude(pk=provider.pk).exists()
                 and not Application.objects.filter(provider=provider).exclude(pk=app.pk).exists()

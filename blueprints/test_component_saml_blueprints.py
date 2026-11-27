@@ -31,6 +31,8 @@ class SamlRegistrationTests(unittest.TestCase):
         for flow in (None, 'interactive-login'):
             resolver, exposures, registration = fixture()
             registration['authentication_flow'] = flow
+            pem = resolver.site['identity_providers']['identity']['signing_certificate']
+            resolver.apps['manager']['authentication_resolved']['idp_signing_certificate'] = '\n' + pem
             selected = auth.providers(resolver, exposures)['identity']
             blueprints.bind(resolver, exposures)
             spec = resolver.apps['login']['settings']['saml_blueprints']['monitor']
