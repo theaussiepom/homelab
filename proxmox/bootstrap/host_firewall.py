@@ -13,6 +13,8 @@ import authored_config
 
 HOST = 'proxmox_virtual_environment_firewall_rules.host'
 CLUSTER = 'proxmox_virtual_environment_cluster_firewall.cluster'
+LOCAL_NETWORK = 'proxmox_virtual_environment_firewall_alias.local_network'
+LOCAL_NETWORK_COMMENT = 'HomeLab standalone host management'
 DEFAULTS = {'enabled': False, 'ebtables': True, 'input_policy': 'DROP',
             'output_policy': 'ACCEPT', 'forward_policy': 'ACCEPT',
             'log_ratelimit': {'enabled': True, 'rate': '1/second', 'burst': 5}}
@@ -44,7 +46,11 @@ def address(value, network=False):
 
 
 def validate(c):
-    closed(c, ('schema', 'endpoint', 'node', 'host_address', 'allowances', 'cluster'))
+    fields = ('schema', 'endpoint', 'node', 'host_address', 'allowances', 'cluster')
+    require(type(c) is dict)
+    closed(c, fields + ('local_network',) if 'local_network' in c else fields)
+    if 'local_network' in c:
+        require(c['local_network'] == 'host-only')
     require(c['schema'] == 'homelab-host-firewall-v1' and type(c['endpoint']) is str)
     try:
         e = urlsplit(c['endpoint'])
@@ -159,6 +165,20 @@ def no_true(value):
     return value is False
 
 
+def local_network(c):
+    if 'local_network' in c:
+        return {'name': 'local_network', 'cidr': c['host_address'] + '/32',
+                'comment': LOCAL_NETWORK_COMMENT}
+    return None
+
+
+def check_alias_attributes(attrs, expected, *, creating=False):
+    closed(attrs, ('id', 'name', 'cidr', 'comment', 'node_name', 'vm_id', 'container_id'))
+    require(attrs['id'] == (None if creating else 'local_network')
+            and all(attrs[k] is None for k in ('node_name', 'vm_id', 'container_id'))
+            and {k: attrs[k] for k in expected} == expected)
+
+
 def plan_rules(value, planned=False):
     require(type(value) is list)
     result = []
@@ -181,17 +201,34 @@ def plan_rules(value, planned=False):
 
 def check_plan(plan, c, before):
     validate(c)
-    closed(before, ('rules', 'cluster'))
+    alias = local_network(c)
+    closed(before, ('rules', 'cluster', 'local_network') if alias else ('rules', 'cluster'))
     validate_cluster(before['cluster'])
     plan_rules(before['rules'])
     require(type(plan) is dict and plan.get('errored') is not True and not plan.get('resource_drift'))
     changes = plan.get('resource_changes')
-    require(type(changes) is list and len(changes) == 2 and {r.get('address') for r in changes} == {HOST, CLUSTER})
+    targets = {HOST, CLUSTER, LOCAL_NETWORK} if alias else {HOST, CLUSTER}
+    require(type(changes) is list and len(changes) == len(targets)
+            and {r.get('address') for r in changes} == targets)
     configured = plan.get('configuration', {}).get('root_module', {}).get('resources', [])
-    require({r.get('address') for r in configured} == {HOST, CLUSTER})
+    require({r.get('address') for r in configured} == targets)
     for resource in changes:
         require(resource.get('mode') == 'managed' and resource.get('provider_name') == 'registry.opentofu.org/bpg/proxmox')
         change = resource['change']
+        if resource['address'] == LOCAL_NETWORK:
+            creating = before['local_network'] is None
+            unknown = change.get('after_unknown', {})
+            require(not change.get('importing') and no_true(change.get('after_sensitive', {})))
+            if creating:
+                require(change['actions'] == ['create'] and change['before'] is None
+                        and unknown == {'id': True} and 'id' not in change['after'])
+                check_alias_attributes(dict(change['after'], id=None), alias, creating=True)
+            else:
+                require(before['local_network'] == alias and change['actions'] == ['no-op']
+                        and no_true(unknown))
+                check_alias_attributes(change['before'], alias)
+                check_alias_attributes(change['after'], alias)
+            continue
         require(change['actions'] in (['update'], ['no-op']) and not change.get('importing')
                 and no_true(change.get('after_unknown', {})) and no_true(change.get('after_sensitive', {})))
         old, new = change['before'], change['after']
