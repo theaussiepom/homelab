@@ -24,10 +24,13 @@ def backend(c,b):
     attrs={h.HOST:{'id':'rule-1','node_name':c['node'],'container_id':None,'vm_id':None,'rule':b['rules']},
            h.CLUSTER:dict(b['cluster'],id='cluster-firewall')}
     attrs[h.CLUSTER]['log_ratelimit']=[attrs[h.CLUSTER]['log_ratelimit']]
+    if alias := b.get('local_network'):
+        attrs[h.LOCAL_NETWORK] = dict(alias, id='local_network', node_name=None,
+                                      vm_id=None, container_id=None)
     return {'version':4,'lineage':'synthetic-lineage','serial':1,'resources':[
         {'type':address.split('.')[0],'name':address.split('.')[1],'mode':'managed',
          'provider':'provider["registry.opentofu.org/bpg/proxmox"]','instances':[{'attributes':attrs[address]}]}
-        for address in (h.HOST,h.CLUSTER)]}
+        for address in attrs]}
 
 
 class FakeAPI:
@@ -41,6 +44,17 @@ class FakeAPI:
             rows=native(self.b['rules'])
             if self.case=='api-digest-drift' and self.native_reads==2:rows[0]['digest']='changed-only-digest'
             return {'data':rows}
+        if path == '/cluster/status':
+            node = {'type': 'node', 'name': self.c['node'], 'ip': self.c['host_address'],
+                    'online': 1, 'local': 1}
+            return {'data': [node, {'type': 'cluster'}] if self.case == 'clustered' else [node]}
+        if path == '/cluster/firewall/ipset':
+            return {'data': [{'name': 'management'}] if self.case == 'management-set' else []}
+        if path == '/cluster/firewall/aliases':
+            if self.case == 'cluster-network':
+                return {'data': [{'name': 'cluster_network'}]}
+            alias = self.b.get('local_network')
+            return {'data': [alias] if alias else []}
         assert path=='/cluster/firewall/options'
         v=self.b['cluster']
         return {'data':{'enable':int(v['enabled']),'ebtables':int(v['ebtables']),
@@ -99,6 +113,8 @@ class Fixture:
         if self.case=='apply-timeout':raise subprocess.TimeoutExpired(args,900)
         if self.case=='apply-failure':return subprocess.CompletedProcess(args,1)
         self.final=True;self.api.b={'rules':h.rules(self.c),'cluster':deepcopy(self.c['cluster'])}
+        if alias := h.local_network(self.c):
+            self.api.b['local_network'] = alias
         self.state=backend(self.c,self.api.b);self.state['serial']=2
         if self.case=='lineage-drift':self.state['lineage']='foreign-lineage'
         self.write(self.backend,self.state)
@@ -126,6 +142,35 @@ class CallerControls(unittest.TestCase):
         f.source.write_text(json.dumps(f.c));f.final=False
         self.assertEqual(f.execute()['status'],'passed')
         self.assertFalse(f.api.b['cluster']['enabled'])
+
+    def test_managed_local_network_creation_repeat_and_removal_refusal(self):
+        f = self.fixture()
+        f.c = dict(f.c, local_network='host-only')
+        f.source.write_text(json.dumps(f.c))
+        self.assertEqual(f.execute()['status'], 'passed')
+        self.assertEqual(f.api.b['local_network'], h.local_network(f.c))
+        self.assertEqual(f.state['resources'][-1]['name'], 'local_network')
+        self.assertTrue(list((f.work / 'operations').glob('*/local-network.tf')))
+        self.assertEqual(f.execute()['status'], 'passed')
+        del f.c['local_network']
+        f.source.write_text(json.dumps(f.c))
+        with self.assertRaises(ValueError):
+            f.execute()
+        self.assertEqual(f.applies, 2)
+
+    def test_first_alias_install_refuses_existing_native_trust_overrides(self):
+        for case in ('clustered', 'cluster-network', 'management-set', 'existing-alias'):
+            with self.subTest(case=case):
+                f = self.fixture()
+                f.api.case = case
+                f.c = dict(f.c, local_network='host-only')
+                f.source.write_text(json.dumps(f.c))
+                if case == 'existing-alias':
+                    f.api.b['local_network'] = h.local_network(f.c)
+                with self.assertRaises(ValueError):
+                    f.execute()
+                self.assertEqual(f.calls, [])
+                self.assertEqual(f.applies, 0)
 
     def test_added_host_address_allowance_keeps_existing_state_target_and_management_policy(self):
         f=self.fixture();self.assertEqual(f.execute()['status'],'passed')

@@ -1,9 +1,10 @@
 variable "policy" {
   type = object({
-    schema       = string
-    endpoint     = string
-    node         = string
-    host_address = string
+    schema        = string
+    endpoint      = string
+    node          = string
+    host_address  = string
+    local_network = optional(string)
     allowances = list(object({
       source      = string
       destination = optional(string)

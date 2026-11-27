@@ -33,7 +33,7 @@ def plan(c=None, b=None):
     oldcluster['log_ratelimit']=[oldcluster['log_ratelimit']]
     newcluster=dict(deepcopy(c['cluster']),id='cluster-firewall')
     newcluster['log_ratelimit']=[newcluster['log_ratelimit']]
-    return {'resource_changes':[
+    result = {'resource_changes':[
         {'address':h.HOST,'mode':'managed','provider_name':'registry.opentofu.org/bpg/proxmox',
          'change':{'actions':['update'],'before':deepcopy(attrs),'after':dict(attrs,rule=h.rules(c)),
                    'after_unknown':{},'after_sensitive':{'rule':[{},{}]}}},
@@ -41,6 +41,18 @@ def plan(c=None, b=None):
          'change':{'actions':['update'],'before':oldcluster,'after':newcluster,
                    'after_unknown':{},'after_sensitive':{'log_ratelimit':[{}]}}}],
         'configuration':{'root_module':{'resources':[{'address':h.HOST},{'address':h.CLUSTER}]}}}
+    if alias := h.local_network(c):
+        existing = b.get('local_network')
+        attrs = dict(alias, node_name=None, vm_id=None, container_id=None)
+        owned = dict(attrs, id='local_network')
+        result['resource_changes'].append(
+            {'address': h.LOCAL_NETWORK, 'mode': 'managed',
+             'provider_name': 'registry.opentofu.org/bpg/proxmox',
+             'change': {'actions': ['no-op'] if existing else ['create'],
+                        'before': owned if existing else None, 'after': owned if existing else attrs,
+                        'after_unknown': {} if existing else {'id': True}}})
+        result['configuration']['root_module']['resources'].append({'address': h.LOCAL_NETWORK})
+    return result
 
 
 def native(rows):
@@ -191,6 +203,30 @@ class SourceControls(unittest.TestCase):
 
 
 class PlanControls(unittest.TestCase):
+    def test_host_only_local_network_has_one_narrow_create_and_then_only_noop(self):
+        for value in (False, None, '10.0.0.0/8', 'automatic'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                h.validate(dict(config(), local_network=value))
+        c = dict(config(), local_network='host-only')
+        self.assertEqual(h.local_network(c)['cidr'], '198.18.25.10/32')
+        for existing in (None, h.local_network(c)):
+            previous = dict(before(c), local_network=existing)
+            desired = plan(c, previous)
+            self.assertTrue(h.check_plan(desired, c, previous))
+            for key, value in (('name', 'management'), ('cidr', '198.18.25.0/24'),
+                               ('node_name', c['node']), ('vm_id', 100), ('container_id', 100)):
+                bad = deepcopy(desired)
+                bad['resource_changes'][-1]['change']['after'][key] = value
+                with self.subTest(key=key, existing=bool(existing)), self.assertRaises(ValueError):
+                    h.check_plan(bad, c, previous)
+            for action in ('delete', 'update'):
+                bad = deepcopy(desired)
+                bad['resource_changes'][-1]['change']['actions'] = [action]
+                with self.subTest(action=action, existing=bool(existing)), self.assertRaises(ValueError):
+                    h.check_plan(bad, c, previous)
+        with self.assertRaises(ValueError):
+            h.check_plan(plan(c, previous), c, dict(previous, local_network={'cidr': '0.0.0.0/0'}))
+
     def test_destination_update_uses_the_same_two_resources_and_rejects_other_planned_targets(self):
         c=config();b=before(c)
         c['allowances'].append({'source':'198.18.40.33/32','destination':'198.18.40.10',

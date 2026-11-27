@@ -34,8 +34,27 @@ def environment(token, rc):
 def snapshot(api, c):
     host = api.call('/nodes/' + c['node'] + '/firewall/rules')['data']
     cluster = api.call('/cluster/firewall/options')['data']
-    return ({'rules': contract.native_rules(host), 'cluster': contract.native_cluster(cluster)},
-            {'host': host, 'cluster': cluster})
+    result = {'rules': contract.native_rules(host), 'cluster': contract.native_cluster(cluster)}
+    raw = {'host': host, 'cluster': cluster}
+    if alias := contract.local_network(c):
+        raw['nodes'] = api.call('/cluster/status')['data']
+        nodes = raw['nodes']
+        require(type(nodes) is list and len(nodes) == 1 and type(nodes[0]) is dict
+                and nodes[0].get('type') == 'node' and nodes[0].get('name') == c['node']
+                and nodes[0].get('ip') == c['host_address'] and nodes[0].get('local') == 1
+                and nodes[0].get('online') == 1)
+        raw['ipsets'] = api.call('/cluster/firewall/ipset')['data']
+        require(type(raw['ipsets']) is list and all(type(row) is dict
+                and type(row.get('name')) is str and row['name'].lower() != 'management'
+                for row in raw['ipsets']))
+        raw['aliases'] = api.call('/cluster/firewall/aliases')['data']
+        require(type(raw['aliases']) is list and all(type(row) is dict
+                and type(row.get('name')) is str and row['name'].lower() != 'cluster_network'
+                for row in raw['aliases']))
+        aliases = [row for row in raw['aliases'] if row['name'].lower() == 'local_network']
+        require(len(aliases) <= 1)
+        result['local_network'] = {key: aliases[0][key] for key in alias} if aliases else None
+    return result, raw
 
 
 def state(raw, c, before):
@@ -44,13 +63,16 @@ def state(raw, c, before):
             and type(value.get('serial')) is int and value['serial'] >= 0
             and type(value.get('lineage')) is str and value['lineage'])
     rows = value.get('resources')
-    require(type(rows) is list and len(rows) == 2)
+    alias = contract.local_network(c)
+    require(before.get('local_network') == alias)
+    targets = {contract.HOST, contract.CLUSTER, contract.LOCAL_NETWORK} if alias else {contract.HOST, contract.CLUSTER}
+    require(type(rows) is list and len(rows) == len(targets))
     selected = {}
     for row in rows:
         require(type(row) is dict and not row.get('module') and row.get('mode') == 'managed'
                 and row.get('provider') == 'provider["registry.opentofu.org/bpg/proxmox"]')
         key = row.get('type', '') + '.' + row.get('name', '')
-        require(key in (contract.HOST, contract.CLUSTER) and key not in selected
+        require(key in targets and key not in selected
                 and type(row.get('instances')) is list and len(row['instances']) == 1
                 and 'deposed' not in row['instances'][0])
         attrs = row['instances'][0]['attributes']
@@ -60,13 +82,17 @@ def state(raw, c, before):
     require(host['node_name'] == c['node'] and host['vm_id'] is None and host['container_id'] is None
             and contract.plan_rules(host['rule']) == before['rules']
             and contract.cluster_values(selected[contract.CLUSTER]) == before['cluster'])
+    if alias:
+        contract.check_alias_attributes(selected[contract.LOCAL_NETWORK], alias)
     return {'lineage': value['lineage'], 'serial': value['serial']}
 
 
-def sources():
-    return {name: io.regular(HERE / relative) for name, relative in (
-        ('main.tf', 'host-firewall/main.tf'), ('variables.tf', 'host-firewall/variables.tf'),
-        ('versions.tf', 'docker/versions.tf'), ('.terraform.lock.hcl', 'docker/.terraform.lock.hcl'))}
+def sources(c):
+    files = {'main.tf': 'host-firewall/main.tf', 'variables.tf': 'host-firewall/variables.tf',
+             'versions.tf': 'docker/versions.tf', '.terraform.lock.hcl': 'docker/.terraform.lock.hcl'}
+    if contract.local_network(c):
+        files['local-network.tf'] = 'host-firewall/local-network.tf'
+    return {name: io.regular(HERE / relative) for name, relative in files.items()}
 
 
 def source_digest(path, c):
@@ -105,10 +131,11 @@ def run_locked(c, work, source, root):
     contract.closed(old_policy, ('policy',))
     contract.validate(old_policy['policy'])
     require(all(old_policy['policy'][k] == c[k] for k in TARGET))
+    require(not contract.local_network(old_policy['policy']) or contract.local_network(c))
     backend = work / 'terraform.tfstate'
     original = io.regular(backend, private=True)
     source_sha = source_digest(source, c)
-    template = sources()
+    template = sources(c)
     operations = work / 'operations'
     io.private_directory(operations, create=not operations.exists())
     attempt = Path(tempfile.mkdtemp(prefix='host-firewall-', dir=operations))
@@ -121,7 +148,7 @@ def run_locked(c, work, source, root):
         token = os.environ['PROXMOX_BOOTSTRAP_TOKEN']
         api = API(c['endpoint'], token, CA)
         before, api_before = snapshot(api, c)
-        identity = state(original, c, before)
+        identity = state(original, old_policy['policy'], before)
         for name, raw in template.items():
             io.write_new(attempt / name, raw)
         io.write_new(attempt / 'policy.auto.tfvars.json', io.encoded({'policy': c}))
@@ -148,12 +175,15 @@ def run_locked(c, work, source, root):
         plan_sha = io.sha(plan)
         io.write_new(attempt / 'plan-binding.json', io.encoded({'source_sha256': source_sha, 'plan_sha256': plan_sha,
                      'state_sha256': hashlib.sha256(original).hexdigest(), **identity}))
-        require(source_digest(source, c) == source_sha and sources() == template
+        require(source_digest(source, c) == source_sha and sources(c) == template
                 and io.regular(backend, private=True) == original and snapshot(api, c) == (before, api_before)
                 and io.sha(plan) == plan_sha and io.regular(marker, private=True) == io.regular(hold, private=True) == claim_raw)
         command('apply', ['apply', '-input=false', '-lock-timeout=30s', str(plan)])
         after, _ = snapshot(api, c)
-        require(after == {'rules': contract.rules(c), 'cluster': c['cluster']})
+        expected = {'rules': contract.rules(c), 'cluster': c['cluster']}
+        if contract.local_network(c):
+            expected['local_network'] = contract.local_network(c)
+        require(after == expected)
         current = state(io.regular(backend, private=True), c, after)
         require(current['lineage'] == identity['lineage'] and current['serial'] >= identity['serial'])
         verified = attempt / 'verified.tfplan'
@@ -161,7 +191,7 @@ def run_locked(c, work, source, root):
         final_plan = io.read_json(command('verify-show', ['show', '-json', str(verified)]), private=True)
         contract.check_plan(final_plan, c, after)
         require(all(r['change']['actions'] == ['no-op'] for r in final_plan['resource_changes'])
-                and source_digest(source, c) == source_sha and sources() == template)
+                and source_digest(source, c) == source_sha and sources(c) == template)
         require(io.regular(marker, private=True) == io.regular(hold, private=True) == claim_raw)
         io.write(work / 'policy.auto.tfvars.json', {'policy': c})
         result = {'status': 'passed', 'api_verified': True, 'provider_noop': True, 'kernel_verified': False}
