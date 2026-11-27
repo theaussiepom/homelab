@@ -13,16 +13,19 @@ def require(value):
         raise ValueError('Identity blueprint verification failed')
 
 
-def strict_callback(provider, url):
-    strict = {'matching_mode': 'strict', 'url': url}
-    if provider._redirect_uris == [dict(strict, redirect_uri_type='authorization')]:
+def strict_callback(provider, url, additional=()):
+    urls = [*additional, url]
+    legacy = [{'matching_mode': 'strict', 'url': value} for value in urls]
+    modern = [dict(entry, redirect_uri_type='authorization') for entry in legacy]
+    stored = provider._redirect_uris
+    if stored == modern:
         return True
-    # Upgraded providers may still store the two-field record. Require the
-    # installed Authentik model to resolve it to the same authorization URI.
-    if provider._redirect_uris != [strict]:
+    # Older records omit the URI type. The installed model must resolve every entry to authorization.
+    if not isinstance(stored, list) or len(stored) != len(urls) or any(
+            row not in (old, new) for row, old, new in zip(stored, legacy, modern)):
         return False
     return [(entry.matching_mode, entry.url, entry.redirect_uri_type) for entry in provider.redirect_uris] == [
-        ('strict', url, 'authorization')]
+        ('strict', value, 'authorization') for value in urls]
 
 
 def verify_registration(spec, secret, references, *, adopting=False):
@@ -45,13 +48,15 @@ def verify_registration(spec, secret, references, *, adopting=False):
         bindings = PolicyBinding.objects.filter(target=app)
         require(not bindings.exclude(group__name=spec['admission_group']).exists() and bindings.count() <= 1)
     if not (provider and app and group.exists()):
+        require(not spec.get('retained'))
         require(not adopting or not (provider or app))
         return False
     binding = PolicyBinding.objects.filter(target=app, group=group.get(), policy=None, user=None,
                                           order=0, enabled=True, negate=False, failure_result=False)
-    matches = (app.provider_id == provider.pk and app.name == spec['app_name'] and app.policy_engine_mode == 'all'
+    matches = (app.provider_id == provider.pk and app.name == spec['app_name']
+            and app.policy_engine_mode == spec.get('policy_engine_mode', 'all')
             and app.meta_launch_url == spec['launch_url'] and binding.count() == 1
-            and strict_callback(provider, spec['callback'])
+            and strict_callback(provider, spec['callback'], spec.get('additional_callbacks', ()))
             and provider.name == spec['provider_name'] and provider.client_type == 'confidential'
             and provider.sub_mode == 'hashed_user_id' and provider.issuer_mode == 'per_provider'
             and provider.include_claims_in_id_token and hmac.compare_digest(provider.client_secret.encode(), secret)
@@ -151,7 +156,7 @@ def apply_registration(spec, deadline):
     from django.core.exceptions import ObjectDoesNotExist
     while True:
         try:
-            references = {'foreign': {key: Flow.objects.get(slug=spec[key]).pk for key in (
+            references = {'foreign': {key: Flow.objects.get(slug=spec[key]).pk if spec[key] is not None else None for key in (
                           'authentication_flow', 'authorization_flow', 'invalidation_flow')},
                           'scopes': {ScopeMapping.objects.get(managed='goauthentik.io/providers/oauth2/scope-' + scope).pk
                                      for scope in ('openid', 'profile', 'email')}}

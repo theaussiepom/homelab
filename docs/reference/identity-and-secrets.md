@@ -43,7 +43,21 @@ OIDC requires `type: oidc`, `origin`, `issuer_path`, `endpoints` and `signing_al
 
 ### Existing Node-RED OIDC strategy
 
-This form requires `type: retained-node-red-oidc`, `origin` and `provider_slug`. The origin uses the same reference forms as OIDC and requires the standard HTTPS port. The slug must match `[a-z0-9][a-z0-9-]{0,62}`. This declaration continues using an existing strategy and its credentials. It is not a one-time migration exception and does not provision an IdP application.
+The strategy reads its client credential and editor permissions from the retained Node-RED settings. Both provider forms require the standard HTTPS port. To describe an externally managed provider, use `type: retained-node-red-oidc`, `origin` and `provider_slug`. The slug must match `[a-z0-9][a-z0-9-]{0,62}`.
+
+To adopt the registration into Identity, select a standard OIDC provider whose origin references the Authentik exposure. Set the issuer path to `/application/o/<slug>/`. The retained strategy uses `/application/o/authorize/`, `/application/o/token/`, `/application/o/userinfo/` and the issuer's `jwks/` endpoint. Supply its existing client ID on the `node-red-retained-oidc` authentication policy and add the following closed `registration` object there.
+
+| Registration field | Required value and effect |
+| --- | --- |
+| `slug` | Existing Authentik application slug, equal to the provider slug in the issuer path. The app display name supplies its existing Authentik name. |
+| `provider_name`, `admission_group`, `signing_key` | Exact names of the existing confidential provider, admission group and signing key. The group must have ordinary privileges. The worker requires one enabled, positive group binding at order zero and looks up the group by name. |
+| `authentication_flow`, `authorization_flow`, `invalidation_flow` | Existing flow slugs. Use YAML `null` for an unset authentication flow. The other two fields require a slug. |
+| `policy_engine_mode`, `launch_url` | Match the existing application. Use `any` or `all` for the mode. The launch URL accepts an empty string or the canonical HTTPS origin with a trailing slash. |
+| `callback_aliases` | Ordered list of unique alias domain IDs from the editor's own exposure. Use `[]` for the canonical callback alone. Each alias precedes the canonical host in the provider list. All use the strict authorization path `/auth/strategy/callback/`. |
+| `client_secret` | Existing environment or file secret-source ID. Identity receives the same credential used by the retained editor. |
+| `secret_slot` | Integer from 1 through 8 selecting a dedicated protected input on that Identity app. Use a free slot and keep existing clients on their original slots. A collision fails compilation. |
+
+On first adoption the worker checks the application, provider, credential, group binding, flows, scopes and exact ordered callbacks before applying the blueprint. An incomplete registration or differing grant fails the Identity phase. For older callback records the installed Authentik model must resolve each entry to the declared strict authorization URI. Later matching deployments verify the existing registration and blueprint hash. Enable the editor's deferred OIDC check for an independent test of discovery and sign-in initiation. [Routed checks](routed-checks.md)
 
 ### SAML
 

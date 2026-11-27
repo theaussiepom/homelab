@@ -81,12 +81,15 @@ OIDC_ALGORITHMS = {'RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512',
                    'ES256', 'ES384', 'ES512', 'EdDSA'}
 
 
+OIDC_CALLBACKS = {'/api/auth/oidc/login': '/oidc/callback', '/auth/strategy': '/auth/strategy/callback/'}
+
+
 def oidc_contract(row, selected):
     data = row['oidc']
     require(isinstance(data, dict) and set(data) == set(OIDC_ENDPOINTS) | {'issuer', 'callback',
             'client_id', 'signing_algorithms', 'resolver_address', 'ingress_address'})
-    require(row['path'] == '/api/auth/oidc/login' and len(row['auth_origins']) == 1)
-    require(data['callback'] == selected + '/oidc/callback')
+    require(row['path'] in OIDC_CALLBACKS and len(row['auth_origins']) == 1)
+    require(data['callback'] == selected + OIDC_CALLBACKS[row['path']])
     for name in ('issuer', *OIDC_ENDPOINTS):
         value = data[name]
         require(isinstance(value, str) and len(value) <= 2048
