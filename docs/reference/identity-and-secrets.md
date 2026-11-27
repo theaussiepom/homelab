@@ -63,6 +63,22 @@ On first adoption the worker checks the application, provider, credential, group
 
 A Security Assertion Markup Language (SAML) provider requires `type: saml` and `signing_certificate`. Supply one valid public PEM certificate of at most 65536 UTF-8 bytes, with no private key. It connects Zabbix to its existing identity provider. The policy selects local or SAML as the default login method; it does not create users or roles, or weaken assertion checks.
 
+#### Adopt an existing Zabbix SAML application
+
+On the `saml` provider, select the Identity HTTPS exposure with `origin: {exposure: login}`. Zabbix still takes its trust from the existing public `signing_certificate`. Add a `registration` object to the retained app's `zabbix-saml` policy to have the Identity worker apply and verify a native blueprint. Each field below is required.
+
+| Registration field | Meaning |
+| --- | --- |
+| `slug`, `application_name`, `provider_name` | Existing Authentik application slug, display name and SAML provider name. Use a lower-case slug of up to 63 characters with letters, numbers and single hyphens between segments. |
+| `issuer` | Exact IdP entity ID trusted by Zabbix. The service-provider entity ID and audience are the Zabbix HTTPS origin plus `/`. The assertion consumer is the same origin plus `/index_sso.php?acs`. |
+| `signing_key` | Existing Authentik certificate and key pair name. Its public certificate must match the SHA-256 digest of the DER certificate pinned in the site's SAML provider. The blueprint refers to the pair by name. |
+| `admission_group`, `policy_engine_mode` | Existing group name and the application's `all` or `any` mode. The worker requires exactly one enabled positive group binding at order zero, with the group's existing identity. |
+| `authentication_flow`, `authorization_flow`, `invalidation_flow` | Authentik flow slugs. Supply YAML `null` when the authentication flow is unset. |
+| `session_minutes` | Existing positive integer session validity in minutes, up to 525600. Assertion validity has five minutes of allowance on each side. |
+| `attribute_mappings` | Unique list of stock mappings drawn from `email`, `groups`, `name`, `upn`, `uid`, `username` and `ms-windowsaccountname`. Include `groups` and `username` for directory admission. |
+
+This profile uses HTTP POST responses containing RSA-SHA256 signed assertions, SHA-256 digests, the unspecified NameID format and an empty app launch URL. It looks up the installed stock mappings, signing key and admission group. First adoption requires the current trust, grant and provider settings to match the declaration. A missing registration, an extra binding or a different signing key fails the Identity job before import. Later deployments check the native worker receipt and read back the registration. The Zabbix installation keeps ownership of its own directory settings and role mappings. A fresh installation needs an existing configured registration to adopt.
+
 ## Protected material continuity
 
 An ordinary app payload is a record of the app's deployment inputs. It seals the app's private roles so later runs can compare them. Later deployments may add selected roles, but cannot remove a sealed role or change its credentials. Renaming the source ID does not bypass those checks. For structured WiNet, MQTT and provider inputs, the existing parsers compare credential identities and values while allowing unrelated public metadata to change. Bitwarden's opaque environment file and immutable keys must remain byte-for-byte identical.

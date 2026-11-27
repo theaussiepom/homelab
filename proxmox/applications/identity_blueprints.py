@@ -142,7 +142,45 @@ def apply_forward_registration(spec, deadline):
         return True
 
 
+def apply_saml_registration(spec, deadline):
+    """Retain a single existing SAML application, provider, signing key and group grant."""
+    import ssl
+    from authentik.core.models import Application, Group, Provider
+    from authentik.crypto.models import CertificateKeyPair
+    from authentik.flows.models import Flow
+    from authentik.policies.models import PolicyBinding
+    from authentik.providers.saml.models import SAMLPropertyMapping, SAMLProvider
+
+    def verify(*, adopting=False):
+        app = Application.objects.get(slug=spec['slug'])
+        provider = SAMLProvider.objects.get(name=spec['provider_name'])
+        group = Group.objects.get(name=spec['admission_group'])
+        key = CertificateKeyPair.objects.only('pk', 'certificate_data').get(name=spec['signing_key'])
+        require(hashlib.sha256(ssl.PEM_cert_to_DER_cert(key.certificate_data)).hexdigest() == spec['certificate_sha256'])
+        require(app.provider_id == provider.pk and provider.signing_kp_id == key.pk
+                and not Provider.objects.filter(name=spec['provider_name']).exclude(pk=provider.pk).exists()
+                and not Application.objects.filter(provider=provider).exclude(pk=app.pk).exists()
+                and not SAMLProvider.objects.filter(acs_url=spec['attributes']['acs_url']).exclude(pk=provider.pk).exists()
+                and not any((provider.is_backchannel, provider.backchannel_application_id, provider.encryption_kp_id,
+                             provider.verification_kp_id, provider.name_id_mapping_id, provider.authn_context_class_ref_mapping_id)))
+        binding = PolicyBinding.objects.get(target=app)
+        require(binding.group_id == group.pk and binding.policy_id is None and binding.user_id is None
+                and binding.order == 0 and binding.enabled and not binding.negate and not binding.failure_result)
+        mappings = {SAMLPropertyMapping.objects.get(managed=ref).pk for ref in spec['mappings']}
+        flows = {key: Flow.objects.get(slug=val).pk if val is not None else None for key, val in spec['flows'].items()}
+        matches = (app.name == spec['application_name'] and app.policy_engine_mode == spec['policy_engine_mode']
+                   and app.meta_launch_url == '' and all(getattr(provider, k) == v for k, v in spec['attributes'].items())
+                   and all(getattr(provider, k + '_id') == v for k, v in flows.items())
+                   and set(provider.property_mappings.values_list('pk', flat=True)) == mappings)
+        require(not adopting or matches)
+        return matches
+
+    return apply_file(spec, deadline, 'saml', verify)
+
+
 def apply_registration(spec, deadline):
+    if spec.get('type') == 'saml':
+        return apply_saml_registration(spec, deadline)
     if spec.get('type') == 'forward_single':
         return apply_forward_registration(spec, deadline)
     from authentik.crypto.models import CertificateKeyPair

@@ -150,7 +150,7 @@ def variables(cfg, phase, *, payload=None, previously_owned=False, initialize_ru
         hooks=component_app_hooks.descriptors(selected,compose_file='/opt/homelab-app/'+selected['project_file'])
         result['component_helpers']=hooks.pop('helpers')
         result.update(hooks)
-    if selected['adapter'] == 'authentik' and ('oidc_blueprints' in selected['settings'] or 'forward_blueprints' in selected['settings']):
+    if selected['adapter'] == 'authentik' and {'oidc_blueprints', 'forward_blueprints', 'saml_blueprints'}.intersection(selected['settings']):
         result['component_helpers'].append({'source': 'identity_blueprints.py',
             'destination': '/opt/homelab-app/identity_blueprints.py', 'mode': '0700'})
         result['component_identity_blueprints'] = {'service': selected['identity']['services']['worker'],

@@ -161,7 +161,9 @@ def providers(resolver, exposures):
                 result[key] = {'type': value['type'], 'origin': origin,
                                'provider_slug': value['provider_slug']}
             else:
-                closed(value, ('type', 'signing_certificate'))
+                closed(value, ('type', 'signing_certificate'), ('origin',))
+                if 'origin' in value:
+                    _origin(value['origin'], exposures)
                 require(value['type'] == 'saml', 'component.authentication')
                 result[key] = {'type': 'saml',
                                'signing_certificate': certificate(value['signing_certificate'])}
@@ -251,7 +253,7 @@ def authentication(resolver, selected_providers):
             closed(value, PEGAPROX_FIELDS if pega else ('type', 'provider', 'default_login') if saml else
                    ('type', 'provider', 'client_id', 'client_secret', 'display_name', 'user_claim')
                    if cloud else ('type', 'provider', 'client_id'),
-                   ('registration',) if value['type'] in ('pegaprox-oidc', 'node-red-retained-oidc') else ())
+                   ('registration',) if value['type'] in ('pegaprox-oidc', 'node-red-retained-oidc', 'zabbix-saml') else ())
             require(identifier(value['provider']) and value['provider'] in selected_providers,
                     'component.reference')
             provider = selected_providers[value['provider']]

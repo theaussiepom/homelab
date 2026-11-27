@@ -82,9 +82,10 @@ def runtime_files(app):
         result.add('identity-blueprints.json')
         for slug in settings['oidc_blueprints']:
             result.update({'oidc-' + slug, 'homelab-oidc-' + slug + '.yaml'})
-    if name == 'authentik' and settings.get('forward_blueprints'):
-        result.add('identity-blueprints.json')
-        result.update('homelab-forward-' + slug + '.yaml' for slug in settings['forward_blueprints'])
+    if name == 'authentik':
+        for kind in ('forward', 'saml'):
+            for slug in settings.get(kind + '_blueprints', {}):
+                result.update({'identity-blueprints.json', 'homelab-' + kind + '-' + slug + '.yaml'})
     if name == 'authentik' and 'allowed_callback_additions' in settings:
         result.add('identity-callbacks.json')
     if name == 'cloudbeaver' and app.get('authentication_resolved', {}).get('type') == 'forward-auth':

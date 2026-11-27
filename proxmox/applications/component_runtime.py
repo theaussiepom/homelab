@@ -270,9 +270,10 @@ def _authentik(app, guest):
                 filename = 'homelab-oidc-' + slug + '.yaml'
                 service['volumes'].extend([_runtime_mount(app, filename, '/blueprints/custom/' + filename),
                                            _runtime_mount(app, 'oidc-' + slug, '/run/secrets/oidc-' + slug)])
-            for slug in sorted(app['settings'].get('forward_blueprints', {})):
-                filename = 'homelab-forward-' + slug + '.yaml'
-                service['volumes'].append(_runtime_mount(app, filename, '/blueprints/custom/' + filename))
+            for kind in ('forward', 'saml'):
+                for slug in sorted(app['settings'].get(kind + '_blueprints', {})):
+                    filename = 'homelab-' + kind + '-' + slug + '.yaml'
+                    service['volumes'].append(_runtime_mount(app, filename, '/blueprints/custom/' + filename))
         if name == 'server':
             service['ports'] = [port.removesuffix('/tcp') for port in _ports(app, name)]
         result[name] = service
