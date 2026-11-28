@@ -8,7 +8,8 @@ from urllib.parse import urlsplit
 import yaml
 
 from component_errors import at
-from component_sources import closed, identifier, require
+from component_sources import closed, identifier, named, require
+from component_auth import _origin, _relative_path
 from routed_checks import OIDC_CALLBACKS
 from identity_callbacks import canonical
 from component_input_secrets import BLUEPRINT_SECRET_ROLES
@@ -211,15 +212,50 @@ def bind_forward(resolver, exposures, app):
             require(route is selected and len(chain) >= 2 and chain[-2] == declared
                     and exposures.middlewares[chain[-1]]['type'] == 'cloudbeaver-headers',
                     'component.authentication')
-    settings = resolver.apps[owner]['settings']
+    publish_forward(resolver.apps[owner]['settings'], source, app, app['origin_url'], name)
+
+
+def publish_forward(settings, source, app, origin, name):
+    slug = source['slug']
     registrations = settings.setdefault('forward_blueprints', {})
     spec = {**source, 'app': app['id'], 'guest': app['guest'], 'type': 'forward_single',
-            'origin': app['origin_url'], 'app_name': name, 'scope_mappings': list(FORWARD_SCOPE_MAPPINGS)}
+            'origin': origin, 'app_name': name, 'scope_mappings': list(FORWARD_SCOPE_MAPPINGS)}
     other = settings.get('oidc_blueprints', {})
     require(not any(item['slug'] == slug or item['provider_name'] == spec['provider_name']
                     or item.get('origin') == spec['origin'] for item in (*registrations.values(), *other.values())),
             'component.authentication')
     registrations[slug] = {**spec, 'blueprint': render_forward_auth(spec)}
+
+
+def bind_retained_proxies(resolver, exposures, app):
+    """Own existing Authentik registrations independently of the route's implementation."""
+    collection = closed(app['retained_proxy_registrations'],
+                        ('identity', 'outpost', 'authorization_flow', 'invalidation_flow', 'registrations'))
+    owner = collection['identity']
+    require(identifier(owner) and owner in resolver.apps and resolver.apps[owner]['adapter'] == 'authentik'
+            and collection['outpost'] == 'embedded', 'component.authentication')
+    identity = resolver.apps[owner]
+    require_worker(identity)
+    common = {}
+    for field in ('outpost', 'authorization_flow', 'invalidation_flow'):
+        label(collection[field])
+        common[field] = collection[field]
+    registrations = named(collection['registrations'])
+    require(registrations, 'component.authentication')
+    for slug, row in registrations.items():
+        with at('registrations', slug):
+            require(re.fullmatch('[a-z0-9]+(?:-[a-z0-9]+)*', slug), 'component.authentication')
+            closed(row, ('origin', 'provider_name', 'admission_group', 'name', 'policy_engine_mode', 'launch_path'))
+            for key in ('provider_name', 'admission_group', 'name'):
+                label(row[key])
+            require(row['policy_engine_mode'] in ('any', 'all'), 'component.authentication')
+            origin = _origin(row['origin'], exposures)
+            path = row['launch_path']
+            launch = '' if path == '' else origin + _relative_path(path)
+            portal = dict(name=row['name'], policy_engine_mode=row['policy_engine_mode'], launch_url=launch)
+            spec = dict(common, slug=slug, provider_name=row['provider_name'], admission_group=row['admission_group'],
+                        retained_application=portal)
+            publish_forward(identity['settings'], spec, app, origin, row['name'])
 
 
 def bind_saml(source, app, owner, settings):
@@ -334,6 +370,9 @@ def bind(resolver, exposures):
         if 'forward_auth' in app:
             with at('apps', app_id, 'forward_auth'):
                 bind_forward(resolver, exposures, app)
+        if 'retained_proxy_registrations' in app:
+            with at('apps', app_id, 'retained_proxy_registrations'):
+                bind_retained_proxies(resolver, exposures, app)
     for owner in resolver.apps.values():
         settings = owner.get('settings', {})
         for slug, saml in settings.get('saml_blueprints', {}).items():
