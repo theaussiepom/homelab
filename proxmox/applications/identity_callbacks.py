@@ -109,9 +109,13 @@ def projection(provider, application, bindings, groups, mappings, scopes):
         'policy': {'policy_bindings': policies, 'bound_groups': groups, 'property_mappings': properties}}, default=str))
 
 
-def bound_groups(model, bindings):
+def rows(model, verify_only):
+    return model.objects if verify_only else model.objects.select_for_update()
+
+
+def bound_groups(model, bindings, *, verify_only=False):
     ids = [row['group_id'] for row in bindings if row['group_id'] is not None]
-    selected = model.objects.select_for_update().filter(pk__in=ids)
+    selected = rows(model, verify_only).filter(pk__in=ids)
     if not hasattr(model, 'parents'):
         return list(selected.values('pk', 'name', 'parent_id', 'is_superuser')[:101])
     groups = list(selected.values('pk', 'name', 'is_superuser')[:101])
@@ -123,7 +127,7 @@ def bound_groups(model, bindings):
     return groups
 
 
-def apply_native(values):
+def apply_native(values, *, verify_only=False):
     """One serializable transaction owns exact rows and changes only _redirect_uris."""
     from django.db import connection, transaction
     from authentik.core.models import Application, Group, PropertyMapping
@@ -134,24 +138,28 @@ def apply_native(values):
     changed = 0
     with transaction.atomic():
         with connection.cursor() as cursor:
-            cursor.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE, READ WRITE')
+            cursor.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE, READ ONLY' if verify_only else
+                           'SET TRANSACTION ISOLATION LEVEL SERIALIZABLE, READ WRITE')
             cursor.execute("SET LOCAL statement_timeout = '10000ms'")
         for record in values:
-            obj = OAuth2Provider.objects.select_for_update().get(pk=record['provider_id'])
-            app = Application.objects.select_for_update().filter(pk=record['application_id']).values(
+            obj = rows(OAuth2Provider, verify_only).get(pk=record['provider_id'])
+            app = rows(Application, verify_only).filter(pk=record['application_id']).values(
                 'pk', 'name', 'slug', 'provider_id', 'policy_engine_mode', 'meta_launch_url').get()
-            bindings = list(PolicyBinding.objects.select_for_update().filter(target_id=record['application_id']).values(
+            bindings = list(rows(PolicyBinding, verify_only).filter(target_id=record['application_id']).values(
                 'pk', 'policy_id', 'group_id', 'user_id', 'order', 'negate', 'enabled', 'timeout')[:101])
-            groups = bound_groups(Group, bindings)
+            groups = bound_groups(Group, bindings, verify_only=verify_only)
             mapping_ids = list(obj.property_mappings.values_list('pk', flat=True)[:101])
-            mappings = list(PropertyMapping.objects.select_for_update().filter(pk__in=mapping_ids).values('pk', 'name', 'expression')[:101])
-            scopes = {str(pk): scope for pk, scope in ScopeMapping.objects.select_for_update().filter(pk__in=mapping_ids).values_list('pk', 'scope_name')}
+            mappings = list(rows(PropertyMapping, verify_only).filter(pk__in=mapping_ids).values('pk', 'name', 'expression')[:101])
+            scopes = {str(pk): scope for pk, scope in rows(ScopeMapping, verify_only).filter(pk__in=mapping_ids).values_list('pk', 'scope_name')}
             fields = ('pk', 'name', 'client_id', 'client_type', '_redirect_uris', 'sub_mode', 'issuer_mode',
                 'include_claims_in_id_token', 'authentication_flow_id', 'authorization_flow_id',
                 'invalidation_flow_id', 'signing_key_id')
             provider = {key: getattr(obj, key) for key in fields}
             current = projection(provider, app, bindings, groups, mappings, scopes)
             expected = check(record, current['provider'], current['application'], current['policy'])
+            if verify_only:
+                need(obj._redirect_uris == expected)
+                continue
             secret = obj.client_secret
             if obj._redirect_uris != expected:
                 obj._redirect_uris = expected

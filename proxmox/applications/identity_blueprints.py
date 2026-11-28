@@ -89,13 +89,13 @@ def forward_registration(spec, group, flows, scopes, *, adopting):
         bindings = PolicyBinding.objects.filter(target=app)
         binding_count = bindings.count()
         require(binding_count <= 1 and not bindings.exclude(group=group, policy=None, user=None).exists())
-        require(not retained or binding_count == 1)
+        require(not retained or binding_count == int(group is not None))
     if not (app and proxy):
         require(not adopting or (app is None and proxy is None))
         return False
     matches = (app.name == spec['app_name'] and app.meta_launch_url == retained.get('launch_url', origin + '/')
                and app.policy_engine_mode == retained.get('policy_engine_mode', 'all')
-               and bindings.filter(order=0, enabled=True, negate=False, failure_result=False).count() == 1
+               and bindings.filter(order=0, enabled=True, negate=False, failure_result=False).count() == int(group is not None)
                and proxy.mode == 'forward_single' and proxy.external_host == origin
                and not any((proxy.internal_host, proxy.skip_path_regex, proxy.cookie_domain, proxy.basic_auth_enabled))
                and proxy.authentication_flow_id is None and not proxy.jwt_federation_sources.exists()
@@ -118,7 +118,7 @@ def apply_forward_registration(spec, deadline):
     # These are existing site objects. The blueprint never creates the group or alters its members.
     while True:
         try:
-            group = Group.objects.get(name=spec['admission_group'])
+            group = Group.objects.get(name=spec['admission_group']) if spec['admission_group'] is not None else None
             outpost = Outpost.objects.get(managed='goauthentik.io/outposts/embedded', type='proxy')
             flows = [Flow.objects.get(slug=spec[key]).pk for key in ('authorization_flow', 'invalidation_flow')]
             scopes = {ScopeMapping.objects.get(managed=scope).pk for scope in spec['scope_mappings']}
@@ -129,7 +129,14 @@ def apply_forward_registration(spec, deadline):
             time.sleep(2)
 
     def verify(*, adopting=False):
-        return forward_registration(spec, group, flows, scopes, adopting=adopting)
+        checked_scopes = scopes
+        if 'additional_scope_mapping' in spec:
+            expected = spec['additional_scope_mapping']
+            mapping = ScopeMapping.objects.get(name=expected['name'])
+            require(mapping.managed is None and mapping.scope_name == expected['scope_name']
+                    and hashlib.sha256(mapping.expression.encode()).hexdigest() == expected['expression_sha256'])
+            checked_scopes = scopes | {mapping.pk}
+        return forward_registration(spec, group, flows, checked_scopes, adopting=adopting)
 
     changed = apply_file(spec, deadline, 'forward', verify)
     proxy = ProxyProvider.objects.get(name=spec['provider_name'])
@@ -185,7 +192,36 @@ def apply_saml_registration(spec, deadline):
     return apply_file(spec, deadline, 'saml', verify)
 
 
+def apply_retained_oidc(spec, deadline):
+    from authentik.core.models import Application
+    from authentik.policies.models import PolicyBinding
+    from authentik.providers.oauth2.models import OAuth2Provider
+    from identity_callbacks import apply_native
+
+    guard = spec['guard']
+    # The value stays in this worker process for the duration of the import.
+    providers = OAuth2Provider.objects.filter(pk=guard['provider_id'], name=spec['provider_name'])
+    secret = providers.values_list('client_secret', flat=True).get()
+    require(secret)
+
+    def verify(*, adopting=False):
+        apply_native([guard], verify_only=True)
+        require(hmac.compare_digest(secret.encode(), providers.values_list('client_secret', flat=True).get().encode()))
+        app = Application.objects.get(pk=guard['application_id'], slug=spec['slug'], name=spec['application_name'],
+                                      provider_id=guard['provider_id'], policy_engine_mode=spec['policy_engine_mode'],
+                                      meta_launch_url=spec['launch_url'])
+        binding = PolicyBinding.objects.get(target=app)
+        require(binding.group_id and binding.group.name == spec['admission_group'] and not binding.policy_id
+                and not binding.user_id and binding.order == 0 and binding.enabled
+                and not binding.negate and not binding.failure_result)
+        return True
+
+    return apply_file(spec, deadline, 'retained_oidc', verify)
+
+
 def apply_registration(spec, deadline):
+    if spec.get('type') == 'retained_oidc':
+        return apply_retained_oidc(spec, deadline)
     if spec.get('type') == 'saml':
         return apply_saml_registration(spec, deadline)
     if spec.get('type') == 'forward_single':
@@ -266,12 +302,20 @@ def main():
     compose, service, records = sys.argv[1:]
     require(Path(compose).is_absolute() and re.fullmatch('[a-z0-9][a-z0-9_-]{0,127}', service))
     data = json.loads(Path(records).read_bytes())
-    code = ("import json,sys; v=json.load(sys.stdin); n={'__name__':'identity_blueprints'}; "
-            "exec(compile(v['code'],'identity_blueprints.py','exec'),n); "
-            "print('BLUEPRINT-RESULT '+json.dumps(n['reconcile'](v['specs'])))")
+    payload = {'code': Path(__file__).read_text(), 'specs': data}
+    if any(row.get('type') == 'retained_oidc' for row in data):
+        payload['callback_guard'] = Path(__file__).with_name('identity_callbacks.py').read_text()
+    code = """import json, sys, types
+v = json.load(sys.stdin)
+if 'callback_guard' in v:
+    guard = types.ModuleType('identity_callbacks')
+    exec(compile(v['callback_guard'], 'identity_callbacks.py', 'exec'), guard.__dict__)
+    sys.modules[guard.__name__] = guard
+n = {'__name__': 'identity_blueprints'}
+exec(compile(v['code'], 'identity_blueprints.py', 'exec'), n)
+print('BLUEPRINT-RESULT ' + json.dumps(n['reconcile'](v['specs'])))"""
     command = ['docker', 'compose', '-f', compose, 'exec', '-T', service, 'python', 'manage.py', 'shell', '-c', code]
-    process = subprocess.run(command, input=json.dumps({'code': Path(__file__).read_text(), 'specs': data}),
-                             text=True, capture_output=True, timeout=330, check=True)
+    process = subprocess.run(command, input=json.dumps(payload), text=True, capture_output=True, timeout=330, check=True)
     rows = [json.loads(line.removeprefix('BLUEPRINT-RESULT ')) for line in process.stdout.splitlines()
             if line.startswith('BLUEPRINT-RESULT ')]
     require(len(rows) == 1 and isinstance(rows[0], dict))

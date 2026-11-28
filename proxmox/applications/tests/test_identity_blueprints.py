@@ -268,6 +268,50 @@ class WorkerTests(unittest.TestCase):
             with patch.object(bp.time,'monotonic',return_value=29), self.assertRaises(TimeoutError):
                 bp.apply_registration(spec,30)
 
+    def test_unbound_proxy_pins_the_existing_scope_expression(self):
+        spec = dict(self.spec, type='forward_single', admission_group=None, scope_mappings=['stock'],
+                    additional_scope_mapping=dict(name='Fixture claim',scope_name='profile',
+                        expression_sha256=hashlib.sha256(b'example').hexdigest()))
+        extra = SimpleNamespace(pk=2, managed=None, scope_name='profile', expression='example')
+        self.scopes.objects.get.side_effect = lambda **query: extra if 'name' in query else SimpleNamespace(pk=1)
+        proxy = self.proxy.objects.get.return_value
+        self.outpost.objects.get.return_value.providers.filter.return_value.exists.return_value = True
+        def apply_file(spec, deadline, kind, verify):
+            return verify(adopting=True)
+        with patch.object(bp,'apply_file',side_effect=apply_file), patch.object(bp,'forward_registration',return_value=True) as check:
+            self.assertTrue(bp.apply_registration(spec,30))
+            self.assertIsNone(check.call_args.args[1])
+            self.assertEqual(check.call_args.args[3], {1,2})
+            extra.expression='drift'
+            with self.assertRaises(ValueError): bp.apply_registration(spec,30)
+            self.group.objects.get.assert_not_called()
+
+    def test_existing_oidc_provider_keeps_its_secret_and_exact_grant(self):
+        spec = dict(self.spec, type='retained_oidc', guard={'application_id':'original','provider_id':3},
+                    application_name='Retained', policy_engine_mode='any')
+        guard = MagicMock()
+        secrets = self.provider.objects.filter.return_value.values_list.return_value.get
+        grant = self.binding.objects.get.return_value
+        grant.group_id=1
+        grant.group.name=spec['admission_group']
+        grant.user_id=grant.policy_id=None
+        grant.order=0
+        grant.enabled=True
+        grant.negate=grant.failure_result=False
+        def apply_file(spec, deadline, kind, verify):
+            self.assertEqual(kind, 'retained_oidc')
+            return verify(adopting=True)
+        with patch.dict(sys.modules, identity_callbacks=guard), patch.object(bp,'apply_file',side_effect=apply_file):
+            secrets.side_effect=['original','original']
+            self.assertTrue(bp.apply_registration(spec,30))
+            guard.apply_native.assert_called_once_with([spec['guard']],verify_only=True)
+            for values in ([''], ['original','changed']):
+                secrets.side_effect=values
+                with self.assertRaises(ValueError): bp.apply_registration(spec,30)
+            secrets.side_effect=['original','original']
+            grant.user_id=7
+            with self.assertRaises(ValueError): bp.apply_registration(spec,30)
+
     def test_reconcile_reports_only_app_guest_result_and_hash(self):
         with patch.object(bp,'apply_registration',return_value=True):
             result=bp.reconcile([self.spec])
@@ -281,6 +325,8 @@ class WorkerTests(unittest.TestCase):
         expected={'guest':'apps','app':'console','sha512':self.spec['sha512'],'changed':False}
         for result, code in [({'registrations':[expected]},0),({'failed':{'guest':'apps','app':'console'}},1),
                              ({'failed':{'guest':'private','app':'unknown'}},'Identity blueprint verification failed')]:
+            if code == 1:
+                data = [dict(self.spec, type='retained_oidc')]
             with patch.object(sys,'argv',[str(script),'/opt/compose.yml','worker','/tmp/manifest']),\
                  patch.object(Path,'read_bytes',return_value=json.dumps(data).encode()),\
                  patch('subprocess.run',return_value=SimpleNamespace(stdout='private\nBLUEPRINT-RESULT '+json.dumps(result))) as run,\
@@ -290,3 +336,5 @@ class WorkerTests(unittest.TestCase):
             self.assertEqual(caught.exception.code,code)
             self.assertNotIn('private',output.getvalue()+errors.getvalue())
             self.assertIn('worker',run.call_args.args[0])
+            self.assertEqual('callback_guard' in json.loads(run.call_args.kwargs['input']),
+                             data[0].get('type') == 'retained_oidc')

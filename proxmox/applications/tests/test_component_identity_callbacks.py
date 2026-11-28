@@ -64,6 +64,8 @@ class ComponentCallbackTests(unittest.TestCase):
             'blueprint':body,'secret_role':role,'secret_source':'console_secret'}}
         forward = {'slug':'reports','app':'reports','guest':'office','type':'forward_single'}
         app['settings']['forward_blueprints'] = {'reports':dict(forward, blueprint='forward file')}
+        retained = {'slug':'dashboard','app':'console','guest':'office','type':'retained_oidc'}
+        app['settings']['retained_oidc_blueprints'] = {'dashboard':dict(retained, blueprint='retained file')}
         client_file = fixture.root/'console.txt'
         write_new(client_file, b'synthetic-client')
         app['input_sources'] = {**sources,role:{'type':'file','path':str(client_file)}}
@@ -97,7 +99,10 @@ class ComponentCallbackTests(unittest.TestCase):
         proof = json.loads((payload.directory/'identity-blueprints.json').read_text())
         self.assertEqual(proof,[{'slug':'console','app':'console','guest':'office',
                                  'sha512':hashlib.sha512(body.encode()).hexdigest()},
-                                dict(forward,sha512=hashlib.sha512(b'forward file').hexdigest())])
+                                dict(forward,sha512=hashlib.sha512(b'forward file').hexdigest()),
+                                dict(retained,sha512=hashlib.sha512(b'retained file').hexdigest())])
+        self.assertEqual((payload.directory/'homelab-retained_oidc-dashboard.yaml').read_bytes(), b'retained file')
+        self.assertFalse((payload.directory/'oidc-dashboard').exists())
         self.assertEqual((payload.directory/'homelab-forward-reports.yaml').read_bytes(), b'forward file')
         self.assertEqual((payload.directory/'oidc-console').read_bytes(), b'synthetic-client')
         self.assertEqual((payload.directory/'homelab-oidc-console.yaml').read_text(), body)

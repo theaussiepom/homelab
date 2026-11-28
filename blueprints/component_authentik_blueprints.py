@@ -59,13 +59,18 @@ def render_forward_auth(spec):
            'identifiers': {'slug': spec['slug']}, 'attrs': {'name': spec['app_name'],
                'provider': Reference('!KeyOf', 'provider'), 'policy_engine_mode': retained.get('policy_engine_mode', 'all'),
                'meta_launch_url': retained.get('launch_url', spec['origin'] + '/')}}
-    binding = {'model': 'authentik_policies.policybinding',
-               'identifiers': {'target': Reference('!KeyOf', 'application'),
-                               'group': find('authentik_core.group', 'name', spec['admission_group'])},
-               'attrs': {'order': 0, 'enabled': True, 'negate': False, 'failure_result': False}}
+    if 'additional_scope_mapping' in spec:
+        provider['attrs']['property_mappings'].append(find('authentik_providers_oauth2.scopemapping',
+                                                          'name', spec['additional_scope_mapping']['name']))
+    entries = [provider, app]
+    if spec['admission_group'] is not None:
+        entries.append({'model': 'authentik_policies.policybinding',
+                        'identifiers': {'target': Reference('!KeyOf', 'application'),
+                                        'group': find('authentik_core.group', 'name', spec['admission_group'])},
+                        'attrs': {'order': 0, 'enabled': True, 'negate': False, 'failure_result': False}})
     return yaml.dump({'version': 1, 'metadata': {'name': 'homelab-forward-' + spec['slug'],
                       'labels': {'blueprints.goauthentik.io/instantiate': 'false'}},
-                      'entries': [provider, app, binding]}, Dumper=BlueprintDumper, sort_keys=False)
+                      'entries': entries}, Dumper=BlueprintDumper, sort_keys=False)
 
 
 def retained_node_red_registration(source, app, owner, resolver, exposures):
@@ -230,7 +235,8 @@ def publish_forward(settings, source, app, origin, name):
 def bind_retained_proxies(resolver, exposures, app):
     """Own existing Authentik registrations independently of the route's implementation."""
     collection = closed(app['retained_proxy_registrations'],
-                        ('identity', 'outpost', 'authorization_flow', 'invalidation_flow', 'registrations'))
+                        ('identity', 'outpost', 'authorization_flow', 'invalidation_flow', 'registrations'),
+                        ('additional_scope_mappings',))
     owner = collection['identity']
     require(identifier(owner) and owner in resolver.apps and resolver.apps[owner]['adapter'] == 'authentik'
             and collection['outpost'] == 'embedded', 'component.authentication')
@@ -240,13 +246,23 @@ def bind_retained_proxies(resolver, exposures, app):
     for field in ('outpost', 'authorization_flow', 'invalidation_flow'):
         label(collection[field])
         common[field] = collection[field]
+    mappings = named(collection.get('additional_scope_mappings', {}))
+    for mapping in mappings.values():
+        closed(mapping, ('name', 'scope_name', 'expression_sha256'))
+        label(mapping['name'])
+        label(mapping['scope_name'])
+        require(isinstance(mapping['expression_sha256'], str) and
+                re.fullmatch('[0-9a-f]{64}', mapping['expression_sha256']), 'component.authentication')
     registrations = named(collection['registrations'])
     require(registrations, 'component.authentication')
     for slug, row in registrations.items():
         with at('registrations', slug):
             require(re.fullmatch('[a-z0-9]+(?:-[a-z0-9]+)*', slug), 'component.authentication')
-            closed(row, ('origin', 'provider_name', 'admission_group', 'name', 'policy_engine_mode', 'launch_path'))
-            for key in ('provider_name', 'admission_group', 'name'):
+            closed(row, ('origin', 'provider_name', 'admission_group', 'name', 'policy_engine_mode', 'launch_path'),
+                   ('additional_scope_mapping',))
+            if row['admission_group'] is not None:
+                label(row['admission_group'])
+            for key in ('provider_name', 'name'):
                 label(row[key])
             require(row['policy_engine_mode'] in ('any', 'all'), 'component.authentication')
             origin = _origin(row['origin'], exposures)
@@ -255,7 +271,65 @@ def bind_retained_proxies(resolver, exposures, app):
             portal = dict(name=row['name'], policy_engine_mode=row['policy_engine_mode'], launch_url=launch)
             spec = dict(common, slug=slug, provider_name=row['provider_name'], admission_group=row['admission_group'],
                         retained_application=portal)
+            if 'additional_scope_mapping' in row:
+                key = row['additional_scope_mapping']
+                require(identifier(key) and key in mappings, 'component.reference')
+                spec['additional_scope_mapping'] = mappings[key]
             publish_forward(identity['settings'], spec, app, origin, row['name'])
+
+
+def bind_retained_oidc(resolver, app):
+    """Transfer a reviewed, completed callback addition to a file-backed client."""
+    source = closed(app['retained_oidc_registration'], ('identity', 'provider_id', 'provider_name', 'slug',
+                    'application_name', 'admission_group', 'policy_engine_mode', 'launch_url'))
+    owner = source['identity']
+    require(identifier(owner) and owner in resolver.apps and resolver.apps[owner]['adapter'] == 'authentik'
+            and type(source['provider_id']) is int and source['policy_engine_mode'] in ('all', 'any')
+            and source['launch_url'] == '', 'component.authentication')
+    identity = resolver.apps[owner]
+    require_worker(identity)
+    for field in ('provider_name', 'application_name', 'admission_group'):
+        label(source[field])
+    slug = source['slug']
+    require(identifier(slug) and re.fullmatch('[a-z0-9]+(?:-[a-z0-9]+)*', slug), 'component.authentication')
+    settings = identity['settings']
+    guarded = settings.get('allowed_callback_additions', [])
+    matches = [record for record in guarded if record['provider_id'] == source['provider_id']]
+    require(len(matches) == 1, 'component.callback-evidence')
+    guard = matches[0]
+    remaining = [record for record in guarded if record != guard]
+    if remaining:
+        settings['allowed_callback_additions'] = remaining
+    else:
+        del settings['allowed_callback_additions']
+    # Existing clients keep their native ID, secret, flows, signing certificate and claims.
+    provider = {'model': 'authentik_providers_oauth2.oauth2provider', 'id': 'provider',
+                'identifiers': {'pk': find('authentik_providers_oauth2.oauth2provider', 'pk', source['provider_id'])},
+                'attrs': {'name': source['provider_name'], 'redirect_uris': [
+                    {'matching_mode': 'strict', 'redirect_uri_type': 'authorization', 'url': url}
+                    for url in [*(row['url'] for row in guard['existing_redirects']), *guard['additions']]]}}
+    application = {'model': 'authentik_core.application', 'id': 'application',
+                   'identifiers': {'pk': find('authentik_core.application', 'pk', guard['application_id'])},
+                   'attrs': {'slug': slug, 'name': source['application_name'], 'provider': Reference('!KeyOf', 'provider'),
+                             'policy_engine_mode': source['policy_engine_mode'], 'meta_launch_url': source['launch_url']}}
+    binding = {'model': 'authentik_policies.policybinding', 'identifiers': {'target': Reference('!KeyOf', 'application'),
+               'group': find('authentik_core.group', 'name', source['admission_group'])},
+               'attrs': {'order': 0, 'enabled': True, 'negate': False, 'failure_result': False}}
+    # The importer runs asynchronously. A disappeared registration must not become a new client.
+    entries = [provider, application, binding]
+    for entry in entries:
+        entry['conditions'] = [
+            find(provider['model'], 'pk', source['provider_id']),
+            find(application['model'], 'pk', guard['application_id']),
+            Reference('!Find', [binding['model'], ['target', guard['application_id']],
+                                ['group__name', source['admission_group']]])]
+    registered = settings.setdefault('retained_oidc_blueprints', {})
+    require(slug not in registered and all(item['provider_name'] != source['provider_name']
+            for item in registered.values()), 'component.authentication')
+    document = {'version': 1, 'metadata': {'name': 'homelab-retained_oidc-' + slug,
+                'labels': {'blueprints.goauthentik.io/instantiate': 'false'}}, 'entries': entries}
+    registered[slug] = {**source, 'type': 'retained_oidc', 'guest': app['guest'], 'app': app['id'], 'guard': guard,
+                        'blueprint': yaml.dump(document, Dumper=BlueprintDumper, sort_keys=False)}
 
 
 def bind_saml(source, app, owner, settings):
@@ -373,8 +447,17 @@ def bind(resolver, exposures):
         if 'retained_proxy_registrations' in app:
             with at('apps', app_id, 'retained_proxy_registrations'):
                 bind_retained_proxies(resolver, exposures, app)
+        if 'retained_oidc_registration' in app:
+            with at('apps', app_id, 'retained_oidc_registration'):
+                bind_retained_oidc(resolver, app)
     for owner in resolver.apps.values():
         settings = owner.get('settings', {})
+        for slug, retained in settings.get('retained_oidc_blueprints', {}).items():
+            others = (*settings.get('oidc_blueprints', {}).values(), *settings.get('forward_blueprints', {}).values(),
+                      *settings.get('saml_blueprints', {}).values())
+            require(all(other['slug'] != slug and other['provider_name'] != retained['provider_name'] for other in others)
+                    and all(canonical(client['client_id']) != retained['guard']['client_id_sha256']
+                            for client in settings.get('oidc_blueprints', {}).values()), 'component.authentication')
         for slug, saml in settings.get('saml_blueprints', {}).items():
             others = (*settings.get('oidc_blueprints', {}).values(), *settings.get('forward_blueprints', {}).values())
             require(all(other['slug'] != slug and other['provider_name'] != saml['provider_name'] for other in others),

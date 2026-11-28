@@ -83,7 +83,7 @@ def runtime_files(app):
         for slug in settings['oidc_blueprints']:
             result.update({'oidc-' + slug, 'homelab-oidc-' + slug + '.yaml'})
     if name == 'authentik':
-        for kind in ('forward', 'saml'):
+        for kind in ('forward', 'saml', 'retained_oidc'):
             for slug in settings.get(kind + '_blueprints', {}):
                 result.update({'identity-blueprints.json', 'homelab-' + kind + '-' + slug + '.yaml'})
     if name == 'authentik' and 'allowed_callback_additions' in settings:
