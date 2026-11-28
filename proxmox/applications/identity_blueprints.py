@@ -74,22 +74,27 @@ def forward_registration(spec, group, flows, scopes, *, adopting):
     proxy = ProxyProvider.objects.filter(name=spec['provider_name']).first()
     app = Application.objects.filter(slug=spec['slug']).first()
     origin = spec['origin']
+    retained = spec.get('retained_application', {})
     same_host = ProxyProvider.objects.filter(external_host__iexact=origin) | ProxyProvider.objects.filter(
         external_host__istartswith=origin + '/')
     require(not same_host.exclude(pk=proxy.pk if proxy else None).exists())
     require(not Provider.objects.filter(name=spec['provider_name']).exclude(pk=proxy.pk if proxy else None).exists())
+    if retained:
+        require(app and proxy and proxy.outpost_set.filter(managed='goauthentik.io/outposts/embedded', type='proxy').exists())
     if proxy:
         require(not Application.objects.filter(provider=proxy).exclude(slug=spec['slug']).exists())
         require(not proxy.outpost_set.exclude(managed='goauthentik.io/outposts/embedded', type='proxy').exists())
     if app:
         require(proxy is not None and app.provider_id == proxy.pk)
         bindings = PolicyBinding.objects.filter(target=app)
-        require(bindings.count() <= 1 and not bindings.exclude(group=group, policy=None, user=None).exists())
+        binding_count = bindings.count()
+        require(binding_count <= 1 and not bindings.exclude(group=group, policy=None, user=None).exists())
+        require(not retained or binding_count == 1)
     if not (app and proxy):
         require(not adopting or (app is None and proxy is None))
         return False
-    matches = (app.name == spec['app_name'] and app.meta_launch_url == origin + '/'
-               and app.policy_engine_mode == 'all'
+    matches = (app.name == spec['app_name'] and app.meta_launch_url == retained.get('launch_url', origin + '/')
+               and app.policy_engine_mode == retained.get('policy_engine_mode', 'all')
                and bindings.filter(order=0, enabled=True, negate=False, failure_result=False).count() == 1
                and proxy.mode == 'forward_single' and proxy.external_host == origin
                and not any((proxy.internal_host, proxy.skip_path_regex, proxy.cookie_domain, proxy.basic_auth_enabled))
@@ -130,6 +135,7 @@ def apply_forward_registration(spec, deadline):
     proxy = ProxyProvider.objects.get(name=spec['provider_name'])
     if outpost.providers.filter(pk=proxy.pk).exists():
         return changed
+    require(not spec.get('retained_application'))
     # The native outpost serializer replaces its provider list. Add just this verified edge.
     with transaction.atomic():
         outpost = Outpost.objects.select_for_update().get(pk=outpost.pk)

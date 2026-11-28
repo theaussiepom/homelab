@@ -49,6 +49,15 @@ class LowerComponentTests(unittest.TestCase):
         self.assertEqual(lowered['storage_paths']['data']['volume_root'],plan.resolved['guests']['one']['volumes']['data']['path'])
         self.assertEqual(lowered['input_sources'], {'oidc_client_1':plan.site['secret_sources']['oauth']})
 
+    def test_retained_portal_settings_belong_to_identity_only(self):
+        plan = fixture()
+        client = app()
+        plan.resolved['apps'] = {'client': client}
+        original = lower.runtime_config(plan, 'one')
+        client['forward_auth'] = {'retained_application': {'name': 'Existing portal'}}
+        self.assertEqual(lower.runtime_config(plan, 'one'), original)
+        self.assertIn('retained_application', client['forward_auth'])
+
     def test_recording_mount_is_a_separate_exact_append_after_managed_volumes(self):
         plan=fixture(); guest=plan.resolved['guests']['one']
         value={'source':'/mnt/example/recordings','slot':2,

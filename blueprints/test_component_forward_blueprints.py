@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'proxmox/applications'))
 import component_authentik_blueprints as blueprints
@@ -31,6 +32,24 @@ def example():
 
 
 class ForwardBlueprintTests(unittest.TestCase):
+    def test_retained_application_preserves_existing_portal_settings(self):
+        resolver, exposures = example()
+        app = resolver.apps['console']
+        app['lifecycle'] = 'retained'
+        retained = app['forward_auth']['retained_application'] = {
+            'name': 'Existing radio', 'policy_engine_mode': 'any', 'launch_url': ''}
+        for changes in ({'name': ' '}, {'policy_engine_mode': 'other'}, {'launch_url': 'https://other.invalid/'},
+                        {'extra': True}):
+            with self.subTest(changes=changes), mock.patch.dict(retained, changes), self.assertRaises(ComponentError):
+                blueprints.bind(resolver, exposures)
+        with mock.patch.dict(app, lifecycle='fresh'), self.assertRaises(ComponentError):
+            blueprints.bind(resolver, exposures)
+        blueprints.bind(resolver, exposures)
+        spec = resolver.apps['identity']['settings']['forward_blueprints']['console']
+        self.assertEqual(spec['app_name'], retained['name'])
+        self.assertIn('policy_engine_mode: any', spec['blueprint'])
+        self.assertIn("meta_launch_url: ''", spec['blueprint'])
+
     def test_direct_authentication_requires_an_owned_origin_and_header_policy_has_no_overrides(self):
         resolver, exposures = example()
         app = resolver.apps['console']
