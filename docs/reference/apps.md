@@ -61,7 +61,14 @@ On first use the Identity worker requires the matching existing portal, proxy pr
 
 ## Existing OIDC client
 
+To retire a retained proxy, keep its declaration and add `retire` to the registration. Supply `application_id` (the existing application UUID) and `provider_id` (its positive integer provider ID). A scheduled file import leaves the objects alone. Protected Identity deployment checks the slug, hostname, application and provider identities, grant, flows, mappings and exclusive embedded outpost assignment. It applies the two native `absent` entries in a serializable transaction and verifies that both objects are gone. The transaction refuses unexpected dependent objects or links. The associated application grants, provider mapping links, outpost assignment and provider access tokens are removed. Groups, reusable mappings and the outpost keep their identities.
+
+On a repeat deployment, the same declaration verifies absence and refuses a newly introduced registration that conflicts with the retired identity. A fresh installation can record absence when the referenced shared dependencies exist. Removing a declaration alone does not retire an existing registration. Restoring a prior registration after deletion requires recovery of its native identity.
+
 An app can take over an existing confidential Authentik client whose callback list is already under the Identity app’s `callbacks.evidence` control. Declare `retained_oidc_registration` on the app that owns the registration. Its `identity` selects the Authentik app. `provider_id` selects exactly one reviewed callback record by its positive native integer ID. Supply the existing `provider_name`, application `slug`, `application_name`, `admission_group` and `policy_engine_mode` (`any` or `all`). This form accepts an empty `launch_url`. The registration requires one enabled group grant at order zero.
+
+To remove a historical alias from this client, set `retire_callbacks` to a nonempty list of exact strict URLs from its reviewed `existing_redirects`. At least one original callback must remain. Identity accepts the complete previous or final guarded state, removes only the selected callbacks and verifies the client, secret, grants, signing settings and complete remaining ordered callback list. Unrecognized callbacks or changed policy stop deployment.
+
 
 At compilation the selected callback record moves to the blueprint. Unrelated records stay with the callback reconciler. The worker requires the completed callback list and matching reviewed client, provider, application and policy fingerprints before applying the native YAML. It checks the same state and the existing client secret after import. The secret stays in Authentik. The existing installation and its reviewed evidence are prerequisites for this form.
 

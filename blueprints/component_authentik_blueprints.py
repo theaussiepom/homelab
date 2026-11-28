@@ -62,8 +62,17 @@ def render_forward_auth(spec):
     if 'additional_scope_mapping' in spec:
         provider['attrs']['property_mappings'].append(find('authentik_providers_oauth2.scopemapping',
                                                           'name', spec['additional_scope_mapping']['name']))
-    entries = [provider, app]
-    if spec['admission_group'] is not None:
+    if 'retire' in spec:
+        # An ordinary file discovery or scheduled import has no such context.
+        # Protected reconciliation supplies it only after checking native ownership.
+        ids = spec['retire']
+        entries = [
+            {'model': model, 'state': 'absent', 'identifiers': {'pk': pk},
+             'conditions': [Reference('!Context', 'confirmed_retirement')]}
+            for model, pk in ((app['model'], ids['application_id']), (provider['model'], ids['provider_id']))]
+    else:
+        entries = [provider, app]
+    if 'retire' not in spec and spec['admission_group'] is not None:
         entries.append({'model': 'authentik_policies.policybinding',
                         'identifiers': {'target': Reference('!KeyOf', 'application'),
                                         'group': find('authentik_core.group', 'name', spec['admission_group'])},
@@ -259,7 +268,7 @@ def bind_retained_proxies(resolver, exposures, app):
         with at('registrations', slug):
             require(re.fullmatch('[a-z0-9]+(?:-[a-z0-9]+)*', slug), 'component.authentication')
             closed(row, ('origin', 'provider_name', 'admission_group', 'name', 'policy_engine_mode', 'launch_path'),
-                   ('additional_scope_mapping',))
+                   ('additional_scope_mapping', 'retire'))
             if row['admission_group'] is not None:
                 label(row['admission_group'])
             for key in ('provider_name', 'name'):
@@ -271,6 +280,13 @@ def bind_retained_proxies(resolver, exposures, app):
             portal = dict(name=row['name'], policy_engine_mode=row['policy_engine_mode'], launch_url=launch)
             spec = dict(common, slug=slug, provider_name=row['provider_name'], admission_group=row['admission_group'],
                         retained_application=portal)
+            if 'retire' in row:
+                ids = closed(row['retire'], ('application_id', 'provider_id'))
+                uid = ids['application_id']
+                require(isinstance(uid, str) and re.fullmatch(
+                    '[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', uid)
+                    and type(ids['provider_id']) is int and ids['provider_id'] > 0, 'component.authentication')
+                spec['retire'] = dict(ids)
             if 'additional_scope_mapping' in row:
                 key = row['additional_scope_mapping']
                 require(identifier(key) and key in mappings, 'component.reference')
@@ -281,7 +297,7 @@ def bind_retained_proxies(resolver, exposures, app):
 def bind_retained_oidc(resolver, app):
     """Transfer a reviewed, completed callback addition to a file-backed client."""
     source = closed(app['retained_oidc_registration'], ('identity', 'provider_id', 'provider_name', 'slug',
-                    'application_name', 'admission_group', 'policy_engine_mode', 'launch_url'))
+                    'application_name', 'admission_group', 'policy_engine_mode', 'launch_url'), ('retire_callbacks',))
     owner = source['identity']
     require(identifier(owner) and owner in resolver.apps and resolver.apps[owner]['adapter'] == 'authentik'
             and type(source['provider_id']) is int and source['policy_engine_mode'] in ('all', 'any')
@@ -297,7 +313,18 @@ def bind_retained_oidc(resolver, app):
     matches = [record for record in guarded if record['provider_id'] == source['provider_id']]
     require(len(matches) == 1, 'component.callback-evidence')
     guard = matches[0]
-    remaining = [record for record in guarded if record != guard]
+    transition = {}
+    if 'retire_callbacks' in source:
+        removed = source['retire_callbacks']
+        original = guard['existing_redirects']
+        require(isinstance(removed, list) and removed and all(isinstance(url, str) for url in removed)
+                and len(set(removed)) == len(removed)
+                and set(removed) <= {row['url'] for row in original}, 'component.callback-evidence')
+        retained = [row for row in original if row['url'] not in removed]
+        require(retained, 'component.callback-evidence')
+        transition['previous_guard'] = guard
+        guard = {**guard, 'existing_redirects': retained}
+    remaining = [record for record in guarded if record is not matches[0]]
     if remaining:
         settings['allowed_callback_additions'] = remaining
     else:
@@ -323,12 +350,14 @@ def bind_retained_oidc(resolver, app):
             find(application['model'], 'pk', guard['application_id']),
             Reference('!Find', [binding['model'], ['target', guard['application_id']],
                                 ['group__name', source['admission_group']]])]
+        if transition:
+            entry['conditions'].append(Reference('!Context', 'confirmed_retirement'))
     registered = settings.setdefault('retained_oidc_blueprints', {})
     require(slug not in registered and all(item['provider_name'] != source['provider_name']
             for item in registered.values()), 'component.authentication')
     document = {'version': 1, 'metadata': {'name': 'homelab-retained_oidc-' + slug,
                 'labels': {'blueprints.goauthentik.io/instantiate': 'false'}}, 'entries': entries}
-    registered[slug] = {**source, 'type': 'retained_oidc', 'guest': app['guest'], 'app': app['id'], 'guard': guard,
+    registered[slug] = {**source, 'type': 'retained_oidc', 'guest': app['guest'], 'app': app['id'], 'guard': guard, **transition,
                         'blueprint': yaml.dump(document, Dumper=BlueprintDumper, sort_keys=False)}
 
 
