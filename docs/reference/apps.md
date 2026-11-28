@@ -39,8 +39,9 @@ Identity reconciles a single-application proxy provider for the HTTPS host in th
 | `outpost` | `embedded` |
 | `authorization_flow` | Slug of the existing provider authorization flow |
 | `invalidation_flow` | Slug of the existing provider invalidation flow |
+| `retained_application` | Optional on a retained app. Supply its existing Authentik `name`, `policy_engine_mode` (`any` or `all`) and `launch_url` (empty or the canonical HTTPS origin followed by `/`). |
 
-All values are nonempty strings of at most 150 characters. On first adoption, the native provider, app and binding must match the declaration or be available for creation. The worker checks the file hash, admission binding and provider settings, then adds the verified provider to the outpost. A repeat checks the membership even when the blueprint hash already matches. This declaration references the group's existing members. Removing the declaration leaves the registered objects in Authentik.
+The required fields are nonempty strings of at most 150 characters. By default the worker can create an application and provider and add the verified provider to the outpost. With `retained_application`, the existing application, provider, single group binding and embedded outpost assignment must already exist. The first import verifies the declared portal settings and access policy. A repeat checks the file hash, provider settings, admission binding and outpost membership. This declaration references the group's existing members. Removing the declaration leaves the registered objects in Authentik.
 
 The CloudBeaver forward-auth profile requires a separate `secrets.recovery_password` reference. On a retained installation that previously used the dedicated OAuth gateway, supply the recovery password already installed for the same recovery administrator. Protected deployment compares the selected credential with the previous successful configuration before removing the gateway. An ordinary repeat verifies the dedicated secret against its existing material proof.
 

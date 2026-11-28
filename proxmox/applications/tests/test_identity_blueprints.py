@@ -204,6 +204,22 @@ class WorkerTests(unittest.TestCase):
         def check(adopting=True):
             return bp.forward_registration(spec, self.group, [1,2], {3,4}, adopting=adopting)
         self.assertTrue(check())
+        app = apps.first.return_value
+        membership = proxy.outpost_set.filter.return_value.exists
+        with patch.dict(spec, retained_application={'name': app.name, 'launch_url': '', 'policy_engine_mode': 'any'}):
+            with self.assertRaises(ValueError):
+                check()
+            with patch.object(app, 'meta_launch_url', ''), patch.object(app, 'policy_engine_mode', 'any'):
+                membership.return_value = True
+                self.assertTrue(check())
+                membership.return_value = False
+                with self.assertRaises(ValueError):
+                    check()
+                membership.return_value = True
+                with patch.object(bindings.count, 'return_value', 0), self.assertRaises(ValueError):
+                    check(adopting=False)
+                with patch.object(apps.first, 'return_value', None), self.assertRaises(ValueError):
+                    check()
         proxy.skip_path_regex = '/unexpected'
         with self.assertRaises(ValueError): check()
         self.assertFalse(check(adopting=False))
@@ -238,6 +254,10 @@ class WorkerTests(unittest.TestCase):
             sleep.assert_called_once_with(2)
             self.outpost.objects.select_for_update.assert_not_called()
             self.group.objects.get.side_effect = None
+            with patch.dict(spec, retained_application={'name': 'Existing radio'}), self.assertRaises(ValueError):
+                exists.return_value = False
+                bp.apply_registration(spec,30)
+            outpost.providers.add.assert_not_called()
             exists.side_effect = [False, True]
             self.assertFalse(bp.apply_registration(spec,30))
             outpost.providers.add.assert_not_called()

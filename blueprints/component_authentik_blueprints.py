@@ -43,6 +43,7 @@ def find(model, field, value):
 
 def render_forward_auth(spec):
     """Manage one proxy registration. The admission group and outpost are existing objects."""
+    retained = spec.get('retained_application', {})
     provider = {'model': 'authentik_providers_proxy.proxyprovider', 'id': 'provider',
                 'identifiers': {'name': spec['provider_name']}, 'attrs': {
                     'mode': 'forward_single', 'external_host': spec['origin'],
@@ -55,8 +56,8 @@ def render_forward_auth(spec):
                                           for scope in spec['scope_mappings']]}}
     app = {'model': 'authentik_core.application', 'id': 'application',
            'identifiers': {'slug': spec['slug']}, 'attrs': {'name': spec['app_name'],
-               'provider': Reference('!KeyOf', 'provider'), 'policy_engine_mode': 'all',
-               'meta_launch_url': spec['origin'] + '/'}}
+               'provider': Reference('!KeyOf', 'provider'), 'policy_engine_mode': retained.get('policy_engine_mode', 'all'),
+               'meta_launch_url': retained.get('launch_url', spec['origin'] + '/')}}
     binding = {'model': 'authentik_policies.policybinding',
                'identifiers': {'target': Reference('!KeyOf', 'application'),
                                'group': find('authentik_core.group', 'name', spec['admission_group'])},
@@ -165,11 +166,11 @@ def require_worker(owner):
 
 
 def bind_forward(resolver, exposures, app):
-    source = closed(app['forward_auth'], ('middleware', 'slug', 'provider_name', 'admission_group',
-                    'outpost', 'authorization_flow', 'invalidation_flow'))
-    require(all(isinstance(v, str) and 0 < len(v) <= 150 and v.strip() == v
-                and not any(ord(c) < 32 or ord(c) == 127 for c in v) for v in source.values()),
-            'component.authentication')
+    required = ('middleware', 'slug', 'provider_name', 'admission_group', 'outpost',
+                'authorization_flow', 'invalidation_flow')
+    source = closed(app['forward_auth'], required, ('retained_application',))
+    for key in required:
+        label(source[key])
     slug = source['slug']
     require(re.fullmatch('[a-z0-9]+(?:-[a-z0-9]+)*', slug) and len(slug) <= 63
             and source['outpost'] == 'embedded', 'component.authentication')
@@ -183,6 +184,14 @@ def bind_forward(resolver, exposures, app):
             and selected.get('middlewares', []).count(source['middleware']) == 1
             and len(selected['hosts']) == 1 and app.get('origin_url') == 'https://' + selected['hosts'][0],
             'component.authentication')
+    name = app['display_name']
+    if 'retained_application' in source:
+        require(app['lifecycle'] == 'retained', 'component.lifecycle')
+        retained = closed(source['retained_application'], ('name', 'policy_engine_mode', 'launch_url'))
+        name = retained['name']
+        label(name)
+        require(retained['policy_engine_mode'] in ('any', 'all') and
+                retained['launch_url'] in ('', app['origin_url'] + '/'), 'component.authentication')
     if app.get('authentication_resolved', {}).get('type') == 'forward-auth':
         declared = source['middleware']
         require(app['settings']['auth_headers'] == {'user': 'X-authentik-username', 'team': 'X-Team'},
@@ -205,7 +214,7 @@ def bind_forward(resolver, exposures, app):
     settings = resolver.apps[owner]['settings']
     registrations = settings.setdefault('forward_blueprints', {})
     spec = {**source, 'app': app['id'], 'guest': app['guest'], 'type': 'forward_single',
-            'origin': app['origin_url'], 'app_name': app['display_name'], 'scope_mappings': list(FORWARD_SCOPE_MAPPINGS)}
+            'origin': app['origin_url'], 'app_name': name, 'scope_mappings': list(FORWARD_SCOPE_MAPPINGS)}
     other = settings.get('oidc_blueprints', {})
     require(not any(item['slug'] == slug or item['provider_name'] == spec['provider_name']
                     or item.get('origin') == spec['origin'] for item in (*registrations.values(), *other.values())),
