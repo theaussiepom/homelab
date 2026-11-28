@@ -21,6 +21,7 @@ Use only the fields listed below. IDs and scalar values follow the [shared rules
 | <a id="app-runtime-dns"></a>`runtime_dns` | Optional `context` or `host` | Overrides the profile mode; otherwise defaults to its mode, then `context`. Selects [container DNS](contexts.md#application-runtime-dns); null/empty/unknown values are rejected. |
 | <a id="app-authentication"></a>`authentication` | Optional ID | Named [authentication policy](policies.md#authentication-policies); may be required by profile |
 | <a id="app-forward-auth"></a>`forward_auth` | Optional object | Declare one native Authentik proxy provider and access binding for this app's canonical HTTPS exposure. [Forward authentication](#authentik-forward-authentication) |
+| <a id="app-retained-proxy-registrations"></a>`retained_proxy_registrations` | Optional object | Adopt existing Authentik single-host registrations for independently routed hosts. [Existing registrations](#existing-proxy-registrations) |
 | <a id="app-devices"></a>`devices` | Optional named map, omitted `{}` | Profile role to [site device](supporting-types.md#devices) ID; one physical owner |
 | <a id="app-origin"></a>`origin` | Optional closed reference | `{exposure: id, domain?: id}` selects an owned [HTTP exposure origin](exposures.md#public-origin) |
 | <a id="app-secrets"></a>`secrets` | Optional named map, omitted `{}` | Maps a declared private role to a [secret-source ID](identity-and-secrets.md#secret-sources); adapter requirements for files still apply |
@@ -44,6 +45,14 @@ Identity reconciles a single-application proxy provider for the HTTPS host in th
 The required fields are nonempty strings of at most 150 characters. By default the worker can create an application and provider and add the verified provider to the outpost. With `retained_application`, the existing application, provider, single group binding and embedded outpost assignment must already exist. The first import verifies the declared portal settings and access policy. A repeat checks the file hash, provider settings, admission binding and outpost membership. This declaration references the group's existing members. Removing the declaration leaves the registered objects in Authentik.
 
 The CloudBeaver forward-auth profile requires a separate `secrets.recovery_password` reference. On a retained installation that previously used the dedicated OAuth gateway, supply the recovery password already installed for the same recovery administrator. Protected deployment compares the selected credential with the previous successful configuration before removing the gateway. An ordinary repeat verifies the dedicated secret against its existing material proof.
+
+## Existing proxy registrations
+
+Use `retained_proxy_registrations` for an app with multiple registered hostnames, an external backend or a gateway that already authenticates requests. The app keeps its own lifecycle selection. Select the Authentik app by its `identity` app ID. Supply `outpost: embedded` and the existing `authorization_flow` and `invalidation_flow` slugs. Under `registrations`, key each record by its unique existing Authentik application slug.
+
+Each record requires `origin`, `provider_name`, `admission_group`, `name`, `policy_engine_mode` and `launch_path`. The origin references a named HTTPS exposure, optionally selecting one of its domain aliases, or a named site domain. Use the exact provider, group and portal display names. The policy mode is `any` or `all`. An empty launch path preserves an empty portal URL. A path such as `/admin` preserves a portal link on that registration's own origin.
+
+On first use the Identity worker requires the matching existing portal, proxy provider, single positive group binding, scope mappings and embedded outpost membership. Later deployments verify the native receipt and settings. The declaration manages identity objects only. DNS records, ingress routes and the guest's own authentication remain the responsibility of their existing declarations. Verify the actual browser return separately.
 
 ## Interface roles
 

@@ -55,6 +55,7 @@ class LowerComponentTests(unittest.TestCase):
         plan.resolved['apps'] = {'client': client}
         original = lower.runtime_config(plan, 'one')
         client['forward_auth'] = {'retained_application': {'name': 'Existing portal'}}
+        client['retained_proxy_registrations'] = {'registrations': {'console': {}}}
         self.assertEqual(lower.runtime_config(plan, 'one'), original)
         self.assertIn('retained_application', client['forward_auth'])
 

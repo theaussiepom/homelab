@@ -32,6 +32,40 @@ def example():
 
 
 class ForwardBlueprintTests(unittest.TestCase):
+    def test_multiple_existing_registrations_do_not_publish_ingress(self):
+        resolver, exposures = example()
+        app = resolver.apps['console']
+        del app['forward_auth']
+        app.update(lifecycle='retained', adapter='console')
+        exposures.domains = {'first': 'one.example.invalid', 'second': 'two.example.invalid'}
+        registration = dict(name='First portal', provider_name='First provider', origin={'domain': 'first'},
+                            admission_group='Operators', policy_engine_mode='any', launch_path='/admin')
+        second = dict(registration, name='Second portal', provider_name='Second provider',
+                      origin={'domain': 'second'}, launch_path='')
+        source = app['retained_proxy_registrations'] = dict(
+            identity='identity', outpost='embedded', authorization_flow='allow', invalidation_flow='logout',
+            registrations={'first': registration, 'second': second})
+        routes = copy.deepcopy(exposures.resolved)
+        blueprints.bind(resolver, exposures)
+        registered = resolver.apps['identity']['settings']['forward_blueprints']
+        self.assertEqual(set(registered), {'first', 'second'})
+        self.assertEqual(registered['first']['retained_application']['launch_url'], 'https://one.example.invalid/admin')
+        self.assertEqual(registered['second']['retained_application']['launch_url'], '')
+        self.assertIn('group, [name, Operators]', registered['second']['blueprint'])
+        self.assertEqual(routes, exposures.resolved)
+        registered.clear()
+        for changes in ({'identity':'missing'}, {'identity':'console'}, {'outpost':'external'},
+                        {'registrations':{}}, {'registrations':{'bad_slug':registration}}):
+            with self.subTest(changes=changes), mock.patch.dict(source, changes), self.assertRaises(ComponentError):
+                blueprints.bind(resolver, exposures)
+        for changes in ({'launch_path':'//other.invalid'}, {'policy_engine_mode':'none'},
+                        {'admission_group':''}, {'origin':{'domain':'unknown'}}, {'secret':'value'}):
+            with self.subTest(changes=changes), mock.patch.dict(registration, changes), self.assertRaises(ComponentError):
+                blueprints.bind(resolver, exposures)
+        with mock.patch.dict(app, lifecycle='fresh'):
+            blueprints.bind(resolver, exposures)
+            self.assertEqual(set(registered), {'first', 'second'})
+
     def test_retained_application_preserves_existing_portal_settings(self):
         resolver, exposures = example()
         app = resolver.apps['console']

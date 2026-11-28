@@ -52,6 +52,7 @@ def runtime_config(plan, guest_id):
         if app['guest'] != guest_id:
             continue
         selected = copy.deepcopy(app)
+        selected.pop('retained_proxy_registrations', None)
         if 'retained_application' in selected.get('forward_auth', {}):
             # Identity owns the adoption. The protected app has no new runtime input.
             del selected['forward_auth']
