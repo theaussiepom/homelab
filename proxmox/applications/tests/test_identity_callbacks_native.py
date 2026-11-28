@@ -280,4 +280,19 @@ class CallbackNative(unittest.TestCase):
             self.assertNotIn('PRIVATE_NATIVE',str(caught.exception))
 
 
+    def test_existing_serializable_transaction_is_read_only_to_the_guard(self):
+        db = Database()
+        with db.installed():
+            conn = sys.modules['django.db'].connection
+            conn.in_atomic_block = False
+            with self.assertRaises(ValueError):
+                c.apply_native([db.record], verify_only=True, in_transaction=True)
+            conn.in_atomic_block = True
+            with self.assertRaises(ValueError):
+                c.apply_native([db.record], in_transaction=True)
+            db.provider['_redirect_uris'] += [{'matching_mode':'strict','url':db.record['additions'][0]}]
+            self.assertEqual(c.apply_native([db.record], verify_only=True, in_transaction=True)['changed'], 0)
+            self.assertFalse(db.sql)
+
+
 if __name__=='__main__':unittest.main()

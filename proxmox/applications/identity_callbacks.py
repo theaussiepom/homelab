@@ -127,7 +127,7 @@ def bound_groups(model, bindings, *, verify_only=False):
     return groups
 
 
-def apply_native(values, *, verify_only=False):
+def apply_native(values, *, verify_only=False, in_transaction=False):
     """One serializable transaction owns exact rows and changes only _redirect_uris."""
     from django.db import connection, transaction
     from authentik.core.models import Application, Group, PropertyMapping
@@ -135,12 +135,15 @@ def apply_native(values, *, verify_only=False):
     from authentik.policies.models import PolicyBinding
     validate(values)
     need(connection.vendor == 'postgresql')
+    if in_transaction:
+        need(verify_only and connection.in_atomic_block)
     changed = 0
     with transaction.atomic():
-        with connection.cursor() as cursor:
-            cursor.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE, READ ONLY' if verify_only else
-                           'SET TRANSACTION ISOLATION LEVEL SERIALIZABLE, READ WRITE')
-            cursor.execute("SET LOCAL statement_timeout = '10000ms'")
+        if not in_transaction:
+            with connection.cursor() as cursor:
+                cursor.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE, READ ONLY' if verify_only else
+                               'SET TRANSACTION ISOLATION LEVEL SERIALIZABLE, READ WRITE')
+                cursor.execute("SET LOCAL statement_timeout = '10000ms'")
         for record in values:
             obj = rows(OAuth2Provider, verify_only).get(pk=record['provider_id'])
             app = rows(Application, verify_only).filter(pk=record['application_id']).values(

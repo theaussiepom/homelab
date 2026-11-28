@@ -338,3 +338,120 @@ class WorkerTests(unittest.TestCase):
             self.assertIn('worker',run.call_args.args[0])
             self.assertEqual('callback_guard' in json.loads(run.call_args.kwargs['input']),
                              data[0].get('type') == 'retained_oidc')
+
+    def test_guarded_import_requires_an_owned_receipt_and_committed_target(self):
+        importer = MagicMock()
+        db = sys.modules['django.db']
+        instance = self.instances.objects.select_for_update.return_value.get.return_value
+        instance.enabled, instance.context, instance.content = True, {}, ''
+        instance.status, instance.last_applied_hash = 'successful', self.spec['sha512']
+        def inert(spec, deadline, kind, check):
+            self.assertTrue(check(adopting=True))
+            return False
+        def owned(spec, deadline, kind, check):
+            self.assertTrue(check())
+            return False
+        with patch.dict(sys.modules, {'authentik.blueprints.v1.importer': SimpleNamespace(Importer=importer)}), \
+                patch.object(db, 'connection', MagicMock(), create=True):
+            with patch.object(bp, 'apply_file', side_effect=inert):
+                with self.assertRaises(ValueError):
+                    bp.apply_guarded(self.spec, 0, 'forward', MagicMock(return_value=False))
+                self.assertFalse(bp.apply_guarded(self.spec, 0, 'forward', MagicMock(return_value=True)))
+                importer.from_string.assert_not_called()
+            with patch.object(bp, 'apply_file', side_effect=owned):
+                for after in (True, False):
+                    state = MagicMock(side_effect=[False, False, after])
+                    if after:
+                        self.assertTrue(bp.apply_guarded(self.spec, 0, 'forward', state))
+                    else:
+                        with self.assertRaises(ValueError):
+                            bp.apply_guarded(self.spec, 0, 'forward', state)
+                importer.from_string.assert_called_with(self.document.decode(), {'confirmed_retirement': True})
+                instance.context = {'foreign': True}
+                with self.assertRaises(ValueError):
+                    bp.apply_guarded(self.spec, 0, 'forward', MagicMock(return_value=True))
+
+    def test_retired_proxy_rejects_reused_or_shared_native_objects(self):
+        spec = dict(self.spec, origin='https://old.example.invalid', retire={'application_id': 'original','provider_id': 7})
+        apps, proxies = self.application.objects.filter.return_value, self.proxy.objects.filter.return_value
+        parent = self.base_provider.objects.filter.return_value
+        app = SimpleNamespace(pk='original', slug=spec['slug'], provider_id=7)
+        proxy = SimpleNamespace(pk=7, backchannel_application_id=None)
+        apps.get.return_value = apps.select_for_update.return_value.get.return_value = app
+        proxies.get.return_value = proxies.select_for_update.return_value.get.return_value = proxy
+        parent.count.return_value = 1
+        verify = MagicMock(return_value=True)
+        with patch.dict(sys.modules, {'django.db.models': SimpleNamespace(Q=MagicMock())}), \
+                patch.object(bp, 'check_proxy_cascades') as cascade:
+            apps.exists.return_value = proxies.exists.return_value = parent.exists.return_value = False
+            self.assertTrue(bp.proxy_retirement_complete(spec, verify, locked=False))
+            apps.exists.return_value = True
+            for locked in (False, True):
+                self.assertFalse(bp.proxy_retirement_complete(spec, verify, locked=locked))
+            cascade.assert_called_once_with(app, proxy)
+            app.pk = 'replacement'
+            with self.assertRaises(ValueError):
+                bp.proxy_retirement_complete(spec, verify, locked=True)
+
+    def test_only_expected_cascades_and_owned_link_updates_are_permitted(self):
+        def annotated(label):
+            value = MagicMock()
+            value._meta.label_lower = label
+            return value
+        app, proxy, factory = MagicMock(pk='a'), MagicMock(), MagicMock()
+        collector = factory.return_value
+        m = annotated('authentik_core.application')
+        q = MagicMock(model=m)
+        col = MagicMock(name='field',model=m)
+        col.name = 'provider'
+        q.exclude.return_value.exists.return_value = False
+        collector.data = {m:[app]}
+        collector.fast_deletes = [q]
+        collector.field_updates = {(col,None):[q]}
+        with patch.dict(sys.modules, {'django.db.models.deletion': SimpleNamespace(Collector=factory)}):
+            bp.check_proxy_cascades(app,proxy)
+            q.exists.return_value = False
+            bp.check_proxy_cascades(app,proxy)
+            q.exists.return_value = True
+            q.exclude.return_value.exists.return_value = True
+            with self.assertRaises(ValueError): bp.check_proxy_cascades(app,proxy)
+            collector.field_updates = {}
+            q.model = annotated('custom.unrelated')
+            with self.assertRaises(ValueError): bp.check_proxy_cascades(app,proxy)
+            collector.fast_deletes = []
+            collector.data = {q.model:[object()]}
+            with self.assertRaises(ValueError): bp.check_proxy_cascades(app,proxy)
+
+    def test_forward_retirement_dispatches_without_adding_outpost_membership(self):
+        spec = dict(self.spec,type='forward_single',scope_mappings=['scope'],retire={'provider_id':4})
+        def guarded(spec, deadline, kind, state):
+            self.assertEqual(kind, 'forward')
+            return state(locked=True)
+        with patch.object(bp,'apply_guarded',side_effect=guarded), patch.object(bp,'proxy_retirement_complete',return_value=True):
+            self.assertTrue(bp.apply_registration(spec,30))
+        self.outpost.objects.select_for_update.assert_not_called()
+
+    def test_guarded_client_distinguishes_approved_previous_state_from_drift(self):
+        spec = dict(self.spec,type='retained_oidc',guard={'provider_id':3,'application_id':'id'},previous_guard={'old':True},
+                    application_name='Retained',policy_engine_mode='any')
+        guard = MagicMock()
+        self.provider.objects.filter.return_value.values_list.return_value.get.return_value = 'stable'
+        binding = self.binding.objects.get.return_value
+        binding.group_id = 1
+        binding.group.name = spec['admission_group']
+        binding.user_id = binding.policy_id = None
+        binding.order = 0
+        binding.enabled = True
+        binding.negate = binding.failure_result = False
+        def guarded(spec, deadline, kind, state):
+            guard.apply_native.side_effect = [ValueError(), None, None]
+            self.assertFalse(state(locked=True))
+            self.assertTrue(state(locked=True))
+            guard.apply_native.assert_any_call([spec['previous_guard']],verify_only=True,in_transaction=True)
+            return True
+        with patch.dict(sys.modules, identity_callbacks=guard), patch.object(bp,'apply_guarded',side_effect=guarded):
+            self.assertTrue(bp.apply_registration(spec,30))
+        del spec['previous_guard']
+        guard.apply_native.side_effect = ValueError()
+        with patch.dict(sys.modules, identity_callbacks=guard), patch.object(bp,'apply_file',side_effect=lambda s,d,k,v:v()), self.assertRaises(ValueError):
+            bp.apply_registration(spec,30)

@@ -138,6 +138,11 @@ def apply_forward_registration(spec, deadline):
             checked_scopes = scopes | {mapping.pk}
         return forward_registration(spec, group, flows, checked_scopes, adopting=adopting)
 
+    if 'retire' in spec:
+        def target_state(*, locked=False):
+            return proxy_retirement_complete(spec, verify, locked=locked)
+
+        return apply_guarded(spec, deadline, 'forward', target_state)
     changed = apply_file(spec, deadline, 'forward', verify)
     proxy = ProxyProvider.objects.get(name=spec['provider_name'])
     if outpost.providers.filter(pk=proxy.pk).exists():
@@ -153,6 +158,53 @@ def apply_forward_registration(spec, deadline):
         outpost.providers.add(proxy)
         require(outpost.providers.filter(pk=proxy.pk).exists())
         return True
+
+
+def check_proxy_cascades(app, proxy):
+    from django.db.models.deletion import Collector
+
+    allowed = {
+        'authentik_core.application', 'authentik_core.provider', 'authentik_core.providerpropertymapping',
+        'authentik_outposts.outpostprovider', 'authentik_policies.policybinding',
+        'authentik_policies.policybindingmodel', 'authentik_providers_oauth2.accesstoken',
+        'authentik_providers_oauth2.oauth2provider', 'authentik_providers_proxy.proxyprovider',
+    }
+    collector = Collector('default')
+    collector.collect([app])
+    collector.collect([proxy])
+    for model, instances in collector.data.items():
+        require(not instances or model._meta.label_lower in allowed)
+    for queryset in collector.fast_deletes:
+        require(queryset.model._meta.label_lower in allowed or not queryset.exists())
+    for (field, value), rows in collector.field_updates.items():
+        for queryset in rows:
+            if queryset.exists():
+                require(field.model._meta.label_lower == 'authentik_core.application'
+                        and field.name == 'provider' and value is None
+                        and not queryset.exclude(pk=app.pk).exists())
+
+
+def proxy_retirement_complete(spec, verify, *, locked):
+    from authentik.core.models import Application, Provider
+    from authentik.providers.proxy.models import ProxyProvider
+    from django.db.models import Q
+
+    ids = spec['retire']
+    apps = Application.objects.filter(Q(pk=ids['application_id']) | Q(slug=spec['slug']))
+    proxies = ProxyProvider.objects.filter(Q(pk=ids['provider_id']) | Q(name=spec['provider_name'])
+                                            | Q(external_host__iexact=spec['origin']))
+    providers = Provider.objects.filter(Q(pk=ids['provider_id']) | Q(name=spec['provider_name']))
+    if not (apps.exists() or proxies.exists() or providers.exists()):
+        return True
+    app = (apps.select_for_update() if locked else apps).get()
+    proxy = (proxies.select_for_update() if locked else proxies).get()
+    require(str(app.pk) == ids['application_id'] and proxy.pk == ids['provider_id']
+            and app.slug == spec['slug'] and app.provider_id == proxy.pk and providers.count() == 1
+            and not Provider.objects.filter(backchannel_application_id=app.pk).exists()
+            and not proxy.backchannel_application_id and verify(adopting=True))
+    if locked:
+        check_proxy_cascades(app, proxy)
+    return False
 
 
 def apply_saml_registration(spec, deadline):
@@ -204,8 +256,18 @@ def apply_retained_oidc(spec, deadline):
     secret = providers.values_list('client_secret', flat=True).get()
     require(secret)
 
-    def verify(*, adopting=False):
-        apply_native([guard], verify_only=True)
+    def verify(*, adopting=False, locked=False):
+        matches = True
+        options = {'verify_only': True}
+        if locked:
+            options['in_transaction'] = True
+        try:
+            apply_native([guard], **options)
+        except ValueError:
+            if 'previous_guard' not in spec:
+                raise
+            apply_native([spec['previous_guard']], **options)
+            matches = False
         require(hmac.compare_digest(secret.encode(), providers.values_list('client_secret', flat=True).get().encode()))
         app = Application.objects.get(pk=guard['application_id'], slug=spec['slug'], name=spec['application_name'],
                                       provider_id=guard['provider_id'], policy_engine_mode=spec['policy_engine_mode'],
@@ -214,8 +276,10 @@ def apply_retained_oidc(spec, deadline):
         require(binding.group_id and binding.group.name == spec['admission_group'] and not binding.policy_id
                 and not binding.user_id and binding.order == 0 and binding.enabled
                 and not binding.negate and not binding.failure_result)
-        return True
+        return matches
 
+    if 'previous_guard' in spec:
+        return apply_guarded(spec, deadline, 'retained_oidc', verify)
     return apply_file(spec, deadline, 'retained_oidc', verify)
 
 
@@ -250,6 +314,37 @@ def apply_registration(spec, deadline):
     def verify(*, adopting=False):
         return verify_registration(spec, secret, references, adopting=adopting)
     return apply_file(spec, deadline, 'oidc', verify)
+
+
+def apply_guarded(spec, deadline, kind, target_state):
+    """Background file discovery is inert. Execute the native import only in this checked transaction."""
+    from authentik.blueprints.models import BlueprintInstance
+    from authentik.blueprints.v1.importer import Importer
+    from authentik.lib.config import CONFIG
+    from django.db import connection, transaction
+
+    name = 'homelab-' + kind + '-' + spec['slug']
+    path = 'custom/' + name + '.yaml'
+
+    def eligible(*, adopting=False):
+        matches = target_state()
+        require(matches or not adopting)
+        return True
+
+    changed = apply_file(spec, deadline, kind, eligible)
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE')
+        instance = BlueprintInstance.objects.select_for_update().get(name=name, path=path)
+        require(instance.enabled and not instance.context and not instance.content
+                and instance.status == 'successful' and instance.last_applied_hash == spec['sha512'])
+        if target_state(locked=True):
+            return changed
+        contents = (Path(CONFIG.get('blueprints_dir')) / path).read_bytes()
+        require(hashlib.sha512(contents).hexdigest() == spec['sha512'])
+        importer = Importer.from_string(contents.decode(), {'confirmed_retirement': True})
+        require(importer.apply() and target_state(locked=True))
+        return True
 
 
 def apply_file(spec, deadline, kind, verify):
