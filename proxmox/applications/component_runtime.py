@@ -773,6 +773,10 @@ def _traefik(app, guest):
                              ('cloudflare-LICENSE', 'LICENSE'), ('cloudflare-manifest.yml', '.traefik.yml')):
             service['volumes'].append(_runtime_mount(app, leaf,
                 '/plugins-local/src/github.com/theaussiepom/homelab-cloudflare/' + target))
+    if settings.get('registration_guard'):
+        for leaf, target in foundation.REGISTRATION_FILES.items():
+            service['volumes'].append(_runtime_mount(app, leaf,
+                '/plugins-local/src/' + foundation.REGISTRATION_MODULE + '/' + target))
     return {'traefik': service}
 
 

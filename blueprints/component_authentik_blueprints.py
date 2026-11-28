@@ -491,3 +491,22 @@ def bind(resolver, exposures):
             others = (*settings.get('oidc_blueprints', {}).values(), *settings.get('forward_blueprints', {}).values())
             require(all(other['slug'] != slug and other['provider_name'] != saml['provider_name'] for other in others),
                     'component.authentication')
+
+
+def bind_ingress_guards(resolver, exposures):
+    """Only expose registration identifiers to the selected Identity router."""
+    for middleware in exposures.middlewares.values():
+        if middleware['type'] != 'authentik-registration-guard':
+            continue
+        identity = resolver.apps[middleware['identity']]['settings']
+        active, retired, receipts = {}, {}, []
+        for kind in ('oidc', 'saml', 'forward', 'retained_oidc'):
+            for slug, spec in identity.get(kind + '_blueprints', {}).items():
+                selected = retired if 'retire' in spec else active
+                selected[slug] = spec['provider_name']
+                receipts.append('homelab-' + kind + '-' + slug)
+        middleware.update(active=active, retired=retired, receipts=sorted(receipts))
+    for ingress, routes in exposures.routes.items():
+        if any(exposures.middlewares[key]['type'] == 'authentik-registration-guard'
+               for route in routes.values() for key in route.get('middlewares', [])):
+            resolver.apps[ingress]['settings']['registration_guard'] = True

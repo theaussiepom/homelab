@@ -1,0 +1,6 @@
+displayName: Authentik registration write protection
+summary: Protect declared Authentik registrations on their administrative API.
+type: middleware
+import: github.com/theaussiepom/homelab-registrations
+testData:
+  inventory: '{"active":{"example":"Example Provider"},"retired":{},"receipts":[]}'

@@ -97,6 +97,9 @@ def runtime_files(app):
             result.add('mariadb-java-client-' + artifact['version'] + '.jar')
     if name == 'traefik':
         result.update(row['filename'] for row in settings.get('route_ca_files', {}).values())
+        if settings.get('registration_guard'):
+            from foundation import REGISTRATION_FILES
+            result.update(REGISTRATION_FILES)
         if settings.get('cloudflare'):
             result.update({'cloudflare-origin-token', 'cloudflare.go', 'cloudflare-go.mod', 'cloudflare-LICENSE', 'cloudflare-manifest.yml'})
         result.update(row['filename'] for row in settings.get('route_ca_certificates', {}).values())

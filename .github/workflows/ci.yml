@@ -51,6 +51,14 @@ jobs:
           docker pull "$image"
           docker run --rm --network none -v "$PWD/proxmox/applications/traefik_cloudflare:/src:ro" \
             -w /src "$image" go test -race -cover ./...
+          docker run --rm --network none -v "$PWD/proxmox/applications/traefik_registrations:/src:ro" \
+            -w /src "$image" go test -race -cover ./...
+      - name: Verify Authentik registration writes through stock Traefik
+        run: |
+          python3 proxmox/applications/tests/registration_guard_fixture.py \
+            --authentik ghcr.io/goauthentik/server@sha256:da89d8338a3b1889800eb033fd61f8d43f7aa9a1c5a042cb5e03d891b1f0c56c \
+            --traefik traefik@sha256:1336e85aaed293bd63d005086e0dd013b04078b26aaeb1c18b26a2f928af7e65 \
+            --postgres postgres@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
       - name: Verify actual Traefik visitor headers, internal HTTPS and websocket
         run: |
           traefik='traefik@sha256:1336e85aaed293bd63d005086e0dd013b04078b26aaeb1c18b26a2f928af7e65'

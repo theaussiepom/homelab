@@ -687,6 +687,7 @@ class Resolver:
             self.apps[app_id]['settings'] = settings
         import component_authentik_blueprints
         component_authentik_blueprints.bind(self, exposure)
+        component_authentik_blueprints.bind_ingress_guards(self, exposure)
         component_renovate.bind(self)
         canonical_accounts = component_accounts.bind(self, dependencies['accounts'])
         monitoring = component_monitoring.bind(self, exposure)

@@ -142,6 +142,19 @@ class PegaProxTests(unittest.TestCase):
 
 
 class TraefikTests(unittest.TestCase):
+    def test_registration_plugin_mounts_only_its_declared_files_read_only(self):
+        import foundation
+        app = descriptor('traefik')
+        app['settings']['registration_guard'] = True
+        with units(app):
+            service = core._traefik(app, guest('traefik'))['traefik']
+        root = '/plugins-local/src/' + foundation.REGISTRATION_MODULE + '/'
+        mounts = {row['target'][len(root):]: row for row in service['volumes'] if row['target'].startswith(root)}
+        self.assertEqual(set(mounts), set(foundation.REGISTRATION_FILES.values()))
+        for leaf, target in foundation.REGISTRATION_FILES.items():
+            self.assertTrue(mounts[target]['read_only'])
+            self.assertTrue(mounts[target]['source'].endswith('/' + leaf))
+
     def test_cloudflare_plugin_uses_closed_readonly_runtime_leaf_mounts(self):
         app = descriptor('traefik'); app['settings']['cloudflare'] = True
         with units(app): result = core._traefik(app, guest('traefik'))['traefik']

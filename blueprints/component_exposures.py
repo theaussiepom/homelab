@@ -55,6 +55,12 @@ class Exposures:
                     require(endpoint.get('protocol') in ('http', 'https') and 'address' in endpoint,
                             'component.authentication')
                     self.middlewares[name] = dict(value, target=copy.deepcopy(endpoint))
+                elif value.get('type') == 'authentik-registration-guard':
+                    closed(value, ('type', 'identity'))
+                    owner = value['identity']
+                    require(identifier(owner) and self.resolver.apps.get(owner, {}).get('adapter') == 'authentik',
+                            'component.authentication')
+                    self.middlewares[name] = dict(value)
                 elif value.get('type') == 'cloudbeaver-headers':
                     closed(value, ('type',))
                     self.middlewares[name] = dict(value)
@@ -153,6 +159,12 @@ class Exposures:
                     types.strings(value.get('middlewares', []), ids=True)
                     require(set(value.get('middlewares', [])) <= set(self.middlewares), 'component.reference')
                     selected_middleware = value.get('middlewares', [])
+                    for key in selected_middleware:
+                        guard = self.middlewares[key]
+                        if guard['type'] == 'authentik-registration-guard':
+                            require(endpoint.get('app') == guard['identity'] and not any(
+                                self.middlewares[other]['type'] == 'forward-auth' for other in selected_middleware),
+                                'component.authentication')
                     cloudflare = [index for index, key in enumerate(selected_middleware)
                                   if self.middlewares[key]['type'] == 'cloudflare-source']
                     require(not cloudflare or (cloudflare == [0] and not any(
