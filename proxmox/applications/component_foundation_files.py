@@ -89,6 +89,13 @@ def routing(app, plan):
             require(set(row) == {'type', 'endpoint', 'target'}, 'Use only resolved forward authentication')
             middleware[key] = {'forwardAuth': {'address': _backend(row['target']) + discovery.AUTHENTIK_AUTH_PATH,
                 'trustForwardHeader': True, 'authResponseHeaders': list(AUTH_HEADERS)}}
+        elif kind == 'authentik-registration-guard':
+            require(set(row) == {'type', 'identity', 'active', 'retired', 'receipts'},
+                    'Use the resolved Authentik ownership projection')
+            if any(key in route.get('middlewares', []) for route in plan['routes'].values()):
+                inventory = {name: row[name] for name in ('active', 'retired', 'receipts')}
+                middleware[key] = {'plugin': {'authentik-registrations': {
+                    'inventory': json.dumps(inventory, sort_keys=True)}}}
         elif kind == 'cloudflare-source':
             require(set(row) == {'type', 'ranges', 'origin_header'}, 'Use the resolved Cloudflare source policy')
             if any(key in route.get('middlewares', []) for route in plan['routes'].values()):
@@ -272,6 +279,10 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
         gates = [row['plugin']['cloudflare-source'] for row in shared['middlewares'].values()
                  if 'cloudflare-source' in row.get('plugin', {})]
         require(bool(gates), 'Select an explicit Cloudflare source middleware')
+    if settings.get('registration_guard'):
+        require(any('authentik-registrations' in row.get('plugin', {}) for row in shared['middlewares'].values()),
+                'Keep the Authentik write guard bound to its declared route')
+        selected['registration_guard'] = True
     static = foundation.ingress_static(selected, token)
     dynamic = discovery.shared(shared)
     trust = shared['transports']
@@ -304,4 +315,7 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
         for leaf, name in (('cloudflare.go', 'cloudflare.go'), ('cloudflare-go.mod', 'go.mod'),
                            ('cloudflare-LICENSE', 'LICENSE'), ('cloudflare-manifest.yml', '.traefik.yml')):
             rows.append(_row(leaf, (Path(__file__).with_name('traefik_cloudflare') / name).read_bytes()))
+    if settings.get('registration_guard'):
+        for leaf, name in foundation.REGISTRATION_FILES.items():
+            rows.append(_row(leaf, (Path(__file__).with_name('traefik_registrations') / name).read_bytes()))
     return rows

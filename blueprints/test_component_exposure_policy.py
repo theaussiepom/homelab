@@ -61,6 +61,33 @@ class ExposurePolicyReview(unittest.TestCase):
                         + ' at exposures.web'):
                     Exposures(r).bind()
 
+    def test_registration_guard_owns_one_authentik_router_and_uses_compiled_blueprints(self):
+        from component_authentik_blueprints import bind_ingress_guards
+        r = fixture()
+        r.policy['middlewares'] = {'managed': {'type': 'authentik-registration-guard', 'identity': 'sso'}}
+        http(r, target={'app': 'sso', 'endpoint': 'auth_endpoint'}, middlewares=['managed'])
+        r.apps['sso']['settings'] = {
+            'saml_blueprints': {'dashboard': {'provider_name': 'Dashboard', 'blueprint': 'private payload'}},
+            'forward_blueprints': {'retired': {'provider_name': 'Old', 'retire': {}}}}
+        r.apps['proxy']['settings'] = {}
+        exposure = Exposures(r)
+        exposure.bind()
+        bind_ingress_guards(r, exposure)
+        self.assertEqual(exposure.middlewares['managed'], {
+            'type': 'authentik-registration-guard', 'identity': 'sso', 'active': {'dashboard': 'Dashboard'},
+            'retired': {'retired': 'Old'}, 'receipts': ['homelab-forward-retired', 'homelab-saml-dashboard']})
+        self.assertTrue(r.apps['proxy']['settings']['registration_guard'])
+        for change in ('backend', 'owner', 'extra'):
+            candidate = fixture()
+            candidate.policy['middlewares'] = copy.deepcopy(r.policy['middlewares'])
+            http(candidate, middlewares=['managed'])
+            if change == 'owner':
+                candidate.policy['middlewares']['managed']['identity'] = 'web'
+            if change == 'extra':
+                candidate.policy['middlewares']['managed']['ids'] = []
+            with self.subTest(change=change), self.assertRaises(ComponentError):
+                Exposures(candidate).bind()
+
     def test_cloudflare_policy_resolves_a_named_internal_allowlist_in_any_order(self):
         r = fixture()
         r.policy['middlewares'] = {

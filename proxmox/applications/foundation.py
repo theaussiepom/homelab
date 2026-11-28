@@ -4,6 +4,9 @@ import re
 from urllib.parse import urlsplit
 
 PLUGIN = "traefik-proxmox-provider"
+REGISTRATION_MODULE = 'github.com/theaussiepom/homelab-registrations'
+REGISTRATION_FILES = {'registrations.go': 'guard.go', 'registrations-go.mod': 'go.mod',
+                      'registrations-manifest.yml': '.traefik.yml', 'registrations-LICENSE': 'LICENSE'}
 
 
 PLUGIN_ARCHIVE_SHA256 = (
@@ -152,4 +155,7 @@ def ingress_static(selected, token):
     if selected.get('cloudflare'):
         static['experimental']['localPlugins'] = {'cloudflare-source': {
             'moduleName': 'github.com/theaussiepom/homelab-cloudflare'}}
+    if selected.get('registration_guard'):
+        static['experimental'].setdefault('localPlugins', {})['authentik-registrations'] = {
+            'moduleName': REGISTRATION_MODULE}
     return static

@@ -193,10 +193,29 @@ and [testing guide](../contributing/testing.md) before publication.
 | forward-auth | endpoint | HTTP/HTTPS endpoint reference to the existing authentication service |
 | cloudbeaver-headers | None | Follows forward-auth on the CloudBeaver route. Clears client-supplied CloudBeaver identity and role headers and sets `X-Team` to `user`. The app reads the verified `X-authentik-username` supplied by forward-auth. |
 | ip-allow-list | ranges | Nonempty ordered IPv4/CIDR, `{network: id}` or `{address_group: id}` list; final maximum 4096 values |
+| authentik-registration-guard | identity | Protects the named Authentik app’s YAML-owned registrations on its HTTP exposure. See [registration writes](#authentik-registration-writes). |
 | cloudflare-source | local_allowlist, origin_header | Socket-peer Cloudflare gate with a named internal allowlist and retained origin secret; see below |
 | canonical-home-redirect | app | Existing app with canonical origin; only a separate alias route with exactly canonical middleware list plus this final middleware |
 
 The redirect policy redirects to the canonical root; it does not accept arbitrary regular expressions. It cannot be attached to the canonical route itself. The redirect and canonical routes must use the same target and ingress, with no shared hostnames. Arbitrary Traefik or Compose middleware options are not accepted.
+
+### Authentik registration writes
+
+Select `policies.middlewares.<id>.type: authentik-registration-guard` and set `identity` to the Authentik app ID. Add the middleware to the HTTP exposure targeting that app. For example, an Identity app named `sso` can select the following site policy.
+
+```yaml
+policies:
+  middlewares:
+    managed-registrations:
+      type: authentik-registration-guard
+      identity: sso
+```
+
+The compiler collects the selected Identity app’s OIDC, SAML and proxy declarations, including retained registrations and retirement records. Traefik receives their slugs, provider names and file-backed blueprint names. Additional inputs, tokens and guest dependencies are unnecessary. On first installation the middleware loads with the ingress configuration. Later deployments regenerate its ownership data from the same declarations.
+
+On the guarded hostname, ordinary administrative saves and deletes for declared applications, providers, access bindings and blueprint instances return HTTP 403. An outpost may edit its unrelated providers while retaining its managed assignments. Application creation also reserves declared slugs and provider names. The admin UI may still offer Edit. Reads, authentication flows and requests to unrelated endpoints pass through. Authentik’s internal worker can still apply the reviewed files.
+
+A management request that needs native IDs uses bounded reads against the same router backend with the caller’s existing permissions. An incomplete response, including limited visibility of active applications during a binding change, returns HTTP 503. Review Identity health and visibility before retrying. The policy prevents accidental direct edits through the selected router. Privileged infrastructure access, independent administrative automations and changes to shared groups or flows have their own controls.
 
 ## Cloudflare source boundary
 

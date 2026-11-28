@@ -101,6 +101,27 @@ class PrivateRelayFiles(unittest.TestCase):
 
 
 class FoundationFilesTests(unittest.TestCase):
+    def test_registration_guard_renders_only_on_its_selected_router(self):
+        from application_contract import runtime_files
+        app, secrets, ca, cas, plan = ingress()
+        app['settings']['registration_guard'] = True
+        policy = {'active': {'editor': 'Editor'}, 'retired': {}, 'receipts': ['homelab-oidc-editor']}
+        plan['middlewares']['managed'] = dict(policy, type='authentik-registration-guard', identity='db')
+        plan['routes']['managed']['middlewares'] = ['security-headers', 'managed']
+        rows = {row['path']: row['content'] for row in self.build((app, secrets, ca, cas, plan))}
+        middleware = json.loads(rows['shared.yml'])['http']['middlewares']['managed']
+        self.assertEqual(json.loads(middleware['plugin']['authentik-registrations']['inventory']), policy)
+        self.assertEqual(json.loads(rows['traefik.yml'])['experimental']['localPlugins'],
+                         {'authentik-registrations': {'moduleName': foundation.REGISTRATION_MODULE}})
+        self.assertTrue(set(foundation.REGISTRATION_FILES) <= runtime_files(app))
+        for leaf, source in foundation.REGISTRATION_FILES.items():
+            self.assertEqual(rows[leaf], (F/'proxmox/applications/traefik_registrations'/source).read_bytes())
+        plan['routes']['managed']['middlewares'].remove('managed')
+        with self.assertRaisesRegex(ValueError, 'bound to its declared route'):
+            self.build((app, secrets, ca, cas, plan))
+        del app['settings']['registration_guard']
+        self.assertNotIn('registrations.go', {row['path'] for row in self.build((app, secrets, ca, cas, plan))})
+
     def test_cloudflare_owned_plugin_and_origin_token_are_only_in_private_payload(self):
         app, secrets, ca, cas, plan = ingress()
         app['settings']['cloudflare'] = True
