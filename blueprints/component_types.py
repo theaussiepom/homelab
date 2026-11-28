@@ -367,7 +367,7 @@ def allocation(value):
 def app(value):
     closed(value, ('profile', 'guest', 'lifecycle', 'interfaces'),
            ('display_name', 'identity', 'storage', 'properties', 'software', 'runtime',
-            'authentication', 'forward_auth', 'retained_proxy_registrations', 'devices', 'origin',
+            'authentication', 'forward_auth', 'retained_proxy_registrations', 'retained_oidc_registration', 'devices', 'origin',
             'secrets', 'resources', 'runtime_dns'))
     require(value.get('runtime_dns', 'context') in ('context', 'host'))
     require(identifier(value['profile']) and identifier(value['guest'])

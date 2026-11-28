@@ -21,6 +21,7 @@ Use only the fields listed below. IDs and scalar values follow the [shared rules
 | <a id="app-runtime-dns"></a>`runtime_dns` | Optional `context` or `host` | Overrides the profile mode; otherwise defaults to its mode, then `context`. Selects [container DNS](contexts.md#application-runtime-dns); null/empty/unknown values are rejected. |
 | <a id="app-authentication"></a>`authentication` | Optional ID | Named [authentication policy](policies.md#authentication-policies); may be required by profile |
 | <a id="app-forward-auth"></a>`forward_auth` | Optional object | Declare one native Authentik proxy provider and access binding for this app's canonical HTTPS exposure. [Forward authentication](#authentik-forward-authentication) |
+| `retained_oidc_registration` | Optional object | Give Identity ownership of a confidential client with completed, reviewed callback additions. [Existing OIDC client](#existing-oidc-client) |
 | <a id="app-retained-proxy-registrations"></a>`retained_proxy_registrations` | Optional object | Adopt existing Authentik single-host registrations for independently routed hosts. [Existing registrations](#existing-proxy-registrations) |
 | <a id="app-devices"></a>`devices` | Optional named map, omitted `{}` | Profile role to [site device](supporting-types.md#devices) ID; one physical owner |
 | <a id="app-origin"></a>`origin` | Optional closed reference | `{exposure: id, domain?: id}` selects an owned [HTTP exposure origin](exposures.md#public-origin) |
@@ -52,7 +53,17 @@ Use `retained_proxy_registrations` for an app with multiple registered hostnames
 
 Each record requires `origin`, `provider_name`, `admission_group`, `name`, `policy_engine_mode` and `launch_path`. The origin references a named HTTPS exposure, optionally selecting one of its domain aliases, or a named site domain. Use the exact provider, group and portal display names. The policy mode is `any` or `all`. An empty launch path preserves an empty portal URL. A path such as `/admin` preserves a portal link on that registration's own origin.
 
-On first use the Identity worker requires the matching existing portal, proxy provider, single positive group binding, scope mappings and embedded outpost membership. Later deployments verify the native receipt and settings. The declaration manages identity objects only. DNS records, ingress routes and the guest's own authentication remain the responsibility of their existing declarations. Verify the actual browser return separately.
+Specify the existing group with `admission_group`. If the application has zero bindings and admits signed-in users, explicitly set `admission_group: null`. The worker checks that the binding count is zero before every application. A missing field is an error.
+
+For an existing custom scope, define a named entry under the collection’s optional `additional_scope_mappings`. Supply the native mapping’s `name`, `scope_name` and lowercase 64-character `expression_sha256`. A registration selects that entry with `additional_scope_mapping`. Identity references the existing mapping by name and checks its scope and fingerprint each time. The mapping expression stays in Authentik.
+
+On first use the Identity worker requires the matching existing portal, proxy provider, declared bindings, scope mappings and embedded outpost membership. Later deployments verify the native receipt and settings. The declaration manages identity objects only. DNS records, ingress routes and the guest's own authentication remain the responsibility of their existing declarations. Verify the actual browser return separately.
+
+## Existing OIDC client
+
+An app can take over an existing confidential Authentik client whose callback list is already under the Identity app’s `callbacks.evidence` control. Declare `retained_oidc_registration` on the app that owns the registration. Its `identity` selects the Authentik app. `provider_id` selects exactly one reviewed callback record by its positive native integer ID. Supply the existing `provider_name`, application `slug`, `application_name`, `admission_group` and `policy_engine_mode` (`any` or `all`). This form accepts an empty `launch_url`. The registration requires one enabled group grant at order zero.
+
+At compilation the selected callback record moves to the blueprint. Unrelated records stay with the callback reconciler. The worker requires the completed callback list and matching reviewed client, provider, application and policy fingerprints before applying the native YAML. It checks the same state and the existing client secret after import. The secret stays in Authentik. The existing installation and its reviewed evidence are prerequisites for this form.
 
 ## Interface roles
 

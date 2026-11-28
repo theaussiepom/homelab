@@ -195,6 +195,17 @@ class CallbackNative(unittest.TestCase):
             c.apply_native([db.record])
         self.assertEqual(len(db.saved_fields), 1)
 
+    def test_reviewed_client_guard_reads_only_and_rejects_incomplete_adoption(self):
+        db = Database()
+        with db.installed():
+            with self.assertRaises(ValueError):
+                c.apply_native([db.record], verify_only=True)
+            c.apply_native([db.record])
+            previous = list(db.saved_fields)
+            self.assertEqual(c.apply_native([db.record], verify_only=True)['changed'], 0)
+            self.assertEqual(db.saved_fields, previous)
+            self.assertIn('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE, READ ONLY', db.sql)
+
     def test_exact_apply_changes_only_redirect_field_in_serializable_transaction(self):
         db=Database();before=copy.deepcopy(db.provider)
         with db.installed():result=c.apply_native([db.record])

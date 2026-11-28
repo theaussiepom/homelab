@@ -215,7 +215,8 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
         rows = [_row(AUTH_FILES[key], value, 1000) for key, value in secrets.items() if key not in client_roles]
         forward = app.get('settings', {}).get('forward_blueprints', {})
         saml = app.get('settings', {}).get('saml_blueprints', {})
-        if registrations or forward or saml:
+        retained_oidc = app.get('settings', {}).get('retained_oidc_blueprints', {})
+        if registrations or forward or saml or retained_oidc:
             manifest = []
             for slug, spec in sorted(registrations.items()):
                 raw = secrets[spec['secret_role']]
@@ -227,7 +228,7 @@ def files(app, *, secrets, public_ca=None, route_cas=None, route_plan=None):
                 manifest.append({**{key: value for key, value in spec.items()
                                     if key not in ('blueprint', 'secret_source', 'secret_role')},
                                  'sha512': hashlib.sha512(body).hexdigest()})
-            for kind, specs in (('forward', forward), ('saml', saml)):
+            for kind, specs in (('forward', forward), ('saml', saml), ('retained_oidc', retained_oidc)):
                 for slug, spec in sorted(specs.items()):
                     body = spec['blueprint'].encode()
                     rows.append(_row('homelab-' + kind + '-' + slug + '.yaml', body, 1000))
